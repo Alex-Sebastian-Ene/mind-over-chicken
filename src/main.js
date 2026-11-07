@@ -45,7 +45,6 @@ try {
   await initEngine();
   BridgeSource.setWasmClasses(RustImuTracker, RustBlinkClassifier);
   engine = new Engine('screen');
-  engine.bind_dom_shell();
 } catch (err) {
   console.error('Failed to initialize Rust WebGL engine:', err);
 }
