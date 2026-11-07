@@ -1,0 +1,225 @@
+{
+ "issue": 100,
+ "what": "civ_advance(1/60) per frame in the browser (wasm, Chromium in the Claude desktop app's browser pane), 300 frames per block. Each world is grown under the rules to ~1,500 agents, then timed under the rules, the trained councils (civ_ppo_enable 1: council + commander), and the rules again, so the blocks are the same world at the same moment. speed 16: 16/60 s of sim per frame; speed 1: 1/60 s.",
+ "caveat": "The machine was shared with other agents' builds and tests, and the pane was sometimes hidden; blocks with a frame over 1 s (rules 27.4/30.9/70.5 ms means) were descheduled and are excluded from the summary.",
+ "rows": [
+  {
+   "world": "4 civs 1280x640",
+   "brain": "rules",
+   "speed": 16,
+   "agents": 1436,
+   "mean_ms": 27.417,
+   "p95_ms": 43.9,
+   "max_ms": 2496.5,
+   "council_decisions": 0
+  },
+  {
+   "world": "4 civs 1280x640",
+   "brain": "ppo",
+   "speed": 16,
+   "agents": 1497,
+   "mean_ms": 3.866,
+   "p95_ms": 6.8,
+   "max_ms": 10.2,
+   "council_decisions": 70
+  },
+  {
+   "world": "4 civs 1280x640",
+   "brain": "rules again",
+   "speed": 16,
+   "agents": 1547,
+   "mean_ms": 4.21,
+   "p95_ms": 6.9,
+   "max_ms": 15.4,
+   "council_decisions": 0
+  },
+  {
+   "world": "4 civs 1280x640",
+   "brain": "rules",
+   "speed": 1,
+   "agents": 1555,
+   "mean_ms": 1.386,
+   "p95_ms": 2.5,
+   "max_ms": 5.4,
+   "council_decisions": 0
+  },
+  {
+   "world": "4 civs 1280x640",
+   "brain": "ppo",
+   "speed": 1,
+   "agents": 1560,
+   "mean_ms": 1.362,
+   "p95_ms": 1.9,
+   "max_ms": 15.4,
+   "council_decisions": 8
+  },
+  {
+   "world": "4 civs 1280x640",
+   "brain": "rules again",
+   "speed": 1,
+   "agents": 1560,
+   "mean_ms": 1.478,
+   "p95_ms": 3,
+   "max_ms": 6.4,
+   "council_decisions": 0
+  },
+  {
+   "world": "4 civs 1280x640",
+   "brain": "rules",
+   "speed": 16,
+   "agents": 1591,
+   "mean_ms": 5.937,
+   "p95_ms": 10,
+   "max_ms": 27.8,
+   "council_decisions": 0
+  },
+  {
+   "world": "4 civs 1280x640",
+   "brain": "ppo",
+   "speed": 16,
+   "agents": 1775,
+   "mean_ms": 6.548,
+   "p95_ms": 12.5,
+   "max_ms": 28.6,
+   "council_decisions": 244
+  },
+  {
+   "world": "4 civs 1280x640",
+   "brain": "rules again",
+   "speed": 16,
+   "agents": 1772,
+   "mean_ms": 30.857,
+   "p95_ms": 34.8,
+   "max_ms": 3179.3,
+   "council_decisions": 0
+  },
+  {
+   "world": "4 civs 1280x640",
+   "brain": "rules",
+   "speed": 1,
+   "agents": 1774,
+   "mean_ms": 70.483,
+   "p95_ms": 8.1,
+   "max_ms": 5033.8,
+   "council_decisions": 0
+  },
+  {
+   "world": "4 civs 1280x640",
+   "brain": "ppo",
+   "speed": 1,
+   "agents": 1773,
+   "mean_ms": 2.878,
+   "p95_ms": 5.5,
+   "max_ms": 49.5,
+   "council_decisions": 14
+  },
+  {
+   "world": "4 civs 1280x640",
+   "brain": "rules again",
+   "speed": 1,
+   "agents": 1781,
+   "mean_ms": 2.689,
+   "p95_ms": 4.7,
+   "max_ms": 16.6,
+   "council_decisions": 0
+  },
+  {
+   "world": "8 rivals 1280x640 (staged)",
+   "brain": "rules",
+   "speed": 16,
+   "agents": 1806,
+   "mean_ms": 4.396,
+   "p95_ms": 8.7,
+   "max_ms": 22.2,
+   "council_decisions": 0
+  },
+  {
+   "world": "8 rivals 1280x640 (staged)",
+   "brain": "ppo",
+   "speed": 16,
+   "agents": 1977,
+   "mean_ms": 4.485,
+   "p95_ms": 8.8,
+   "max_ms": 16.8,
+   "council_decisions": 180
+  },
+  {
+   "world": "8 rivals 1280x640 (staged)",
+   "brain": "rules again",
+   "speed": 16,
+   "agents": 2105,
+   "mean_ms": 5.394,
+   "p95_ms": 10.3,
+   "max_ms": 23.8,
+   "council_decisions": 0
+  },
+  {
+   "world": "8 rivals 1280x640 (staged)",
+   "brain": "rules",
+   "speed": 1,
+   "agents": 2098,
+   "mean_ms": 1.67,
+   "p95_ms": 3.6,
+   "max_ms": 8.4,
+   "council_decisions": 0
+  },
+  {
+   "world": "8 rivals 1280x640 (staged)",
+   "brain": "ppo",
+   "speed": 1,
+   "agents": 2112,
+   "mean_ms": 1.548,
+   "p95_ms": 2.9,
+   "max_ms": 8.2,
+   "council_decisions": 9
+  },
+  {
+   "world": "8 rivals 1280x640 (staged)",
+   "brain": "rules again",
+   "speed": 1,
+   "agents": 2112,
+   "mean_ms": 1.452,
+   "p95_ms": 2.3,
+   "max_ms": 11.9,
+   "council_decisions": 0
+  }
+ ],
+ "summary_excluding_descheduled_blocks": {
+  "speed1_ppo": {
+   "blocks": 3,
+   "mean_ms": 1.93,
+   "p95_ms_max": 5.5,
+   "agents": [
+    1560,
+    2112
+   ]
+  },
+  "speed1_rules": {
+   "blocks": 5,
+   "mean_ms": 1.74,
+   "p95_ms_max": 4.7,
+   "agents": [
+    1555,
+    2112
+   ]
+  },
+  "speed16_ppo": {
+   "blocks": 3,
+   "mean_ms": 4.97,
+   "p95_ms_max": 12.5,
+   "agents": [
+    1497,
+    1977
+   ]
+  },
+  "speed16_rules": {
+   "blocks": 4,
+   "mean_ms": 4.98,
+   "p95_ms_max": 10.3,
+   "agents": [
+    1547,
+    2105
+   ]
+  }
+ }
+}
