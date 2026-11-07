@@ -70,7 +70,16 @@ jobs:
         with:
           path: 'dist'
 
+  # deploy-pages must run in a job that declares the github-pages environment, and only
+  # main may deploy to it, so deployment is its own job after the build (#46).
+  deploy:
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
-        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         id: deployment
         uses: actions/deploy-pages@v4
