@@ -99,7 +99,7 @@ export class CivSandbox {
     this.era = 'kingdoms';
     this.label = 'Sandbox · A crowded planet';
     this.intro = {
-      title: 'Four civilisations',
+      title: 'A crowded planet',
       goal: 'Found your four peoples on a planet of random size, one at a time: choose one, place it, and seed its temper from your mind for 5 seconds. Rival peoples rise on their own: 4 on a small planet, up to 16 on a huge one. Watch them all climb twenty ages, trade, ally, fight and split. Your mind tilts war and peace.',
       how: [
         ['Calm', 'Hold Space: friendlier chiefs, trade, peace treaties, fewer rebels.'],
