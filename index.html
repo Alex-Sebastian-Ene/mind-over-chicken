@@ -54,6 +54,8 @@
         <button type="button" class="btn btn-primary btn-small" id="makePlanet">Make planet</button>
       </header>
       <p class="mind-line" id="mindLine"></p>
+      <!-- planets (#68): the selected world's tier, stocks, strife, milestones and history -->
+      <section class="world-detail" id="worldDetail" aria-label="World details" aria-live="polite" hidden></section>
       <ul class="planet-list" id="planetList" aria-label="Worlds"></ul>
       <ol class="galaxy-log" id="galaxyLog" aria-label="Galaxy news" aria-live="polite"></ol>
     </aside>
@@ -118,7 +120,7 @@
       <div class="start-main">
         <button type="button" class="btn btn-primary" id="playSim">Play with the emulated headset</button>
         <p class="hint">Placeholder for the Muse: it sends the same signals, driven by your keyboard.
-          <kbd>Space</kbd> calm · <kbd>F</kbd> focus · <kbd>Shift</kbd> racing pulse · <kbd>B</kbd> or click to blink · mouse is head tilt. Scroll, pinch or <kbd>Z</kbd> / <kbd>X</kbd> to zoom out to the planet and the galaxy. On a phone, hold the power tiles and tap the map.</p>
+          <kbd>Space</kbd> calm · <kbd>F</kbd> focus · <kbd>Shift</kbd> racing pulse · <kbd>B</kbd> or click to blink · mouse is head tilt. Scroll, pinch or <kbd>Z</kbd> / <kbd>X</kbd> to zoom out to the planet and the galaxy; zoom into any world to land on it, or press <kbd>G</kbd> to visit the next one <!-- planets (#68) -->. On a phone, hold the power tiles and tap the map.</p>
       </div>
       <div class="start-sandbox">
         <button type="button" class="btn" id="playSandbox">Galaxy sandbox</button>

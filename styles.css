@@ -330,6 +330,22 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 .planet-bar::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--p, 0%); background: var(--focus); }
 .galaxy-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 11px; line-height: 1.3; color: var(--muted); }
 .galaxy-log li:first-child { color: var(--bone); }
+/* planets (#68): world details in the galaxy panel */
+.world-detail { display: grid; gap: 3px; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 3px; font-size: 11px; line-height: 1.3; color: var(--muted); min-width: 0; }
+.world-detail p { margin: 0; }
+.wd-head { color: var(--bone); font: 600 12px/1.2 var(--pixel); }
+.wd-line { overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.wd-stab { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 6px; }
+.wd-bar { height: 3px; background: var(--ink); position: relative; }
+.wd-bar::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--p, 0%); background: var(--calm); }
+.wd-bar.is-low::after { background: var(--heart); }
+.wd-war { color: var(--heart); }
+.wd-miles { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 3px; }
+.wd-miles li { font: 600 10px/1 var(--pixel); color: var(--ember); border: 1px solid currentColor; border-radius: 2px; padding: 2px 4px 1px; }
+.wd-hist { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.wd-hist li::before { content: "· "; }
+.wd-hist li.is-setback, .wd-hist li.is-conflict { color: var(--heart); }
+.wd-hist li.is-tier, .wd-hist li.is-milestone { color: var(--good); }
 .start-sandbox { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .start-sandbox .hint { flex: 1 1 260px; }
 

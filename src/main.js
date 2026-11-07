@@ -17,6 +17,7 @@ import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel } from '.
 import { initCamera } from './camera/camera.js'; // camera (#33)
 import { Calibration, readCalibrationConfig } from './brain/calibration.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
+import { worldMeta, renderWorldDetail } from './cosmos/panel.js'; // planets (#68)
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
 // mind read uses the same window.
@@ -87,7 +88,8 @@ function newGame(source, startIndex = 0) {
     hud.flashBlink();
     cosmos.galaxy?.onBlink();   // storms on the blink world; a strike on the world you're zoomed into
     if (cosmos.galaxy?.attended) audio.thunder();
-    if (!banner && !cosmos.active && G.scene?.onBlink) G.scene.onBlink(aim);
+    const view = cosmos.viewScene(G); // planets (#68): another world's surface when you're on it
+    if (!banner && !cosmos.active && view?.onBlink) view.onBlink(aim);
   });
   // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
   cosmos.ensureGalaxy(G);
@@ -204,7 +206,7 @@ function showEnd() {
 
 // ---------- render ----------
 function render() {
-  const scene = G?.scene;
+  const scene = G ? cosmos.viewScene(G) : null; // planets (#68): another world's surface when you're on it
   textCtx.setTransform(1, 0, 0, 1, 0, 0);
   textCtx.clearRect(0, 0, textLayer.width, textLayer.height);
   if (!scene) {
@@ -306,10 +308,10 @@ function frame(ts) {
     G.shake = Math.max(0, (G.shake || 0) - dt * 2);
     cosmos.update(dt, G);
     advisor.update(dt);
-    const showGalaxyHud = cosmos.galaxy && (G.sandbox || cosmos.inGalaxy);
-    const wanted = showGalaxyHud ? galaxyHudScene : G.scene;
+    // planets (#68): the HUD names the world you're on: "your world" at home, "AI god" elsewhere.
+    const wanted = cosmos.hudScene(G, galaxyHudScene);
     if (wanted !== hudScene) { hudScene = wanted; hud.setScene(wanted); }
-    hud.update(dt, showGalaxyHud ? Object.assign(Object.create(G), { scene: galaxyHudScene }) : G);
+    hud.update(dt, wanted === G.scene ? G : Object.assign(Object.create(G), { scene: wanted }));
     updateCosmosUi(dt);
   }
   render();
@@ -332,7 +334,7 @@ let panDrag = null;
 
 screen.addEventListener('pointermove', (e) => {
   if (G && cosmos.active) { const p = worldFromEvent(e); cosmos.pointerMove(e.pointerId, p.x, p.y, G); return; }
-  if (panDrag && panDrag.id === e.pointerId) { const x = worldFromEvent(e).x; cosmos.pan(x - panDrag.x); panDrag.x = x; return; }
+  if (panDrag && panDrag.id === e.pointerId) { const q = worldFromEvent(e); cosmos.pan(q.x - panDrag.x, q.y - panDrag.y); panDrag.x = q.x; panDrag.y = q.y; return; } // planets (#68): + north–south
   const s = sim(); if (!s) return;
   const a = surfaceAim(e);
   s.setAim(a.x, a.y);
@@ -351,7 +353,8 @@ screen.addEventListener('pointerdown', (e) => {
   if (G && (e.button === 1 || e.button === 2)) {
     e.preventDefault();
     screen.setPointerCapture?.(e.pointerId);
-    panDrag = { id: e.pointerId, x: worldFromEvent(e).x };
+    const q = worldFromEvent(e);
+    panDrag = { id: e.pointerId, x: q.x, y: q.y };
     return;
   }
   const s = sim(); if (!s) return;
@@ -386,6 +389,8 @@ window.addEventListener('keydown', (e) => {
   if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { cosmos.zoomOut(G); return; }
   if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { cosmos.zoomIn(G); return; }
   if (G && !cosmos.active && (e.code === 'KeyA' || e.code === 'KeyD')) { cosmos.panVel = e.code === 'KeyA' ? 140 : -140; return; }
+  if (G && !cosmos.active && cosmos.surfaceInView && (e.code === 'KeyW' || e.code === 'KeyS')) { cosmos.panVelY = e.code === 'KeyW' ? 110 : -110; return; } // planets (#68)
+  if (G && e.code === 'KeyG' && !e.repeat) { if (cosmos.visitNextWorld(G)) audio.blip(); return; } // planets (#68, #43): visit the next AI world
   if (e.code === 'Enter') {
     if (banner) dismissBanner();
     else if (!$('failScreen').hidden) retryEra();
@@ -478,8 +483,10 @@ function updateCosmosUi(dt) {
     const mirrored = p.home && !p.autonomous;
     const era = p.pop > 0 ? ERA_LABEL[ERA_NAMES[p.eraIndex]] : 'Barren';
     const owner = gal.attended === p ? `${ownerLabel(p)} · you're here` : ownerLabel(p);
-    return { p, era: p.forming ? 'Forming' : era, pop: `${mirrored ? `${p.pop} people` : fmtPop(p.pop)} · ${owner}`, prog: mirrored ? (p.eraIndex + 1) / 4 : p.pop > 0 ? p.progress : 0 };
+    const tier = worldMeta(p); // planets (#68): settlement tier and strife
+    return { p, era: p.forming ? 'Forming' : tier ? `${era} · ${tier}` : era, pop: `${mirrored ? `${p.pop} people` : fmtPop(p.pop)} · ${owner}`, prog: mirrored ? (p.eraIndex + 1) / 4 : p.pop > 0 ? p.progress : 0 };
   });
+  renderWorldDetail($('worldDetail'), cosmos.detailPlanet()); // planets (#68): milestones and history
   const key = rows.map((r) => `${r.p.name}|${r.era}|${r.pop}|${Math.round(r.prog * 20)}|${gal.attended === r.p}|${cosmos.target}|${r.p.effect}|${r.p.channel}`).join(';');
   if (key !== lastListKey) {
     lastListKey = key;
@@ -584,7 +591,7 @@ window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos
 // camera (#33): opt-in webcam. Hand gestures cast spells (keys 1-7 without a webcam), the face sets
 // the world's mood. It adds to the brain and keyboard inputs and never replaces them.
 window.__moc.camera = initCamera({
-  getG: () => G,
+  getG: () => cosmos.castG(G), // planets (#68): casts and mood reach the world you're on
   canCast: () => !!G?.scene && !banner && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,
 });
 
