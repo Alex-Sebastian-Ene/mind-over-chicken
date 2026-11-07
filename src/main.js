@@ -45,7 +45,6 @@ try {
   await initEngine();
   BridgeSource.setWasmClasses(RustImuTracker, RustBlinkClassifier);
   engine = new Engine('screen');
-  engine.bind_dom_shell();
 } catch (err) {
   console.error('Failed to initialize Rust WebGL engine:', err);
 }
@@ -408,10 +407,20 @@ function render() {
   const visible = 1 - Math.min(1, fade);
   if (surface) {
     textCtx.globalAlpha = visible * k;
+    if (G.render3d && engine && typeof engine.project_to_screen === 'function') {
+      textCtx.__project3d = (wx, wz) => {
+        const p = engine.project_to_screen(wx, wz, textLayer.width, textLayer.height);
+        if (p[0] < -9000) return null;
+        return [p[0] / K, p[1] / K];
+      };
+    } else {
+      textCtx.__project3d = null;
+    }
     for (const off of offsets) {
       textCtx.setTransform(K, 0, 0, K, off * K, 0);
       scene.drawOverlay?.(textCtx);
     }
+    textCtx.__project3d = null;
   }
   textCtx.setTransform(K, 0, 0, K, 0, 0);
   textCtx.globalAlpha = visible;
@@ -716,6 +725,10 @@ function toggleModel() {
   const p = $('modelPanel');
   p.hidden = !p.hidden;
   $('modelBtn').setAttribute('aria-pressed', String(!p.hidden));
+  if (!p.hidden) {
+    eegPanel?.toggle(false);
+    window.__moc?.camera?.togglePanel?.(false);
+  }
 }
 $('modelBtn').addEventListener('click', toggleModel);
 $('modelClose').addEventListener('click', toggleModel);
@@ -904,6 +917,21 @@ window.__moc.camera = initCamera({
 window.__moc.debug = initDebug({ getG: () => G, camera: window.__moc.camera });
 
 // ---------- boot ----------
+async function autoConnectBridge() {
+  const active = G?.source || previewSource;
+  if (active?.kind === 'bridge' && active.connected) return;
+  const url = ($('bridgeUrl')?.value || '').trim() || 'ws://localhost:8765';
+  const src = new BridgeSource(url);
+  try {
+    await src.connect();
+    setGameSource(src);
+    const status = $('bridgeStatus');
+    if (status) status.textContent = 'Connected to Muse 2 bridge.';
+  } catch {
+    src.disconnect();
+  }
+}
+
 function start(data = {}) {
   resize();
   lastTs = performance.now();
@@ -912,6 +940,7 @@ function start(data = {}) {
     $('titleScreen').hidden = true;
     newGame(new SimSource(), data.sceneIndex);
   }
+  autoConnectBridge();
 }
 document.fonts?.load('16px "Pixelify Sans"').finally?.(() => {});
 if (window.claude?.hot?.ready) window.claude.hot.ready(start);

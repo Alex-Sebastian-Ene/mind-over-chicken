@@ -1,14 +1,16 @@
 //! Run the simulation without a browser and print what happens.
 //!
 //! ```text
-//! cargo run --release -p moc-civ --example headless -- [seed] [seconds] [neutral|calm|anger|panic] [map.rgba|-] [width height] [--speed N] [--quiet] [--duel]
+//! cargo run --release -p moc-civ --example headless -- [seed] [seconds] [neutral|calm|anger|panic] [map.rgba|-] [width height] [--speed N] [--civs N] [--quiet] [--duel]
 //! ```
 //! `seconds` is real (wall) time: at `--speed 16` each 1/60 s frame runs 16/60 s of the world,
 //! in steps of at most 0.1 s, as the sandbox does. Prints the age ladder (every age-up and
 //! Dark Age), conflict (escalations, strife inside civilisations, civil wars, battles,
 //! vassals, captives), a timeline every 60 world-seconds and the step time per frame. With a
 //! map path, writes the whole planet (terrain, territory, villages) as raw RGBA. `--duel`
-//! adds controlled battles showing what terrain and morale do. Default planet 1280×640.
+//! adds controlled battles showing what terrain and morale do. `--civs N` (#101): the player's
+//! four civilisations are founded at their homelands at once and N − 4 rivals arrive at
+//! staggered times. Default planet 1280×640.
 
 use std::time::Instant;
 
@@ -21,6 +23,7 @@ fn main() {
     let all: Vec<String> = std::env::args().collect();
     let flag = |name: &str| all.iter().position(|a| a == name);
     let speed: f32 = flag("--speed").and_then(|i| all.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(1.0);
+    let civs: usize = flag("--civs").and_then(|i| all.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(0);
     let quiet = flag("--quiet").is_some();
     let duel = flag("--duel").is_some();
     let mut args: Vec<String> = Vec::new();
@@ -30,7 +33,7 @@ fn main() {
             skip = false;
             continue;
         }
-        if a == "--speed" {
+        if a == "--speed" || a == "--civs" {
             skip = true;
             continue;
         }
@@ -51,7 +54,21 @@ fn main() {
     let pw: usize = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(Dims::DEFAULT.w);
     let ph: usize = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(Dims::DEFAULT.h);
     let t0 = Instant::now();
-    let mut w = World::new_sized(seed, Dims::new(pw, ph));
+    let mut w = if civs > 0 {
+        let mut w = World::new_staged_with(seed, Dims::new(pw, ph), 4.min(civs), civs.saturating_sub(4));
+        for f in w.setup.slots.clone() {
+            let (s, start) = (w.factions[f as usize].seed, w.factions[f as usize].start);
+            w.found_civ(f, start.0, start.1, Traits::from_seed(s));
+        }
+        w
+    } else {
+        World::new_sized(seed, Dims::new(pw, ph))
+    };
+    println!("planet {}x{}: {} land tiles, {} landmasses of 1500+ tiles; limits {} agents, {} villages", w.d.w, w.d.h, w.land_tiles, {
+        let mut c = std::collections::BTreeMap::<u16, u32>::new();
+        for &l in &w.terrain.land_id { if l != 0 { *c.entry(l).or_insert(0) += 1; } }
+        c.values().filter(|&&a| a >= 1500).count()
+    }, w.cap_agents, w.cap_villages);
     let (PW, PH) = (w.d.w, w.d.h);
     println!("seed {seed}, {mode}, x{speed}: world built in {:.1} ms", t0.elapsed().as_secs_f64() * 1000.0);
     for f in w.alive_factions() {

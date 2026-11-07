@@ -156,17 +156,19 @@ pub struct Gym {
     pub worlds: u32,
 }
 
-/// A world of `n` civilisations on a `d` planet: the first four on the four home continents
-/// (as `World::populate` does), more on free land of the same landmass, 38+ tiles apart.
+/// A world of `n` civilisations on a `d` planet, all starting at once, at #101's start sites
+/// (`World::start_sites`: the home regions first, then spread over the big landmasses), or, if
+/// those run out, on free land of the home landmass 24+ tiles from the others.
 pub fn new_world(seed: u32, n: usize, d: Dims) -> World {
     let mut w = World::with_terrain(seed, Terrain::generate(seed, d));
     let mut run = Rng::new(seed ^ 0x2545_f491);
     let mut starts: Vec<(i32, i32)> = Vec::new();
+    let sites = w.start_sites(n.min(MAX_FACTIONS));
     let home: Vec<(i32, i32)> = w.terrain.regions.iter().take(4).map(|r| r.start).collect();
     let lands: Vec<u16> = home.iter().map(|&(x, y)| w.terrain.land(x, y)).collect();
     for i in 0..n.min(MAX_FACTIONS) {
-        let s = if i < home.len() {
-            Some(home[i])
+        let s = if i < sites.len() {
+            Some(sites[i])
         } else {
             let mut found = None;
             for t in 0..6000 {

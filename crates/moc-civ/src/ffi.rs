@@ -347,3 +347,189 @@ pub extern "C" fn civ_owner_at(p: *mut World, x: f32, y: f32) -> i32 {
 pub extern "C" fn civ_time(p: *mut World) -> f32 {
     w(p).map(|w| w.time).unwrap_or(0.0)
 }
+
+// ---- Words for the sandbox (#69): Rust writes them, JS draws them. ----
+
+/// ×1 → ×4 → ×16 → ×1; returns the new speed.
+#[no_mangle]
+pub extern "C" fn civ_cycle_speed(p: *mut World) -> f32 {
+    w(p).map(|w| w.cycle_speed()).unwrap_or(1.0)
+}
+
+/// The number the next news line will get (lines `civ_news_first`..this exist).
+#[no_mangle]
+pub extern "C" fn civ_news_next(p: *mut World) -> u32 {
+    w(p).map(|w| w.news.next).unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn civ_news_first(p: *mut World) -> u32 {
+    w(p).and_then(|w| w.news.lines.front().map(|l| l.seq)).unwrap_or(0)
+}
+
+/// A news line's number fields: 0 event kind, 1 tone (0 info, 1 good, 2 bad, 3 warning), 2 in
+/// the log (1/0), 3 advisor priority, 4 advisor cooldown (s), 5 x, 6 y. -1 if gone.
+#[no_mangle]
+pub extern "C" fn civ_news_meta(p: *mut World, seq: u32, field: u32) -> i32 {
+    let Some(l) = w(p).and_then(|w| w.news.get(seq)) else { return -1 };
+    match field {
+        0 => l.kind,
+        1 => l.tone as i32,
+        2 => l.log as i32,
+        3 => l.priority as i32,
+        4 => l.cooldown as i32,
+        5 => l.x,
+        6 => l.y,
+        _ => -1,
+    }
+}
+
+fn news_str<'a>(w: &'a World, seq: u32, which: u32) -> &'a str {
+    match w.news.get(seq) {
+        Some(l) => match which {
+            0 => &l.text,
+            1 => &l.log_text,
+            2 => &l.say,
+            3 => &l.key,
+            _ => "",
+        },
+        None => "",
+    }
+}
+
+/// A news line's text: 0 headline, 1 log line, 2 advisor line, 3 advisor key (UTF-8).
+#[no_mangle]
+pub extern "C" fn civ_news_str_ptr(p: *mut World, seq: u32, which: u32) -> *const u8 {
+    w(p).map(|w| news_str(w, seq, which).as_ptr()).unwrap_or(std::ptr::null())
+}
+
+#[no_mangle]
+pub extern "C" fn civ_news_str_len(p: *mut World, seq: u32, which: u32) -> usize {
+    w(p).map(|w| news_str(w, seq, which).len()).unwrap_or(0)
+}
+
+/// Write the HUD rows (a line per people: label, value, bad, tab-separated, with its age)
+/// and return their
+/// length; read them at `civ_text_buf_ptr`.
+#[no_mangle]
+pub extern "C" fn civ_hud_build(p: *mut World) -> usize {
+    w(p).map(|w| {
+        w.text_buf = w.hud_rows();
+        w.text_buf.len()
+    })
+    .unwrap_or(0)
+}
+
+/// Write the label over civilisation `f`'s capital and return its length.
+#[no_mangle]
+pub extern "C" fn civ_label_build(p: *mut World, f: u32) -> usize {
+    w(p).filter(|_| (f as usize) < MAX_FACTIONS)
+        .map(|w| {
+            w.text_buf = w.capital_label(f as u8);
+            w.text_buf.len()
+        })
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn civ_text_buf_ptr(p: *mut World) -> *const u8 {
+    w(p).map(|w| w.text_buf.as_ptr()).unwrap_or(std::ptr::null())
+}
+
+/// How many steps the last `civ_advance` took.
+#[no_mangle]
+pub extern "C" fn civ_last_steps(p: *mut World) -> u32 {
+    w(p).map(|w| w.last_steps).unwrap_or(0)
+}
+
+// ---- Staggered, player-initialised civilisations (#98) ----
+
+/// A staged run: the planet with four civilisations waiting to be founded one by one (0 for the
+/// default size).
+#[no_mangle]
+pub extern "C" fn civ_new_staged(seed: u32, w: u32, h: u32) -> *mut World {
+    let d = if w == 0 || h == 0 { crate::planet::Dims::DEFAULT } else { crate::planet::Dims::new(w as usize, h as usize) };
+    Box::into_raw(Box::new(World::new_staged(seed, d)))
+}
+
+/// 0 off, 1 choose, 2 place, 3 seed, 4 done.
+#[no_mangle]
+pub extern "C" fn civ_setup_phase(p: *mut World) -> u32 {
+    w(p).map(|w| w.setup.phase as u32).unwrap_or(0)
+}
+
+/// The civilisation being set up (-1 none).
+#[no_mangle]
+pub extern "C" fn civ_setup_slot(p: *mut World) -> i32 {
+    w(p).map(|w| if w.setup.slot == NO_F { -1 } else { w.setup.slot as i32 }).unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern "C" fn civ_setup_select(p: *mut World, f: u32) -> i32 {
+    w(p).map(|w| refreshed(w, |w| w.setup_select(f.min(255) as u8) as i32)).unwrap_or(0)
+}
+
+/// Tab: the next waiting civilisation.
+#[no_mangle]
+pub extern "C" fn civ_setup_next(p: *mut World) {
+    if let Some(w) = w(p) {
+        w.setup_next();
+    }
+}
+
+/// Where the player aims while placing (planet coordinates); 1 if a civilisation may begin there.
+#[no_mangle]
+pub extern "C" fn civ_setup_hover(p: *mut World, x: f32, y: f32) -> i32 {
+    w(p).map(|w| w.setup_hover(x, y) as i32).unwrap_or(0)
+}
+
+/// A click or blink on the planet during setup; returns the phase after it.
+#[no_mangle]
+pub extern "C" fn civ_setup_click(p: *mut World, x: f32, y: f32) -> u32 {
+    w(p).map(|w| refreshed(w, |w| w.setup_click(x, y) as u32)).unwrap_or(0)
+}
+
+/// Enter during setup; returns the phase after it.
+#[no_mangle]
+pub extern "C" fn civ_setup_enter(p: *mut World) -> u32 {
+    w(p).map(|w| refreshed(w, |w| w.setup_enter() as u32)).unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn civ_setup_blink(p: *mut World) {
+    if let Some(w) = w(p) {
+        w.setup_blink();
+    }
+}
+
+/// Seeding progress 0..1.
+#[no_mangle]
+pub extern "C" fn civ_setup_progress(p: *mut World) -> f32 {
+    w(p).map(|w| w.setup_progress()).unwrap_or(0.0)
+}
+
+/// Write the setup's words (what to do, then a line per civilisation) and return their length;
+/// read them at `civ_text_buf_ptr`.
+#[no_mangle]
+pub extern "C" fn civ_setup_text_build(p: *mut World) -> usize {
+    w(p).map(|w| {
+        w.text_buf = w.setup_text();
+        w.text_buf.len()
+    })
+    .unwrap_or(0)
+}
+
+/// Found civilisation `f` at (x, y) with these traits directly (tools and tests; the sandbox
+/// goes through the seeding window).
+#[no_mangle]
+pub extern "C" fn civ_found(p: *mut World, f: u32, x: i32, y: i32, friendliness: f32, aggressiveness: f32, violence: f32, fertility: f32, cohesion: f32) -> i32 {
+    w(p).map(|w| refreshed(w, |w| w.found_civ(f.min(255) as u8, x, y, Traits { friendliness, aggressiveness, violence, fertility, cohesion }) as i32)).unwrap_or(0)
+}
+
+/// A staged run with `players` civilisations for the player to found and `rivals` arriving on
+/// their own (#101); 0×0 for the default planet size.
+#[no_mangle]
+pub extern "C" fn civ_new_staged_with(seed: u32, w: u32, h: u32, players: u32, rivals: u32) -> *mut World {
+    let d = if w == 0 || h == 0 { crate::planet::Dims::DEFAULT } else { crate::planet::Dims::new(w as usize, h as usize) };
+    Box::into_raw(Box::new(World::new_staged_with(seed, d, players as usize, rivals as usize)))
+}

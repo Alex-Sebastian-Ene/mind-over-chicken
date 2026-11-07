@@ -74,6 +74,7 @@ export class Engine {
     constructor(canvas_id: string);
     orbit_camera(delta_yaw: number, delta_pitch: number): void;
     pan_camera(dx: number, dz: number): void;
+    project_to_screen(wx: number, wz: number, cw: number, ch: number): Float32Array;
     render_3d(dt: number, sun_x: number, sun_y: number, sun_z: number, night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
     render_uploaded_canvas(night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
     screen_to_ground(sx: number, sy: number, cw: number, ch: number): Float32Array;
@@ -120,6 +121,10 @@ export class RustBlinkClassifier {
     learned_af8_uv(): number;
     learned_threshold_uv(): number;
     constructor();
+    /**
+     * Records the latest EEG window as a non-blink negative sample (used during Hold Still
+     * and Move Head Around Without Blinking calibration stages to cancel noise & hum).
+     */
     record_baseline_button(): boolean;
     /**
      * Searches the last ~2.5s of EEG windows for the strongest blink peak if the user blinked
@@ -146,8 +151,10 @@ export class RustImuTracker {
     calib_sample_count(): number;
     cancel_motion_calibration(): void;
     /**
-     * Fits a 2D Ridge Regression model in Rust mapping `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
-     * Automatically discovers axis signs, sensitivity/range, center offset, and cross-axis head tilt coupling.
+     * Fits a 2D Ridge Regression + Piecewise Directional Reach model in Rust mapping
+     * `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
+     * Automatically discovers axis signs, high vertical pitch sensitivity, cross-axis coupling,
+     * and separate Left/Right/Up/Down edge reach scales so every full screen edge is reachable.
      */
     finish_motion_calibration(): boolean;
     has_motion_model(): boolean;
@@ -248,6 +255,7 @@ export interface InitOutput {
     readonly engine_new: (a: number, b: number) => [number, number, number];
     readonly engine_orbit_camera: (a: number, b: number, c: number) => void;
     readonly engine_pan_camera: (a: number, b: number, c: number) => void;
+    readonly engine_project_to_screen: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly engine_render_3d: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
     readonly engine_render_uploaded_canvas: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly engine_screen_to_ground: (a: number, b: number, c: number, d: number, e: number) => any;

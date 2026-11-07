@@ -10,10 +10,12 @@ use crate::jobs::{Fx, CATS};
 use crate::planet::{Cam, Dims, Paths};
 use crate::terrain::{self, food_max, Terrain};
 
-pub const MAX_FACTIONS: usize = 16;
+/// Civilisation slots: up to 12 at the start (#101) and room for rebels.
+pub const MAX_FACTIONS: usize = 24;
 pub const NO_F: u8 = 255;
 pub const NO_V: u16 = u16::MAX;
 pub const NO_TILE: i32 = i32::MIN;
+/// Agent and village limits on the default planet; a bigger planet gets more (`World::cap_agents`).
 pub const MAX_AGENTS: usize = 2400;
 pub const MAX_VILLAGES: usize = 480;
 /// Civilisations and agents per civilisation at the start (#52).
@@ -93,6 +95,11 @@ pub mod ev {
     pub const INDEPENDENCE: i32 = 31;
     /// a's chief dies; extra 1 if the succession is disputed.
     pub const SUCCESSION: i32 = 32;
+    // Staggered starts (#98).
+    /// Civilisation a is founded, n-th, with traits `setup::unpack_traits(extra)`.
+    pub const CIV_FOUNDED: i32 = 33;
+    /// The player picks civilisation a to set up (n 0) or starts seeding it (n 1).
+    pub const SETUP: i32 = 34;
 }
 
 /// One log entry: what happened, between which civilisations, where, how much.
@@ -325,6 +332,8 @@ pub struct Faction {
     pub succession: bool,
     /// Seconds of manning the walls left (`politics::Decision::Fortify`).
     pub fortify_t: f32,
+    /// Waiting to be founded by the player (#98): not alive yet, and its slot is kept.
+    pub pending: bool,
 }
 
 impl Faction {
@@ -384,6 +393,7 @@ impl Faction {
             crisis_cd: 30.0,
             succession: false,
             fortify_t: 0.0,
+            pending: false,
         }
     }
 }
@@ -698,12 +708,15 @@ impl Grid {
     /// Call `f` with every agent index in cells overlapping the square of radius `r` round (x, y).
     pub fn near(&self, x: f32, y: f32, r: f32, mut f: impl FnMut(usize)) {
         let (gw, gh) = (self.gw, self.gh);
+        // Wraps both ways (the planet is a torus). The last cell row or column may be partial.
         let x0 = ((x - r).floor() as i32).div_euclid(GRID);
         let x1 = ((x + r).floor() as i32).div_euclid(GRID);
-        let y0 = (((y - r).floor() as i32).max(0) / GRID).clamp(0, gh - 1);
-        let y1 = (((y + r).floor() as i32).max(0) / GRID).clamp(0, gh - 1);
+        let y0 = ((y - r).floor() as i32).div_euclid(GRID);
+        let y1 = ((y + r).floor() as i32).div_euclid(GRID);
         let span = (x1 - x0 + 1).min(gw);
-        for cy in y0..=y1 {
+        let rows = (y1 - y0 + 1).min(gh);
+        for j in 0..rows {
+            let cy = (y0 + j).rem_euclid(gh);
             for k in 0..span {
                 let cx = (x0 + k).rem_euclid(gw);
                 let c = (cy * gw + cx) as usize;
@@ -780,6 +793,17 @@ pub struct World {
     pub tick: u32,
     /// A war-and-peace policy replacing the rules of `politics::decide` (#100); None = rules.
     pub policy: Option<Box<dyn crate::politics::Policy>>,
+    /// Headlines, log lines and advisor lines for the sandbox (`news`).
+    pub news: crate::news::News,
+    /// Text handed to JS (`civ_hud_*`, `civ_label_*`).
+    pub text_buf: String,
+    /// Steps the last `advance` took (for per-step timing).
+    pub last_steps: u32,
+    /// The player's founding of civilisations one by one (#98; `Phase::Off` when all start at once).
+    pub setup: crate::setup::Setup,
+    /// Agent and village limits for this planet: the defaults, more on a bigger one (#101).
+    pub cap_agents: usize,
+    pub cap_villages: usize,
     #[cfg(not(target_arch = "wasm32"))]
     pub prof: [f64; 8],
 }
@@ -789,7 +813,7 @@ pub const VSTRIDE: usize = 12;
 pub const NAME_LEN: usize = 24;
 pub const STATS_LEN: usize = 44;
 
-const PALETTE: [[u8; 3]; 16] = [
+const PALETTE: [[u8; 3]; 24] = [
     [232, 70, 62],   // red
     [66, 136, 246],  // blue
     [246, 198, 54],  // gold
@@ -806,6 +830,14 @@ const PALETTE: [[u8; 3]; 16] = [
     [255, 210, 160], // peach
     [110, 110, 120], // slate
     [140, 40, 40],   // maroon
+    [255, 120, 90],  // coral
+    [0, 150, 130],   // teal
+    [210, 170, 255], // lavender
+    [180, 140, 20],  // ochre
+    [90, 200, 255],  // sky
+    [255, 80, 200],  // magenta
+    [200, 230, 160], // sage
+    [100, 70, 160],  // indigo
 ];
 
 const SYL_A: [&str; 24] = [
@@ -888,10 +920,20 @@ impl World {
             scratch: Vec::new(),
             tick: 0,
             policy: None,
+            news: crate::news::News::default(),
+            text_buf: String::new(),
+            last_steps: 0,
+            setup: crate::setup::Setup::default(),
+            cap_agents: MAX_AGENTS,
+            cap_villages: MAX_VILLAGES,
             #[cfg(not(target_arch = "wasm32"))]
             prof: [0.0; 8],
             terrain,
         };
+        // More land, more people: the limits grow with the land (about 50 tiles a person).
+        let land = w.land_tiles as usize;
+        w.cap_agents = (land / 50).clamp(MAX_AGENTS, 9000);
+        w.cap_villages = (land / 250).clamp(MAX_VILLAGES, 2000);
         w.refresh_info();
         w
     }
@@ -900,20 +942,7 @@ impl World {
     /// seed; each civilisation's traits come from its own seed alone. Seeds are redrawn until
     /// the four temperaments differ enough to make a story (one hot head, one cool head).
     pub fn populate(&mut self) {
-        let mut run = Rng::new(self.seed ^ 0x2545_f491);
-        let mut seeds = [0u32; START_CIVS];
-        for _ in 0..64 {
-            for s in seeds.iter_mut() {
-                *s = run.next_u32();
-            }
-            let tr: Vec<Traits> = seeds.iter().map(|&s| Traits::from_seed(s)).collect();
-            let amax = tr.iter().map(|t| t.aggressiveness).fold(0.0, f32::max);
-            let amin = tr.iter().map(|t| t.aggressiveness).fold(1.0, f32::min);
-            let fmax = tr.iter().map(|t| t.friendliness).fold(0.0, f32::max);
-            if amax >= 0.62 && amin <= 0.4 && fmax >= 0.55 {
-                break;
-            }
-        }
+        let seeds = self.civ_seeds(START_CIVS);
         for (i, &s) in seeds.iter().enumerate() {
             let region = i % self.terrain.regions.len().max(1);
             let start = self.terrain.regions.get(region).map(|r| r.start).unwrap_or((80 + 160 * i as i32, self.d.h as i32 / 2));
@@ -946,7 +975,13 @@ impl World {
 
     /// Create a civilisation in the first free slot. Returns its id.
     pub fn add_faction(&mut self, seed: u32, source: SeedSource, traits: Traits, parent: u8, name: Option<(String, String)>) -> u8 {
-        let slot = self.factions.iter().position(|f| !f.used).or_else(|| self.factions.iter().position(|f| !f.alive)).unwrap_or(MAX_FACTIONS - 1);
+        // Never a slot kept for a civilisation waiting to be founded (#98).
+        let slot = self
+            .factions
+            .iter()
+            .position(|f| !f.used)
+            .or_else(|| self.factions.iter().position(|f| !f.alive && !f.pending))
+            .unwrap_or(MAX_FACTIONS - 1);
         let (name, stem) = name.unwrap_or_else(|| make_name(seed));
         let used: Vec<[u8; 3]> = self.factions.iter().filter(|f| f.alive).map(|f| f.color).collect();
         let color = if slot < START_CIVS && !used.contains(&PALETTE[slot]) {
@@ -1018,6 +1053,7 @@ impl World {
             self.events.drain(..256);
         }
         self.events.push(e);
+        self.news_of(&e);
     }
 
     pub fn alive_factions(&self) -> impl Iterator<Item = &Faction> {
@@ -1026,7 +1062,7 @@ impl World {
 
     /// Found a village and claim the land round it.
     pub fn found_village(&mut self, f: u8, x: i32, y: i32, food: f32, log: bool) -> u16 {
-        let (x, y) = (self.d.wrap_x(x), y.clamp(0, self.d.h as i32 - 1));
+        let (x, y) = (self.d.wrap_x(x), self.d.wrap_y(y));
         // Reuse a slot that has been dead a while (nothing points at it any more), so long
         // runs don't grow the village list without bound.
         let reuse = self.villages.iter().position(|v| !v.alive && v.camp == 0 && self.time - v.died > 30.0);
@@ -1162,13 +1198,13 @@ impl World {
     }
 
     pub fn spawn_agent(&mut self, f: u8, home: u16, job: Job, x: i32, y: i32) -> Option<usize> {
-        if self.agents.len() >= MAX_AGENTS {
+        if self.agents.len() >= self.cap_agents {
             return None;
         }
         let life = self.rng.range(75.0, 115.0);
         let timer = self.rng.range(0.0, 0.6);
         let x = self.d.wrap_x(x);
-        let y = y.clamp(0, self.d.h as i32 - 1);
+        let y = self.d.wrap_y(y);
         // Born into a family of the village: mostly its founding clan, sometimes another
         // (marriage); with a share of the goats the village's dead left behind.
         let (clan, family, goats) = match self.villages.get(home as usize) {
@@ -1237,14 +1273,18 @@ impl World {
     /// Run `real_dt` seconds of real time at the world's speed (×1, ×4, ×16), in steps of at
     /// most `MAX_SUBSTEP`; refresh the buffers JS reads once at the end.
     pub fn advance(&mut self, real_dt: f32) {
+        // Seeding a civilisation from the mind runs on real time (#98).
+        self.setup_tick(real_dt.max(0.0));
         let total = (real_dt.max(0.0) * self.speed).min(2.0);
         if total <= 0.0 {
+            self.refresh_info();
             return;
         }
         let n = (total / MAX_SUBSTEP).ceil().max(1.0);
         for _ in 0..n as usize {
             self.step_core(total / n);
         }
+        self.last_steps = n as u32;
         self.refresh_info();
     }
 
@@ -1266,6 +1306,10 @@ impl World {
         }
         self.time += dt;
         self.tick = self.tick.wrapping_add(1);
+        // Rival civilisations arrive on their own, at staggered times (#101).
+        if !self.setup.rivals.is_empty() {
+            self.rivals_tick();
+        }
         let phase = (self.time / DAY_SECONDS).fract();
         self.night = 0.5 - 0.5 * (phase * std::f32::consts::TAU).cos();
         self.rain_t = (self.rain_t - dt).max(0.0);
@@ -1286,6 +1330,7 @@ impl World {
             self.slow_acc -= SLOW_DT / 2.0;
             #[cfg(not(target_arch = "wasm32"))]
             let p0 = std::time::Instant::now();
+            #[cfg(not(target_arch = "wasm32"))]
             let ph = (self.slow_n % 4) as usize;
             crate::politics::phase_tick(self);
             #[cfg(not(target_arch = "wasm32"))]
@@ -1536,7 +1581,15 @@ impl World {
                 }
             };
             let vals = [
-                if f.alive { 1.0 } else if f.used { -1.0 } else { 0.0 },
+                if f.alive {
+                    1.0
+                } else if f.pending {
+                    2.0
+                } else if f.used {
+                    -1.0
+                } else {
+                    0.0
+                },
                 f.pop as f32,
                 f.villages as f32,
                 f.color[0] as f32,

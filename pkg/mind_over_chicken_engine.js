@@ -644,6 +644,17 @@ export class Engine {
         wasm.engine_pan_camera(this.__wbg_ptr, dx, dz);
     }
     /**
+     * @param {number} wx
+     * @param {number} wz
+     * @param {number} cw
+     * @param {number} ch
+     * @returns {Float32Array}
+     */
+    project_to_screen(wx, wz, cw, ch) {
+        const ret = wasm.engine_project_to_screen(this.__wbg_ptr, wx, wz, cw, ch);
+        return ret;
+    }
+    /**
      * @param {number} dt
      * @param {number} sun_x
      * @param {number} sun_y
@@ -906,6 +917,8 @@ export class RustBlinkClassifier {
         return this;
     }
     /**
+     * Records the latest EEG window as a non-blink negative sample (used during Hold Still
+     * and Move Head Around Without Blinking calibration stages to cancel noise & hum).
      * @returns {boolean}
      */
     record_baseline_button() {
@@ -996,8 +1009,10 @@ export class RustImuTracker {
         wasm.rustimutracker_cancel_motion_calibration(this.__wbg_ptr);
     }
     /**
-     * Fits a 2D Ridge Regression model in Rust mapping `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
-     * Automatically discovers axis signs, sensitivity/range, center offset, and cross-axis head tilt coupling.
+     * Fits a 2D Ridge Regression + Piecewise Directional Reach model in Rust mapping
+     * `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
+     * Automatically discovers axis signs, high vertical pitch sensitivity, cross-axis coupling,
+     * and separate Left/Right/Up/Down edge reach scales so every full screen edge is reachable.
      * @returns {boolean}
      */
     finish_motion_calibration() {
@@ -1198,6 +1213,10 @@ function __wbg_get_imports() {
         },
         __wbg_bufferData_aaab2a06f5c64e23: function(arg0, arg1, arg2, arg3, arg4) {
             arg0.bufferData(arg1 >>> 0, getArrayU8FromWasm0(arg2, arg3), arg4 >>> 0);
+        },
+        __wbg_children_5767547ca7e1c276: function(arg0) {
+            const ret = arg0.children;
+            return ret;
         },
         __wbg_classList_97e966c261669b85: function(arg0) {
             const ret = arg0.classList;
@@ -1422,6 +1441,14 @@ function __wbg_get_imports() {
                 result = false;
             }
             const ret = result;
+            return ret;
+        },
+        __wbg_item_66d2ef77cbc53343: function(arg0, arg1) {
+            const ret = arg0.item(arg1 >>> 0);
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        },
+        __wbg_length_9f82f041dce0ac51: function(arg0) {
+            const ret = arg0.length;
             return ret;
         },
         __wbg_linkProgram_dee7cda98bacb12f: function(arg0, arg1) {

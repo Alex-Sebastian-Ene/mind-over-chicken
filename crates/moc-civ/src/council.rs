@@ -307,7 +307,8 @@ pub struct Council {
     /// Pick the most likely legal option (true, the default: it plays better than sampling in
     /// the evaluation) or sample the policy with a deterministic RNG (the training league).
     pub greedy: bool,
-    /// Leave the player's own civilisation to the rules.
+    /// Leave the player's own civilisations to the rules (the one marked `is_player`, and every
+    /// one the player founded in the staged setup, #98).
     pub spare_player: bool,
     minds: [Mind; MAX_FACTIONS],
     allied: [bool; MAX_FACTIONS * MAX_FACTIONS],
@@ -366,7 +367,8 @@ impl Council {
             let fac = &w.factions[f];
             let m = &mut self.minds[f];
             if fac.alive && (!m.used || (m.born - fac.born).abs() > 1e-3) {
-                let player = fac.is_player && self.spare_player;
+                // The player's own peoples (#98: the first one, and every one it founded itself).
+                let player = self.spare_player && (fac.is_player || w.setup.slots.contains(&(f as u8)));
                 let brain = if player { Brain::Rules } else { self.new_brain };
                 let cmd = if player { CmdBrain::Rules } else { self.new_cmd };
                 *m = Mind::new(brain, cmd, fac.born, w.time + (f % 4) as f32);

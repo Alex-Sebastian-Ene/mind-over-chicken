@@ -336,7 +336,7 @@ impl Terrain {
                 }
             }
         }
-        (self.d.wrap_x(cx), cy.clamp(0, self.d.h as i32 - 1))
+        (self.d.wrap_x(cx), self.d.wrap_y(cy))
     }
 
     /// The painted colour of a tile (used again when burnt land grows back).
@@ -396,10 +396,7 @@ fn trace_rivers(d: Dims, kind: &[u8], elev: &[f32], regions: &[Region], rng: &mu
             let here = elev[d.idx(cx, cy)];
             let mut best: Option<(f32, i32, i32)> = None;
             for (ox, oy) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] {
-                let (nx, ny) = (d.wrap_x(cx + ox), cy + oy);
-                if !d.in_y(ny) {
-                    continue;
-                }
+                let (nx, ny) = (d.wrap_x(cx + ox), d.wrap_y(cy + oy));
                 let j = d.idx(nx, ny);
                 if matches!(kind[j], MOUNTAIN | ICE) || path.contains(&j) {
                     continue;
@@ -434,7 +431,7 @@ fn trace_rivers(d: Dims, kind: &[u8], elev: &[f32], regions: &[Region], rng: &mu
     river
 }
 
-/// Connected components of walkable land (8-neighbour, wrapping east–west).
+/// Connected components of walkable land (8-neighbour, wrapping both ways).
 fn label_landmasses(d: Dims, walk: &[bool]) -> Vec<u16> {
     let mut id = vec![0u16; d.n()];
     let mut next = 1u16;
@@ -449,9 +446,6 @@ fn label_landmasses(d: Dims, walk: &[bool]) -> Vec<u16> {
             let (x, y) = ((i % d.w) as i32, (i / d.w) as i32);
             for oy in -1..=1 {
                 let ny = y + oy;
-                if !d.in_y(ny) {
-                    continue;
-                }
                 for ox in -1..=1 {
                     let j = d.idx(x + ox, ny);
                     if walk[j] && id[j] == 0 {

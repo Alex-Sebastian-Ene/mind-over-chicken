@@ -133,7 +133,7 @@ fn too_close(w: &World, x: i32, y: i32, spacing: f32) -> bool {
 }
 
 fn site_ok(w: &World, f: u8, x: i32, y: i32) -> bool {
-    if y < 3 || y > w.d.h as i32 - 4 || !w.terrain.walkable(x, y) {
+    if !w.terrain.walkable(x, y) {
         return false;
     }
     let o = w.owner[w.d.idx(x, y)];
@@ -148,8 +148,8 @@ pub fn pick_site(w: &mut World, f: u8, ox: i32, oy: i32, fx: i32, fy: i32) -> Op
         let ang = w.rng.range(0.0, TAU);
         let d = w.rng.range(13.0, 30.0);
         let sx = w.d.wrap_x((ox as f32 + ang.cos() * d).round() as i32);
-        let sy = (oy as f32 + ang.sin() * d).round() as i32;
-        if sy < 3 || sy > w.d.h as i32 - 4 || !w.terrain.walkable(sx, sy) {
+        let sy = w.d.wrap_y((oy as f32 + ang.sin() * d).round() as i32);
+        if !w.terrain.walkable(sx, sy) {
             continue;
         }
         if w.terrain.kind_at(sx, sy) == SAND && w.rng.chance(0.6) {
@@ -189,7 +189,7 @@ pub fn settle(w: &mut World, i: usize) {
         (a.faction, a.gx, a.gy, a.state)
     };
     let alive_villages = w.villages.iter().filter(|v| v.alive).count();
-    if state == State::ToSite && w.d.cheb(cx, cy, gx, gy) <= 1 && site_ok(w, f, cx, cy) && alive_villages < MAX_VILLAGES {
+    if state == State::ToSite && w.d.cheb(cx, cy, gx, gy) <= 1 && site_ok(w, f, cx, cy) && alive_villages < w.cap_villages {
         let food = w.agents[i].carry + 1.0;
         let origin = w.agents[i].home;
         let v = w.found_village(f, cx, cy, food, true);
@@ -315,7 +315,7 @@ fn update_villages(w: &mut World, dt: f32) {
         w.villages[vi].spawn_t += dt * (0.6 + 0.8 * tr.fertility) * (1.0 + 0.5 * focus);
         let (pop, food) = (w.villages[vi].pop, w.villages[vi].food);
         let reserve = pop as f32 * EAT_RATE * DAY_SECONDS * reserve_days(fac.age);
-        if w.villages[vi].spawn_t >= SPAWN_EVERY && pop < cap && food >= SPAWN_COST + 0.5 + reserve && w.agents.len() < MAX_AGENTS {
+        if w.villages[vi].spawn_t >= SPAWN_EVERY && pop < cap && food >= SPAWN_COST + 0.5 + reserve && w.agents.len() < w.cap_agents {
             w.villages[vi].spawn_t = 0.0;
             w.villages[vi].food -= SPAWN_COST;
             let at_war = w.at_war[f as usize];
@@ -337,8 +337,8 @@ fn update_villages(w: &mut World, dt: f32) {
             && jobs::has(&w.villages[vi], Building::Shipyard, fac.age)
             && food >= SETTLER_COST + 2.0
             && w.rng.chance(0.15)
-            && alive_villages < MAX_VILLAGES
-            && w.agents.len() < MAX_AGENTS
+            && alive_villages < w.cap_villages
+            && w.agents.len() < w.cap_agents
         {
             if let Some((sx, sy)) = pick_overseas(w, f, vx, vy) {
                 w.villages[vi].food -= SETTLER_COST;
@@ -354,9 +354,9 @@ fn update_villages(w: &mut World, dt: f32) {
         if w.villages[vi].settler_t <= 0.0
             && pop as f32 >= (cap as f32 * 0.45).max(3.0)
             && food >= SETTLER_COST + 1.0 + reserve
-            && alive_villages < MAX_VILLAGES
+            && alive_villages < w.cap_villages
             && fac.villages < max_villages(fac.age)
-            && w.agents.len() < MAX_AGENTS
+            && w.agents.len() < w.cap_agents
         {
             match pick_site(w, f, vx, vy, vx, vy) {
                 Some((sx, sy)) => {
@@ -679,8 +679,8 @@ fn scan_borders(w: &mut World) {
                     border[o as usize * MAX_FACTIONS + e as usize] += 1;
                     border[e as usize * MAX_FACTIONS + o as usize] += 1;
                 }
-                if d.in_y(y + 1) {
-                    let s = w.owner[i + d.w];
+                {
+                    let s = w.owner[d.idx(v.x + ox, y + 1)];
                     if s != NO_F && s != o {
                         border[o as usize * MAX_FACTIONS + s as usize] += 1;
                         border[s as usize * MAX_FACTIONS + o as usize] += 1;
@@ -1107,7 +1107,7 @@ fn plan_marches(w: &mut World) {
 /// Unit vector from village `from` toward (x, y).
 fn heading(w: &World, from: u16, x: i32, y: i32) -> (f32, f32) {
     let Some(v) = w.villages.get(from as usize) else { return (1.0, 0.0) };
-    let (dx, dy) = (w.d.dxi(v.x, x) as f32, (y - v.y) as f32);
+    let (dx, dy) = (w.d.dxi(v.x, x) as f32, w.d.dyi(v.y, y) as f32);
     let len = (dx * dx + dy * dy).sqrt();
     if len < 1e-3 {
         (1.0, 0.0)
@@ -1123,8 +1123,8 @@ pub fn pick_overseas(w: &mut World, f: u8, ox: i32, oy: i32) -> Option<(i32, i32
         let ang = w.rng.range(0.0, TAU);
         let d = w.rng.range(25.0, 90.0);
         let sx = w.d.wrap_x((ox as f32 + ang.cos() * d).round() as i32);
-        let sy = (oy as f32 + ang.sin() * d).round() as i32;
-        if sy < 4 || sy > w.d.h as i32 - 5 || !w.terrain.walkable(sx, sy) || w.terrain.land(sx, sy) == home {
+        let sy = w.d.wrap_y((oy as f32 + ang.sin() * d).round() as i32);
+        if !w.terrain.walkable(sx, sy) || w.terrain.land(sx, sy) == home {
             continue;
         }
         let o = w.owner[w.d.idx(sx, sy)];

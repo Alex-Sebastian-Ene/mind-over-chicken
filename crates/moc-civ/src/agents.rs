@@ -26,12 +26,12 @@ pub const SPEED_SAIL: f32 = 6.0;
 
 #[inline]
 pub fn tile(a: &Agent, d: Dims) -> (i32, i32) {
-    (d.wrap_x(a.x.floor() as i32), (a.y.floor() as i32).clamp(0, d.h as i32 - 1))
+    (d.wrap_x(a.x.floor() as i32), d.wrap_y(a.y.floor() as i32))
 }
 
 /// Point an agent at a new goal tile (keeps its progress if the goal is unchanged).
 pub fn set_goal(a: &mut Agent, d: Dims, x: i32, y: i32) {
-    let (x, y) = (d.wrap_x(x), y.clamp(0, d.h as i32 - 1));
+    let (x, y) = (d.wrap_x(x), d.wrap_y(y));
     if a.gx != x || a.gy != y {
         a.gx = x;
         a.gy = y;
@@ -44,7 +44,7 @@ pub fn set_goal(a: &mut Agent, d: Dims, x: i32, y: i32) {
 /// pick targets they can see, so simple steering always gets them there.)
 pub fn los(t: &Terrain, x0: i32, y0: i32, x1: i32, y1: i32) -> bool {
     let dx = t.d.dxi(x0, x1);
-    let dy = y1 - y0;
+    let dy = t.d.dyi(y0, y1);
     let n = dx.abs().max(dy.abs());
     for s in 1..=n {
         let k = s as f32 / n as f32;
@@ -61,7 +61,7 @@ pub fn los(t: &Terrain, x0: i32, y0: i32, x1: i32, y1: i32) -> bool {
 /// and avoiding stepping straight back.
 pub fn greedy(t: &Terrain, cx: i32, cy: i32, gx: i32, gy: i32, px: i32, py: i32) -> Option<(i32, i32)> {
     let dx = t.d.dxi(cx, gx);
-    let dy = gy - cy;
+    let dy = t.d.dyi(cy, gy);
     if dx == 0 && dy == 0 {
         return None;
     }
@@ -70,7 +70,7 @@ pub fn greedy(t: &Terrain, cx: i32, cy: i32, gx: i32, gy: i32, px: i32, py: i32)
     let mut fallback = None;
     for off in [0, 1, -1, 2, -2, 3, -3] {
         let (ox, oy) = DIRS[(k + off).rem_euclid(8) as usize];
-        let (nx, ny) = (t.d.wrap_x(cx + ox), cy + oy);
+        let (nx, ny) = (t.d.wrap_x(cx + ox), t.d.wrap_y(cy + oy));
         if !t.walkable(nx, ny) {
             continue;
         }
@@ -129,7 +129,7 @@ pub fn walk(a: &mut Agent, t: &Terrain, paths: &mut Paths, speed: f32, dt: f32, 
     }
     let (tx, ty) = (a.nx as f32 + 0.5, a.ny as f32 + 0.5);
     let ddx = d.dx(a.x, tx);
-    let ddy = ty - a.y;
+    let ddy = d.dy(a.y, ty);
     let len = (ddx * ddx + ddy * ddy).sqrt();
     let hurt = if a.wound == Wound::Wounded { 0.6 } else { 1.0 };
     let ford = if t.river_at(a.nx, a.ny) { RIVER_SPEED } else { 1.0 };
@@ -149,7 +149,7 @@ pub fn walk(a: &mut Agent, t: &Terrain, paths: &mut Paths, speed: f32, dt: f32, 
         return dg == 0;
     }
     a.x = d.wrap_xf(a.x + ddx / len * step);
-    a.y = (a.y + ddy / len * step).clamp(0.0, d.h as f32 - 0.01);
+    a.y = d.wrap_yf(a.y + ddy / len * step);
     false
 }
 
@@ -157,7 +157,7 @@ pub fn walk(a: &mut Agent, t: &Terrain, paths: &mut Paths, speed: f32, dt: f32, 
 pub fn sail(a: &mut Agent, d: Dims, speed: f32, dt: f32) -> bool {
     let (tx, ty) = (a.gx as f32 + 0.5, a.gy as f32 + 0.5);
     let ddx = d.dx(a.x, tx);
-    let ddy = ty - a.y;
+    let ddy = d.dy(a.y, ty);
     let len = (ddx * ddx + ddy * ddy).sqrt();
     let step = speed * dt;
     a.nx = NO_TILE;
@@ -167,7 +167,7 @@ pub fn sail(a: &mut Agent, d: Dims, speed: f32, dt: f32) -> bool {
         return true;
     }
     a.x = d.wrap_xf(a.x + ddx / len * step);
-    a.y = (a.y + ddy / len * step).clamp(0.0, d.h as f32 - 0.01);
+    a.y = d.wrap_yf(a.y + ddy / len * step);
     false
 }
 
@@ -970,7 +970,7 @@ pub fn combat(w: &mut World, dt: f32) {
                     return;
                 }
                 let b = &agents[j];
-                let (ddx, ddy) = (dm.dx(ax, b.x), b.y - ay);
+                let (ddx, ddy) = (dm.dx(ax, b.x), dm.dy(ay, b.y));
                 let d2 = ddx * ddx + ddy * ddy;
                 if d2 > range2 || !b.alive || b.prisoner > 0.0 || b.state == State::Sail {
                     return;
@@ -1041,7 +1041,7 @@ pub fn combat(w: &mut World, dt: f32) {
                     a.timer = if routed { 3.0 } else { 1.5 };
                     let (cx, cy) = tile(a, dm);
                     let ox = -dm.dx(ax, bx).signum() as i32;
-                    let oy = -(by - ay).signum() as i32;
+                    let oy = -dm.dy(ay, by).signum() as i32;
                     set_goal(a, dm, cx + ox * 6, cy + oy * 6);
                 }
             }
@@ -1073,7 +1073,7 @@ pub fn combat(w: &mut World, dt: f32) {
                     }
                     let _ = t;
                 }
-                w.agents[i].engage = Some((dm.wrap_x(bx.floor() as i32), by.floor() as i32));
+                w.agents[i].engage = Some((dm.wrap_x(bx.floor() as i32), dm.wrap_y(by.floor() as i32)));
             } else {
                 w.agents[i].engage = None;
             }
@@ -1081,7 +1081,7 @@ pub fn combat(w: &mut World, dt: f32) {
         }
         if bd <= reach.max(1.3) {
             let hurt = if wound == Wound::Wounded { 0.5 } else { 1.0 };
-            let (btx, bty) = (dm.wrap_x(bx.floor() as i32), by.floor() as i32);
+            let (btx, bty) = (dm.wrap_x(bx.floor() as i32), dm.wrap_y(by.floor() as i32));
             let mut cover = defence(w.terrain.kind_at(btx, bty));
             // Walls: a defender at its own walled village.
             if let Some(h) = w.villages.get(w.agents[j].home as usize) {
@@ -1100,7 +1100,7 @@ pub fn combat(w: &mut World, dt: f32) {
             }
             let (atx, aty) = (dm.wrap_x(ax.floor() as i32), ay.floor() as i32);
             let mx = dm.wrap_x((ax + dm.dx(ax, bx) * 0.5).floor() as i32);
-            let my = ((ay + by) * 0.5).floor() as i32;
+            let my = dm.wrap_y((ay + dm.dy(ay, by) * 0.5).floor() as i32);
             let across = w.terrain.river_at(atx, aty) || (w.terrain.river_at(mx, my) && !w.terrain.river_at(btx, bty));
             let river = if across { terrain_mul::RIVER_CROSSING } else { 1.0 };
             let flank = if age >= crate::ages_table::FORMATIONS_FROM_AGE && is_flank(id) && w.agents[j].fight > 0.0 { 1.3 } else { 1.0 };
@@ -1118,7 +1118,7 @@ pub fn combat(w: &mut World, dt: f32) {
             }
             w.agents[i].fight = 0.25;
             if w.rng.chance(dt * 6.0) {
-                w.effect(ax + dm.dx(ax, bx) * 0.5, (ay + by) * 0.5, 0, 0.3, 1.0);
+                w.effect(dm.wrap_xf(ax + dm.dx(ax, bx) * 0.5), dm.wrap_yf(ay + dm.dy(ay, by) * 0.5), 0, 0.3, 1.0);
             }
             let (bcamp, bside) = (w.agents[j].camp, w.agents[j].side);
             if leader_hit {
@@ -1155,7 +1155,7 @@ pub fn combat(w: &mut World, dt: f32) {
             // Archers, gunners and drones stand and shoot.
             Some(tile(&w.agents[i], dm))
         } else {
-            Some((dm.wrap_x(bx.floor() as i32), by.floor() as i32))
+            Some((dm.wrap_x(bx.floor() as i32), dm.wrap_y(by.floor() as i32)))
         };
     }
 }
