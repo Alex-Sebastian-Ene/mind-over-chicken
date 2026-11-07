@@ -15,14 +15,28 @@ export function villagerLook(era = 'stone') {
 
 // Walk toward a target. Far away: follow the island's distance field around water and
 // mountains. Close up: steer straight in, sliding round small obstacles. True on arrival.
+// Invariant: sprites must never stand or walk on water.
 export function walk(a, tx, ty, speed, dt, world) {
+  // If displaced into water, immediately snap back to nearest walkable land
+  if (world && world.isWater && (world.isWater(a.x, a.y) || !world.walkable(a.x, a.y))) {
+    const safe = world.nearestWalkable(a.x, a.y, 40);
+    a.x = safe.x;
+    a.y = safe.y;
+  }
+  // If destination is in water, clamp target to nearest walkable land so sprites don't wade in
+  if (world && world.isWater && (world.isWater(tx, ty) || !world.walkable(tx, ty))) {
+    const safe = world.nearestWalkable(tx, ty, 40);
+    tx = safe.x;
+    ty = safe.y;
+  }
+
   const dx = tx - a.x, dy = ty - a.y;
   const d = Math.hypot(dx, dy);
   if (d < 1.2) return true;
   // Target sits on rock or water and we're pressed up against it: close enough.
   if (d < 6 && (a.stuck || 0) > 0.8) { a.stuck = 0; return true; }
   const step = Math.min(d, speed * dt);
-  if (d > 7 && world.field) {
+  if (d > 7 && world && world.field) {
     const f = world.field(tx, ty);
     const W = 320;
     const cx = Math.round(a.x), cy = Math.round(a.y);
@@ -35,10 +49,14 @@ export function walk(a, tx, ty, speed, dt, world) {
       }
       if (bx !== cx || by !== cy) {
         const mx = bx - a.x, my = by - a.y, md = Math.hypot(mx, my) || 1;
-        a.x += (mx / md) * step; a.y += (my / md) * step;
-        a.facing = mx >= 0 ? 1 : -1;
-        a.stuck = 0;
-        return false;
+        const nx = a.x + (mx / md) * step, ny = a.y + (my / md) * step;
+        // Strictly prevent taking a step into water
+        if (world.walkable(nx, ny) && (!world.isWater || !world.isWater(nx, ny))) {
+          a.x = nx; a.y = ny;
+          a.facing = mx >= 0 ? 1 : -1;
+          a.stuck = 0;
+          return false;
+        }
       }
     }
   }
@@ -47,7 +65,7 @@ export function walk(a, tx, ty, speed, dt, world) {
   for (const off of tries) {
     const ang = base + off * (a.side || 1);
     const nx = a.x + Math.cos(ang) * step, ny = a.y + Math.sin(ang) * step;
-    if (world.walkable(nx, ny)) {
+    if (world.walkable(nx, ny) && (!world.isWater || !world.isWater(nx, ny))) {
       a.x = nx; a.y = ny;
       a.facing = Math.cos(ang) >= 0 ? 1 : -1;
       return false;

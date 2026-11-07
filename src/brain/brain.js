@@ -46,9 +46,22 @@ export function faceAnger(mood) {
 const WINDOW = 6;            // frames averaged per feature window (~0.6 s)
 const TRAIN_EVERY = 2.5;     // seconds between retrains
 
+let RustBrainClass = null;
+
+export function setRustBrain(cls) {
+  RustBrainClass = cls;
+}
+
 export class Brain {
   constructor(source) {
     this.source = source;
+    if (RustBrainClass) {
+      try {
+        this.wasm = new RustBrainClass();
+      } catch (e) {
+        this.wasm = null;
+      }
+    }
     this.model = new PersonalModel();
     this.window = [];
     this.feat = null;
@@ -92,7 +105,13 @@ export class Brain {
   }
 
   onBlink(fn) { this.blinkListeners.push(fn); }
-  setCue(label) { this.cue = label; }
+  setCue(label) {
+    this.cue = label;
+    if (this.wasm) {
+      const id = label === 'rest' ? 0 : label === 'calm' ? 1 : label === 'focus' ? 2 : -1;
+      this.wasm.set_cue(id);
+    }
+  }
 
   resetTelemetry() {
     this.window = [];
@@ -140,10 +159,28 @@ export class Brain {
       this.trainTimer = 0;
       if (this.model.maybeTrain() && this.onTrained) this.onTrained(this.model);
     }
+
+    if (this.wasm) {
+      this.wasm.update(dt);
+      this.calm = this.wasm.calm();
+      this.focus = this.wasm.focus();
+      this.stress = this.wasm.stress();
+      this.anger = this.wasm.anger();
+      this.stats.blinks = this.wasm.blinks();
+    }
   }
 
   ingest(frame) {
     this.stats.framesSeen++;
+    if (this.wasm && frame.bands) {
+      const b = frame.bands;
+      this.wasm.ingest(
+        b.delta || 0, b.theta || 0, b.alpha || 0, b.beta || 0, b.gamma || 0,
+        !!frame.blink, frame.hr || 0,
+        frame.tilt ? frame.tilt[0] : 0, frame.tilt ? frame.tilt[1] : 0,
+        frame.motion || 0, frame.quality || 1
+      );
+    }
     this.quality = frame.quality;
     if (frame.bands) this.bands = { ...frame.bands };
     if (frame.contact) this.contact = frame.contact;

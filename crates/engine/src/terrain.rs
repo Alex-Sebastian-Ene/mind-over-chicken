@@ -1088,6 +1088,34 @@ impl Terrain {
             self.tile_type[(y as usize) * W + (x as usize)] = t;
         }
     }
+
+    pub fn sites_json(&self) -> String {
+        let s = &self.sites;
+        format!(
+            "{{\"village\":{{\"x\":{},\"y\":{}}},\"pad\":{{\"x\":{},\"y\":{}}},\"ridge\":{{\"x\":{},\"y\":{}}},\"cave\":{{\"x\":{},\"y\":{}}},\"caveMouth\":{{\"x\":{},\"y\":{}}},\"fire\":{{\"x\":{},\"y\":{}}},\"factory\":{{\"x\":{},\"y\":{}}},\"exchange\":{{\"x\":{},\"y\":{}}},\"picket\":{{\"x\":{},\"y\":{}}},\"hangar\":{{\"x\":{},\"y\":{}}},\"crowd\":{{\"x\":{},\"y\":{}}}}}",
+            s.village.x, s.village.y,
+            s.pad.x, s.pad.y,
+            s.ridge.x, s.ridge.y,
+            s.cave.x, s.cave.y,
+            s.cave_mouth.x, s.cave_mouth.y,
+            s.fire.x, s.fire.y,
+            s.factory.x, s.factory.y,
+            s.exchange.x, s.exchange.y,
+            s.picket.x, s.picket.y,
+            s.hangar.x, s.hangar.y,
+            s.crowd.x, s.crowd.y,
+        )
+    }
+
+    pub fn continents_json(&self) -> String {
+        let items: Vec<String> = self.continents.iter().map(|c| {
+            format!(
+                "{{\"id\":\"{}\",\"cx\":{},\"cy\":{},\"rx\":{},\"ry\":{},\"village\":{{\"x\":{},\"y\":{}}}}}",
+                c.id, c.cx, c.cy, c.rx, c.ry, c.village.x, c.village.y
+            )
+        }).collect();
+        format!("[{}]", items.join(","))
+    }
 }
 
 #[cfg(test)]

@@ -156,6 +156,12 @@ export class PinchDetector {
   }
 }
 
+let RustFingerControllerClass = null;
+
+export function setRustFingerController(cls) {
+  RustFingerControllerClass = cls;
+}
+
 // ---------- Wave / swipe detector (#121) ----------
 // Detects a horizontal (or vertical) open-hand wave over ~250 ms with ~400 ms cooldown.
 export class WaveDetector {
@@ -453,6 +459,13 @@ export class MultiHandTracker {
 export class FingerController {
   constructor({ aimScore = 0.45, pointGraceMs = 200, preciseGain = 0.35, deadZone = 0.004, minPinchMs = 150, refractoryMs = 300,
     fistScore = 0.5, headCursorOnly = false, filter = {}, pinchFilter = { minCutoff: 0.6, beta: 4 }, range = {}, pinch = {} } = {}) {
+    if (RustFingerControllerClass) {
+      try {
+        this.wasm = new RustFingerControllerClass();
+      } catch (e) {
+        this.wasm = null;
+      }
+    }
     Object.assign(this, { aimScore, pointGraceMs, preciseGain, deadZone, minPinchMs, refractoryMs, fistScore, headCursorOnly });
     this.filter = new PointFilter(filter);
     this.pinchFilter = new PointFilter(pinchFilter);
@@ -462,6 +475,7 @@ export class FingerController {
   }
 
   reset() {
+    if (this.wasm) this.wasm.reset();
     this.filter.reset(); this.pinchFilter.reset(); this.range.reset(); this.pinch.reset();
     this.out = null;
     this.anchor = null;
@@ -472,6 +486,35 @@ export class FingerController {
   }
 
   update({ hand, gesture = { name: 'None', score: 0 }, aim = { x: 0.5, y: 0.55 }, now, aspect = 4 / 3 }) {
+    if (this.wasm) {
+      let coords = null;
+      if (hand && hand.length >= 21) {
+        coords = new Float64Array(63);
+        for (let i = 0; i < 21; i++) {
+          coords[i * 3] = hand[i].x;
+          coords[i * 3 + 1] = hand[i].y;
+          coords[i * 3 + 2] = hand[i].z || 0;
+        }
+      }
+      const res = this.wasm.update(coords, gesture.name || 'None', gesture.score || 0, now, aspect);
+      const mode = res[0];
+      const resAim = res[1] ? { x: res[1][0], y: res[1][1] } : null;
+      const cast = res[2];
+      const cancelled = res[3];
+      const suppress = res[4];
+      const progress = res[5];
+      return (this.last = {
+        mode,
+        aim: resAim,
+        cast,
+        cancelled,
+        suppress,
+        progress,
+        pinching: mode === 'pinch',
+        heldMs: mode === 'pinch' ? progress * this.minPinchMs : 0,
+      });
+    }
+
     const out = { mode: 'none', aim: null, cast: false, cancelled: false, suppress: false, progress: 0,
       tip: null, mapped: null, ratio: null, reach: null, pinching: false, heldMs: 0 };
     const m = pinchMetrics(hand, aspect);

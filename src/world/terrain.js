@@ -65,6 +65,12 @@ function makeNoise(rng) {
   };
 }
 
+let RustWorldGenClass = null;
+
+export function setRustWorldGen(cls) {
+  RustWorldGenClass = cls;
+}
+
 export class World {
   constructor(seed = (Math.random() * 1e9) | 0, opts = {}) {
     this.seed = seed;
@@ -78,6 +84,40 @@ export class World {
   }
 
   generate() {
+    if (RustWorldGenClass && (!this.biome || this.biome === 'temperate')) {
+      try {
+        const rustGen = new RustWorldGenClass(this.seed >>> 0);
+        this.h = rustGen.heights();
+        this.type = rustGen.types();
+        this.baseType = this.type.slice();
+        this.sites = JSON.parse(rustGen.sites_json());
+        this.continents = JSON.parse(rustGen.continents_json());
+        this.owner = new Uint8Array(W * H);
+        for (let y = 0; y < H; y++) {
+          for (let x = 0; x < W; x++) {
+            let best = -9, owner = 0;
+            this.continents.forEach((c, i) => {
+              const rx = (x - c.cx) / (c.rx || 60), ry = (y - c.cy) / (c.ry || 40);
+              const b = 1 - (rx * rx + ry * ry);
+              if (b > best) { best = b; owner = i; }
+            });
+            this.owner[y * W + x] = owner;
+          }
+        }
+        for (const [k, pt] of Object.entries(this.sites)) {
+          if (pt && typeof pt.x === 'number' && typeof pt.y === 'number') {
+            if (!this.walkable(pt.x, pt.y) && k !== 'harbour' && k !== 'caveMouth') {
+              this.sites[k] = this.nearestWalkable(pt.x, pt.y);
+            }
+          }
+        }
+        this.initHarbors();
+        return;
+      } catch (err) {
+        console.warn('RustWorldGen failed, falling back to JS terrain generator:', err);
+      }
+    }
+
     const rng = mulberry32(this.seed);
     const noise = makeNoise(rng);
     const moist = makeNoise(mulberry32(this.seed ^ 0x9e3779b9));
@@ -164,13 +204,20 @@ export class World {
     this.sites.crowd = this.nearestWalkable(p.x - 30, p.y - 10);
 
     // Other continents: a village spot and a harbour on the coast facing home.
+    this.initHarbors();
+  }
+
+  initHarbors() {
+    const v = this.sites.village;
     for (const c of this.continents) {
-      c.village = c.id === 'home' ? { ...v } : this.nearestWalkable(c.cx, c.cy);
+      c.village = c.id === 'home' ? { ...v } : (c.village || this.nearestWalkable(c.cx, c.cy));
     }
     const home = this.continents[0];
-    for (const c of this.continents.slice(1)) {
-      c.harbor = this.coastToward(c.village, home.village, (x, y) => this.owner[y * W + x] !== 0);
-      c.homeHarbor = this.coastToward(home.village, c.village, (x, y) => this.owner[y * W + x] === 0);
+    if (home) {
+      for (const c of this.continents.slice(1)) {
+        c.harbor = this.coastToward(c.village, home.village, (x, y) => this.owner[y * W + x] !== 0);
+        c.homeHarbor = this.coastToward(home.village, c.village, (x, y) => this.owner[y * W + x] === 0);
+      }
     }
   }
 
@@ -204,13 +251,19 @@ export class World {
 
   nearestWalkable(x, y, maxR = 60) {
     x = Math.round(x); y = Math.round(y);
-    for (let r = 0; r <= maxR; r++) {
+    if (this.walkable(x, y)) return { x, y };
+    let fallback = null;
+    for (let r = 1; r <= maxR; r++) {
       for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-        if (this.walkable(x + dx, y + dy) && this.get(x + dx, y + dy) !== T.FOREST) return { x: x + dx, y: y + dy };
+        const px = x + dx, py = y + dy;
+        if (this.walkable(px, py)) {
+          if (this.get(px, py) !== T.FOREST) return { x: px, y: py };
+          fallback ??= { x: px, y: py };
+        }
       }
     }
-    return { x, y };
+    return fallback || (this.sites?.village ? { ...this.sites.village } : { x, y });
   }
 
   // Random walkable point in a ring around (x,y).

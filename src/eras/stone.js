@@ -52,7 +52,8 @@ export class StoneAge {
     for (let i = 0; i < POP_START; i++) this.people.push(this.makePerson(w.randomLand(w.sites.cave.x, w.sites.cave.y, 2, 14), NAMES[i]));
     this.mammoths = [];
     for (let i = 0; i < 4; i++) this.spawnMammoth();
-    this.chicken = { x: this.fire.x + 8, y: this.fire.y + 4, frame: 0, ft: 0, facing: 1, tx: this.fire.x + 8, ty: this.fire.y + 4, t: 0 };
+    const cp = w.nearestWalkable ? w.nearestWalkable(this.fire.x + 8, this.fire.y + 4) : { x: this.fire.x + 8, y: this.fire.y + 4 };
+    this.chicken = { x: cp.x, y: cp.y, frame: 0, ft: 0, facing: 1, tx: cp.x, ty: cp.y, t: 0 };
     G.brain.setCue('rest');
     G.advisor.say('intro', 'My lord! The tribe is cold, hungry and quietly judging you. Blink to throw lightning at the fire pit.', { priority: 3, cooldown: 999 });
   }
@@ -197,6 +198,11 @@ export class StoneAge {
     if (this.mammoths.filter((m) => m.alive).length < 3 && this.spawnTimer > 6) { this.spawnTimer = 0; this.spawnMammoth(); }
     for (const m of this.mammoths) {
       if (!m.alive) continue;
+      // Invariant: mammoths must never stand or walk on water
+      if (w.isWater && (w.isWater(m.x, m.y) || !w.walkable(m.x, m.y))) {
+        const safe = w.nearestWalkable(m.x, m.y);
+        m.x = safe.x; m.y = safe.y;
+      }
       animate(m, dt, 3);
       m.pause -= dt;
       if (m.pause <= 0 && walk(m, m.tx, m.ty, 4, dt, w)) {
@@ -232,6 +238,11 @@ export class StoneAge {
     const camp = w.sites.village;
     for (const p of this.people) {
       if (!p.alive) continue;
+      // Invariant: people must never stand or walk on water
+      if (w.isWater && (w.isWater(p.x, p.y) || !w.walkable(p.x, p.y))) {
+        const safe = w.nearestWalkable(p.x, p.y);
+        p.x = safe.x; p.y = safe.y;
+      }
       animate(p, dt, 6);
       const dFire = dist(p.x, p.y, f.x, f.y);
       const hungerRate = this.G.assistMode ? 0.008 : 0.017;
@@ -312,6 +323,10 @@ export class StoneAge {
 
     // ---- The sacred chicken pecks around the fire ----
     const c = this.chicken;
+    if (w.isWater && (w.isWater(c.x, c.y) || !w.walkable(c.x, c.y))) {
+      const safe = w.nearestWalkable(c.x, c.y);
+      c.x = safe.x; c.y = safe.y;
+    }
     animate(c, dt, 5);
     c.t -= dt;
     if (c.t <= 0) { const p = w.randomLand(f.x, f.y, 5, 12); c.tx = p.x; c.ty = p.y; c.t = rand(1.5, 4); }
@@ -432,21 +447,31 @@ export class StoneAge {
         break;
       case 'warm':
       case 'dance': {
-        if (!p.spot || p.spotT-- <= 0) { const a = rand(0, Math.PI * 2), r = rand(5, 12); p.spot = { x: f.x + Math.cos(a) * r, y: f.y + Math.sin(a) * r * 0.7 }; p.spotT = 300; }
+        if (!p.spot || p.spotT-- <= 0 || !w.walkable(p.spot.x, p.spot.y)) {
+          p.spot = w.randomLand(f.x, f.y, 4, 12);
+          p.spotT = 300;
+        }
         walk(p, p.spot.x, p.spot.y, 8, dt, w);
         break;
       }
-      case 'cower':
-        walk(p, w.sites.cave.x + p.side * 2, w.sites.cave.y, 12, dt, w);
+      case 'cower': {
+        const caveSpot = w.nearestWalkable(w.sites.cave.x + p.side * 2, w.sites.cave.y);
+        walk(p, caveSpot.x, caveSpot.y, 12, dt, w);
         break;
+      }
       case 'huddle': {
-        if (!p.spot || p.spotT-- <= 0) { p.spot = w.randomLand(f.x, f.y, 3, 10); p.spotT = 200; }
+        if (!p.spot || p.spotT-- <= 0 || !w.walkable(p.spot.x, p.spot.y)) {
+          p.spot = w.randomLand(f.x, f.y, 3, 10);
+          p.spotT = 200;
+        }
         walk(p, p.spot.x, p.spot.y, 7, dt, w);
         break;
       }
-      case 'flee':
-        if (walk(p, camp.x + p.side * 6, camp.y + 4, 16, dt, w)) p.state = 'idle';
+      case 'flee': {
+        const fleeSpot = w.nearestWalkable(camp.x + p.side * 6, camp.y + 4);
+        if (walk(p, fleeSpot.x, fleeSpot.y, 16, dt, w)) p.state = 'idle';
         break;
+      }
       default: {
         if (!p.spot || dist(p.x, p.y, p.spot.x, p.spot.y) < 1.5) p.spot = w.randomLand(camp.x, camp.y, 4, 22);
         walk(p, p.spot.x, p.spot.y, 5, dt, w);

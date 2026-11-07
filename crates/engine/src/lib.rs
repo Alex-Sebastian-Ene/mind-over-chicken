@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod audio;
 pub mod biosignal;
+pub mod camera;
 mod camera3d;
 pub mod eras;
 pub mod input; // pointer gestures: tap blinks, drag pans
@@ -341,6 +342,44 @@ impl Engine {
         let wx = x.rem_euclid(map_w);
         let wz = z.rem_euclid(map_h);
         let h_norm = self.get_terrain_height_at(wx, wz);
+
+        // Never let land entities (villagers, mammoths, chickens, goats, fires) stand or walk on water
+        let is_land_entity = matches!(
+            sprite_id,
+            sprites::SPRITE_VILLAGER
+                | sprites::SPRITE_MAMMOTH
+                | sprites::SPRITE_CHICKEN
+                | sprites::SPRITE_GOAT
+                | sprites::SPRITE_FIRE
+        );
+        let (wx, wz, h_norm) = if is_land_entity && h_norm < 0.33 {
+            // Find nearest land point on the coast
+            let mut best_x = wx;
+            let mut best_z = wz;
+            let mut best_h = h_norm;
+            'search_land: for r in 1..=8 {
+                let rf = r as f32;
+                for &(dx, dz) in &[
+                    (rf, 0.0), (-rf, 0.0), (0.0, rf), (0.0, -rf),
+                    (rf * 0.707, rf * 0.707), (-rf * 0.707, rf * 0.707),
+                    (rf * 0.707, -rf * 0.707), (-rf * 0.707, -rf * 0.707),
+                ] {
+                    let tx = (wx + dx).rem_euclid(map_w);
+                    let tz = (wz + dz).rem_euclid(map_h);
+                    let th = self.get_terrain_height_at(tx, tz);
+                    if th >= 0.33 {
+                        best_x = tx;
+                        best_z = tz;
+                        best_h = th;
+                        break 'search_land;
+                    }
+                }
+            }
+            (best_x, best_z, best_h)
+        } else {
+            (wx, wz, h_norm)
+        };
+
         let ground_y = (h_norm * 24.0).max(7.92) + 0.15; // Slightly above ground so feet never clip into slopes
         let center = [wx, ground_y, wz];
 
@@ -1134,10 +1173,10 @@ impl Engine {
     }
 }
 
-/// Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109)
+/// Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109, #19, #128)
 #[wasm_bindgen]
 pub struct RustWorldGen {
-    map: moc_terrain::TerrainMap,
+    terrain: crate::terrain::Terrain,
 }
 
 #[wasm_bindgen]
@@ -1145,27 +1184,545 @@ impl RustWorldGen {
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Self {
         Self {
-            map: moc_terrain::TerrainMap::generate_home_world(seed),
+            terrain: crate::terrain::Terrain::new(seed),
         }
     }
 
     pub fn heights(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.map.heights[..])
+        js_sys::Float32Array::from(&self.terrain.h[..])
     }
 
     pub fn types(&self) -> js_sys::Uint8Array {
-        js_sys::Uint8Array::from(&self.map.types[..])
+        js_sys::Uint8Array::from(&self.terrain.tile_type[..])
     }
 
     pub fn rgba(&self) -> js_sys::Uint8Array {
-        js_sys::Uint8Array::from(&self.map.rgba[..])
+        js_sys::Uint8Array::from(&self.terrain.pixels[..])
     }
 
     pub fn sites_json(&self) -> String {
-        self.map.sites_json()
+        self.terrain.sites_json()
     }
 
     pub fn continents_json(&self) -> String {
-        self.map.continents_json()
+        self.terrain.continents_json()
+    }
+}
+
+/// Standalone WebAssembly Cast Controller for camera god powers (#33, #108)
+#[wasm_bindgen]
+pub struct RustCastController {
+    inner: camera::casts::CastController,
+}
+
+#[wasm_bindgen]
+impl RustCastController {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: camera::casts::CastController::default(),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    pub fn spell_for(&self, gesture: &str) -> Option<String> {
+        self.inner.spell_for(gesture).map(|s| s.as_str().to_string())
+    }
+
+    pub fn update(&mut self, gesture: &str, score: f64, now: f64) -> js_sys::Array {
+        let u = self.inner.update(gesture, score, now);
+        let arr = js_sys::Array::new();
+        arr.push(&JsValue::from(u.held.map(|s| s.as_str())));
+        arr.push(&JsValue::from_f64(u.progress));
+        arr.push(&JsValue::from(u.cast.map(|s| s.as_str())));
+        arr.push(&JsValue::from_bool(u.aiming));
+        arr
+    }
+
+    pub fn trigger(&mut self, spell_id: &str, now: f64) -> bool {
+        if let Some(id) = camera::spells::SpellId::from_str(spell_id) {
+            self.inner.trigger(id, now)
+        } else {
+            false
+        }
+    }
+
+    pub fn ready(&self, spell_id: &str, now: f64) -> bool {
+        if let Some(id) = camera::spells::SpellId::from_str(spell_id) {
+            self.inner.ready(id, now)
+        } else {
+            false
+        }
+    }
+
+    pub fn cooldown_left(&self, spell_id: &str, now: f64) -> f64 {
+        if let Some(id) = camera::spells::SpellId::from_str(spell_id) {
+            self.inner.cooldown_left(id, now)
+        } else {
+            0.0
+        }
+    }
+
+    pub fn cooldown_frac(&self, spell_id: &str, now: f64) -> f64 {
+        if let Some(id) = camera::spells::SpellId::from_str(spell_id) {
+            self.inner.cooldown_frac(id, now)
+        } else {
+            0.0
+        }
+    }
+}
+
+/// Standalone WebAssembly Finger Controller for smoothing, deadzone and pinching (#33, #67, #108)
+#[wasm_bindgen]
+pub struct RustFingerController {
+    inner: camera::fingers::FingerController,
+}
+
+#[wasm_bindgen]
+impl RustFingerController {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: camera::fingers::FingerController::default(),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    pub fn update(
+        &mut self,
+        landmarks: Option<Vec<f64>>,
+        gesture: &str,
+        score: f64,
+        now: f64,
+        aspect: f64,
+    ) -> js_sys::Array {
+        let landmarks_vec = landmarks.and_then(|coords| {
+            if coords.len() >= 63 {
+                let mut v = Vec::with_capacity(21);
+                for i in 0..21 {
+                    v.push(camera::fingers::Landmark {
+                        x: coords[i * 3],
+                        y: coords[i * 3 + 1],
+                        z: coords[i * 3 + 2],
+                    });
+                }
+                Some(v)
+            } else {
+                None
+            }
+        });
+
+        let u = self.inner.update(
+            landmarks_vec.as_deref(),
+            gesture,
+            score,
+            now,
+            aspect,
+        );
+
+        let arr = js_sys::Array::new();
+        let mode_str = match u.mode {
+            camera::fingers::FingerMode::None => "none",
+            camera::fingers::FingerMode::Point => "point",
+            camera::fingers::FingerMode::Pinch => "pinch",
+            camera::fingers::FingerMode::Release => "release",
+        };
+        arr.push(&JsValue::from_str(mode_str));
+        if let Some((ax, ay)) = u.aim {
+            let aim_arr = js_sys::Array::new();
+            aim_arr.push(&JsValue::from_f64(ax));
+            aim_arr.push(&JsValue::from_f64(ay));
+            arr.push(&aim_arr);
+        } else {
+            arr.push(&JsValue::NULL);
+        }
+        arr.push(&JsValue::from_bool(u.cast));
+        arr.push(&JsValue::from_bool(u.cancelled));
+        arr.push(&JsValue::from_bool(u.suppress));
+        arr.push(&JsValue::from_f64(u.progress));
+        arr
+    }
+}
+
+/// Standalone WebAssembly Face Emotion Tracker (#33, #108)
+#[wasm_bindgen]
+pub struct RustEmotionTracker {
+    inner: camera::emotion::EmotionTracker,
+}
+
+#[wasm_bindgen]
+impl RustEmotionTracker {
+    #[wasm_bindgen(constructor)]
+    pub fn new(calibrate_seconds: f64) -> Self {
+        Self {
+            inner: camera::emotion::EmotionTracker::new(calibrate_seconds),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    pub fn update_direct(
+        &mut self,
+        has_face: bool,
+        mouth_smile_left: f64,
+        mouth_smile_right: f64,
+        brow_down_left: f64,
+        brow_down_right: f64,
+        mouth_press_left: f64,
+        mouth_press_right: f64,
+        jaw_open: f64,
+        brow_inner_up: f64,
+        eye_wide_left: f64,
+        eye_wide_right: f64,
+        mouth_frown_left: f64,
+        mouth_frown_right: f64,
+        dt: f64,
+    ) -> js_sys::Array {
+        let mut map = std::collections::HashMap::new();
+        if has_face {
+            map.insert("mouthSmileLeft".to_string(), mouth_smile_left);
+            map.insert("mouthSmileRight".to_string(), mouth_smile_right);
+            map.insert("browDownLeft".to_string(), brow_down_left);
+            map.insert("browDownRight".to_string(), brow_down_right);
+            map.insert("mouthPressLeft".to_string(), mouth_press_left);
+            map.insert("mouthPressRight".to_string(), mouth_press_right);
+            map.insert("jawOpen".to_string(), jaw_open);
+            map.insert("browInnerUp".to_string(), brow_inner_up);
+            map.insert("eyeWideLeft".to_string(), eye_wide_left);
+            map.insert("eyeWideRight".to_string(), eye_wide_right);
+            map.insert("mouthFrownLeft".to_string(), mouth_frown_left);
+            map.insert("mouthFrownRight".to_string(), mouth_frown_right);
+        }
+
+        let (mood, ev) = self.inner.update(if has_face { Some(&map) } else { None }, dt);
+
+        let arr = js_sys::Array::new();
+        arr.push(&JsValue::from_str(mood.dominant.as_str()));
+        arr.push(&JsValue::from_f64(mood.joy));
+        arr.push(&JsValue::from_f64(mood.anger));
+        arr.push(&JsValue::from_f64(mood.surprise));
+        arr.push(&JsValue::from_f64(mood.sadness));
+        arr.push(&JsValue::from_f64(mood.neutral));
+        arr.push(&JsValue::from_f64(mood.intensity));
+        arr.push(&JsValue::from_bool(mood.face));
+        let ev_str = match ev {
+            Some(camera::emotion::EmotionEvent::Change) => "change",
+            Some(camera::emotion::EmotionEvent::Strong) => "strong",
+            None => "",
+        };
+        arr.push(&JsValue::from_str(ev_str));
+        arr
+    }
+}
+
+/// Standalone WebAssembly Galaxy & Multi-World Simulator (#24, #108)
+#[wasm_bindgen]
+pub struct RustGalaxy {
+    inner: moc_cosmos::galaxy::Galaxy,
+}
+
+#[wasm_bindgen]
+impl RustGalaxy {
+    #[wasm_bindgen(constructor)]
+    pub fn new(seed: u32) -> Self {
+        Self {
+            inner: moc_cosmos::galaxy::Galaxy::new(seed),
+        }
+    }
+
+    pub fn step(
+        &mut self,
+        dt: f32,
+        calm: f32,
+        focus: f32,
+        stress: f32,
+        blinks_last_10s: u32,
+        blinks_total: u32,
+    ) {
+        let fx = moc_cosmos::planet_sim::BrainEffects::from_signals(calm, focus, stress, blinks_last_10s);
+        self.inner.step(dt, &fx, blinks_total);
+    }
+
+    pub fn on_blink(&mut self) {
+        self.inner.on_blink();
+    }
+
+    pub fn set_attended(&mut self, planet_idx: i32) {
+        self.inner.attended = if planet_idx >= 0 {
+            Some(planet_idx as usize)
+        } else {
+            None
+        };
+    }
+
+    pub fn get_attended(&self) -> i32 {
+        self.inner.attended.map(|idx| idx as i32).unwrap_or(-1)
+    }
+
+    pub fn planet_count(&self) -> usize {
+        self.inner.planets.len()
+    }
+
+    pub fn planet_pop(&self, idx: usize) -> f32 {
+        self.inner.planets.get(idx).map(|p| p.state.pop).unwrap_or(0.0)
+    }
+
+    pub fn planet_era(&self, idx: usize) -> usize {
+        self.inner.planets.get(idx).map(|p| p.state.era_index).unwrap_or(0)
+    }
+
+    pub fn planet_progress(&self, idx: usize) -> f32 {
+        self.inner.planets.get(idx).map(|p| p.state.progress).unwrap_or(0.0)
+    }
+
+    pub fn planet_market(&self, idx: usize) -> f32 {
+        self.inner.planets.get(idx).map(|p| p.state.market).unwrap_or(100.0)
+    }
+
+    pub fn planet_is_alive(&self, idx: usize) -> bool {
+        self.inner.planets.get(idx).map(|p| p.alive).unwrap_or(false)
+    }
+
+    pub fn planet_is_forming(&self, idx: usize) -> bool {
+        self.inner.planets.get(idx).map(|p| p.forming).unwrap_or(false)
+    }
+
+    pub fn planet_name(&self, idx: usize) -> String {
+        self.inner.planets.get(idx).map(|p| p.name.clone()).unwrap_or_default()
+    }
+
+    pub fn planet_biome(&self, idx: usize) -> String {
+        self.inner.planets.get(idx).map(|p| p.biome.name().to_string()).unwrap_or_else(|| "forming".to_string())
+    }
+
+    pub fn planet_channel(&self, idx: usize) -> String {
+        self.inner.planets.get(idx).map(|p| p.state.channel.name().to_string()).unwrap_or_else(|| "mixed".to_string())
+    }
+
+    pub fn planet_pos_x(&self, idx: usize) -> f32 {
+        self.inner.planets.get(idx).map(|p| p.position(self.inner.time).0).unwrap_or(0.0)
+    }
+
+    pub fn planet_pos_y(&self, idx: usize) -> f32 {
+        self.inner.planets.get(idx).map(|p| p.position(self.inner.time).1).unwrap_or(0.0)
+    }
+
+    pub fn is_mind_done(&self) -> bool {
+        self.inner.mind.done
+    }
+}
+
+/// Standalone WebAssembly MLP Policy AI God (#25, #108)
+#[wasm_bindgen]
+pub struct RustAiPolicy {
+    inner: moc_ai::policy::MLPPolicy,
+}
+
+#[wasm_bindgen]
+impl RustAiPolicy {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: moc_ai::policy::MLPPolicy::from_embedded(),
+        }
+    }
+
+    pub fn act(&self, obs: &[f32], greedy: bool, sample_val: f32) -> u32 {
+        if obs.len() < moc_ai::policy::NUM_INPUTS {
+            return 0;
+        }
+        self.inner.act(obs, greedy, sample_val) as u32
+    }
+
+    pub fn probs(&self, obs: &[f32]) -> js_sys::Float32Array {
+        if obs.len() < moc_ai::policy::NUM_INPUTS {
+            return js_sys::Float32Array::new_with_length(moc_ai::policy::NUM_ACTIONS as u32);
+        }
+        let probs = self.inner.probs(obs);
+        js_sys::Float32Array::from(&probs[..])
+    }
+
+    pub fn self_check(&self) -> f32 {
+        self.inner.self_check()
+    }
+}
+
+/// Standalone WebAssembly Brain signal processor and personal model (#20, #108)
+#[wasm_bindgen]
+pub struct RustBrain {
+    inner: moc_brain::brain::Brain,
+}
+
+#[wasm_bindgen]
+impl RustBrain {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: moc_brain::brain::Brain::new(),
+        }
+    }
+
+    pub fn update(&mut self, dt: f32) -> bool {
+        self.inner.update(dt)
+    }
+
+    pub fn set_cue(&mut self, cue_id: i32) {
+        let cue = match cue_id {
+            0 => Some(moc_brain::model::Class::Rest),
+            1 => Some(moc_brain::model::Class::Calm),
+            2 => Some(moc_brain::model::Class::Focus),
+            _ => None,
+        };
+        self.inner.set_cue(cue);
+    }
+
+    pub fn ingest(
+        &mut self,
+        delta: f32,
+        theta: f32,
+        alpha: f32,
+        beta: f32,
+        gamma: f32,
+        blink: bool,
+        hr: f32,
+        tilt_x: f32,
+        tilt_y: f32,
+        motion: f32,
+        quality: f32,
+    ) -> bool {
+        let frame = moc_brain::sim_source::BrainFrame {
+            bands: moc_brain::model::Bands {
+                delta,
+                theta,
+                alpha,
+                beta,
+                gamma,
+            },
+            blink,
+            hr: if hr > 0.0 { Some(hr) } else { None },
+            tilt: Some((tilt_x, tilt_y)),
+            motion,
+            quality,
+        };
+        self.inner.ingest(&frame)
+    }
+
+    pub fn calm(&self) -> f32 {
+        self.inner.calm
+    }
+
+    pub fn focus(&self) -> f32 {
+        self.inner.focus
+    }
+
+    pub fn stress(&self) -> f32 {
+        self.inner.stress
+    }
+
+    pub fn anger(&self) -> f32 {
+        self.inner.anger
+    }
+
+    pub fn blinks(&self) -> u32 {
+        self.inner.stats.blinks
+    }
+
+    pub fn retrain(&mut self) -> bool {
+        self.inner.model.maybe_train()
+    }
+
+    pub fn accuracy(&self) -> f32 {
+        self.inner.model.accuracy
+    }
+}
+
+/// Standalone WebAssembly Simulated Headset Source (#20, #108)
+#[wasm_bindgen]
+pub struct RustSimSource {
+    inner: moc_brain::sim_source::SimSource,
+}
+
+#[wasm_bindgen]
+impl RustSimSource {
+    #[wasm_bindgen(constructor)]
+    pub fn new(seed: u32) -> Self {
+        Self {
+            inner: moc_brain::sim_source::SimSource::new(seed),
+        }
+    }
+
+    pub fn set_input(&mut self, calm: bool, focus: bool, panic: bool) {
+        self.inner.input.calm = calm;
+        self.inner.input.focus = focus;
+        self.inner.input.panic = panic;
+    }
+
+    pub fn blink(&mut self) {
+        self.inner.blink();
+    }
+
+    pub fn step(&mut self, dt: f32) -> js_sys::Float32Array {
+        let mut out = [0.0f32; 11];
+        self.inner.update(dt, |f| {
+            out = [
+                f.bands.delta,
+                f.bands.theta,
+                f.bands.alpha,
+                f.bands.beta,
+                f.bands.gamma,
+                if f.blink { 1.0 } else { 0.0 },
+                f.hr.unwrap_or(0.0),
+                f.tilt.map(|t| t.0).unwrap_or(0.0),
+                f.tilt.map(|t| t.1).unwrap_or(0.0),
+                f.motion,
+                f.quality,
+            ];
+        });
+        js_sys::Float32Array::from(&out[..])
+    }
+}
+
+/// Standalone WebAssembly Calibration traits (#54, #108)
+#[wasm_bindgen]
+pub struct RustCalibration;
+
+#[wasm_bindgen]
+impl RustCalibration {
+    pub fn random_traits(seed: u32) -> js_sys::Float32Array {
+        let t = moc_brain::calibration::random_seed_traits(seed);
+        let out = [t.friendliness, t.aggressiveness, t.violence];
+        js_sys::Float32Array::from(&out[..])
+    }
+
+    pub fn traits_from_sensors(
+        calm: f32,
+        focus: f32,
+        stress: f32,
+        blink_rate: f32,
+        joy: f32,
+        anger: f32,
+    ) -> js_sys::Float32Array {
+        let features = moc_brain::calibration::SensorFeatures {
+            calm,
+            focus,
+            stress,
+            blink_rate,
+            joy,
+            anger,
+            surprise: 0.0,
+            sadness: 0.0,
+            face_seen: joy > 0.0 || anger > 0.0,
+        };
+        let t = moc_brain::calibration::traits_from_features(&features);
+        let out = [t.friendliness, t.aggressiveness, t.violence];
+        js_sys::Float32Array::from(&out[..])
     }
 }
