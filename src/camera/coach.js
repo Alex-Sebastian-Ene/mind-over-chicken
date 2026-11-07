@@ -98,19 +98,6 @@ export const COACH_MOVES = [
     },
   },
   {
-    id: 'wave_orbit',
-    title: 'Wave Orbit',
-    key: '← / →',
-    glyph: '👋',
-    instruction: 'Wave an open hand left or right to orbit the 3D camera or cycle planets.',
-    contexts: ['surface', 'globe', 'galaxy'],
-    sample(phase) {
-      const swing = Math.sin(phase * Math.PI * 2);
-      const cx = 0.5 + swing * 0.22;
-      return [{ hand: buildGhostHand('open', 'open', 0, { cx, cy: 0.78, size: 0.26 }), state: { held: Math.abs(swing) > 0.5 } }];
-    },
-  },
-  {
     id: 'palm_calm',
     title: 'Open Palm · Calm',
     key: '2',
@@ -245,8 +232,6 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
     ctx.textAlign = 'center';
     if (move.id === 'two_hand_zoom') {
       ctx.fillText('←  PINCH & SPREAD  →', w / 2, 16);
-    } else if (move.id === 'wave_orbit') {
-      ctx.fillText('←  WAVE TO ORBIT  →', w / 2, 16);
     } else if (move.id === 'pinch_grab') {
       ctx.fillText('PINCH · MOVE HEAD · DROP', w / 2, 16);
     }
@@ -257,7 +242,6 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
 
     if (state.bothPinched) selectMove('two_hand_zoom');
     else if (state.grabActive) selectMove('pinch_grab');
-    else if (context === 'galaxy' || context === 'globe') selectMove('wave_orbit');
     else if (state.heldMove === 'fist') selectMove('fist_strike');
 
     const handCount = (state.leftVisible ? 1 : 0) + (state.rightVisible ? 1 : 0);

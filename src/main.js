@@ -1133,7 +1133,7 @@ $('playBridge').addEventListener('click', async () => {
 // Debug handle for the console (and for automated playtests).
 window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos, get engine() { return engine; } };
 
-// camera (#33, #116–#123): opt-in webcam. Hands perform actions (pinch-grab, 2-hand zoom, palm, fist, wave)
+// camera (#33, #116–#123): opt-in webcam. Hands perform actions (pinch-grab, 2-hand zoom, palm, fist)
 // with coach visual demonstration. Face sets mood.
 window.__moc.camera = initCamera({
   getG: () => cosmos.castG(G), // planets (#68): casts and mood reach the world you're on
@@ -1178,18 +1178,6 @@ window.__moc.camera = initCamera({
     }
     if (active && (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001)) {
       panMap(-dx * W * 1.5, -dy * H * 1.5);
-    }
-  },
-  onWave: (dir) => {
-    // Open-hand wave orbits camera or spins globe (#121)
-    if (cosmos.active || cosmos.z > 0.4) {
-      cosmos.rot += dir * 0.7;
-      cosmos.spinVel = dir * 15;
-    } else if (in3dSurface()) {
-      engine.orbit_camera(dir * 0.25, 0);
-      cam3dBase = null;
-    } else {
-      panMap(dir * 45, 0);
     }
   },
 });
