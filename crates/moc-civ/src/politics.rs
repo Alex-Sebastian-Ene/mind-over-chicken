@@ -99,6 +99,11 @@ fn politics_tick(w: &mut World, rebels: bool) {
     jobs::rebalance(w);
     w.refresh_hostility();
     plan_marches(w);
+    // #100: a plugged-in policy may rewrite the marches (its army commanders) and act.
+    if let Some(mut p) = w.policy.take() {
+        p.command(w);
+        w.policy = Some(p);
+    }
     trade(w);
     if rebels {
         rebellion(w);
@@ -909,6 +914,15 @@ pub enum Decision {
 /// A war-and-peace policy: given the world, what civilisation `civ` does this second.
 pub trait Policy {
     fn decide(&mut self, w: &World, civ: u8, out: &mut Vec<Decision>);
+    /// #100 companion seam: runs once per politics tick right after the rules planned the
+    /// marches, with the world mutable, for what a `Decision` can't say (army orders, trade,
+    /// alliances, the price of a broken truce). The rules do nothing here.
+    fn command(&mut self, _w: &mut World) {}
+    /// #100: the share of civilisation `civ`'s people the policy wants under arms (0..1), or
+    /// None to leave it to the rules (`jobs::wants`).
+    fn mobilise(&self, _civ: u8) -> Option<f32> {
+        None
+    }
 }
 
 /// The default policy: today's rules, as a pure function of the world.
