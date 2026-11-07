@@ -422,8 +422,8 @@ class Bridge:
             board = BoardShim(self.board_id, self.make_params())
             self.board = board  # so shutdown can release it even mid-connect
             try:
-                # prepare_session scans BLE / opens the dongle and can block for seconds.
-                await asyncio.to_thread(board.prepare_session)
+                # prepare_session scans BLE / opens the dongle and can block; guard against BlueZ GATT deadlock.
+                await asyncio.wait_for(asyncio.to_thread(board.prepare_session), timeout=22.0)
                 self.ppg_enabled = False
                 if self.ppg is not None and self.ppg_command:
                     cmds = (self.ppg_command,) if isinstance(self.ppg_command, str) else self.ppg_command
@@ -452,7 +452,7 @@ class Bridge:
                 self.streaming_status = f"Streaming from {self.label}" + (f" ({', '.join(extras)})" if extras else "")
                 self.set_status(self.streaming_status)
                 return
-            except BrainFlowError as e:
+            except (BrainFlowError, asyncio.TimeoutError) as e:
                 log.warning("connect failed: %s", e)
                 self.release_board()
                 self.set_status(f"Waiting for headset: {self.label} not found, retrying")
@@ -478,6 +478,7 @@ class Bridge:
             await self.connect_board()
             await self.stream_loop()       # returns when data stalls
             self.release_board()
+            await asyncio.sleep(2.5)       # let BlueZ finish GATT teardown before rescanning
 
     async def stream_loop(self):
         next_tick = time.monotonic()
