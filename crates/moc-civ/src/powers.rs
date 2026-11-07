@@ -210,16 +210,16 @@ pub fn set_player_traits(w: &mut World, friendliness: f32, aggressiveness: f32, 
 }
 
 /// The mind read: the player's first ten seconds of brain data shape their civilisation.
-/// Calm → friendliness, pulse → aggressiveness, blinks → chaos (violence up, cohesion down),
-/// focus → fertility (industry).
-pub fn seed_player_mind(w: &mut World, calm: f32, focus: f32, hr_delta: f32, blinks: f32) -> bool {
+/// Calm → friendliness, stress (above resting) → aggressiveness, blinks → chaos (violence up,
+/// cohesion down), focus → fertility (industry).
+pub fn seed_player_mind(w: &mut World, calm: f32, focus: f32, stress: f32, blinks: f32) -> bool {
     let Some(p) = w.player() else { return false };
-    let pulse = (hr_delta / 25.0).clamp(0.0, 1.0);
+    let agitation = Inputs { calm, focus, stress, anger: 0.0 }.agitation();
     let chaos = (blinks / 8.0).clamp(0.0, 1.0);
     let f = &mut w.factions[p as usize];
     f.traits = Traits {
         friendliness: 0.2 + 0.7 * calm.clamp(0.0, 1.0),
-        aggressiveness: 0.15 + 0.75 * pulse,
+        aggressiveness: 0.15 + 0.75 * agitation,
         violence: 0.2 + 0.6 * chaos,
         fertility: 0.3 + 0.6 * focus.clamp(0.0, 1.0),
         cohesion: 0.8 - 0.5 * chaos,

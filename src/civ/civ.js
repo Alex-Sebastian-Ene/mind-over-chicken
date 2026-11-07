@@ -53,7 +53,8 @@ export class Civ {
 
   get mem() { return this.ex.memory.buffer; }
 
-  setInputs(calm, focus, hrDelta, anger) { this.ex.civ_set_inputs(this.w, calm || 0, focus || 0, hrDelta || 0, anger || 0); }
+  // stress = max(1 - calm, anger): the brain's `stress` when it has one.
+  setInputs(calm, focus, stress, anger) { this.ex.civ_set_inputs(this.w, calm || 0, focus || 0, stress || 0, anger || 0); }
   step(dt) { this.ex.civ_step(this.w, dt); }
   get time() { return this.ex.civ_time(this.w); }
   get agents() { return this.ex.civ_agent_count(this.w); }
@@ -91,7 +92,7 @@ export class Civ {
   // ---- the god's hand ----
   lightning(x, y) { return this.ex.civ_lightning(this.w, x, y); }
   cast(kind, x, y) { return this.ex.civ_cast(this.w, kind, x, y); }
-  seedMind(calm, focus, hrDelta, blinks) { return this.ex.civ_seed_player_mind(this.w, calm, focus, hrDelta, blinks); }
+  seedMind(calm, focus, stress, blinks) { return this.ex.civ_seed_player_mind(this.w, calm, focus, stress, blinks); }
   // Calibration hook (#54): friendliness, aggressiveness, violence for the player's civilisation.
   setPlayerTraits(friendliness, aggressiveness, violence) { return this.ex.civ_set_player_traits(this.w, friendliness, aggressiveness, violence); }
 

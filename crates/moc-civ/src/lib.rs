@@ -5,10 +5,10 @@
 //! settle new villages, claim land, starve, age and die. Civilisations that meet trade or
 //! raid; when tension boils over they go to war, and warriors fight in pixel skirmishes and
 //! capture villages. Unrest from crowding, hunger, distance from the capital and war losses
-//! (plus the player's anger and racing pulse) splits villages off as new civilisations, which
+//! (plus the player's anger and stress) splits villages off as new civilisations, which
 //! usually fight their parent.
 //!
-//! The player is a god, not a general: calm, focus, pulse and anger tilt every civilisation
+//! The player is a god, not a general: calm, focus, stress and anger tilt every civilisation
 //! each step, and lightning and casts act on the world. One civilisation's traits can be set
 //! from a calibration payload (#54) or from the player's first ten seconds of brain data.
 //!

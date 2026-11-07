@@ -433,18 +433,27 @@ pub struct March {
 pub struct Inputs {
     pub calm: f32,
     pub focus: f32,
-    pub hr_delta: f32,
+    /// 0..1: `max(1 − calm, anger)` (the brain's `stress`, or that formula when it has none).
+    pub stress: f32,
     pub anger: f32,
 }
 
+/// Resting stress. Resting calm is low, so `max(1 − calm, anger)` sits near 0.8–0.85 when the
+/// player is doing nothing; only stress above this agitates the world.
+pub const STRESS_REST: f32 = 0.8;
+
 impl Inputs {
-    /// A racing pulse, 0..1 (+25 bpm over resting is fully racing).
-    pub fn pulse(&self) -> f32 {
-        (self.hr_delta / 25.0).clamp(0.0, 1.0)
+    /// Stress from a frown or a lost calm, `stress` (0..1, see `Inputs::stress`).
+    pub fn with_stress(calm: f32, focus: f32, anger: f32) -> Inputs {
+        Inputs { calm, focus, stress: (1.0 - calm).max(anger).clamp(0.0, 1.0), anger }
     }
-    /// The god's mood pushed onto every chief: + pulse and anger, - calm.
+    /// Stress above resting, 0..1: the player is tense rather than merely not calm.
+    pub fn agitation(&self) -> f32 {
+        ((self.stress - STRESS_REST) / (1.0 - STRESS_REST)).clamp(0.0, 1.0)
+    }
+    /// The god's mood pushed onto every chief: + agitation and anger, − calm.
     pub fn hostility(&self) -> f32 {
-        0.7 * self.pulse() + 0.6 * self.anger.clamp(0.0, 1.0) - 0.75 * self.calm.clamp(0.0, 1.0)
+        0.7 * self.agitation() + 0.6 * self.anger.clamp(0.0, 1.0) - 0.75 * self.calm.clamp(0.0, 1.0)
     }
 }
 

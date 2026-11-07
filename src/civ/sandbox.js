@@ -3,8 +3,8 @@
 // The simulation is Rust (crates/moc-civ, loaded by ./civ.js); this scene feeds it the brain,
 // draws its view, and turns its event log into news and advisor lines.
 //
-// The player is a god, not a general: calm cools every chief, a racing pulse and an angry
-// face heat them up, focus fattens harvests, blinks throw lightning, and the camera casts
+// The player is a god, not a general: calm cools every chief, stress and an angry face heat
+// them up (stress = max(1 - calm, anger), from the brain when it reports it), focus fattens harvests, blinks throw lightning, and the camera casts
 // (#33: onCast/onMood) act on the world. The player's own civilisation (★) is seeded by the
 // calibration window (#54, G.calibration): from the mind read with ?calib_mode=sensor, at
 // random (reproducible from ?seed=) in the default dummy run. The run seed also picks the
@@ -63,13 +63,13 @@ export class CivSandbox {
       goal: 'Four peoples share one big planet. Watch them grow, fight for land and split. Your mind tilts war and peace.',
       how: [
         ['Calm', 'Hold Space: friendlier chiefs, trade, peace treaties, fewer rebels.'],
-        ['Pulse', 'Hold Shift: a racing pulse (and an angry face) brings raids, wars and rebellions.'],
+        ['Stress', 'Hold Shift (or frown at the camera): stress and anger bring raids, wars and rebellions.'],
         ['Focus', 'Hold F: richer harvests, faster growth.'],
         ['Blink', 'Click or B: lightning where you look. It scares rebels back into line.'],
         ['Look around', 'A/D/W/S or the arrow keys pan the planet; right-drag works too.'],
       ],
     };
-    this.powers = ['blink', 'calm', 'focus', 'heart'];
+    this.powers = ['blink', 'calm', 'focus', 'stress'];
     this.darkness = 0.1;
     this.flash = 0;
     this.cosmos = cosmos;
@@ -88,8 +88,8 @@ export class CivSandbox {
     this.mini = null;
     this.miniTimer = 0;
     this.infoTimer = 0;
-    this.mind = { t: 0, calm: 0, focus: 0, hr: 0, n: 0, blinks0: null, done: false, shownUntil: 0, text: '' };
-    this.moodHold = { calm: 0, pulse: 0, anger: 0 };
+    this.mind = { t: 0, calm: 0, focus: 0, stress: 0, n: 0, blinks0: null, done: false, shownUntil: 0, text: '' };
+    this.moodHold = { calm: 0, stress: 0, anger: 0 };
     this.mood = null;
     this.perf = { stepMs: 0, renderMs: 0, worstStepMs: 0, samples: 0, sumStep: 0, sumRender: 0 };
   }
@@ -145,10 +145,11 @@ export class CivSandbox {
     if (px || py) civ.pan(px * PAN_SPEED * dt, py * PAN_SPEED * dt);
 
     // The brain (and the face, if the camera is on) tilts every chief this step.
-    const calm = b.calm || 0, focus = b.focus || 0, hr = b.hrDelta() || 0;
+    const calm = b.calm || 0, focus = b.focus || 0;
     const anger = G.mood && G.mood.active !== false ? (G.mood.anger || 0) : (this.mood?.anger || 0);
-    civ.setInputs(calm, focus, hr, anger);
-    if (!this.G.calibration) this.readMind(dt, calm, focus, hr);
+    const stress = stressOf(b, calm, anger);
+    civ.setInputs(calm, focus, stress, anger);
+    if (!this.G.calibration) this.readMind(dt, calm, focus, stress);
 
     const t0 = performance.now();
     civ.step(Math.min(dt, 0.05));
@@ -180,11 +181,11 @@ export class CivSandbox {
       for (const n of this.news) if (!n.seen) next = n;
       if (next) { next.seen = true; this.shown = { text: next.text, kind: next.kind, until: this.t + NEWS_HOLD }; }
     }
-    this.reactToMood(dt, calm, hr, anger);
+    this.reactToMood(dt, calm, stress, anger);
   }
 
   // calibration (#54): the window's result seeds the player's civilisation. In sensor mode the
-  // mind read sets all five traits (calm → friendliness, pulse → aggressiveness, blinks →
+  // mind read sets all five traits (calm → friendliness, stress → aggressiveness, blinks →
   // violence and less cohesion, focus → fertility), with #54's formula for the README three.
   // The dummy run leaves the player's civilisation as the run seed made it.
   applyCalibration(r) {
@@ -194,7 +195,7 @@ export class CivSandbox {
     const f = r.features || {};
     const sensor = r.source === 'sensor';
     if (sensor) {
-      this.civ.seedMind(f.calm ?? 0, f.focus ?? 0, f.hrDelta ?? 0, ((f.blinkRate ?? 0) * r.seconds) / 10);
+      this.civ.seedMind(f.calm ?? 0, f.focus ?? 0, f.stress ?? Math.max(1 - (f.calm ?? 0), f.anger ?? 0), ((f.blinkRate ?? 0) * r.seconds) / 10);
       this.civ.setPlayerTraits(r.friendliness, r.aggressiveness, r.violence);
     }
     this.refresh();
@@ -202,7 +203,7 @@ export class CivSandbox {
     if (!me) return;
     const words = describe(me);
     m.text = sensor
-      ? `Read from your first ${r.seconds} s: calm ${pct(f.calm ?? 0)}, focus ${pct(f.focus ?? 0)}, pulse ${(f.hrDelta ?? 0) >= 0 ? '+' : ''}${Math.round(f.hrDelta ?? 0)} → ${me.name}: ${words.join(', ')}.`
+      ? `Read from your first ${r.seconds} s: calm ${pct(f.calm ?? 0)}, focus ${pct(f.focus ?? 0)} → ${me.name}: ${words.join(', ')}.`
       : `Dummy run (seed ${r.seed}): the ${me.name} were born at random: ${words.join(', ')}. Add ?calib_mode=sensor to seed them from your mind.`;
     m.shownUntil = this.t + 9;
     this.G.advisor.say('civ-mind', sensor
@@ -211,40 +212,40 @@ export class CivSandbox {
   }
 
   // Without the calibration module: the first ten seconds of play shape the player's civilisation.
-  readMind(dt, calm, focus, hr) {
+  readMind(dt, calm, focus, stress) {
     const m = this.mind;
     if (m.done) return;
     if (m.blinks0 == null) m.blinks0 = this.G.brain.stats.blinks;
     m.t += dt; m.n++;
-    m.calm += calm; m.focus += focus; m.hr += hr;
+    m.calm += calm; m.focus += focus; m.stress += stress;
     if (m.t < MIND_SECONDS) return;
     m.done = true;
-    const c = m.calm / m.n, f = m.focus / m.n, h = m.hr / m.n, blinks = this.G.brain.stats.blinks - m.blinks0;
-    this.civ.seedMind(c, f, h, blinks);
+    const c = m.calm / m.n, f = m.focus / m.n, s = m.stress / m.n, blinks = this.G.brain.stats.blinks - m.blinks0;
+    this.civ.seedMind(c, f, s, blinks);
     this.refresh();
     const me = this.player();
     if (!me) return;
     const words = describe(me);
-    m.text = `Read from your first ${MIND_SECONDS} s: calm ${pct(c)}, focus ${pct(f)}, pulse ${h >= 0 ? '+' : ''}${Math.round(h)}, ${blinks} blinks → ${me.name}: ${words.join(', ')}.`;
+    m.text = `Read from your first ${MIND_SECONDS} s: calm ${pct(c)}, focus ${pct(f)}, stress ${pct(s)}, ${blinks} blinks → ${me.name}: ${words.join(', ')}.`;
     m.shownUntil = this.t + 9;
     this.G.advisor.say('civ-mind', `I have read your mind, my lord. The ${me.name} are made in your image: ${words.join(', ')}.`, { mood: 'happy', priority: 3, cooldown: 999 });
   }
 
-  reactToMood(dt, calm, hr, anger) {
+  reactToMood(dt, calm, stress, anger) {
     const h = this.moodHold, say = this.G.advisor.say.bind(this.G.advisor);
     h.calm = calm > 0.65 ? h.calm + dt : 0;
-    h.pulse = hr > 12 ? h.pulse + dt : 0;
+    h.stress = stress > 0.92 ? h.stress + dt : 0;
     h.anger = anger > 0.4 ? h.anger + dt : 0;
     const wars = this.factions.reduce((s, f) => s + (f.alive ? f.wars : 0), 0) / 2;
     if (h.calm > 4) say('civ-calm', wars ? 'Your calm spreads, my lord. The chiefs are tired of war and want soup.' : 'Your calm spreads, my lord. Chiefs unclench their fists and swap grain.', { mood: 'happy', priority: 1, cooldown: 25 });
-    if (h.pulse > 3) say('civ-pulse', 'Your pulse is racing, my lord, and so are the war drums.', { mood: 'panic', priority: 2, cooldown: 25 });
+    if (h.stress > 3) say('civ-stress', 'You are tense, my lord, and so are the war drums.', { mood: 'panic', priority: 2, cooldown: 25 });
     if (h.anger > 3) say('civ-anger', 'That scowl, my lord. Every village is grumbling now. Rebels are sharpening sticks.', { mood: 'panic', priority: 2, cooldown: 25 });
   }
 
   // ---------- news ----------
   onEvent(e) {
     const A = this.name(e.a), B = this.name(e.b), say = this.G.advisor.say.bind(this.G.advisor);
-    const hot = (this.G.brain.hrDelta() || 0) > 10;
+    const hot = stressOf(this.G.brain, this.G.brain.calm || 0, this.G.mood?.anger || 0) > 0.92;
     let text = null;
     switch (e.kind) {
       case EVENT.CONTACT:
@@ -253,7 +254,7 @@ export class CivSandbox {
         break;
       case EVENT.WAR:
         text = `WAR: the ${A} declare war on the ${B}`;
-        say('civ-war', `The ${A} have declared war on the ${B}!${hot ? ' Your racing pulse is not helping, my lord.' : ''}`, { mood: 'panic', priority: 2, cooldown: 10 });
+        say('civ-war', `The ${A} have declared war on the ${B}!${hot ? ' Your stress is not helping, my lord.' : ''}`, { mood: 'panic', priority: 2, cooldown: 10 });
         this.G.audio?.bad?.();
         break;
       case EVENT.PEACE:
@@ -457,6 +458,11 @@ export class CivSandbox {
   }
 
   skip() {}
+}
+
+// Stress, 0..1: the brain's own reading when it has one, else max(1 - calm, anger).
+function stressOf(brain, calm, anger) {
+  return typeof brain?.stress === 'number' ? clamp(brain.stress) : clamp(Math.max(1 - calm, anger));
 }
 
 function describe(f) {

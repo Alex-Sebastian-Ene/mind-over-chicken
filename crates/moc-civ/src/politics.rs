@@ -10,10 +10,10 @@
 //! - **Tension** (a's hostility toward a neighbour b, per second):
 //!   0.04 · (aggressiveness + 0.8·hunger + border pressure + rebel grudge + god's mood
 //!   − 0.8·friendliness − 0.25). Raid at 0.55 (if aggressiveness ≥ 0.45), war at 1.0.
-//!   The god's mood is +0.7·pulse + 0.6·anger − 0.75·calm (full weight for the player's
-//!   civilisation, 0.6 for the rest).
+//!   The god's mood is +0.7·agitation + 0.6·anger − 0.75·calm (full weight for the player's
+//!   civilisation, 0.6 for the rest), where agitation is stress above resting (`Inputs`).
 //! - **Peace:** weariness grows with time and losses; peace when
-//!   weariness · (0.4 + mean friendliness) · (1 + 1.6·calm − 0.6·pulse − 0.6·anger) > 1
+//!   weariness · (0.4 + mean friendliness) · (1 + 1.6·calm − 0.6·agitation − 0.6·anger) > 1
 //!   after at least 20 s of war.
 //! - **Capture:** hostile warriors within 3 tiles of a village with no defending warriors
 //!   within 5 build siege at 0.35/s each; at `SIEGE_TO_CAPTURE` the village changes owner.
@@ -205,7 +205,7 @@ pub fn settle(w: &mut World, i: usize) {
 fn update_villages(w: &mut World, dt: f32) {
     let focus = w.inputs.focus.clamp(0.0, 1.0);
     let calm = w.inputs.calm.clamp(0.0, 1.0);
-    let mood = w.inputs.anger.clamp(0.0, 1.0) * 1.2 + w.inputs.pulse() * 0.6;
+    let mood = w.inputs.anger.clamp(0.0, 1.0) * 1.2 + w.inputs.agitation() * 0.6;
     let alive_villages = w.villages.iter().filter(|v| v.alive).count();
     for vi in 0..w.villages.len() {
         if !w.villages[vi].alive {
@@ -680,7 +680,7 @@ pub fn make_peace(w: &mut World, a: u8, b: u8) {
 fn diplomacy(w: &mut World, dt: f32) {
     let hostility = w.inputs.hostility();
     let calm = w.inputs.calm.clamp(0.0, 1.0);
-    let pulse = w.inputs.pulse();
+    let agitation = w.inputs.agitation();
     let anger = w.inputs.anger.clamp(0.0, 1.0);
     let alive: Vec<u8> = w.alive_factions().map(|f| f.id).collect();
     // Tension drifts.
@@ -728,7 +728,7 @@ fn diplomacy(w: &mut World, dt: f32) {
                     declare_war(w, a, b);
                     continue;
                 }
-                if r.tension >= RAID_TENSION && ta.aggressiveness >= 0.45 && rb.war == 0 && (hungry > 0.2 || w.rng.chance(0.1 * ta.aggressiveness + 0.1 * pulse)) {
+                if r.tension >= RAID_TENSION && ta.aggressiveness >= 0.45 && rb.war == 0 && (hungry > 0.2 || w.rng.chance(0.1 * ta.aggressiveness + 0.1 * agitation)) {
                     let rr = w.rel_mut(a, b);
                     rr.war = 1;
                     rr.war_t = 0.0;
@@ -750,7 +750,7 @@ fn diplomacy(w: &mut World, dt: f32) {
                 let (fa, fb) = (&w.factions[a as usize], &w.factions[b as usize]);
                 let losses = (fa.recent_losses + fb.recent_losses) / (fa.pop + fb.pop + 10) as f32;
                 let fr = (fa.traits.friendliness + fb.traits.friendliness) * 0.5;
-                let mood = (1.0 + 1.6 * calm - 0.6 * pulse - 0.6 * anger).max(0.1);
+                let mood = (1.0 + 1.6 * calm - 0.6 * agitation - 0.6 * anger).max(0.1);
                 let rr = w.rel_mut(a, b);
                 rr.war_t += dt;
                 rr.weariness += dt * (0.01 + 0.4 * losses);

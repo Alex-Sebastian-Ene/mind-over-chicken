@@ -86,7 +86,7 @@ fn same_seed_same_history_different_seed_different_world() {
     let mut b = World::new_sized(9, Dims::SMALL);
     let mut c = World::new_sized(10, Dims::SMALL);
     for w in [&mut a, &mut b, &mut c] {
-        w.inputs = Inputs { calm: 0.3, focus: 0.4, hr_delta: 5.0, anger: 0.1 };
+        w.inputs = Inputs { calm: 0.3, focus: 0.4, stress: 0.7, anger: 0.1 };
         run(w, 40.0);
     }
     assert_eq!(a.checksum(), b.checksum());
@@ -218,12 +218,12 @@ fn meeting_another_civilisation_is_an_event() {
     assert!(!w.is_hostile(a, b), "meeting is not fighting");
 }
 
-/// Two neighbours, met, same temperament: a calm god keeps the peace, a racing pulse and an
+/// Two neighbours, met, same temperament: a calm god keeps the peace, stress and an
 /// angry face start a war.
 #[test]
 fn the_players_mood_tilts_war_and_peace() {
     let mut outcomes = Vec::new();
-    for inputs in [Inputs { calm: 0.95, focus: 0.0, hr_delta: -2.0, anger: 0.0 }, Inputs { calm: 0.0, focus: 0.0, hr_delta: 30.0, anger: 0.8 }] {
+    for inputs in [Inputs::with_stress(0.95, 0.0, 0.0), Inputs::with_stress(0.0, 0.0, 0.8)] {
         let mut w = flat(9, GRASS);
         let (a, _) = civ(&mut w, 100, 160, 3, Job::Gatherer, traits(0.55, 0.45));
         let (b, _) = civ(&mut w, 125, 160, 3, Job::Gatherer, traits(0.55, 0.45));

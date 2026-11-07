@@ -18,9 +18,9 @@ fn main() {
     let secs: f32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(180.0);
     let mode = args.get(3).cloned().unwrap_or_else(|| "neutral".into());
     let inputs = match mode.as_str() {
-        "calm" => Inputs { calm: 0.9, focus: 0.2, hr_delta: -3.0, anger: 0.0 },
-        "panic" => Inputs { calm: 0.02, focus: 0.1, hr_delta: 30.0, anger: 0.6 },
-        _ => Inputs { calm: 0.2, focus: 0.15, hr_delta: 2.0, anger: 0.0 },
+        "calm" => Inputs::with_stress(0.9, 0.2, 0.0),
+        "panic" => Inputs::with_stress(0.02, 0.1, 0.6),
+        _ => Inputs::with_stress(0.2, 0.15, 0.0),
     };
     let pw: usize = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(Dims::DEFAULT.w);
     let ph: usize = args.get(6).and_then(|s| s.parse().ok()).unwrap_or(Dims::DEFAULT.h);

@@ -61,10 +61,11 @@ pub extern "C" fn civ_free(p: *mut World) {
     }
 }
 
+/// The player this step: calm, focus, stress (`max(1 − calm, anger)`), anger, all 0..1.
 #[no_mangle]
-pub extern "C" fn civ_set_inputs(p: *mut World, calm: f32, focus: f32, hr_delta: f32, anger: f32) {
+pub extern "C" fn civ_set_inputs(p: *mut World, calm: f32, focus: f32, stress: f32, anger: f32) {
     if let Some(w) = w(p) {
-        w.inputs = Inputs { calm, focus, hr_delta, anger };
+        w.inputs = Inputs { calm, focus, stress, anger };
     }
 }
 
@@ -133,10 +134,10 @@ pub extern "C" fn civ_set_player_traits(p: *mut World, friendliness: f32, aggres
     w(p).map(|w| refreshed(w, |w| powers::set_player_traits(w, friendliness, aggressiveness, violence) as i32)).unwrap_or(0)
 }
 
-/// The mind read: calm, focus, pulse (bpm over resting) and blink count from the first 10 s.
+/// The mind read: mean calm, focus and stress, and the blink count, from the first 10 s.
 #[no_mangle]
-pub extern "C" fn civ_seed_player_mind(p: *mut World, calm: f32, focus: f32, hr_delta: f32, blinks: f32) -> i32 {
-    w(p).map(|w| refreshed(w, |w| powers::seed_player_mind(w, calm, focus, hr_delta, blinks) as i32)).unwrap_or(0)
+pub extern "C" fn civ_seed_player_mind(p: *mut World, calm: f32, focus: f32, stress: f32, blinks: f32) -> i32 {
+    w(p).map(|w| refreshed(w, |w| powers::seed_player_mind(w, calm, focus, stress, blinks) as i32)).unwrap_or(0)
 }
 
 #[no_mangle]
