@@ -157,53 +157,62 @@ pub fn draw_person(
     hair: (u8, u8, u8),
 ) {
     if pose == 3 {
-        // Fallen smitten body on the ground with charred clothing
-        fill_rect(buf, x - 3, y - 1, 7, 2, 0x1e, 0x14, 0x0d, 255);
+        // Fallen smitten body on the ground with outline and charred clothing
+        fill_rect(buf, x - 3, y - 2, 7, 3, 0x12, 0x0d, 0x09, 255);
         fill_rect(buf, x - 2, y - 1, 4, 1, shirt.0, shirt.1, shirt.2, 255);
         fill_rect(buf, x + 2, y - 1, 2, 1, skin.0, skin.1, skin.2, 255);
         put_pixel(buf, x + 3, y - 2, hair.0, hair.1, hair.2, 255);
-        put_pixel(buf, x - 3, y - 2, 0x33, 0x33, 0x33, 255);
+        put_pixel(buf, x - 3, y - 1, 0x2b, 0x1d, 0x14, 255);
         return;
     }
     let bob = if pose == 1 { (frame % 2) as i32 } else { 0 };
     let sy = y - bob;
-    fill_rect(buf, x - 2, y, 5, 1, 0, 0, 0, 64); // shadow
 
-    // Legs with boots & walk cycle
-    let leg_col = (0x2d, 0x21, 0x18);
-    if pose == 0 && (frame % 2 == 1) {
-        put_pixel(buf, x - 1, sy - 1, leg_col.0, leg_col.1, leg_col.2, 255);
-        put_pixel(buf, x + 1, sy - 1, leg_col.0, leg_col.1, leg_col.2, 255);
-        put_pixel(buf, x - 1, sy - 2, 0x4a, 0x34, 0x24, 255);
-        put_pixel(buf, x + 1, sy - 2, 0x4a, 0x34, 0x24, 255);
+    // Ground contact shadow
+    fill_rect(buf, x - 2, y, 5, 1, 0, 0, 0, 76);
+
+    // Dark silhouette backing for crisp readability on any background
+    fill_rect(buf, x - 2, sy - 7, 5, 7, 0x12, 0x0d, 0x09, 255);
+
+    // Legs and boots
+    let leg_step = if pose == 0 && (frame % 2 == 1) { 1 } else { 0 };
+    let boot = (0x2b, 0x1d, 0x14);
+    if pose == 0 {
+        fill_rect(buf, x - 1, sy - 2 + leg_step, 1, 2, boot.0, boot.1, boot.2, 255);
+        fill_rect(buf, x + 1, sy - 2 + (1 - leg_step), 1, 2, boot.0, boot.1, boot.2, 255);
     } else {
-        put_pixel(buf, x, sy - 1, leg_col.0, leg_col.1, leg_col.2, 255);
-        fill_rect(buf, x - 1, sy - 2, 3, 1, 0x4a, 0x34, 0x24, 255);
+        fill_rect(buf, x - 1, sy - 2, 3, 2, boot.0, boot.1, boot.2, 255);
     }
 
-    // Torso (3px wide with collar & belt for depth)
-    fill_rect(buf, x - 1, sy - 4, 3, 2, shirt.0, shirt.1, shirt.2, 255);
-    fill_rect(buf, x - 1, sy - 2, 3, 1, 0x2e, 0x1d, 0x13, 255); // belt
+    // Torso / shirt (3x3)
+    fill_rect(buf, x - 1, sy - 5, 3, 3, shirt.0, shirt.1, shirt.2, 255);
+    // Belt & buckle
+    fill_rect(buf, x - 1, sy - 3, 3, 1, 0x3a, 0x24, 0x14, 255);
+    put_pixel(buf, x, sy - 3, 0xd4, 0xaf, 0x37, 255);
 
-    // Arms with skin hands
-    if pose == 1 || pose == 2 {
-        let flick = if pose == 2 && frame % 2 == 1 { -1 } else { 0 };
-        put_pixel(buf, x - 2, sy - 5 + flick, shirt.0, shirt.1, shirt.2, 255);
-        put_pixel(buf, x + 2, sy - 5 - flick, shirt.0, shirt.1, shirt.2, 255);
+    // Head and face
+    fill_rect(buf, x - 1, sy - 7, 3, 2, skin.0, skin.1, skin.2, 255);
+    // Eye pointing forward
+    put_pixel(buf, x + 1, sy - 6, 0x1a, 0x11, 0x0a, 255);
+    // Hair crown and back
+    fill_rect(buf, x - 1, sy - 8, 3, 1, hair.0, hair.1, hair.2, 255);
+    put_pixel(buf, x - 1, sy - 7, hair.0, hair.1, hair.2, 255);
+
+    // Arms and poses
+    if pose == 1 {
+        // Pray / dance: arms raised
+        put_pixel(buf, x - 2, sy - 6, skin.0, skin.1, skin.2, 255);
+        put_pixel(buf, x + 2, sy - 6, skin.0, skin.1, skin.2, 255);
+    } else if pose == 2 {
+        // Panic
+        let flick = if frame % 2 == 1 { -1 } else { 1 };
         put_pixel(buf, x - 2, sy - 6 + flick, skin.0, skin.1, skin.2, 255);
         put_pixel(buf, x + 2, sy - 6 - flick, skin.0, skin.1, skin.2, 255);
     } else {
-        fill_rect(buf, x - 2, sy - 4, 1, 2, shirt.0, shirt.1, shirt.2, 255);
-        fill_rect(buf, x + 2, sy - 4, 1, 2, shirt.0, shirt.1, shirt.2, 255);
-        put_pixel(buf, x - 2, sy - 2, skin.0, skin.1, skin.2, 255);
-        put_pixel(buf, x + 2, sy - 2, skin.0, skin.1, skin.2, 255);
+        // Walk swing
+        put_pixel(buf, x - 2, sy - 4 + leg_step, shirt.0, shirt.1, shirt.2, 255);
+        put_pixel(buf, x + 2, sy - 4 + (1 - leg_step), shirt.0, shirt.1, shirt.2, 255);
     }
-
-    // Head, face, eye, and hair crown
-    fill_rect(buf, x - 1, sy - 5, 3, 1, skin.0, skin.1, skin.2, 255); // face
-    put_pixel(buf, x + 1, sy - 5, 0x1e, 0x10, 0x08, 255); // eye
-    fill_rect(buf, x - 1, sy - 6, 3, 1, hair.0, hair.1, hair.2, 255); // hair crown
-    put_pixel(buf, x, sy - 7, hair.0, hair.1, hair.2, 255); // hair tuft
 }
 
 pub fn draw_mammoth(buf: &mut [u8], x: i32, y: i32, facing: i32, frame: u32, dead: bool) {

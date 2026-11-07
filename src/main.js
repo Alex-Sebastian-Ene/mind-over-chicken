@@ -517,6 +517,7 @@ function render() {
   if (engine) {
     try {
       if (surface && G.render3d) {
+        engine.begin_frame();
         engine.upload_canvas(low);
         G.world?.draw3d?.(engine);
         if (scene.draw3d) {
