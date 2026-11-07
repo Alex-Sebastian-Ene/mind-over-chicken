@@ -38,6 +38,7 @@ let engine = null;
 try {
   await initEngine();
   engine = new Engine('screen');
+  engine.bind_dom_shell();
 } catch (err) {
   console.error('Failed to initialize Rust WebGL engine:', err);
 }
@@ -54,7 +55,24 @@ function resize() {
 new ResizeObserver(resize).observe(screen);
 
 // ---------- game state ----------
-const audio = new Audio();
+const jsAudio = new Audio();
+const audio = {
+  unlock() { if (engine) engine.audio_unlock(); else jsAudio.unlock(); },
+  toggle() { return engine ? engine.audio_toggle() : jsAudio.toggle(); },
+  thunder() { if (engine) engine.audio_play('thunder'); else jsAudio.thunder(); },
+  ignite() { if (engine) engine.audio_play('ignite'); else jsAudio.ignite(); },
+  blip() { if (engine) engine.audio_play('blip'); else jsAudio.blip(); },
+  good() { if (engine) engine.audio_play('good'); else jsAudio.good(); },
+  bad() { if (engine) engine.audio_play('bad'); else jsAudio.bad(); },
+  pop() { if (engine) engine.audio_play('pop'); else jsAudio.pop(); },
+  coin() { if (engine) engine.audio_play('coin'); else jsAudio.coin(); },
+  bell() { if (engine) engine.audio_play('bell'); else jsAudio.bell(); },
+  crash() { if (engine) engine.audio_play('crash'); else jsAudio.crash(); },
+  tick() { if (engine) engine.audio_play('tick'); else jsAudio.tick(); },
+  rumble(dur) { if (engine) engine.audio_play('rumble'); else jsAudio.rumble(dur); },
+  fanfare() { if (engine) engine.audio_play('fanfare'); else jsAudio.fanfare(); },
+  heartbeat(now, bpm, intensity) { if (engine) engine.audio_heartbeat(now, bpm, intensity); else jsAudio.heartbeat(now, bpm, intensity); },
+};
 const advisor = new Advisor($('advisor'));
 const hud = new Hud(document);
 const cosmos = new Cosmos();
@@ -85,6 +103,7 @@ function newGame(source, startIndex = 0) {
   };
   brain.onBlink((aim) => {
     hud.flashBlink();
+    if (engine) engine.game_on_blink(aim.x * W, aim.y * H);
     cosmos.galaxy?.onBlink();   // storms on the blink world; a strike on the world you're zoomed into
     if (cosmos.galaxy?.attended) audio.thunder();
     if (!banner && !cosmos.active && G.scene?.onBlink) G.scene.onBlink(aim);
@@ -97,6 +116,7 @@ function newGame(source, startIndex = 0) {
   if (engine && G.world) {
     engine.init_world(G.world.seed);
     engine.set_era(startIndex);
+    engine.game_start_era(Math.min(2, Math.floor(startIndex / 2)));
   }
   startScene(startIndex);
   try { window.claude?.hot?.snapshot?.(() => ({ sceneIndex: G?.sceneIndex ?? 0, kind: G?.source?.kind })); } catch {}
@@ -109,7 +129,10 @@ function startScene(i) {
   G.sceneIndex = i;
   const scene = SCENES[i]();
   G.scene = scene;
-  if (engine) engine.set_era(i);
+  if (engine) {
+    engine.set_era(i);
+    engine.game_start_era(Math.min(2, Math.floor(i / 2)));
+  }
   advisor.setEra(scene.era);
   scene.enter(G);
   hud.setScene(scene);
@@ -124,7 +147,10 @@ function restartScene() {
   const i = G.sceneIndex;
   const scene = SCENES[i]();
   G.scene = scene;
-  if (engine) engine.set_era(i);
+  if (engine) {
+    engine.set_era(i);
+    engine.game_restart_era();
+  }
   advisor.setEra(scene.era);
   scene.enter(G);
   hud.setScene(scene);
@@ -300,6 +326,22 @@ function frame(ts) {
   lastTs = ts;
   if (G) {
     G.brain.update(dt);
+    if (engine) {
+      const b = G.brain;
+      engine.game_tick(
+        dt,
+        b.calm || 0,
+        b.focus || 0,
+        0,
+        b.hr || 0,
+        b.restHr || 70,
+        b.hrDelta(),
+        b.stats?.blinks || 0
+      );
+      if (b.hr > 0) {
+        engine.audio_heartbeat(performance.now() / 1000, b.hr, Math.max(0, b.hrDelta() / 30));
+      }
+    }
     if (banner) {
       banner.t += dt;
       if (banner.t > 6) dismissBanner();
