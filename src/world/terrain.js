@@ -304,13 +304,24 @@ export class World {
     this.structures.sort((a, b) => a.y - b.y);
   }
 
-  // Bake terrain + static structures into one pixel canvas for this era.
+  // Bake terrain + static structures into pixel canvases (2D flat and 3D clean landscape).
   paint(era) {
     this.shape(era);
-    const c = document.createElement('canvas');
-    c.width = W; c.height = H;
-    const ctx = c.getContext('2d');
-    const img = ctx.createImageData(W, H);
+    this.layers3d ||= {};
+
+    // 1. Collect 3D tree coordinates for forest tiles
+    this.trees = [];
+    const trng = mulberry32(this.seed + 5);
+    for (let y = 1; y < H; y += 2) for (let x = (y >> 1) % 2; x < W; x += 2) {
+      if (this.type[y * W + x] !== T.FOREST || trng() > 0.7) continue;
+      this.trees.push({ x, y, variant: trng() > 0.5 ? 1 : 0 });
+    }
+
+    // 2. Base landscape texture (used for 3D terrain mesh upload: no flat structure or tree decals)
+    const c3d = document.createElement('canvas');
+    c3d.width = W; c3d.height = H;
+    const ctx3d = c3d.getContext('2d');
+    const img = ctx3d.createImageData(W, H);
     const rng = mulberry32(this.seed + 3);
     for (let i = 0; i < W * H; i++) {
       const t = this.type[i];
@@ -330,32 +341,82 @@ export class World {
       if (t === T.SHALLOW && (this.typeAt(x + 1, y) === T.SAND || this.typeAt(x - 1, y) === T.SAND || this.typeAt(x, y + 1) === T.SAND || this.typeAt(x, y - 1) === T.SAND)) { [r, g, b] = this.palette.foam; }
       img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = 255;
     }
-    ctx.putImageData(img, 0, 0);
-    // Tree crowns on forest pixels.
-    const trng = mulberry32(this.seed + 5);
-    for (let y = 1; y < H; y += 2) for (let x = (y >> 1) % 2; x < W; x += 2) {
-      if (this.type[y * W + x] !== T.FOREST || trng() > 0.7) continue;
-      const tc = this.palette.trees;
-      ctx.fillStyle = tc[0]; ctx.fillRect(x, y, 1, 1);
-      ctx.fillStyle = trng() > 0.5 ? tc[1] : tc[2]; ctx.fillRect(x, y - 1, 1, 1);
-    }
+    ctx3d.putImageData(img, 0, 0);
+
     // Cave mouth.
     if (era === 'stone' || era === 'farming') {
       const m = this.sites.caveMouth;
-      ctx.fillStyle = '#1a1714'; ctx.fillRect(m.x - 2, m.y - 1, 4, 3);
-      ctx.fillStyle = '#2b2622'; ctx.fillRect(m.x - 3, m.y, 1, 2); ctx.fillRect(m.x + 2, m.y, 1, 2);
+      ctx3d.fillStyle = '#1a1714'; ctx3d.fillRect(m.x - 2, m.y - 1, 4, 3);
+      ctx3d.fillStyle = '#2b2622'; ctx3d.fillRect(m.x - 3, m.y, 1, 2); ctx3d.fillRect(m.x + 2, m.y, 1, 2);
     }
+    this.layers3d[era] = c3d;
+
+    // 3. 2D fallback / globe texture (with flat painted trees and structures)
+    const c2d = document.createElement('canvas');
+    c2d.width = W; c2d.height = H;
+    const ctx2d = c2d.getContext('2d');
+    ctx2d.drawImage(c3d, 0, 0);
+
+    // Flat tree crowns for 2D mode
+    const trng2 = mulberry32(this.seed + 5);
+    for (let y = 1; y < H; y += 2) for (let x = (y >> 1) % 2; x < W; x += 2) {
+      if (this.type[y * W + x] !== T.FOREST || trng2() > 0.7) continue;
+      const tc = this.palette.trees;
+      ctx2d.fillStyle = tc[0]; ctx2d.fillRect(x, y, 1, 1);
+      ctx2d.fillStyle = trng2() > 0.5 ? tc[1] : tc[2]; ctx2d.fillRect(x, y - 1, 1, 1);
+    }
+
+    // Flat structures for 2D mode
     for (const s of this.structures) {
-      if (s.kind === 'hut') drawHut(ctx, s.x, s.y);
-      if (s.kind === 'house') drawHouse(ctx, s.x, s.y, s.roof);
-      if (s.kind === 'tower') drawTower(ctx, s.x, s.y, s.h);
-      if (s.kind === 'factory') drawFactory(ctx, s.x, s.y);
-      if (s.kind === 'exchange') drawExchange(ctx, s.x, s.y);
-      if (s.kind === 'hangar') drawHangar(ctx, s.x, s.y);
-      if (s.kind === 'pad') drawPad(ctx, s.x, s.y);
+      if (s.kind === 'hut') drawHut(ctx2d, s.x, s.y);
+      if (s.kind === 'house') drawHouse(ctx2d, s.x, s.y, s.roof);
+      if (s.kind === 'tower') drawTower(ctx2d, s.x, s.y, s.h);
+      if (s.kind === 'factory') drawFactory(ctx2d, s.x, s.y);
+      if (s.kind === 'exchange') drawExchange(ctx2d, s.x, s.y);
+      if (s.kind === 'hangar') drawHangar(ctx2d, s.x, s.y);
+      if (s.kind === 'pad') drawPad(ctx2d, s.x, s.y);
     }
-    this.layers[era] = c;
-    return c;
+    this.layers[era] = c2d;
+    return c2d;
+  }
+
+  // Draw 3D trees and structures as upright billboards standing on the terrain
+  draw3d(engine) {
+    if (!engine) return;
+    // 3D Trees across forest tiles
+    if (this.trees) {
+      for (const t of this.trees) {
+        engine.add_billboard(14, t.x, t.y, 1, 0, t.variant || 0);
+      }
+    }
+    // 3D Structures
+    if (this.structures) {
+      for (const s of this.structures) {
+        switch (s.kind) {
+          case 'hut':
+            engine.add_billboard(5, s.x, s.y, 1, 0, 0);
+            break;
+          case 'house':
+            engine.add_billboard(6, s.x, s.y, 1, 0, 0);
+            break;
+          case 'tower':
+            engine.add_billboard(7, s.x, s.y, 1, 0, 0);
+            break;
+          case 'factory':
+            engine.add_billboard(8, s.x, s.y, 1, 0, 0);
+            break;
+          case 'exchange':
+            engine.add_billboard(9, s.x, s.y, 1, 0, 0);
+            break;
+          case 'hangar':
+            engine.add_billboard(10, s.x, s.y, 1, 0, 0);
+            break;
+          case 'pad':
+            engine.add_billboard(11, s.x, s.y, 1, 0, 0);
+            break;
+        }
+      }
+    }
   }
 
   typeAt(x, y) { if (x < 0 || y < 0 || x >= W || y >= H) return T.DEEP; return this.type[y * W + x]; }
