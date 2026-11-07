@@ -1378,9 +1378,11 @@ pub fn paint_land_use(base: &[u8], types: &[u8], base_types: &[u8], width: u32, 
 pub fn walk_field(types: &[u8], width: u32, height: u32, tx: i32, ty: i32, sea: bool) -> Vec<i16> {
     let (w, h) = (width as i32, height as i32);
     let mut f = vec![-1i16; types.len()];
-    if tx < 0 || ty < 0 || tx >= w || ty >= h {
+    if w <= 0 || h <= 0 || types.len() < (w * h) as usize {
         return f;
     }
+    // The map is a torus (#111): the target and every step wrap both ways.
+    let (tx, ty) = (tx.rem_euclid(w), ty.rem_euclid(h));
     let ok = |t: u8| if sea { t <= terrain::T_SHALLOW } else { t >= terrain::T_SAND && t != terrain::T_MOUNTAIN && t != terrain::T_SNOW };
     let mut q = std::collections::VecDeque::new();
     let s0 = (ty * w + tx) as usize;
@@ -1394,10 +1396,7 @@ pub fn walk_field(types: &[u8], width: u32, height: u32, tx: i32, ty: i32, sea: 
                 if ox == 0 && oy == 0 {
                     continue;
                 }
-                let (nx, ny) = (x + ox, y + oy);
-                if nx < 0 || ny < 0 || nx >= w || ny >= h {
-                    continue;
-                }
+                let (nx, ny) = ((x + ox).rem_euclid(w), (y + oy).rem_euclid(h));
                 let j = (ny * w + nx) as usize;
                 if f[j] != -1 || !ok(types[j]) {
                     continue;
@@ -1925,5 +1924,29 @@ impl RustCalibration {
         let t = moc_brain::calibration::traits_from_features(&features);
         let out = [t.friendliness, t.aggressiveness, t.violence];
         js_sys::Float32Array::from(&out[..])
+    }
+}
+
+#[cfg(test)]
+mod walk_field_tests {
+    use super::*;
+
+    #[test]
+    fn walk_field_wraps_both_ways_on_the_torus() {
+        // A 10×6 sea with one walkable row; the BFS from x=1 reaches x=9 the short way, across
+        // the east-west seam (2 steps, not 8), and a target off the map wraps onto it (#111).
+        let (w, h) = (10usize, 6usize);
+        let mut types = vec![terrain::T_DEEP; w * h];
+        for x in 0..w {
+            types[2 * w + x] = terrain::T_GRASS;
+        }
+        let f = walk_field(&types, w as u32, h as u32, 1, 2, false);
+        assert_eq!(f[2 * w + 9], 2);
+        assert_eq!(f[2 * w + 5], 4);
+        let g = walk_field(&types, w as u32, h as u32, 11, 2 + h as i32, false);
+        assert_eq!(g, f);
+        // Over water the seam wraps north-south too.
+        let s = walk_field(&types, w as u32, h as u32, 0, 0, true);
+        assert_eq!(s[5 * w], 1);
     }
 }

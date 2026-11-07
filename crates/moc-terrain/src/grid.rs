@@ -307,6 +307,41 @@ pub fn components(d: Dims, inside: &[bool]) -> (Vec<u32>, Vec<usize>) {
     (label, sizes)
 }
 
+/// Grow a mask by `r` tiles (a (2r+1)² square), separably, wrap-aware.
+pub fn dilate(d: Dims, mask: &[bool], r: i32) -> Vec<bool> {
+    let mut tmp = vec![false; d.n()];
+    for y in 0..d.h as i32 {
+        for x in 0..d.w as i32 {
+            let mut v = false;
+            for ox in -r..=r {
+                if let Some(j) = d.idx(x + ox, y) {
+                    if mask[j] {
+                        v = true;
+                        break;
+                    }
+                }
+            }
+            tmp[y as usize * d.w + x as usize] = v;
+        }
+    }
+    let mut out = vec![false; d.n()];
+    for y in 0..d.h as i32 {
+        for x in 0..d.w as i32 {
+            let mut v = false;
+            for oy in -r..=r {
+                if let Some(j) = d.idx(x, y + oy) {
+                    if tmp[j] {
+                        v = true;
+                        break;
+                    }
+                }
+            }
+            out[y as usize * d.w + x as usize] = v;
+        }
+    }
+    out
+}
+
 /// Smoothstep from `a` to `b`.
 #[inline]
 pub fn smoothstep(a: f32, b: f32, x: f32) -> f32 {

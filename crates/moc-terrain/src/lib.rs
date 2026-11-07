@@ -189,11 +189,11 @@ impl TerrainParams {
         p.continents = 6 + (r.f32() < 0.4) as usize;
         p.land_fraction = r.range(0.4, 0.48);
         p.size_spread = 0.15;
-        p.size_power = r.range(0.7, 0.9);
+        p.size_power = r.range(1.05, 1.35);
         let m = 14.0 * k;
         // Home lands anywhere away from the seams, so every run's map is laid out differently.
         p.anchor = Some(Anchor { x: w as f32 * r.range(0.2, 0.8), y: h as f32 * r.range(0.3, 0.7), share: r.range(1.3, 1.9), bounds: Some([m, m * 1.1, w as f32 - m, h as f32 - m * 1.1]) });
-        p.gap = 5.0 * k;
+        p.gap = 7.0 * k;
         p.seam_margin = 5.0 * k;
         // A mild world: land may reach well into the cool belt along the top and bottom.
         p.cold_limit = 0.97;
@@ -433,6 +433,8 @@ pub struct Stats {
     pub layout: landform::Layout,
     /// Each planned continent's character.
     pub characters: Vec<&'static str>,
+    /// Landform and biome shares over the land, and their entropy.
+    pub variety: landform::Variety,
 }
 
 /// A generated map (the name and the first fields follow #112).
@@ -449,6 +451,8 @@ pub struct TerrainMap {
     pub biome: Vec<u8>,
     /// [`climate::relief`] per tile.
     pub relief: Vec<u8>,
+    /// [`landform::class`] per tile.
+    pub landform: Vec<u8>,
     /// Game tile ([`climate::tile`], the JS `T` codes).
     pub types: Vec<u8>,
     /// 1-px rivers.
@@ -613,6 +617,7 @@ impl TerrainMap {
             heights,
             biome: biome_map,
             relief: pick8(&self.relief),
+            landform: pick8(&self.landform),
             types,
             river_mask: pickb(&self.river_mask),
             lake_mask: pickb(&self.lake_mask),
@@ -1068,7 +1073,7 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
         let wv = noise::coarse_field(sd, p.w, p.h, lo, |q| wob.sample(q));
         for i in 0..n {
             if !ocean_s[i] {
-                moist_s[i] = (moist_s[i] + wv[i] * 0.07 - ch_arid[i]).clamp(0.0, 1.0);
+                moist_s[i] = (moist_s[i] + wv[i] * 0.1 - ch_arid[i]).clamp(0.0, 1.0);
             }
         }
     }
@@ -1191,6 +1196,59 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
     let moist_f = up(&moist_s);
     clock.lap("fields");
 
+    // Distances (tiles, simulation grid) to fresh water and to the sea.
+    let fresh_s: Vec<bool> = (0..n).map(|i| river_s[i] || lake_s[i]).collect();
+    let fresh_d: Vec<f32> = grid::distance(sd, &fresh_s).iter().map(|v| v * csf).collect();
+    let sea_d: Vec<f32> = grid::distance(sd, &ocean_s).iter().map(|v| v * csf).collect();
+    let sim_of = |i: usize| -> usize {
+        let (x, y) = full.xy(i);
+        (y as usize / cs).min(sd.h - 1) * sd.w + (x as usize / cs).min(sd.w - 1)
+    };
+    // Basins: low ground well below its surroundings, and rift floors.
+    let basin_s: Vec<bool> = {
+        let mut sm = h.clone();
+        grid::blur(sd, &mut sm, ((0.06 * scale / csf) as usize).clamp(2, 12));
+        (0..n).map(|i| !ocean_s[i] && h[i] < sm[i] - 0.02 && h[i] < bands_low1(&p.bands)).collect()
+    };
+    // Rolling country: low ground that is still steep at the simulation grid's scale.
+    let rolling_s: Vec<bool> = (0..n)
+        .map(|i| {
+            let mut g = 0.0f32;
+            sd.nb4(i, |j| g = g.max((h[i] - h[j]).abs()));
+            !ocean_s[i] && g > 0.036 * csf.sqrt()
+        })
+        .collect();
+    // Deltas: low land round the mouths of the bigger rivers.
+    let mut delta = vec![false; nf];
+    {
+        let rd_ = (0.035 * scale).clamp(3.0, 40.0) as i32;
+        let mut mouths = Vec::new();
+        for i in 0..nf {
+            if river_f[i] {
+                let mut sea = false;
+                full.nb4(i, |j| sea |= ocean_f[j]);
+                if sea {
+                    mouths.push(i);
+                }
+            }
+        }
+        for &m in mouths.iter() {
+            let (mx, my) = full.xy(m);
+            for oy in -rd_..=rd_ {
+                for ox in -rd_..=rd_ {
+                    if ox * ox + oy * oy > rd_ * rd_ {
+                        continue;
+                    }
+                    if let Some(j) = full.idx(mx + ox, my + oy) {
+                        if !ocean_f[j] && !lake_f[j] && hf[j] < p.bands.low[0] {
+                            delta[j] = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ---- 9. biomes, tiles, colour ----
     // The sea-ice edge meanders (floes and bays) rather than following a temperature line.
     let ice_edge = {
@@ -1198,13 +1256,15 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
         noise::coarse_field(full, p.w, p.h, (cs * 2).max(2), |q| f.sample(q) * 7.0)
     };
     let bands = &p.bands;
+    // A shelf at least two tiles wide along every coast.
+    let near_land = grid::dilate(full, &land_m, 2);
     let mut class = vec![0u8; nf];
     for i in 0..nf {
         let v = hf[i];
         let (b, r) = if ocean_f[i] {
             let b = if temp_f[i] + ice_edge[i] < -13.0 {
                 biome::SEA_ICE
-            } else if v > -bands.shelf {
+            } else if v > -bands.shelf || near_land[i] {
                 biome::SHELF
             } else {
                 biome::OCEAN
@@ -1227,6 +1287,15 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
             if r == relief::LOW && v < bands.beach && t > 1.0 && b != biome::ICE && near(full, &ocean_f, i, 2) {
                 b = biome::BEACH;
             }
+            // Wetlands: flat, wet low ground by fresh water or the sea, and wet deltas.
+            if r == relief::LOW && t > 2.0 && b != biome::DESERT && b != biome::ICE {
+                let si = sim_of(i);
+                let m = moist_f[i] + ice_edge[i] * 0.01;
+                let by_water = fresh_d[si] <= (0.02 * scale).max(3.0) || sea_d[si] <= (0.015 * scale).max(2.0);
+                if (v < bands.low[0] + 0.01 && m > 0.6 && by_water) || (delta[i] && m > 0.4) {
+                    b = biome::MARSH;
+                }
+            }
             (b, r)
         };
         class[i] = palette::class_of(b, r);
@@ -1243,14 +1312,23 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
         }
     };
     let class0 = class.clone();
-    filter::despeckle(full, &mut class, |i, v| kind(v) == kind(class0[i]), 24);
+    filter::despeckle(full, &mut class, |i, v| kind(v) == kind(class0[i]), 40);
     let shade = palette::hillshade(full, &hf, 3.0 * cs.max(1) as f32);
     let mut paint_idx: Vec<u16> = (0..nf)
         .map(|i| {
             let c = class[i];
             let (b, r) = (palette::class_biome(c), palette::class_relief(c));
             let s = if biome::is_land(b) && b != biome::ICE { shade[i] } else { 1 };
-            palette::paint_index(c, palette::step_of(b, r, hf[i], bands), s)
+            let mut st = palette::step_of(b, r, hf[i], bands);
+            if b == biome::DESERT && r == relief::LOW {
+                // Dune ridges: a coherent ripple across sand seas (crests ~2 tiles wide).
+                let (x, y) = full.xy(i);
+                let ph = (x as f32 * 0.88 + y as f32 * 0.47) * std::f32::consts::TAU / 6.0 + ice_edge[i] * 0.45;
+                if ph.sin() > 0.35 {
+                    st = 3;
+                }
+            }
+            palette::paint_index(c, st, s)
         })
         .collect();
     filter::despeckle(full, &mut paint_idx, |i, v| (v / 12) as u8 == class[i], 24);
@@ -1263,9 +1341,58 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
     // ---- 10. continents and sites ----
     let major_min = (0.35 * areas.iter().cloned().fold(f32::INFINITY, f32::min)) as usize;
     let (cont_id, continents) = sites::continents(full, &biome_map, major_min);
-    let fresh_s: Vec<bool> = (0..n).map(|i| river_s[i] || lake_s[i]).collect();
-    let fresh_d: Vec<f32> = grid::distance(sd, &fresh_s).iter().map(|v| v * csf).collect();
-    let sea_d: Vec<f32> = grid::distance(sd, &ocean_s).iter().map(|v| v * csf).collect();
+    // Landform classes and the variety they add up to.
+    let landform_map: Vec<u8> = {
+        use landform::class::*;
+        let coast_reach = (0.06 * scale).max(4.0);
+        (0..nf)
+            .map(|i| {
+                let (b, r) = (biome_map[i], relief_map[i]);
+                if !biome::is_land(b) {
+                    return WATER;
+                }
+                let si = sim_of(i);
+                let cid = cont_id[i] as usize;
+                if r >= relief::MOUNTAIN {
+                    MOUNTAINS
+                } else if r == relief::HILL || rolling_s[si] {
+                    HILLS
+                } else if b == biome::TUNDRA || b == biome::ICE {
+                    COLD
+                } else if b == biome::DESERT {
+                    DESERT
+                } else if delta[i] {
+                    DELTA
+                } else if b == biome::MARSH {
+                    WETLAND
+                } else if cid > 0 && !continents[cid - 1].major {
+                    ISLAND
+                } else if basin_s[si] {
+                    BASIN
+                } else if hf[i] >= bands.low[1] {
+                    PLATEAU
+                } else if sea_d[si] <= coast_reach && hf[i] < bands.low[0] {
+                    COASTAL
+                } else {
+                    PLAINS
+                }
+            })
+            .collect()
+    };
+    let variety = {
+        let mut lf = vec![0usize; landform::class::COUNT];
+        let mut bc = vec![0usize; biome::COUNT];
+        for i in 0..nf {
+            if landform_map[i] != landform::class::WATER {
+                lf[landform_map[i] as usize] += 1;
+                bc[biome_map[i] as usize] += 1;
+            }
+        }
+        lf[0] = 0;
+        let (landform_share, landform_entropy) = landform::shares(&lf);
+        let (biome_share, biome_entropy) = landform::shares(&bc);
+        landform::Variety { landform_share, biome_share, landform_entropy, biome_entropy, characters: chars.iter().map(|c| c.name).collect() }
+    };
     let (region, region_size) = sites::regions(full, &tiles);
     let site_list = sites::rank(
         &sites::SiteInput { d: full, height: &hf, biome: &biome_map, tiles: &tiles, continent: &cont_id, fresh_dist: &fresh_d, sea_dist: &sea_d, cell: cs, sim_w: sd.w, max_sites: p.max_sites },
@@ -1287,7 +1414,7 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
     let mut layout = landform::layout(full, &cont_id, &majors);
     let land_mask: Vec<bool> = biome_map.iter().map(|&b| biome::is_land(b)).collect();
     (layout.straight_strips, layout.max_strip_linearity) = metrics::strips(full, &land_mask);
-    let stats = Stats { stages: clock.stages, sim_cell: cs, dla_nodes: info.dla_nodes, coast: coast_stats, min_island: min_island as usize, layout, characters: chars.iter().map(|c| c.name).collect() };
+    let stats = Stats { stages: clock.stages, sim_cell: cs, dla_nodes: info.dla_nodes, coast: coast_stats, min_island: min_island as usize, layout, characters: chars.iter().map(|c| c.name).collect(), variety };
     TerrainMap {
         seed,
         width: p.w,
@@ -1298,6 +1425,7 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
         heights: height,
         biome: biome_map,
         relief: relief_map,
+        landform: landform_map,
         types: tiles,
         river_mask: river_f,
         lake_mask: lake_f,
@@ -1313,6 +1441,10 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
         sim: SimInfo { w: sd.w, h: sd.h, cell: cs, height: h, recv: dr.recv, river: river_s, lake: lake_s, ocean: ocean_s, dla: info.dla, corridor: info.corridor },
         stats,
     }
+}
+
+fn bands_low1(b: &Bands) -> f32 {
+    b.low[1]
 }
 
 /// Average `cs`×`cs` blocks of the full grid down to the simulation grid.

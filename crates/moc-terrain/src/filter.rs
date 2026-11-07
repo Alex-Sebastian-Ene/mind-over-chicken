@@ -94,7 +94,9 @@ pub fn despeckle<T: Copy + Eq>(d: Dims, c: &mut [T], allowed: impl Fn(usize, T) 
             for slot in cand.iter().take(k) {
                 let v = slot.0.unwrap();
                 c[i] = v;
-                let score = slot.1 as i32 * 4 + if in_block(d, c, i) { 2 } else { 0 } + if v == old { 1 } else { 0 };
+                // A class that makes a 2×2 block here always wins (so tiles where several
+                // classes meet still settle); then the most common; then keeping the old one.
+                let score = if in_block(d, c, i) { 1000 } else { 0 } + slot.1 as i32 * 4 + if v == old { 1 } else { 0 };
                 if score > best_score {
                     best_score = score;
                     best = Some(v);

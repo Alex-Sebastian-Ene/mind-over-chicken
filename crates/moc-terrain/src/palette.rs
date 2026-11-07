@@ -119,6 +119,7 @@ impl BiomePalette {
             TAIGA => mix(forest, deep, 0.24),
             TUNDRA => mix(hill, snow, 0.4),
             ICE | SEA_ICE => snow,
+            MARSH => scale(mix(grass, f(self.shallow), 0.35), 0.86),
             _ => grass,
         }
     }
@@ -242,7 +243,9 @@ pub fn lut(p: &BiomePalette) -> Vec<[u8; 4]> {
                                 relief::LOW => match step {
                                     0 => scale(base, 0.93),
                                     1 => base,
-                                    _ => scale(mix(base, hill, 0.2), 1.04),
+                                    2 => scale(mix(base, hill, 0.2), 1.04),
+                                    // Dune crests in sand seas.
+                                    _ => scale(mix(base, f(p.sand), 0.45), 1.08),
                                 },
                                 relief::HILL => mix(base, hill, 0.42 + 0.16 * step as f32),
                                 relief::MOUNTAIN => {

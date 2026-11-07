@@ -5,7 +5,7 @@
 // sites, field, walkable, the era repaint) and is size-agnostic (world.width × world.height;
 // the game's W × H by default, #129).
 
-import { W, H, lerp, mulberry32, dist } from '../sim/util.js';
+import { W, H, lerp, mulberry32, dist, wrap, wrapDelta } from '../sim/util.js';
 import { drawHouse, drawHut, drawFactory, drawExchange, drawTower, drawHangar, drawPad } from '../render/sprites.js';
 import * as wasm from '../../pkg/mind_over_chicken_engine.js';
 
@@ -104,22 +104,37 @@ export class World {
     this.stats = { ...JSON.parse(g.stats_json()), ms: g.ms() };
   }
 
-  get(x, y) {
-    x = Math.round(x); y = Math.round(y);
-    if (x < 0 || y < 0 || x >= this.width || y >= this.height) return T.DEEP;
-    return this.type[y * this.width + x];
+  // ---- the map is a torus (#111) of its own size (640×360 at home, #129) ----
+  // Index of map pixel (x, y), wrapping both ways.
+  idx(x, y) {
+    const w = this.width, h = this.height;
+    x = Math.round(x) % w; if (x < 0) x += w;
+    y = Math.round(y) % h; if (y < 0) y += h;
+    return y * w + x;
   }
+  wrapX(x) { return wrap(x, this.width); }
+  wrapY(y) { return wrap(y, this.height); }
+  dx(a, b) { return wrapDelta(a, b, this.width); }
+  dy(a, b) { return wrapDelta(a, b, this.height); }
+  // Distance the short way round.
+  dist(ax, ay, bx, by) { return Math.hypot(this.dx(ax, bx), this.dy(ay, by)); }
+  // Aims (the brain's, the mouse's, the AI's) are 0..1 of the world: the map pixel under one,
+  // and the aim at a map pixel.
+  aimPoint(aim) { return { x: this.wrapX(Math.round(aim.x * this.width)), y: this.wrapY(Math.round(aim.y * this.height)) }; }
+  aimOf(x, y) { return { x: this.wrapX(x) / this.width, y: this.wrapY(y) / this.height }; }
+
+  get(x, y) { return this.type[this.idx(x, y)]; }
   walkable(x, y) { const t = this.get(x, y); return t >= T.SAND && t !== T.MOUNTAIN && t !== T.SNOW; }
   isWater(x, y) { return this.get(x, y) <= T.SHALLOW; }
 
   nearestWalkable(x, y, maxR = 60) {
-    x = Math.round(x); y = Math.round(y);
+    x = this.wrapX(Math.round(x)); y = this.wrapY(Math.round(y));
     if (this.walkable(x, y)) return { x, y };
     let fallback = null;
     for (let r = 1; r <= maxR; r++) {
       for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-        const px = x + dx, py = y + dy;
+        const px = this.wrapX(x + dx), py = this.wrapY(y + dy);
         if (this.walkable(px, py)) {
           if (this.get(px, py) !== T.FOREST) return { x: px, y: py };
           fallback ??= { x: px, y: py };
@@ -133,7 +148,7 @@ export class World {
   randomLand(x, y, rMin, rMax, pred) {
     for (let i = 0; i < 80; i++) {
       const a = Math.random() * Math.PI * 2, r = rMin + Math.random() * (rMax - rMin);
-      const px = Math.round(x + Math.cos(a) * r), py = Math.round(y + Math.sin(a) * r);
+      const px = this.wrapX(Math.round(x + Math.cos(a) * r)), py = this.wrapY(Math.round(y + Math.sin(a) * r));
       if (this.walkable(px, py) && (!pred || pred(px, py))) return { x: px, y: py };
     }
     return this.nearestWalkable(x, y);
@@ -146,12 +161,13 @@ export class World {
     this.structures = [];
     const v = this.sites.village, s = this.sites;
     const rng = mulberry32(this.seed + 17);
-    const W = this.width, H = this.height;
-    const setT = (x, y, t) => { if (x >= 0 && y >= 0 && x < W && y < H) this.type[y * W + x] = t; };
+    const setT = (x, y, t) => { this.type[this.idx(x, y)] = t; };
+    // Roads take the short way round the torus.
     const road = (a, b, w = 1) => {
-      const n = Math.ceil(dist(a.x, a.y, b.x, b.y));
+      const ex = a.x + this.dx(b.x, a.x), ey = a.y + this.dy(b.y, a.y);
+      const n = Math.max(1, Math.ceil(Math.hypot(ex - a.x, ey - a.y)));
       for (let i = 0; i <= n; i++) {
-        const x = Math.round(lerp(a.x, b.x, i / n)), y = Math.round(lerp(a.y, b.y, i / n));
+        const x = Math.round(lerp(a.x, ex, i / n)), y = Math.round(lerp(a.y, ey, i / n));
         for (let d = 0; d < w; d++) if (this.walkable(x, y + d)) setT(x, y + d, T.ROAD);
       }
     };
@@ -182,7 +198,7 @@ export class World {
         const n = era === 'farming' ? 5 : 8;
         for (let i = 0; i < n; i++) {
           const a = (i / n) * Math.PI * 2;
-          const x = Math.round(c.village.x + Math.cos(a) * 7), y = Math.round(c.village.y + Math.sin(a) * 5);
+          const x = this.wrapX(Math.round(c.village.x + Math.cos(a) * 7)), y = this.wrapY(Math.round(c.village.y + Math.sin(a) * 5));
           if (!this.walkable(x, y)) continue;
           if (era === 'farming') this.structures.push({ kind: 'hut', x, y });
           else if (era === 'space' && i % 3 === 0) this.structures.push({ kind: 'tower', x, y, h: 7 + (i % 4) });
@@ -269,18 +285,21 @@ export class World {
     return c2d;
   }
 
-  // Draw 3D trees and structures as upright billboards standing on the terrain
-  draw3d(engine) {
+  // Draw 3D trees and structures as upright billboards standing on the terrain. With a world
+  // bigger than the view (#129), only those near the camera are sent: `near(x, y)`.
+  draw3d(engine, near = null) {
     if (!engine) return;
     // 3D Trees across forest tiles
     if (this.trees) {
       for (const t of this.trees) {
+        if (near && !near(t.x, t.y)) continue;
         engine.add_billboard(14, t.x, t.y, 1, 0, t.variant || 0);
       }
     }
     // 3D Structures
     if (this.structures) {
       for (const s of this.structures) {
+        if (near && !near(s.x, s.y)) continue;
         switch (s.kind) {
           case 'hut':
             engine.add_billboard(5, s.x, s.y, 1, 0, 0);
@@ -308,13 +327,13 @@ export class World {
     }
   }
 
-  typeAt(x, y) { if (x < 0 || y < 0 || x >= this.width || y >= this.height) return T.DEEP; return this.type[y * this.width + x]; }
+  typeAt(x, y) { return this.type[this.idx(x, y)]; }
 
   // Distance field (BFS over walkable tiles, in Rust) toward a target, cached on a 3 px grid so
   // moving targets like mammoths don't trigger a new search every frame.
   field(tx, ty) {
     const W = this.width, H = this.height;
-    const qx = Math.max(0, Math.min(W - 1, Math.round(tx / 3) * 3)), qy = Math.max(0, Math.min(H - 1, Math.round(ty / 3) * 3));
+    const qx = this.wrapX(Math.round(tx / 3) * 3), qy = this.wrapY(Math.round(ty / 3) * 3);
     const key = qy * W + qx;
     this.fields ||= new Map();
     let f = this.fields.get(key);
@@ -329,7 +348,7 @@ export class World {
   // Same idea over water, for boats.
   seaField(tx, ty) {
     const W = this.width;
-    const qx = Math.round(tx), qy = Math.round(ty);
+    const qx = this.wrapX(Math.round(tx)), qy = this.wrapY(Math.round(ty));
     const key = -(qy * W + qx) - 1;
     this.fields ||= new Map();
     let f = this.fields.get(key);
@@ -343,14 +362,16 @@ export class World {
   // Can you walk from the village to (x, y)?
   reachable(x, y) {
     const v = this.sites.village;
-    return this.field(v.x, v.y)[Math.round(y) * this.width + Math.round(x)] >= 0;
+    return this.field(v.x, v.y)[this.idx(x, y)] >= 0;
   }
 
   // Animated water glints, drawn every frame on top of the baked layer.
   drawWater(ctx, time) {
     const rng = mulberry32((Math.floor(time * 2) * 7919) ^ this.seed);
     ctx.fillStyle = 'rgba(170, 205, 240, 0.55)';
-    for (let i = 0; i < 70; i++) {
+    // As many glints per pixel of sea on a bigger world as on the 320×180 one (#129).
+    const n = Math.round((70 * this.width * this.height) / (W * H));
+    for (let i = 0; i < n; i++) {
       const x = Math.floor(rng() * this.width), y = Math.floor(rng() * this.height);
       if (this.typeAt(x, y) <= T.SHALLOW) ctx.fillRect(x, y, 2, 1);
     }

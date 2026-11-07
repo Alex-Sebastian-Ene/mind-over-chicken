@@ -26,9 +26,11 @@ pub mod biome {
     pub const TAIGA: u8 = 11;
     pub const TUNDRA: u8 = 12;
     pub const ICE: u8 = 13;
-    pub const COUNT: usize = 14;
+    /// Wetland: marsh and swamp on flat, wet low ground by rivers, lakes and deltas.
+    pub const MARSH: u8 = 14;
+    pub const COUNT: usize = 15;
     pub const NAMES: [&str; COUNT] =
-        ["ocean", "shelf", "lake", "sea ice", "beach", "desert", "steppe", "savanna", "grassland", "forest", "jungle", "taiga", "tundra", "ice"];
+        ["ocean", "shelf", "lake", "sea ice", "beach", "desert", "steppe", "savanna", "grassland", "forest", "jungle", "taiga", "tundra", "ice", "marsh"];
 
     /// Open water (sea ice and land are not).
     #[inline]
@@ -98,12 +100,12 @@ pub fn whittaker(t: f32, p: f32) -> u8 {
     } else if t < 6.0 {
         if p > 0.36 { TAIGA } else if p > 0.16 { STEPPE } else { TUNDRA }
     } else if t < 19.0 {
-        if p < 0.13 { DESERT } else if p < 0.28 { STEPPE } else if p < 0.5 { GRASSLAND } else { FOREST }
+        if p < 0.13 { DESERT } else if p < 0.28 { STEPPE } else if p < 0.55 { GRASSLAND } else { FOREST }
     } else if p < 0.17 {
         DESERT
-    } else if p < 0.36 {
+    } else if p < 0.42 {
         SAVANNA
-    } else if p < 0.58 {
+    } else if p < 0.6 {
         FOREST
     } else {
         JUNGLE

@@ -136,8 +136,11 @@ pub struct Layout {
     pub size_cv: f32,
     /// Largest over smallest major continent.
     pub size_ratio: f32,
-    /// Clark–Evans nearest-neighbour index of their centroids (< 1: clustered).
-    pub clark_evans: f32,
+    /// Quadrat dispersion of the land share (0: land spread evenly over every quadrat, 1: every
+    /// quadrat all land or all sea); bunched continents with open ocean between score high.
+    pub bunching: f32,
+    /// The largest disc of open ocean (no land in it), as a share of the map.
+    pub open_ocean: f32,
     /// Mean isoperimetric quotient 4πA/P² (P: land–water edges), and that of a 2:1 ellipse of
     /// the same mean area drawn on the same grid (an irregular coast scores well below it).
     pub iq_mean: f32,
@@ -160,18 +163,31 @@ pub fn layout(d: crate::grid::Dims, continent: &[u16], majors: &[(usize, usize, 
     let sd = (areas.iter().map(|a| (a - mean).powi(2)).sum::<f32>() / n as f32).sqrt();
     let lo = areas.iter().cloned().fold(f32::INFINITY, f32::min);
     let hi = areas.iter().cloned().fold(0.0, f32::max);
-    // Nearest-neighbour distances between centroids (on the torus).
-    let mut nn = 0.0;
-    for (k, a) in majors.iter().enumerate() {
-        let mut best = f32::INFINITY;
-        for (j, b) in majors.iter().enumerate() {
-            if j != k {
-                best = best.min(d.dist2(a.2, a.3, b.2, b.3).sqrt());
+    // Bunching: the land share in quadrats half the spacing an even layout of `n` continents
+    // would have; its variance as a share of the most it could be (m(1 - m), every quadrat all
+    // land or all sea). Evenly spread continents score low, bunched ones high.
+    let land: Vec<bool> = continent.iter().map(|&c| c > 0).collect();
+    let q = (((d.n() as f32 / n as f32).sqrt() * 0.5).round() as usize).max(4);
+    let (qx, qy) = (d.w.div_ceil(q), d.h.div_ceil(q));
+    let mut cnt = vec![0f32; qx * qy];
+    let mut tot = vec![0f32; qx * qy];
+    for y in 0..d.h {
+        for x in 0..d.w {
+            let k = (y / q) * qx + x / q;
+            tot[k] += 1.0;
+            if land[y * d.w + x] {
+                cnt[k] += 1.0;
             }
         }
-        nn += best;
     }
-    let expected = 0.5 / (n as f32 / d.n() as f32).sqrt();
+    let share: Vec<f32> = cnt.iter().zip(tot.iter()).map(|(c, t)| c / t).collect();
+    let m = share.iter().sum::<f32>() / share.len() as f32;
+    let var = share.iter().map(|s| (s - m).powi(2)).sum::<f32>() / share.len() as f32;
+    let bunching = var / (m * (1.0 - m)).max(1e-6);
+    // Open ocean: the largest disc with no land in it.
+    let dist = crate::grid::distance(d, &land);
+    let rmax = dist.iter().cloned().fold(0.0f32, f32::max);
+    let open_ocean = std::f32::consts::PI * rmax * rmax / d.n() as f32;
     // Perimeter: land–water edges of each major continent.
     let mut edges = vec![0usize; majors.iter().map(|m| m.0).max().unwrap_or(0) + 1];
     for i in 0..d.n() {
@@ -214,5 +230,5 @@ pub fn layout(d: crate::grid::Dims, continent: &[u16], majors: &[(usize, usize, 
             }
         }
     }
-    Layout { size_cv: sd / mean, size_ratio: hi / lo.max(1.0), clark_evans: (nn / n as f32) / expected, iq_mean, iq_ellipse: iq(ea as f32, ep), ..Layout::default() }
+    Layout { size_cv: sd / mean, size_ratio: hi / lo.max(1.0), bunching, open_ocean, iq_mean, iq_ellipse: iq(ea as f32, ep), ..Layout::default() }
 }

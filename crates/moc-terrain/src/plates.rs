@@ -226,14 +226,14 @@ pub fn build(map_w: usize, map_h: usize, gd: Dims, plan: &ContinentPlan, plates:
             }
         }
         let cl = if c < n_clusters { c } else { rng.below(n_clusters) };
-        let sigma = (radius(c) + mean_r) * 0.75;
+        let sigma = (radius(c) + mean_r) * 0.85;
         let mut placed = None;
         for _ in 0..80 {
             let (gx, gy) = wrap_pt(centres[cl].0 + gauss(&mut rng) * sigma, centres[cl].1 + gauss(&mut rng) * sigma * 0.8);
             if !ok_core(gx, gy) {
                 continue;
             }
-            if cores.iter().enumerate().all(|(k, &(cx, cy))| gd.dist2(cx, cy, gx, gy).sqrt() >= 0.6 * (radius(c) + radius(k))) {
+            if cores.iter().enumerate().all(|(k, &(cx, cy))| gd.dist2(cx, cy, gx, gy).sqrt() >= 0.7 * (radius(c) + radius(k))) {
                 placed = Some((gx, gy));
                 break;
             }
