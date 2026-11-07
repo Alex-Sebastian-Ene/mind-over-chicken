@@ -96,6 +96,7 @@ export class SimSource {
     const pitch = Math.round((this.aim.y * 2 - 1) * 20 * 10) / 10;
     const yaw = Math.round((this.aim.x * 2 - 1) * 25 * 10) / 10;
     return {
+      isSim: true,
       bands: rel,
       blink,
       tilt: { x: this.aim.x * 2 - 1, y: this.aim.y * 2 - 1 },

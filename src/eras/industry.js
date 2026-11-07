@@ -9,7 +9,7 @@
 
 import { W, H, Particles, clamp, dist, rand, chance, gauss, floater, pick } from '../sim/util.js';
 import { walk, animate, villagerLook, sail } from '../sim/agents.js';
-import { drawPerson, drawGoat, drawChicken, drawBoat } from '../render/sprites.js';
+import { drawPerson, drawGoat, drawChicken, drawBoat, drawReticle } from '../render/sprites.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
 
@@ -432,6 +432,8 @@ export class Industry {
     const tw = ctx.measureText(text).width;
     if (this.tickerX < -tw) this.tickerX = W;
     ctx.fillText(text, this.tickerX, H - 2.2);
+    const aim = G.brain?.aim;
+    if (aim) drawReticle(ctx, aim.x * (W - 1), aim.y * (H - 1), this.t, '#ffe066');
   }
 
   // ---- camera (#33): hand casts and face mood. Extra inputs on top of the brain, never instead of it. ----

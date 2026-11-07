@@ -250,7 +250,7 @@ export class MultiHandTracker {
     this.pinchStart = null;
     this.lastDistance = null;
     this.frozenZoom = 1;
-    this.grabState = { active: false, side: null, cooldownUntil: -Infinity };
+    this.grabState = { active: false, side: null, cooldownUntil: -Infinity, lastPoint: null };
   }
 
   // Assigns detected hands to stable { left, right } slots (#118).
@@ -397,33 +397,48 @@ export class MultiHandTracker {
     }
 
     // One-hand pinch grab (#120) — suppressed while two-hand zoom is active or cooling down
-    const grab = { active: false, started: false, released: false, cancelled: false, side: null };
+    const grab = { active: false, started: false, released: false, cancelled: false, side: null, dx: 0, dy: 0, point: null };
     if (!bothPinched && !this.zoomActive) {
       const activeSide = evL.active ? 'left' : evR.active ? 'right' : null;
       const ev = activeSide === 'left' ? evL : activeSide === 'right' ? evR : (this.grabState.side === 'left' ? evL : evR);
+      const activeHand = activeSide === 'left' ? curL : activeSide === 'right' ? curR : (this.grabState.side === 'left' ? curL : curR);
       if (!this.grabState.active) {
         if (activeSide && (evL.started || evR.started) && now >= this.grabState.cooldownUntil) {
           this.grabState.active = true;
           this.grabState.side = activeSide;
+          this.grabState.lastPoint = activeHand ? { ...activeHand.point } : null;
           grab.active = true;
           grab.started = true;
           grab.side = activeSide;
+          grab.point = activeHand ? { ...activeHand.point } : null;
         }
       } else {
         const s = this.grabState.side;
         const curEv = s === 'left' ? evL : evR;
+        const curHand = s === 'left' ? curL : curR;
         if (curEv.active) {
           grab.active = true;
           grab.side = s;
+          if (curHand && this.grabState.lastPoint) {
+            grab.dx = curHand.point.x - this.grabState.lastPoint.x;
+            grab.dy = curHand.point.y - this.grabState.lastPoint.y;
+            this.grabState.lastPoint = { ...curHand.point };
+            grab.point = { ...curHand.point };
+          } else if (curHand) {
+            this.grabState.lastPoint = { ...curHand.point };
+            grab.point = { ...curHand.point };
+          }
         } else if (curEv.released) {
           this.grabState.active = false;
           this.grabState.side = null;
+          this.grabState.lastPoint = null;
           this.grabState.cooldownUntil = now + this.grabCooldownMs;
           grab.released = true;
           grab.side = s;
         } else if (curEv.cancelled) {
           this.grabState.active = false;
           this.grabState.side = null;
+          this.grabState.lastPoint = null;
           grab.cancelled = true;
           grab.side = s;
         }
