@@ -199,6 +199,7 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
   window.addEventListener('keydown', (e) => {
     if (e.code !== COACH_KEY || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+    if (['titleScreen', 'failScreen', 'endScreen', 'banner'].some((id) => document.getElementById(id)?.hidden === false)) return;
     e.preventDefault();
     setOpen(!open);
   });
