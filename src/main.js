@@ -15,6 +15,13 @@ import initEngine, { Engine } from '../pkg/mind_over_chicken_engine.js';
 import { Cosmos } from './cosmos/cosmos.js';
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
+import { Calibration, readCalibrationConfig } from './brain/calibration.js'; // calibration (#54)
+import { SIM } from './cosmos/planet-sim.js';
+
+// calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
+// mind read uses the same window.
+const calibConfig = readCalibrationConfig();
+SIM.MIND_SECONDS = calibConfig.seconds;
 
 const SCENES = [() => new StoneAge(), () => new FarmingToKingdoms(), () => new Industry(), () => new InfoAge(), () => new SpaceAge()];
 const $ = (id) => document.getElementById(id);
@@ -68,6 +75,7 @@ function newGame(source, startIndex = 0) {
   G = {
     world: new World(),
     brain, source, advisor, hud, audio,
+    calibration: new Calibration(calibConfig), // calibration (#54)
     scene: null, sceneIndex: startIndex, runTime: 0, shake: 0,
     stats: { lightning: 0, smitten: 0, births: 0, deaths: 0, recessions: 0, restarts: 0 },
     eraTimes: [], eraStart: 0, finished: false,
@@ -280,8 +288,10 @@ function frame(ts) {
       if (banner.t > 6) dismissBanner();
     } else if (G.sandbox) {
       G.runTime += dt;   // the hand-played game stays paused in the sandbox
+      G.calibration?.update(dt, G.brain, G.mood);
     } else if ($('failScreen').hidden && $('endScreen').hidden) {
       G.runTime += dt;
+      G.calibration?.update(dt, G.brain, G.mood);
       G.scene.update(dt);
     } else if (!$('endScreen').hidden) {
       G.scene.update(dt);
@@ -494,7 +504,7 @@ function updateCosmosUi(dt) {
   const m = gal.mind;
   $('mindLine').textContent = m.done
     ? `Read from your first 10 s: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, ${m.blinks} blinks.`
-    : `Reading your mind: ${Math.max(0, Math.ceil(10 - m.t))} s of play left.`;
+    : `Reading your mind: ${Math.max(0, Math.ceil(SIM.MIND_SECONDS - m.t))} s of play left.`;
   $('galaxyLog').replaceChildren(...gal.log.slice(0, 4).map((l) => { const li = document.createElement('li'); li.textContent = l.text; return li; }));
 }
 

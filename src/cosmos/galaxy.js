@@ -24,7 +24,7 @@ export const ERA_LABEL = { stone: 'Stone Age', farming: 'Farming', industry: 'In
 const MAX_PLANETS = 7;
 const STAR = { x: 132, y: 92 };      // left of centre, so the galaxy panel doesn't hide the outer orbits
 const ORBIT_FIRST = 34, ORBIT_STEP = 15, ORBIT_SQUASH = 0.42;
-const MIND_SECONDS = SIM.MIND_SECONDS;
+// The mind-read window comes from the calibration config (#54); read it live, not once.
 const NAMES = ['Henhaven', 'Cluckturn', 'Roostia', 'Yolkos', 'Featherfall', 'Eggsodus', 'Pecktopia', 'Gizzardia', 'Coopernicus', 'Bok Prime', 'Omelettia', 'Wattle IV'];
 const BIOMES = ['desert', 'ice', 'jungle', 'alien', 'temperate'];
 const ATMOS = { temperate: [110, 175, 255], desert: [255, 190, 120], ice: [190, 225, 255], jungle: [120, 230, 170], alien: [210, 140, 255], forming: [150, 140, 130] };
@@ -198,7 +198,7 @@ export class Galaxy {
       if (!ranked) return;
       this.planets.filter((p) => p.mindSlot).forEach((p, i) => this.revealQueue.push({ p, ch: ranked[i].ch }));
       this.revealT = 0;
-      this.note(null, `Your first ${MIND_SECONDS} seconds: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, ${m.blinks} blinks.`);
+      this.note(null, `Your first ${SIM.MIND_SECONDS} seconds: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, ${m.blinks} blinks.`);
       return;
     }
     // Staggered reveal so each world gets its moment.
@@ -330,7 +330,7 @@ export class Galaxy {
       const q = this.pos(p);
       const ch = CHANNELS[p.channel];
       label(ctx, q.x, q.y + p.size + 7, p.name, p === hover ? '#ffe066' : '#f2e8d5', 5);
-      const sub = p.forming ? (p.mindSlot && !this.mind.done ? `reading your mind ${Math.max(0, Math.ceil(MIND_SECONDS - this.mind.t))}s` : 'forming…')
+      const sub = p.forming ? (p.mindSlot && !this.mind.done ? `reading your mind ${Math.max(0, Math.ceil(SIM.MIND_SECONDS - this.mind.t))}s` : 'forming…')
         : p.pop > 0 ? `${ERA_LABEL[ERA_NAMES[p.eraIndex]]} · ${p.home && !p.autonomous ? `${p.pop} people` : fmtPop(p.pop)}` : 'barren';
       label(ctx, q.x, q.y + p.size + 12.5, sub, p.pop > 0 ? '#a3a6c4' : '#6f7394', 4);
       if (ch && !p.home && p.channel !== 'mixed' && p.alive) label(ctx, q.x, q.y + p.size + 17.5, `listens to ${ch.label.toLowerCase()}`, ch.color, 4);
@@ -349,7 +349,7 @@ export class Galaxy {
     const pop = this.planets.reduce((s, p) => s + Math.max(0, p.home && !p.autonomous ? 0 : p.pop), 0);
     return [
       { label: 'Worlds', value: `${this.planets.length}/${MAX_PLANETS}`, plain: true },
-      { label: 'Mind read', value: this.mind.done ? 'yes' : `${Math.max(0, Math.ceil(MIND_SECONDS - this.mind.t))}s`, done: this.mind.done },
+      { label: 'Mind read', value: this.mind.done ? 'yes' : `${Math.max(0, Math.ceil(SIM.MIND_SECONDS - this.mind.t))}s`, done: this.mind.done },
       { label: 'Space-faring', value: `${spacefaring}`, plain: true },
       { label: 'Population', value: fmtPop(pop), plain: true },
     ];
@@ -406,4 +406,4 @@ export function planetDot(p) {
   return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
 
-export { STAR, MAX_PLANETS, MIND_SECONDS };
+export { STAR, MAX_PLANETS };

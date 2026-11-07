@@ -1,0 +1,44 @@
+# Calibration seed
+
+How the player's signals at the start of play become the seed for **their** civilisation (README §3.1 and §4.1, issue #54). The other three civilisations are always random.
+
+## Configure it without editing code
+
+| URL parameter | Values | Default |
+|---|---|---|
+| `calib` | window length in seconds, 1–120 | `10` (a placeholder) |
+| `calib_mode` | `random` (dummy run) or `sensor` | `random` |
+| `seed` | any integer: the run seed | random each load |
+
+For example: `index.html?calib=6&calib_mode=sensor&seed=42`.
+
+The same keys can be saved in `localStorage` under `moc.calibration` (JSON). The galaxy's "mind read", which births the three mind-worlds, uses the same window.
+
+## What the window measures
+The window only counts seconds of real play; menus and the era intro card don't count. It averages:
+
+| Feature | Source |
+|---|---|
+| `calm`, `focus` (0–1) | the brain model (personal classifier blended with the generic rule) |
+| `hrDelta` (bpm) | heart rate above the player's resting rate |
+| `blinkRate` | deliberate blinks per 10 s |
+| `joy`, `anger`, `surprise`, `sadness` (0–1) | the face emotion manager, only while a face is visible (#33). They are 0 without a camera. |
+
+## Formula (`sensor` mode)
+With `pulse = clamp(hrDelta / 20)` and `blinks = clamp(blinkRate / 6)`:
+
+| Trait | Formula |
+|---|---|
+| **friendliness** | 0.55·calm + 0.35·joy + 0.10·(1 − anger) |
+| **aggressiveness** | 0.50·pulse + 0.35·anger + 0.15·focus |
+| **violence** | 0.45·anger + 0.35·pulse·(1 − calm) + 0.20·blinks |
+
+All three are clamped to 0–1. A calm, smiling player seeds a friendly civilisation; a tense, angry one seeds an aggressive, violent one.
+
+## Random setup (`random` mode, the dummy run)
+`friendliness`, `aggressiveness` and `violence` (scaled by 0.8) are the first three draws of `mulberry32(seed)`, so the same seed always gives the same setup.
+
+## Output
+`G.calibration.result = { friendliness, aggressiveness, violence, source, seconds, seed, features }`. It's shown in the model panel (press **M**). The four-civilisation sandbox (#50, #52) reads it to seed the player's civilisation.
+
+Code: `src/brain/calibration.js`. Tests: `tests/calibration.test.mjs`.
