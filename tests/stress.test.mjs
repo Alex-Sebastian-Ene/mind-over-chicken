@@ -55,12 +55,15 @@ test('emulated headset: calm lowers stress; the Stress key raises it, even over 
   near(b.stress, 0.7, 0.05);
 });
 
-test('emulated headset frames carry only the signals the bridge sends', () => {
+test('emulated headset frames carry no heart-rate or PPG fields', () => {
   const frames = [];
   const src = new SimSource();
   src.update(0.35, (f) => frames.push(f));
   assert.ok(frames.length >= 3);
-  for (const f of frames) assert.deepEqual(Object.keys(f).sort(), ['bands', 'blink', 'motion', 'quality', 'tilt']);
+  for (const f of frames) {
+    for (const k of ['bands', 'blink', 'tilt', 'motion', 'quality']) assert.ok(k in f, k);
+    for (const k of ['hr', 'ppg']) assert.equal(k in f, false, k);
+  }
 });
 
 test('ProxyBrain and SharedBrain derive stress the same way', () => {

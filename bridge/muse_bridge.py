@@ -195,6 +195,17 @@ class HeadTracker:
         self.rate = 0.0             # deg/s, bias-corrected rotation speed of the latest sample
         self._reset_window()
 
+    def calib_progress(self):
+        """0.0..1.0 gyro bias calibration progress."""
+        if self.bias is not None:
+            return 1.0
+        return clamp(self._win_time / max(1e-6, self.bias_init))
+
+    def tare(self):
+        """Zero yaw heading immediately while keeping the learned gyro bias."""
+        self.yaw = 0.0
+        self.rate = 0.0
+
     def _reset_window(self):
         self._win_sum, self._win_n, self._win_time = [0.0, 0.0, 0.0], 0, 0.0
 
@@ -242,11 +253,15 @@ class HeadTracker:
             ux, uy, uz = self.up
             # w . up is the turn rate about the vertical, counter-clockwise from above by the
             # right-hand rule (a turn to the left), so negate it for "positive = right".
-            self.yaw -= (w[0] * ux + w[1] * uy + w[2] * uz) * dt
+            self.rate = math.sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2])
+            yaw_rate = -(w[0] * ux + w[1] * uy + w[2] * uz)
+            # Zero Angular Velocity Update (ZUPT): when the head is stationary (< 1.5 deg/s),
+            # do not integrate micro-tremor or residual bias into yaw.
+            if self.rate >= 1.5 or not math.isfinite(self.bias_tau):
+                self.yaw += yaw_rate * dt
             if math.isfinite(self.yaw_tau):
                 self.yaw *= math.exp(-dt / self.yaw_tau)
             self.yaw = (self.yaw + 180.0) % 360.0 - 180.0
-            self.rate = math.sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2])
         return self.rate
 
     def _remove_bias(self, gx, gy, gz, dt):
@@ -268,7 +283,8 @@ class HeadTracker:
             self._reset_window()
         d = [gx - self.bias[0], gy - self.bias[1], gz - self.bias[2]]
         if math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) < self.still and math.isfinite(self.bias_tau):
-            k = 1.0 - math.exp(-dt / self.bias_tau)
+            tau = 2.0 if math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) < 2.0 else self.bias_tau
+            k = 1.0 - math.exp(-dt / tau)
             self.bias = [b + k * v for b, v in zip(self.bias, d)]
             d = [gx - self.bias[0], gy - self.bias[1], gz - self.bias[2]]
         return d
@@ -293,6 +309,12 @@ class Bridge:
         self.eeg = find_sensor(bid, BoardShim.get_eeg_channels, [DEFAULT])
         if self.eeg is None:
             raise SystemExit(f"{self.label}: BrainFlow reports no EEG channels")
+        try:
+            raw_names = [n.strip() for n in BoardShim.get_eeg_names(bid)]
+        except BrainFlowError:
+            raw_names = []
+        self.eeg_names = (raw_names[:len(self.eeg.channels)] if len(raw_names) >= len(self.eeg.channels)
+                          else [f"CH{i + 1}" for i in range(len(self.eeg.channels))])
         self.frontal, frontal_labels = frontal_rows(bid, self.eeg.channels)
         self.accel = find_sensor(bid, BoardShim.get_accel_channels, [AUXILIARY, DEFAULT])
         # The gyro is fused with the accelerometer sample by sample, so it must come from the same
@@ -339,8 +361,14 @@ class Bridge:
         log.info("client connected %s (%d total)", peer, len(self.clients))
         try:
             await ws.send(json.dumps({"type": "status", "text": self.status}))
-            async for _ in ws:   # the game does not send anything; just drain
-                pass
+            async for raw in ws:
+                try:
+                    msg = json.loads(raw)
+                    if isinstance(msg, dict) and msg.get("type") in ("recenter", "calibrate"):
+                        self.head.tare()
+                        log.info("head orientation tared / recalibrating gyro bias")
+                except (ValueError, TypeError):
+                    pass
         except ConnectionClosed:
             pass
         finally:
@@ -358,8 +386,7 @@ class Bridge:
             p.mac_address = a.mac_address
         if a.serial_number:
             p.serial_number = a.serial_number
-        if a.timeout:
-            p.timeout = int(a.timeout)
+        p.timeout = int(a.timeout) if a.timeout else 15
         return p
 
     async def connect_board(self):
@@ -371,8 +398,8 @@ class Bridge:
             board = BoardShim(self.board_id, self.make_params())
             self.board = board  # so shutdown can release it even mid-connect
             try:
-                # prepare_session scans BLE / opens the dongle and can block for seconds.
-                await asyncio.to_thread(board.prepare_session)
+                # prepare_session scans BLE / opens the dongle and can block; guard against BlueZ GATT deadlock.
+                await asyncio.wait_for(asyncio.to_thread(board.prepare_session), timeout=22.0)
                 board.start_stream(BUFFER_SAMPLES)
                 self._reset_signal_state()
                 extras = []
@@ -385,7 +412,7 @@ class Bridge:
                 self.streaming_status = f"Streaming from {self.label}" + (f" ({', '.join(extras)})" if extras else "")
                 self.set_status(self.streaming_status)
                 return
-            except BrainFlowError as e:
+            except (BrainFlowError, asyncio.TimeoutError) as e:
                 log.warning("connect failed: %s", e)
                 self.release_board()
                 self.set_status(f"Waiting for headset: {self.label} not found, retrying")
@@ -411,6 +438,7 @@ class Bridge:
             await self.connect_board()
             await self.stream_loop()       # returns when data stalls
             self.release_board()
+            await asyncio.sleep(2.5)       # let BlueZ finish GATT teardown before rescanning
 
     async def stream_loop(self):
         next_tick = time.monotonic()
@@ -474,8 +502,9 @@ class Bridge:
         eeg_block = np.ascontiguousarray(np.vstack([rows[ch] for ch in eeg.channels]))
         bands = self.band_powers(eeg_block, fs)
         quality = self.signal_quality(eeg_block, now)
+        eeg_wave, contact = self.eeg_telemetry(eeg_block, fs, now)
         accel, gyro, orientation, motion = self.read_imu(board, now)
-        blink = self.detect_blink([rows[ch] for ch in self.frontal], fs, now, motion)
+        blink = self.detect_blink([rows[ch] for ch in self.frontal], fs, now, motion, eeg_block)
 
         return {
             "t": round(now - self.t0, 3),
@@ -484,8 +513,11 @@ class Bridge:
             "accel": accel,
             "gyro": gyro,
             "orientation": orientation,
+            "imu_calib": finite(self.head.calib_progress(), 2),
             "motion": finite(motion, 3),
             "quality": finite(quality, 3),
+            "eeg": eeg_wave,
+            "contact": contact,
         }
 
     def band_powers(self, eeg_block, fs):
@@ -514,7 +546,34 @@ class Bridge:
                 scores.append(clamp(1.0 - (sd - 40.0) / 110.0))   # 1 up to 40 µV, 0 at 150 µV
         return float(np.mean(scores)) if scores else 0.0
 
-    def detect_blink(self, frontal, fs, now, motion):
+    def eeg_telemetry(self, eeg_block, fs, now):
+        """Per-electrode detrended recent samples (~0.1 s at ~64 Hz) and contact quality badges
+        (GOOD / FAIR / POOR, matching Muse 2 DSP thresholds) for the EEG side panel."""
+        wave = {}
+        contact = {}
+        stalled = now - self.last_eeg_new_at > STALL_STATUS
+        step = max(1, int(round(fs / 64)))
+        n_wave = max(4, int(round(FRAME_DT * fs)))
+        n_qual = min(eeg_block.shape[1], int(round(fs)))
+        for idx, name in enumerate(self.eeg_names[:4]):
+            if idx >= eeg_block.shape[0]:
+                break
+            raw = eeg_block[idx]
+            seg = raw[-n_qual:].copy()
+            DataFilter.detrend(seg, DetrendOperations.LINEAR.value)
+            sd = float(np.std(seg))
+            railed = float(np.count_nonzero(np.abs(seg) > 1000.0) / seg.size) if seg.size else 1.0
+            if stalled or railed > 0.15 or sd < 1.0 or sd > 450.0:
+                contact[name] = "POOR"
+            elif railed > 0.03 or sd > 180.0:
+                contact[name] = "FAIR"
+            else:
+                contact[name] = "GOOD"
+            tail = seg[-n_wave::step] if seg.size >= n_wave else seg[::step]
+            wave[name] = [finite(v, 1) for v in tail]
+        return wave, contact
+
+    def detect_blink(self, frontal, fs, now, motion, eeg_block=None):
         n = int(BLINK_WINDOW * fs)
         segs = []
         for row in frontal:
@@ -525,25 +584,48 @@ class Bridge:
             segs.append(seg)
         ptp = np.array([s.max() - s.min() for s in segs])
         mean_ptp = float(ptp.mean())
+        max_frontal = float(ptp.max())
         thr = self.args.blink_threshold
 
-        if mean_ptp < BLINK_REARM * thr:
+        # Muse 2 uses Fpz (center forehead) as the hardware reference electrode.
+        # Eye blinks shift Fpz directly, which often produces synchronous large deflections on
+        # TP9 and TP10 alongside one or both frontal channels (AF7/AF8).
+        tp_sync_ptp = 0.0
+        tp_corr = 0.0
+        if eeg_block is not None and eeg_block.shape[0] >= 4 and eeg_block.shape[1] >= n // 2:
+            tp9 = np.ascontiguousarray(eeg_block[0, -n:], dtype=np.float64).copy()
+            tp10 = np.ascontiguousarray(eeg_block[3, -n:], dtype=np.float64).copy()
+            DataFilter.detrend(tp9, DetrendOperations.LINEAR.value)
+            DataFilter.detrend(tp10, DetrendOperations.LINEAR.value)
+            p9 = float(tp9.max() - tp9.min())
+            p10 = float(tp10.max() - tp10.min())
+            if p9 < ARTIFACT_PTP and p10 < ARTIFACT_PTP and np.std(tp9) > 0 and np.std(tp10) > 0:
+                tp_corr = float(np.corrcoef(tp9, tp10)[0, 1])
+                if tp_corr >= 0.45:
+                    tp_sync_ptp = min(p9, p10)
+
+        eff_ptp = max(mean_ptp, min(max_frontal, tp_sync_ptp * 0.85))
+        eff_thr = min(thr, 145.0) if tp_sync_ptp >= 180.0 else thr
+
+        if eff_ptp < BLINK_REARM * eff_thr:
             self.blink_armed = True
-        if mean_ptp < thr:
-            if self.args.verbose and mean_ptp > 0.5 * thr:
-                log.debug("blink candidate ptp=%.0f uV below threshold %.0f", mean_ptp, thr)
+        if eff_ptp < eff_thr:
+            if self.args.verbose and eff_ptp > 0.5 * eff_thr:
+                log.debug("blink candidate eff_ptp=%.0f (frontal=%s tp_sync=%.0f) below %.0f",
+                          eff_ptp, np.round(ptp).tolist(), tp_sync_ptp, eff_thr)
             return False
 
         corr = 1.0
         if len(segs) >= 2 and np.std(segs[0]) > 0 and np.std(segs[1]) > 0:
             corr = float(np.corrcoef(segs[0], segs[1])[0, 1])
+        effective_corr = max(corr, tp_corr)
         reason = None
         if ptp.max() > ARTIFACT_PTP:
             reason = "artifact (contact pop / railed)"
-        elif ptp.min() < 0.5 * thr:
+        elif ptp.min() < 0.5 * thr and tp_sync_ptp < 170.0:
             reason = "only one frontal channel"
-        elif corr < BLINK_MIN_CORR:
-            reason = f"channels disagree (corr {corr:.2f}, likely eye movement)"
+        elif effective_corr < BLINK_MIN_CORR:
+            reason = f"channels disagree (corr {effective_corr:.2f}, likely eye movement)"
         elif motion > BLINK_MAX_MOTION:
             reason = "head moving"
         elif not self.blink_armed:
@@ -551,11 +633,13 @@ class Bridge:
         elif now - self.last_blink_at < BLINK_REFRACTORY:
             reason = "refractory"
         if reason:
-            log.debug("blink rejected ptp=%s corr=%.2f: %s", np.round(ptp).tolist(), corr, reason)
+            log.debug("blink rejected ptp=%s tp_sync=%.0f corr=%.2f: %s",
+                      np.round(ptp).tolist(), tp_sync_ptp, effective_corr, reason)
             return False
         self.last_blink_at = now
         self.blink_armed = False
-        log.debug("blink accepted ptp=%s corr=%.2f", np.round(ptp).tolist(), corr)
+        log.info("blink accepted ptp=%s tp_sync=%.0f corr=%.2f",
+                 np.round(ptp).tolist(), tp_sync_ptp, effective_corr)
         return True
 
     def read_imu(self, board, now):
@@ -591,7 +675,9 @@ class Bridge:
                 # Rotation is what the gyro sees best: a turn barely moves the gravity vector.
                 spin = sum(rates) / len(rates)
                 raw = max(raw, clamp((spin - GYRO_MOTION_FLOOR) / (GYRO_MOTION_FULL - GYRO_MOTION_FLOOR)))
-            gyro = [finite(v, 3) for v in gyr[:, -n_frame:].mean(axis=1)]
+            g_mean = gyr[:, -n_frame:].mean(axis=1)
+            bias = self.head.bias or (0.0, 0.0, 0.0)
+            gyro = [finite(g_mean[k] - bias[k], 3) for k in range(3)]
             angles = self.head.angles()
             if angles is not None:
                 orientation = {k: finite(v, 2) for k, v in zip(("pitch", "roll", "yaw"), angles)}
