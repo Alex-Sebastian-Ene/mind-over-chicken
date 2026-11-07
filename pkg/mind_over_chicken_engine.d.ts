@@ -97,6 +97,10 @@ export class RustBlinkClassifier {
     learned_af8_uv(): number;
     learned_threshold_uv(): number;
     constructor();
+    /**
+     * Records the latest EEG window as a non-blink negative sample (used during Hold Still
+     * and Move Head Around Without Blinking calibration stages to cancel noise & hum).
+     */
     record_baseline_button(): boolean;
     /**
      * Searches the last ~2.5s of EEG windows for the strongest blink peak if the user blinked
@@ -123,8 +127,10 @@ export class RustImuTracker {
     calib_sample_count(): number;
     cancel_motion_calibration(): void;
     /**
-     * Fits a 2D Ridge Regression model in Rust mapping `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
-     * Automatically discovers axis signs, sensitivity/range, center offset, and cross-axis head tilt coupling.
+     * Fits a 2D Ridge Regression + Piecewise Directional Reach model in Rust mapping
+     * `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
+     * Automatically discovers axis signs, high vertical pitch sensitivity, cross-axis coupling,
+     * and separate Left/Right/Up/Down edge reach scales so every full screen edge is reachable.
      */
     finish_motion_calibration(): boolean;
     has_motion_model(): boolean;

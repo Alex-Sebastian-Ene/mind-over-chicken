@@ -700,6 +700,8 @@ export class RustBlinkClassifier {
         return this;
     }
     /**
+     * Records the latest EEG window as a non-blink negative sample (used during Hold Still
+     * and Move Head Around Without Blinking calibration stages to cancel noise & hum).
      * @returns {boolean}
      */
     record_baseline_button() {
@@ -790,8 +792,10 @@ export class RustImuTracker {
         wasm.rustimutracker_cancel_motion_calibration(this.__wbg_ptr);
     }
     /**
-     * Fits a 2D Ridge Regression model in Rust mapping `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
-     * Automatically discovers axis signs, sensitivity/range, center offset, and cross-axis head tilt coupling.
+     * Fits a 2D Ridge Regression + Piecewise Directional Reach model in Rust mapping
+     * `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
+     * Automatically discovers axis signs, high vertical pitch sensitivity, cross-axis coupling,
+     * and separate Left/Right/Up/Down edge reach scales so every full screen edge is reachable.
      * @returns {boolean}
      */
     finish_motion_calibration() {
