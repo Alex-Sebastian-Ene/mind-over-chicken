@@ -22,8 +22,8 @@ let pending = null;
 
 // Resolves to { gesture, face, delegates: {gesture, face}, timings: {runtime, gesture, face, total} (ms), rebuildOnCpu(name) }.
 // Cached: a second call (camera toggled off and on) reuses the loaded models.
-export function loadVision(onStatus = () => {}) {
-  pending ??= load(onStatus).catch((err) => { pending = null; throw err; });
+export function loadVision(onStatus = () => {}, { hands = true } = {}) {
+  pending ??= load(onStatus, hands).catch((err) => { pending = null; throw err; });
   return pending;
 }
 
@@ -41,7 +41,7 @@ function quietInfoLogs() {
   console.error = quiet;
 }
 
-async function load(onStatus) {
+async function load(onStatus, hands) {
   quietInfoLogs();
   const t0 = performance.now();
   const timings = {};
@@ -51,25 +51,31 @@ async function load(onStatus) {
   timings.runtime = Math.round(performance.now() - t0);
 
   // One after the other: the tasks share one WebAssembly loader.
-  onStatus('Loading the hand model…');
-  let t = performance.now();
-  const gesture = await create(mp.GestureRecognizer, fileset, OPTIONS.gesture);
-  timings.gesture = Math.round(performance.now() - t);
+  let gesture = null;
+  if (hands) {
+    onStatus('Loading the hand model…');
+    let t = performance.now();
+    gesture = await create(mp.GestureRecognizer, fileset, OPTIONS.gesture);
+    timings.gesture = Math.round(performance.now() - t);
+  } else {
+    timings.gesture = 0;
+  }
 
   onStatus('Loading the face model…');
-  t = performance.now();
+  let t = performance.now();
   const face = await create(mp.FaceLandmarker, fileset, OPTIONS.face);
   timings.face = Math.round(performance.now() - t);
   timings.total = Math.round(performance.now() - t0);
 
   const vision = {
-    gesture: gesture.task, face: face.task,
-    delegates: { gesture: gesture.delegate, face: face.delegate },
+    gesture: gesture?.task || null, face: face.task,
+    delegates: { gesture: gesture?.delegate || null, face: face.delegate },
     timings,
     // A GPU delegate can build fine and still fail on the first frame (lost context, blocked
     // WebGL). The camera loop calls this once per task to fall back to the CPU.
     async rebuildOnCpu(name) {
       try { vision[name]?.close?.(); } catch {}
+      if (!vision[name]) return null;
       const Task = name === 'gesture' ? mp.GestureRecognizer : mp.FaceLandmarker;
       vision[name] = await Task.createFromOptions(fileset, withDelegate(OPTIONS[name], 'CPU'));
       vision.delegates[name] = 'CPU';

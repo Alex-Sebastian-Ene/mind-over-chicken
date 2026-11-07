@@ -1,5 +1,6 @@
 // camera (#33): opt-in webcam input.
 //   Hands: MediaPipe Gesture Recognizer → seven casts (spells.js). Pointing up aims.
+//          Deferred milestone: gated off by CAMERA_CASTS_ENABLED until gesture UI is in scope.
 //   Face:  MediaPipe Face Landmarker blendshapes → smoothed mood → G.mood and scene.onMood().
 //
 // PRIVACY: the camera starts only when the player clicks "Camera". Frames go from the <video>
@@ -12,7 +13,7 @@
 // the brain's calm, focus or heart-rate signals and never block another input.
 
 import { W, H, clamp, smooth } from '../sim/util.js';
-import { SPELLS, SPELL_BY_ID, GESTURE_LABEL, spellForKeyCode } from './spells.js';
+import { SPELLS, SPELL_BY_ID, GESTURE_LABEL, spellForKeyCode, CAMERA_CASTS_ENABLED } from './spells.js';
 import { CastController } from './casts.js';
 import { EMOTIONS, EmotionTracker, neutralMood } from './emotion.js';
 import { loadVision } from './vision.js';
@@ -59,26 +60,33 @@ const TEMPLATE = `
   </div>
   <p class="cam-privacy">Frames never leave this device. Nothing is uploaded.</p>`;
 
-function cameraError(err) {
+function cameraError(err, castsEnabled) {
+  const fallback = castsEnabled ? ' Keys 1–7 still cast every spell.' : '';
   const name = err?.name || '';
   if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError')
-    return 'Camera permission was denied. Allow it in the address bar and click Camera again. Keys 1–7 still cast every spell.';
+    return `Camera permission was denied. Allow it in the address bar and click Camera again.${fallback}`;
   if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError')
-    return 'No camera found. Keys 1–7 (or the buttons below) cast every spell.';
+    return `No camera found.${fallback}`;
   if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError')
-    return 'The camera is busy in another app. Close it and click Camera again. Keys 1–7 still cast.';
-  return `Camera unavailable (${name || err?.message || 'unknown error'}). Keys 1–7 still cast.`;
+    return `The camera is busy in another app. Close it and click Camera again.${fallback}`;
+  return `Camera unavailable (${name || err?.message || 'unknown error'}).${fallback}`;
 }
 
 function stopTracks(stream) { stream?.getTracks().forEach((t) => t.stop()); }
 
-export function initCamera({ getG, canCast = () => true } = {}) {
+export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_CASTS_ENABLED } = {}) {
   const btn = document.getElementById('camBtn');
   const panel = document.getElementById('camPanel');
   const screen = document.getElementById('screen');
   if (!btn || !panel) return null;
   panel.innerHTML = TEMPLATE;
   const $ = (sel) => panel.querySelector(sel);
+  const spellRow = $('.cam-spells');
+  if (!castsEnabled) {
+    spellRow.style.display = 'none';
+    panel.dataset.casts = 'off';
+    $('.cam-now').textContent = 'Face mood is active. Hand casts are deferred.';
+  }
   const video = $('.cam-video');
   const hands = $('.cam-hands');
   const handsCtx = hands.getContext('2d');
@@ -99,6 +107,7 @@ export function initCamera({ getG, canCast = () => true } = {}) {
 
   const casts = new CastController();
   const tracker = new EmotionTracker();
+  const castFallback = castsEnabled ? ' Keys 1–7 still cast every spell.' : '';
   let status = 'off';          // off | starting | on | error
   let stream = null;
   let vision = null;
@@ -144,28 +153,28 @@ export function initCamera({ getG, canCast = () => true } = {}) {
     setStatus('starting', 'Asking for the camera…');
     if (!navigator.mediaDevices?.getUserMedia) {
       setStatus('error', window.isSecureContext === false
-        ? 'The camera needs https or localhost. Keys 1–7 still cast every spell.'
-        : 'This browser has no camera access. Keys 1–7 still cast every spell.');
+        ? `The camera needs https or localhost.${castFallback}`
+        : `This browser has no camera access.${castFallback}`);
       return;
     }
     let s;
     try {
       s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
     } catch (err) {
-      if (id === run) setStatus('error', cameraError(err));
+      if (id === run) setStatus('error', cameraError(err, castsEnabled));
       return;
     }
     if (id !== run) { stopTracks(s); return; } // turned off while the prompt was open
     stream = s;
     video.srcObject = stream;
     try { await video.play(); } catch { /* autoplay of a muted inline video is allowed; ignore */ }
-    setStatus('starting', 'Loading hand and face models…');
+    setStatus('starting', castsEnabled ? 'Loading hand and face models…' : 'Loading face model…');
     try {
-      vision = await loadVision((m) => { if (id === run) setMsg(m); });
+      vision = await loadVision((m) => { if (id === run) setMsg(m); }, { hands: castsEnabled });
     } catch (err) {
       if (id !== run) return;
       teardown();
-      setStatus('error', `Couldn't load the hand and face models (${err?.message || err}). Keys 1–7 still cast.`);
+      setStatus('error', `Couldn't load the camera models (${err?.message || err}).`);
       return;
     }
     if (id !== run) return;
@@ -238,6 +247,7 @@ export function initCamera({ getG, canCast = () => true } = {}) {
 
   // via: 'gesture' (already debounced and cooled down by the controller), 'key' or 'tap'.
   function cast(id, via, now = performance.now()) {
+    if (!castsEnabled) return false;
     const G = getG();
     const scene = G?.scene;
     if (!scene || !SPELL_BY_ID[id] || !canCast()) return false;
@@ -259,7 +269,7 @@ export function initCamera({ getG, canCast = () => true } = {}) {
   }
 
   window.addEventListener('keydown', (e) => {
-    if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!castsEnabled || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
     const spell = spellForKeyCode(e.code);
     if (!spell) return;
@@ -303,14 +313,14 @@ export function initCamera({ getG, canCast = () => true } = {}) {
       vision.rebuildOnCpu(name).catch((e) => console.warn(`[camera] ${name} CPU fallback failed:`, e?.message || e)).finally(() => { rebuilding[name] = false; });
     } else if (taskErrors[name] === 30) {
       console.warn(`[camera] ${name} model keeps failing:`, err?.message || err);
-      setMsg(`${name === 'gesture' ? 'Hand' : 'Face'} tracking is struggling on this device. Keys 1–7 still cast.`);
+      setMsg(`${name === 'gesture' ? 'Hand' : 'Face'} tracking is struggling on this device.${castFallback}`);
     }
   }
 
   // Runs one model on the current video frame, if one is due. Returns after at most one call.
   function infer(now) {
     const t = video.currentTime;
-    if (now >= nextAt.gesture && t !== seen.gesture && !rebuilding.gesture) {
+    if (castsEnabled && vision.gesture && now >= nextAt.gesture && t !== seen.gesture && !rebuilding.gesture) {
       seen.gesture = t;
       runGesture(now);
       nextAt.gesture = now + Math.max(hand ? HAND_MS.tracking : HAND_MS.searching, cost.gesture * HAND_MS.costX);
@@ -327,6 +337,7 @@ export function initCamera({ getG, canCast = () => true } = {}) {
   }
 
   function runGesture(now) {
+    if (!castsEnabled || !vision.gesture) return;
     const dt = clamp((now - lastAt.gesture) / 1000, 0, 0.25);
     lastAt.gesture = now;
     const res = timed('gesture', () => vision.gesture.recognizeForVideo(video, now));
@@ -351,6 +362,7 @@ export function initCamera({ getG, canCast = () => true } = {}) {
   }
 
   function drawHands() {
+    if (!castsEnabled) return;
     const w = video.videoWidth || 320, h = video.videoHeight || 240;
     if (hands.width !== w || hands.height !== h) { hands.width = w; hands.height = h; }
     handsCtx.clearRect(0, 0, w, h);
@@ -371,6 +383,13 @@ export function initCamera({ getG, canCast = () => true } = {}) {
 
   // ---------- UI ----------
   function updatePanel(now) {
+    if (!castsEnabled) {
+      for (const k of EMOTIONS) ui.bars[k].style.width = `${Math.round(mood[k] * 100)}%`;
+      const dom = !stream ? 'camera off' : !mood.face ? 'no face' : mood.calibrating ? 'reading your face…' : mood.dominant;
+      if (ui.dominant.textContent !== dom) ui.dominant.textContent = dom;
+      panel.dataset.mood = stream ? mood.dominant : 'off';
+      return;
+    }
     const fmt = (s) => `${s.glyph} ${s.name}`;
     let text;
     const recent = lastCast && now - lastCast.at < 1400 ? SPELL_BY_ID[lastCast.id] : null;
@@ -466,6 +485,6 @@ export function initCamera({ getG, canCast = () => true } = {}) {
     start, stop, cast,
     casts, tracker,
     // Download and initialise the models without a camera, e.g. to time them.
-    async loadModels() { const v = await loadVision(); return { timings: v.timings, delegates: v.delegates }; },
+    async loadModels() { const v = await loadVision(undefined, { hands: castsEnabled }); return { timings: v.timings, delegates: v.delegates }; },
   };
 }

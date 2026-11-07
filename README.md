@@ -127,7 +127,7 @@ Tracked in #55.
 
 ## 7. Current build status
 
-The Rust/Wasm engine and WebGL renderer are landing under #17; the JavaScript game shell remains playable while the port reaches parity. The current build runs one hand-played civilization on the home world plus three autonomous brain-seeded worlds, one civilization each — not four civilizations sharing one circular world. It has no camera input, uses accelerometer tilt without gyroscope fusion, and trains a hidden calm/focus classifier instead of producing civilization traits. Treat the build as a reference implementation, not as the specification.
+The Rust/Wasm engine and WebGL renderer are landing under #17; the JavaScript game shell remains playable while the port reaches parity. The current build runs one hand-played civilization on the home world plus three autonomous brain-seeded worlds, one civilization each — not four civilizations sharing one circular world. Camera face mood is active; hand-gesture casts and camera god powers are gated behind `CAMERA_CASTS_ENABLED` until the deferred milestone. It uses accelerometer tilt without gyroscope fusion, and trains a hidden calm/focus classifier instead of producing civilization traits. Treat the build as a reference implementation, not as the specification.
 
 ---
 

@@ -1,6 +1,11 @@
 // camera (#33): the seven hand casts. One row per canned MediaPipe gesture.
 // `gesture` is the Gesture Recognizer's category name, `key` the keyboard fallback (1–7),
 // `cooldown` is per spell, in milliseconds.
+//
+// Deferred milestone (README §1/§3.3/§4.3): gesture UI and god powers are not in the
+// current scope. Keep the implementation, but do not load the hand model or wire casts
+// until this flag is flipped.
+export const CAMERA_CASTS_ENABLED = false;
 
 export const SPELLS = [
   { id: 'point', key: 1, gesture: 'Pointing_Up', glyph: '☝️', name: 'Aim', cooldown: 0,
