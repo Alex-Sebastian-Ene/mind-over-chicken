@@ -187,8 +187,10 @@ mod tests {
                 assert!(h[j] < 0.0, "cell {i} drains to a sea cell");
             }
         }
+        // Accumulation conserves water: the outlets receive every routed cell's share.
         let acc = accumulate(&dr, &vec![1.0; d.n()]);
-        assert!(acc.iter().cloned().fold(0.0, f32::max) > 50.0);
+        let out: f32 = dr.order.iter().filter(|&&i| dr.recv[i as usize] == NONE).map(|&i| acc[i as usize]).sum();
+        assert_eq!(out as usize, dr.order.len());
         let mut hh = h.clone();
         let lake = lakes(d, &mut hh, &dr.filled, 0.0, 4, 0.05, 3);
         assert!(lake[15 * 40 + 20], "the pit holds a lake");
