@@ -73,6 +73,14 @@ pub struct WebGl3DRenderer {
     pub u_billboard_vp: WebGlUniformLocation,
     pub u_billboard_cam_right: WebGlUniformLocation,
     pub u_billboard_night: WebGlUniformLocation,
+    pub u_billboard_up_scale: WebGlUniformLocation,
+    pub u_terrain_offset_x: WebGlUniformLocation,
+    pub u_water_offset_x: WebGlUniformLocation,
+    pub u_billboard_offset_x: WebGlUniformLocation,
+
+    /// Clear colour around the map (rgb 0..1): the world's deep sea, so the view's edges read
+    /// as open ocean rather than a void. Set from JS with `Engine::set_backdrop`.
+    pub backdrop: [f32; 3],
 }
 
 const TERRAIN_VS: &str = r#"
@@ -81,6 +89,7 @@ attribute vec2 a_texCoord;
 attribute vec3 a_normal;
 
 uniform mat4 u_viewProjection;
+uniform float u_offsetX; // east-west copy of the map (the planet wraps)
 
 varying vec2 v_texCoord;
 varying vec3 v_normal;
@@ -90,7 +99,7 @@ void main() {
     v_worldPos = a_position;
     v_normal = a_normal;
     v_texCoord = a_texCoord;
-    gl_Position = u_viewProjection * vec4(a_position, 1.0);
+    gl_Position = u_viewProjection * vec4(a_position + vec3(u_offsetX, 0.0, 0.0), 1.0);
 }
 "#;
 
@@ -146,6 +155,7 @@ attribute vec3 a_normal;
 
 uniform mat4 u_viewProjection;
 uniform mediump float u_time; // must match WATER_FS precision or the program fails to link
+uniform float u_offsetX;
 
 varying vec2 v_texCoord;
 varying vec3 v_worldPos;
@@ -156,7 +166,7 @@ void main() {
     pos.y += sin(pos.x * 0.18 + u_time * 2.8) * cos(pos.z * 0.18 + u_time * 2.2) * 0.45;
     v_worldPos = pos;
     v_texCoord = a_texCoord;
-    gl_Position = u_viewProjection * vec4(pos, 1.0);
+    gl_Position = u_viewProjection * vec4(pos + vec3(u_offsetX, 0.0, 0.0), 1.0);
 }
 "#;
 
@@ -175,18 +185,21 @@ uniform float u_lightRad[16];
 uniform float u_lightInt[16];
 
 void main() {
-    vec3 dayWater = vec3(0.12, 0.38, 0.64);
-    vec3 nightWater = vec3(0.04, 0.08, 0.20);
+    // A thin dark glaze: the 2D map's own sea (shallows, foam, animation) shows through.
+    vec3 dayWater = vec3(0.08, 0.17, 0.36);
+    vec3 nightWater = vec3(0.03, 0.06, 0.16);
     vec3 col = mix(dayWater, nightWater, u_night);
 
     // Sun height brightens the water in steps (pixel-art lighting, like the terrain)
     float sunUp = max(0.0, normalize(u_sunDir).y);
     col += vec3(0.04, 0.06, 0.08) * (floor(sunUp * 3.0 + 0.5) / 3.0) * (1.0 - u_night);
 
-    // Wave foam highlights
-    float foam = sin(v_worldPos.x * 0.45 + v_worldPos.z * 0.45 + u_time * 3.2);
-    if (foam > 0.82) {
-        col += vec3(0.18, 0.28, 0.35) * (1.0 - u_night * 0.5);
+    // Sparse twinkles (one in ~60 two-unit cells, each blinking on its own phase) instead of
+    // the old full-screen diagonal foam stripes.
+    vec2 cell = floor(v_worldPos.xz * 0.5);
+    float h = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
+    if (h > 0.984 && sin(u_time * 2.5 + h * 60.0) > 0.6) {
+        col += vec3(0.30, 0.38, 0.45) * (1.0 - u_night * 0.6);
     }
 
     // Dynamic point lights reflection on water
@@ -199,7 +212,7 @@ void main() {
         }
     }
 
-    gl_FragColor = vec4(clamp(col, 0.0, 1.0), 0.86);
+    gl_FragColor = vec4(clamp(col, 0.0, 1.0), 0.34);
 }
 "#;
 
@@ -210,13 +223,15 @@ attribute vec2 a_texCoord;
 
 uniform mat4 u_viewProjection;
 uniform vec3 u_camRight;
+uniform float u_upScale; // 1 / cos(pitch): an upright sprite keeps its pixel height when seen from above
+uniform float u_offsetX;
 
 varying vec2 v_texCoord;
 
 void main() {
     v_texCoord = a_texCoord;
-    vec3 camUp = vec3(0.0, 1.0, 0.0);
-    vec3 worldPos = a_center + u_camRight * a_offset.x + camUp * a_offset.y;
+    vec3 camUp = vec3(0.0, u_upScale, 0.0);
+    vec3 worldPos = a_center + vec3(u_offsetX, 0.0, 0.0) + u_camRight * a_offset.x + camUp * a_offset.y;
     gl_Position = u_viewProjection * vec4(worldPos, 1.0);
 }
 "#;
@@ -434,6 +449,18 @@ impl WebGl3DRenderer {
         let u_billboard_night = gl
             .get_uniform_location(&billboard_program, "u_night")
             .ok_or("Missing u_night in billboard shader")?;
+        let u_billboard_up_scale = gl
+            .get_uniform_location(&billboard_program, "u_upScale")
+            .ok_or("Missing u_upScale in billboard shader")?;
+        let u_terrain_offset_x = gl
+            .get_uniform_location(&terrain_program, "u_offsetX")
+            .ok_or("Missing u_offsetX in terrain shader")?;
+        let u_water_offset_x = gl
+            .get_uniform_location(&water_program, "u_offsetX")
+            .ok_or("Missing u_offsetX in water shader")?;
+        let u_billboard_offset_x = gl
+            .get_uniform_location(&billboard_program, "u_offsetX")
+            .ok_or("Missing u_offsetX in billboard shader")?;
 
         Ok(Self {
             gl,
@@ -472,6 +499,11 @@ impl WebGl3DRenderer {
             u_billboard_vp,
             u_billboard_cam_right,
             u_billboard_night,
+            u_billboard_up_scale,
+            u_terrain_offset_x,
+            u_water_offset_x,
+            u_billboard_offset_x,
+            backdrop: [0.09, 0.17, 0.36],
         })
     }
 
@@ -574,11 +606,10 @@ impl WebGl3DRenderer {
         gl.bind_framebuffer(WebGlRenderingContext::FRAMEBUFFER, Some(&self.fbo));
         gl.viewport(0, 0, 320, 180);
 
-        // Sky background: deep blue to twilight night
-        let sky_r = 0.05 * (1.0 - night) + 0.02 * night;
-        let sky_g = 0.12 * (1.0 - night) + 0.04 * night;
-        let sky_b = 0.28 * (1.0 - night) + 0.12 * night;
-        gl.clear_color(sky_r, sky_g, sky_b, 1.0);
+        // Around the map: the world's deep sea, darkened at night like the terrain.
+        let dim = 1.0 - 0.65 * night;
+        let [br, bg, bb] = self.backdrop;
+        gl.clear_color(br * dim, bg * dim, bb * dim, 1.0);
         gl.clear(WebGlRenderingContext::COLOR_BUFFER_BIT | WebGlRenderingContext::DEPTH_BUFFER_BIT);
 
         let aspect = 320.0 / 180.0;
@@ -628,12 +659,15 @@ impl WebGl3DRenderer {
         ];
 
         gl.bind_buffer(WebGlRenderingContext::ELEMENT_ARRAY_BUFFER, Some(&self.terrain_ibo));
-        gl.draw_elements_with_i32(
-            WebGlRenderingContext::TRIANGLES,
-            self.terrain_index_count,
-            WebGlRenderingContext::UNSIGNED_SHORT,
-            0,
-        );
+        for off in WRAP_OFFSETS {
+            gl.uniform1f(Some(&self.u_terrain_offset_x), off);
+            gl.draw_elements_with_i32(
+                WebGlRenderingContext::TRIANGLES,
+                self.terrain_index_count,
+                WebGlRenderingContext::UNSIGNED_SHORT,
+                0,
+            );
+        }
         unbind_attrs(gl, &terrain_attrs);
 
         // 3. Render Animated Water Grid
@@ -661,12 +695,18 @@ impl WebGl3DRenderer {
         ];
 
         gl.bind_buffer(WebGlRenderingContext::ELEMENT_ARRAY_BUFFER, Some(&self.water_ibo));
-        gl.draw_elements_with_i32(
-            WebGlRenderingContext::TRIANGLES,
-            self.water_index_count,
-            WebGlRenderingContext::UNSIGNED_SHORT,
-            0,
-        );
+        // The glaze must not hide sprites standing in shallow water, so it doesn't write depth.
+        gl.depth_mask(false);
+        for off in WRAP_OFFSETS {
+            gl.uniform1f(Some(&self.u_water_offset_x), off);
+            gl.draw_elements_with_i32(
+                WebGlRenderingContext::TRIANGLES,
+                self.water_index_count,
+                WebGlRenderingContext::UNSIGNED_SHORT,
+                0,
+            );
+        }
+        gl.depth_mask(true);
         unbind_attrs(gl, &water_attrs);
 
         // 4. Render Billboard Sprites (camera-facing entities standing on the ground)
@@ -680,6 +720,7 @@ impl WebGl3DRenderer {
                 cam_right.z,
             );
             gl.uniform1f(Some(&self.u_billboard_night), night);
+            gl.uniform1f(Some(&self.u_billboard_up_scale), 1.0 / camera.pitch.cos().max(0.4));
 
             gl.active_texture(WebGlRenderingContext::TEXTURE0);
             gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&self.atlas_texture));
@@ -704,7 +745,10 @@ impl WebGl3DRenderer {
                 bind_attr(gl, &self.billboard_program, "a_texCoord", 2, b_stride, 5 * 4),
             ];
 
-            gl.draw_arrays(WebGlRenderingContext::TRIANGLES, 0, billboards.len() as i32);
+            for off in WRAP_OFFSETS {
+                gl.uniform1f(Some(&self.u_billboard_offset_x), off);
+                gl.draw_arrays(WebGlRenderingContext::TRIANGLES, 0, billboards.len() as i32);
+            }
             unbind_attrs(gl, &billboard_attrs);
         }
 
@@ -713,6 +757,10 @@ impl WebGl3DRenderer {
         gl.bind_framebuffer(WebGlRenderingContext::FRAMEBUFFER, None);
     }
 }
+
+/// The planet wraps east-west: draw the map, and the copies either side of it, so panning
+/// across the date line shows continuous land and sea instead of the map's edge.
+const WRAP_OFFSETS: [f32; 3] = [-(crate::sprites::W as f32), 0.0, crate::sprites::W as f32];
 
 /// Point a vertex attribute at the bound ARRAY_BUFFER. Returns None, and touches nothing, when
 /// the shader compiler stripped the attribute (location -1); `-1 as u32` would otherwise be

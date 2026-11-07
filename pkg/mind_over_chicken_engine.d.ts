@@ -55,6 +55,11 @@ export class Engine {
     render_uploaded_canvas(night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
     screen_to_ground(sx: number, sy: number, cw: number, ch: number): Float32Array;
     set_3d_mode(enabled: boolean): void;
+    /**
+     * The colour around the map in 3D (the world's deep sea, 0..255), so the view's edges read
+     * as open ocean. JS passes its palette's deep-water colour.
+     */
+    set_backdrop(r: number, g: number, b: number): void;
     set_camera_target(tx: number, tz: number): void;
     set_era(era: number): void;
     /**
@@ -124,6 +129,7 @@ export interface InitOutput {
     readonly engine_render_uploaded_canvas: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly engine_screen_to_ground: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly engine_set_3d_mode: (a: number, b: number) => void;
+    readonly engine_set_backdrop: (a: number, b: number, c: number, d: number) => void;
     readonly engine_set_camera_target: (a: number, b: number, c: number) => void;
     readonly engine_set_era: (a: number, b: number) => void;
     readonly engine_set_heightmap: (a: number, b: number, c: number) => [number, number];

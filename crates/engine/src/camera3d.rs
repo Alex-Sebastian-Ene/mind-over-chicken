@@ -1,5 +1,12 @@
 use crate::math3d::{Mat4, Vec3};
 
+/// Default view: a steep (~60 degree) look down a narrow 30 degree lens from far back, so the
+/// island reads like a tilted diorama of the 2D map instead of a low wide-angle shot.
+pub const DEFAULT_PITCH: f32 = 1.05;
+pub const DEFAULT_DISTANCE: f32 = 300.0;
+pub const MIN_DISTANCE: f32 = 40.0;
+pub const MAX_DISTANCE: f32 = 600.0;
+
 #[derive(Clone, Debug)]
 pub struct OrbitCamera {
     pub target: Vec3,
@@ -16,9 +23,9 @@ impl OrbitCamera {
         Self {
             target: Vec3::new(target_x, 0.0, target_z),
             yaw: 0.0,
-            pitch: 0.65, // ~37 degrees tilt down
-            distance: 120.0,
-            fov: std::f32::consts::FRAC_PI_4, // 45 degrees
+            pitch: DEFAULT_PITCH,
+            distance: DEFAULT_DISTANCE,
+            fov: std::f32::consts::FRAC_PI_6, // 30 degrees: little perspective distortion
             near: 1.0,
             far: 2000.0,
         }
@@ -28,13 +35,13 @@ impl OrbitCamera {
         self.yaw += delta_yaw;
         // Clamp pitch so camera cannot flip upside down
         let min_pitch = 0.15; // ~8 degrees
-        let max_pitch = 1.45; // ~83 degrees
+        let max_pitch = 1.55; // ~89 degrees: straight down, for the hand-over to the globe
         self.pitch = (self.pitch + delta_pitch).clamp(min_pitch, max_pitch);
     }
 
     pub fn zoom(&mut self, factor: f32) {
         // Zoom in/out clamped between close ground view and high orbit
-        self.distance = (self.distance * factor).clamp(25.0, 600.0);
+        self.distance = (self.distance * factor).clamp(MIN_DISTANCE, MAX_DISTANCE);
     }
 
     pub fn pan(&mut self, dx: f32, dz: f32) {
@@ -177,7 +184,7 @@ mod tests {
 
         // Orbit test
         cam.orbit(0.2, 0.1);
-        assert!(cam.pitch > 0.65);
+        assert!(cam.pitch > DEFAULT_PITCH);
     }
 
     #[test]
@@ -197,6 +204,8 @@ mod tests {
         let plane = cam.screen_to_ground(400.0, 300.0, 800.0, 600.0, 8.0).unwrap();
         let hit = cam.screen_to_terrain(400.0, 300.0, 800.0, 600.0, 24.0, ground).unwrap();
         assert!(hit[1] > 80.0, "hit {:?} should be on the plateau", hit);
-        assert!(hit[1] > plane[1], "camera looks toward +z: the plateau is hit before the plane ({:?} vs {:?})", hit, plane);
+        // The camera sits south (+z) looking north, so the ray meets the plateau south of
+        // where it would meet the sea-level plane.
+        assert!(hit[1] > plane[1], "plateau should be hit before the plane ({:?} vs {:?})", hit, plane);
     }
 }

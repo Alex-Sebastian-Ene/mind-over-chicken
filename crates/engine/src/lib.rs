@@ -172,9 +172,12 @@ impl Engine {
     // Unproject screen coordinates to 3D terrain surface for click aiming & lightning
     pub fn screen_to_ground(&self, sx: f32, sy: f32, cw: f32, ch: f32) -> js_sys::Float32Array {
         let result = js_sys::Float32Array::new_with_length(2);
-        // Land on the terrain surface (hills included), never below the sea.
-        let ground_at = |x: f32, z: f32| (self.get_terrain_height_at(x, z) * 24.0).max(7.92);
+        // Land on the terrain surface (hills included), never below the sea. The map repeats
+        // east-west, so wrap x; beyond the poles, clamp to the edge row.
+        let ground_at = |x: f32, z: f32| (self.get_terrain_height_at(x.rem_euclid(W as f32), z) * 24.0).max(7.92);
         if let Some([hx, hz]) = self.camera_3d.screen_to_terrain(sx, sy, cw, ch, 24.0, ground_at) {
+            let hx = hx.rem_euclid(W as f32);
+            let hz = hz.clamp(0.0, H as f32 - 1.0);
             result.set_index(0, hx);
             result.set_index(1, hz);
         } else {
@@ -195,6 +198,21 @@ impl Engine {
 
     pub fn clear_3d_billboards(&mut self) {
         self.billboards_3d.clear();
+    }
+
+    /// The colour around the map in 3D (the world's deep sea, 0..255), so the view's edges read
+    /// as open ocean. JS passes its palette's deep-water colour.
+    pub fn set_backdrop(&mut self, r: u8, g: u8, b: u8) {
+        if let Some(r3d) = &mut self.renderer_3d {
+            // The open sea renders ~1.45x its palette colour once lit and glazed (measured), so
+            // match that and the pole edges disappear into it.
+            let k = 1.45 / 255.0;
+            r3d.backdrop = [
+                (r as f32 * k).min(1.0),
+                (g as f32 * k).min(1.0),
+                (b as f32 * k).min(1.0),
+            ];
+        }
     }
 
     /// Use the JS world's heights (row-major W×H, 0..1, sea level 0.33) for the 3D mesh, the

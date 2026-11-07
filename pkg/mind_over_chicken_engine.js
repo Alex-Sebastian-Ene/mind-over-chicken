@@ -483,6 +483,16 @@ export class Engine {
         wasm.engine_set_3d_mode(this.__wbg_ptr, enabled);
     }
     /**
+     * The colour around the map in 3D (the world's deep sea, 0..255), so the view's edges read
+     * as open ocean. JS passes its palette's deep-water colour.
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     */
+    set_backdrop(r, g, b) {
+        wasm.engine_set_backdrop(this.__wbg_ptr, r, g, b);
+    }
+    /**
      * @param {number} tx
      * @param {number} tz
      */
