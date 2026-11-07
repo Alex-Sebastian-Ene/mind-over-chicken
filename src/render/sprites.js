@@ -68,41 +68,61 @@ export function drawPad(ctx, x, y) {
 // ---------- animated sprites ----------
 
 // Villager. opts: shirt, skin, hair, frame (walk cycle), pose, carry (color), facing (-1|1)
+// People are 3x6 pixels on a 320x180 map, so a dark 1-pixel outline around the exact
+// silhouette (arms, hats and carried things included) is what makes them readable on grass,
+// sand and dirt. o.outline = false draws the bare sprite.
+const OUTLINE = '#120d09';
 export function drawPerson(ctx, x, y, o = {}) {
   x = Math.round(x); y = Math.round(y);
-  const skin = o.skin || '#e0b48a', shirt = o.shirt || '#8b5a3c', hair = o.hair || '#3b2a1e';
+  const skin = o.skin || '#e0b48a', shirt = o.shirt || '#c0703a', hair = o.hair || '#3b2a1e';
   const pose = o.pose || 'walk';
+  const pix = new Map(); // "x,y" -> colour, in draw order (later wins)
+  const put = (px0, py0, c, w = 1, h = 1) => { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) pix.set(`${px0 + i},${py0 + j}`, c); };
   if (pose === 'dead') {
-    px(ctx, x - 2, y - 1, shirt, 3, 1); px(ctx, x + 1, y - 1, skin);
-    return;
-  }
-  const bob = pose === 'dance' ? (o.frame % 2) : 0;
-  const sy = y - bob;
-  // shadow
-  px(ctx, x - 1, y, 'rgba(0,0,0,0.25)', 3, 1);
-  // legs
-  if (pose === 'walk' && o.frame % 2) { px(ctx, x - 1, sy - 1, '#3a2b20'); px(ctx, x + 1, sy - 1, '#3a2b20'); }
-  else px(ctx, x, sy - 1, '#3a2b20');
-  // body
-  px(ctx, x, sy - 3, shirt, 1, 2);
-  // arms
-  if (pose === 'pray' || pose === 'dance' || pose === 'panic' || pose === 'cheer') {
-    const flick = pose === 'panic' ? (o.frame % 2 ? -1 : 0) : 0;
-    px(ctx, x - 1, sy - 4 + flick, skin); px(ctx, x + 1, sy - 4 - flick, skin);
+    put(x - 2, y - 1, shirt, 3, 1); put(x + 1, y - 1, skin);
   } else {
-    px(ctx, x - 1, sy - 3, shirt); px(ctx, x + 1, sy - 3, shirt);
+    const bob = pose === 'dance' ? (o.frame % 2) : 0;
+    const sy = y - bob;
+    // legs
+    if (pose === 'walk' && o.frame % 2) { put(x - 1, sy - 1, '#3a2b20'); put(x + 1, sy - 1, '#3a2b20'); }
+    else put(x, sy - 1, '#3a2b20');
+    // body
+    put(x, sy - 3, shirt, 1, 2);
+    // arms
+    if (pose === 'pray' || pose === 'dance' || pose === 'panic' || pose === 'cheer') {
+      const flick = pose === 'panic' ? (o.frame % 2 ? -1 : 0) : 0;
+      put(x - 1, sy - 4 + flick, skin); put(x + 1, sy - 4 - flick, skin);
+    } else {
+      put(x - 1, sy - 3, shirt); put(x + 1, sy - 3, shirt);
+    }
+    // head + hair
+    put(x, sy - 4, skin);
+    put(x, sy - 5, hair);
+    if (o.hat) put(x - 1, sy - 5, o.hat, 3, 1);
+    if (o.carry) put(x + (o.facing || 1), sy - 4, o.carry, 2, 1);
+    if (pose === 'sign') {
+      put(x, sy - 7, '#7a5a3a', 1, 3);
+      put(x - 2, sy - 9, '#f2ead8', 5, 2);
+      put(x - 1, sy - 9, '#c0392b', 3, 1);
+    }
+    if (o.mark) put(x, sy - 7, o.mark);
   }
-  // head + hair
-  px(ctx, x, sy - 4, skin);
-  px(ctx, x, sy - 5, hair);
-  if (o.hat) px(ctx, x - 1, sy - 5, o.hat, 3, 1);
-  if (o.carry) px(ctx, x + (o.facing || 1), sy - 4, o.carry, 2, 1);
-  if (pose === 'sign') {
-    px(ctx, x, sy - 7, '#7a5a3a', 1, 3);
-    px(ctx, x - 2, sy - 9, '#f2ead8', 5, 2);
-    px(ctx, x - 1, sy - 9, '#c0392b', 3, 1);
+  // shadow, then the outline (every empty 4-neighbour of the silhouette), then the sprite
+  if (pose !== 'dead') px(ctx, x - 1, y, 'rgba(0,0,0,0.25)', 3, 1);
+  if (o.outline !== false) {
+    ctx.fillStyle = OUTLINE;
+    const done = new Set();
+    for (const k of pix.keys()) {
+      const [kx, ky] = k.split(',').map(Number);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nk = `${kx + dx},${ky + dy}`;
+        if (pix.has(nk) || done.has(nk)) continue;
+        done.add(nk);
+        ctx.fillRect(kx + dx, ky + dy, 1, 1);
+      }
+    }
   }
-  if (o.mark) px(ctx, x, sy - 7, o.mark);
+  for (const [k, c] of pix) { const [kx, ky] = k.split(',').map(Number); ctx.fillStyle = c; ctx.fillRect(kx, ky, 1, 1); }
 }
 
 export function drawMammoth(ctx, x, y, o = {}) {
