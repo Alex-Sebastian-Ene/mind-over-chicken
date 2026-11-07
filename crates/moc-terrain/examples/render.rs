@@ -48,6 +48,7 @@ fn main() {
     for seed in seeds {
         let p = match kind.as_str() {
             "home" => TerrainParams::home_world(seed),
+            "home640" => TerrainParams::home_world_sized(seed, 640, 360),
             "galaxy" => TerrainParams::galaxy_surface(seed, &biome_name),
             _ => TerrainParams::civ_planet(seed, size.0, size.1),
         };
@@ -113,6 +114,8 @@ fn main() {
             println!("  islands: {} (min {}, median {}, max {}; min allowed {})", isl.len(), isl[0], isl[isl.len() / 2], isl[isl.len() - 1], t.stats.min_island);
         }
         println!("  coast clean: {:?}", t.stats.coast);
+        let l = &t.stats.layout;
+        println!("  layout: size CV {:.2}, largest/smallest {:.1}, Clark-Evans {:.2}, isoperimetric {:.3} (2:1 ellipse {:.3}), straight strips {} (max linearity {:.2}); characters {:?}", l.size_cv, l.size_ratio, l.clark_evans, l.iq_mean, l.iq_ellipse, l.straight_strips, l.max_strip_linearity, t.stats.characters);
         println!("  ranges: {}", t.ranges.iter().map(|r| format!("{}n/{}l/{}b", r.nodes, r.leaves, r.branch_points)).collect::<Vec<_>>().join(" "));
         println!("  biomes: {}", biomes.join(", "));
     }

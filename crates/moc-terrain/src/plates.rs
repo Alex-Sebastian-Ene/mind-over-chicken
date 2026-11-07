@@ -43,6 +43,8 @@ pub struct ContinentPlan {
     pub bands: f32,
     /// How irregular the shapes are (0 = round blobs).
     pub roughness: f32,
+    /// Clusters the continents bunch into (0: one to three, at random).
+    pub clusters: usize,
 }
 
 pub struct Tectonics {
@@ -170,46 +172,89 @@ pub fn build(map_w: usize, map_h: usize, gd: Dims, plan: &ContinentPlan, plates:
         }
         true
     };
+    // Cores: continents bunch round one to three cluster centres (some nearly touching across
+    // narrow straits) and leave wide open oceans elsewhere; no even spacing (Alex, #109).
     let mut cores: Vec<(f32, f32)> = Vec::new();
-    let aspect = |r: &mut Rng| (r.range(0.0, std::f32::consts::PI), r.range(1.0, 2.3));
+    // Elongated, at 1.8–3.6 : 1; continents in one cluster lie roughly parallel (like
+    // neighbouring plates), so they can sit close side by side.
+    let aspect = |r: &mut Rng, base: f32| (base + r.range(-0.45, 0.45), r.range(1.8, 3.6));
     let mut shape: Vec<(f32, f32)> = Vec::new();
+    let radius = |k: usize| (plan.areas[k] / (cell.0 * cell.1) / std::f32::consts::PI).sqrt();
+    let mean_r = (0..n).map(radius).sum::<f32>() / n.max(1) as f32;
+    let ok_core = |gx: f32, gy: f32| {
+        let i = (gy as usize).min(gd.h - 1) * gd.w + (gx as usize).min(gd.w - 1);
+        allowed(i) && lat_of(gy as usize) <= plan.cold_limit * 0.9
+    };
+    let wrap_pt = |gx: f32, gy: f32| {
+        let x = if gd.wrap_x { gx.rem_euclid(gd.w as f32) } else { gx.clamp(0.0, gd.w as f32 - 1.0) };
+        let y = if gd.wrap_y { gy.rem_euclid(gd.h as f32) } else { gy.clamp(0.0, gd.h as f32 - 1.0) };
+        (x, y)
+    };
+    let n_clusters = if plan.clusters > 0 { plan.clusters } else { (1 + (n >= 5 && rng.chance(0.4)) as usize).min(n.max(1)) };
+    let mut centres: Vec<(f32, f32)> = Vec::new();
+    for k in 0..n_clusters {
+        if k == 0 {
+            if let Some((ax, ay, _)) = plan.anchor {
+                centres.push((ax / cell.0, ay / cell.1));
+                continue;
+            }
+        }
+        let mut best = (gd.w as f32 * 0.5, gd.h as f32 * 0.5, f32::NEG_INFINITY);
+        for _ in 0..40 {
+            let (gx, gy) = (rng.range(0.0, gd.w as f32), rng.range(0.0, gd.h as f32));
+            if !ok_core(gx, gy) {
+                continue;
+            }
+            let d = centres.iter().map(|&(cx, cy)| gd.dist2(cx, cy, gx, gy)).fold(f32::INFINITY, f32::min);
+            if d > best.2 {
+                best = (gx, gy, d);
+            }
+        }
+        centres.push((best.0, best.1));
+    }
+    let cluster_dir: Vec<f32> = (0..n_clusters).map(|_| rng.range(0.0, std::f32::consts::PI)).collect();
+    let gauss = |r: &mut Rng| {
+        let (u, v) = (r.range(1e-6, 1.0), r.f32());
+        (-2.0 * u.ln()).sqrt() * (std::f32::consts::TAU * v).cos()
+    };
     for c in 0..n {
         if c == 0 {
             if let Some((ax, ay, _)) = plan.anchor {
                 cores.push((ax / cell.0, ay / cell.1));
-                shape.push(aspect(&mut rng));
+                shape.push(aspect(&mut rng, cluster_dir[0]));
                 continue;
             }
         }
-        // Best candidate: far from the other cores, weighted by their size.
-        let mut best = (0.0, 0.0, f32::NEG_INFINITY);
-        for _ in 0..40 {
-            let gx = rng.range(0.0, gd.w as f32);
-            let gy = rng.range(0.0, gd.h as f32);
-            let i = (gy as usize).min(gd.h - 1) * gd.w + (gx as usize).min(gd.w - 1);
-            if !allowed(i) || lat_of(gy as usize) > plan.cold_limit * 0.9 {
+        let cl = if c < n_clusters { c } else { rng.below(n_clusters) };
+        let sigma = (radius(c) + mean_r) * 0.75;
+        let mut placed = None;
+        for _ in 0..80 {
+            let (gx, gy) = wrap_pt(centres[cl].0 + gauss(&mut rng) * sigma, centres[cl].1 + gauss(&mut rng) * sigma * 0.8);
+            if !ok_core(gx, gy) {
                 continue;
             }
-            let mut score = f32::INFINITY;
-            for (k, &(cx, cy)) in cores.iter().enumerate() {
-                let r = (plan.areas[k] / (cell.0 * cell.1)).sqrt();
-                let d = gd.dist2(cx, cy, gx, gy).sqrt() / (r + 1.0);
-                score = score.min(d);
-            }
-            if plan.seam_margin > 0.0 {
-                let r = (plan.areas[c] / (cell.0 * cell.1)).sqrt();
-                let to_seam = gx.min(gd.w as f32 - gx).min(gy.min(gd.h as f32 - gy) * 1.6) / (r + 1.0);
-                score = score.min(to_seam * 1.6);
-            }
-            if score > best.2 {
-                best = (gx, gy, score);
+            if cores.iter().enumerate().all(|(k, &(cx, cy))| gd.dist2(cx, cy, gx, gy).sqrt() >= 0.6 * (radius(c) + radius(k))) {
+                placed = Some((gx, gy));
+                break;
             }
         }
-        if best.2 == f32::NEG_INFINITY {
-            best = (rng.range(0.0, gd.w as f32), gd.h as f32 * 0.5, 0.0);
-        }
-        cores.push((best.0, best.1));
-        shape.push(aspect(&mut rng));
+        let p = placed.unwrap_or_else(|| {
+            // Crowded: the most open allowed spot.
+            let mut best = (rng.range(0.0, gd.w as f32), gd.h as f32 * 0.5, f32::NEG_INFINITY);
+            for _ in 0..60 {
+                let (gx, gy) = (rng.range(0.0, gd.w as f32), rng.range(0.0, gd.h as f32));
+                if !ok_core(gx, gy) {
+                    continue;
+                }
+                let d = cores.iter().enumerate().map(|(k, &(cx, cy))| gd.dist2(cx, cy, gx, gy).sqrt() / (radius(k) + radius(c))).fold(f32::INFINITY, f32::min);
+                if d > best.2 {
+                    best = (gx, gy, d);
+                }
+            }
+            (best.0, best.1)
+        });
+        cores.push(p);
+        shape.push(aspect(&mut rng, cluster_dir[cl]));
     }
 
     let mut owner = vec![OCEAN; gd.n()];
@@ -281,7 +326,8 @@ pub fn build(map_w: usize, map_h: usize, gd: Dims, plan: &ContinentPlan, plates:
                 let lat = lat_of(jy as usize);
                 let lat_pen = 1.0 + 30.0 * (lat - plan.cold_limit * 0.8).max(0.0).powi(2);
                 let cn = cost_noise[j];
-                let rough_mul = 1.0 + plan.roughness * 5.0 * cn * cn;
+                // Cheap fingers grow peninsulas, dear pockets stay bays and gulfs.
+                let rough_mul = 0.45 + plan.roughness * 8.0 * cn * cn * cn;
                 let nc = cost + step * aniso * rough_mul * lat_pen;
                 if nc < best_cost[j] || owner[j] == OCEAN {
                     best_cost[j] = best_cost[j].min(nc);
