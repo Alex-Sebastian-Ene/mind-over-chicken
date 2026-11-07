@@ -71,6 +71,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "moc-brain"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "moc-planet"
 version = "0.1.0"
 
