@@ -1,4 +1,4 @@
-use crate::math3d::Vec3;
+﻿use crate::math3d::Vec3;
 
 // Vertex format: [x, y, z,  u, v,  nx, ny, nz] (8 floats per vertex)
 pub const VERTEX_STRIDE: usize = 8;
@@ -22,7 +22,7 @@ impl TerrainMesh {
     ) -> Self {
         // High-density 1:1 tile grid (320x180): 58,101 vertices (fits within u16::MAX 65535)
         // Coastlines, cliffs and mountain ridges are sharp and accurate to the simulation grid.
-        let cols = grid_w.min(320);
+        let cols = grid_w.min(320); // u16 indices: keep under 65,535 vertices
         let rows = grid_h.min(180);
         let total_verts = (cols + 1) * (rows + 1);
         let mut vertices = Vec::with_capacity(total_verts * VERTEX_STRIDE);

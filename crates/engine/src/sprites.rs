@@ -1,7 +1,7 @@
 // Hand-placed pixel sprites rendered to a 320x180 RGBA buffer or 256x256 sprite atlas.
 
-pub const W: usize = 320;
-pub const H: usize = 180;
+pub const W: usize = 640;
+pub const H: usize = 360;
 pub const ATLAS_SIZE: usize = 256;
 pub const CELL_SIZE: usize = 32;
 

@@ -2,8 +2,8 @@
 
 // The world is drawn at a low pixel resolution and scaled up with nearest-neighbour
 // filtering, so every sprite is honest pixel art.
-export const W = 320;   // world width in pixels
-export const H = 180;   // world height in pixels
+export const W = 640;   // world width in pixels
+export const H = 360;   // world height in pixels
 
 export const clamp = (v, lo = 0, hi = 1) => (v < lo ? lo : v > hi ? hi : v);
 export const lerp = (a, b, t) => a + (b - a) * t;

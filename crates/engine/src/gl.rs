@@ -55,7 +55,7 @@ uniform vec4 u_lights[16];
 
 void main() {
     vec4 texColor = texture2D(u_texture, v_texCoord);
-    vec2 worldCoord = vec2(v_texCoord.x * 320.0, v_texCoord.y * 180.0);
+    vec2 worldCoord = vec2(v_texCoord.x * 640.0, v_texCoord.y * 360.0);
 
     // Deep blue night ambient tint
     vec3 nightTint = vec3(0.06, 0.09, 0.24);
@@ -279,11 +279,11 @@ impl WebGlRenderer {
         self.gl.clear(WebGlRenderingContext::COLOR_BUFFER_BIT);
 
         // Integer upscale letterbox calculation (preserves 320x180 aspect ratio)
-        let scale_x = canvas_w / 320;
-        let scale_y = canvas_h / 180;
+        let scale_x = canvas_w / 640;
+        let scale_y = canvas_h / 360;
         let scale = scale_x.min(scale_y).max(1);
-        let vp_w = 320 * scale;
-        let vp_h = 180 * scale;
+        let vp_w = 640 * scale;
+        let vp_h = 360 * scale;
         let vp_x = (canvas_w - vp_w) / 2;
         let vp_y = (canvas_h - vp_h) / 2;
 

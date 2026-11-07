@@ -38,7 +38,7 @@ export function walk(a, tx, ty, speed, dt, world) {
   const step = Math.min(d, speed * dt);
   if (d > 7 && world && world.field) {
     const f = world.field(tx, ty);
-    const W = 320;
+    const W = 640;
     const cx = Math.round(a.x), cy = Math.round(a.y);
     const here = f[cy * W + cx];
     if (here > 0) {
@@ -93,7 +93,7 @@ export function sail(b, tx, ty, speed, dt, world) {
   if (d < 1.5) return true;
   const step = Math.min(d, speed * dt);
   const f = world.seaField(tx, ty);
-  const W = 320;
+  const W = 640;
   const cx = Math.round(b.x), cy = Math.round(b.y);
   const here = f[cy * W + cx];
   let mx = tx - b.x, my = ty - b.y;

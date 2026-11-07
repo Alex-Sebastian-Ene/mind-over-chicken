@@ -385,8 +385,8 @@ impl WebGl3DRenderer {
             WebGlRenderingContext::TEXTURE_2D,
             0,
             WebGlRenderingContext::RGBA as i32,
-            320,
-            180,
+            640,
+            360,
             0,
             WebGlRenderingContext::RGBA,
             WebGlRenderingContext::UNSIGNED_BYTE,
@@ -421,8 +421,8 @@ impl WebGl3DRenderer {
         gl.renderbuffer_storage(
             WebGlRenderingContext::RENDERBUFFER,
             WebGlRenderingContext::DEPTH_COMPONENT16,
-            320,
-            180,
+            640,
+            360,
         );
 
         gl.bind_framebuffer(WebGlRenderingContext::FRAMEBUFFER, Some(&fbo));
@@ -739,7 +739,7 @@ impl WebGl3DRenderer {
 
         // 1. Render to offscreen 320x180 framebuffer for pixel-art aesthetic
         gl.bind_framebuffer(WebGlRenderingContext::FRAMEBUFFER, Some(&self.fbo));
-        gl.viewport(0, 0, 320, 180);
+        gl.viewport(0, 0, 640, 360);
 
         // Around the map: the world's deep sea, darkened at night like the terrain.
         let dim = 1.0 - 0.65 * night;
@@ -747,7 +747,7 @@ impl WebGl3DRenderer {
         gl.clear_color(br * dim, bg * dim, bb * dim, 1.0);
         gl.clear(WebGlRenderingContext::COLOR_BUFFER_BIT | WebGlRenderingContext::DEPTH_BUFFER_BIT);
 
-        let aspect = 320.0 / 180.0;
+        let aspect = 640.0 / 360.0;
         let (_view, _proj, view_proj) = camera.compute_matrices(aspect);
         let cam_right = Vec3::new(camera.yaw.cos(), 0.0, -camera.yaw.sin());
         let ground_forward = Vec3::new(-camera.yaw.sin(), 0.0, -camera.yaw.cos());

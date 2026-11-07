@@ -942,7 +942,7 @@ impl Engine {
         if let Some(t) = &mut self.terrain {
             t.field(tx, ty).to_vec()
         } else {
-            vec![-1i16; 320 * 180]
+            vec![-1i16; W * H]
         }
     }
 
@@ -950,7 +950,7 @@ impl Engine {
         if let Some(t) = &mut self.terrain {
             t.sea_field(tx, ty).to_vec()
         } else {
-            vec![-1i16; 320 * 180]
+            vec![-1i16; W * H]
         }
     }
 
@@ -975,7 +975,7 @@ impl Engine {
             t.palette = terrain::BiomePalette::for_biome(biome);
             t.bake_era(self.game.era_index as u8);
             if let Some(r3d) = &mut self.renderer_3d {
-                r3d.upload_terrain_texture(&t.pixels, 320, 180);
+                r3d.upload_terrain_texture(&t.pixels, W as i32, H as i32);
             }
         }
     }

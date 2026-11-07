@@ -6,8 +6,8 @@
 use crate::sprites::*;
 use std::collections::HashMap;
 
-pub const W: usize = 320;
-pub const H: usize = 180;
+pub const W: usize = 640;
+pub const H: usize = 360;
 
 pub const T_DEEP: u8 = 0;
 pub const T_SHALLOW: u8 = 1;
