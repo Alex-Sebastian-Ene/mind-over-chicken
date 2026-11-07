@@ -29,6 +29,12 @@
     <div class="frame">
       <canvas id="screen" width="960" height="540" aria-label="The island"></canvas>
 
+      <div class="zoom" role="group" aria-label="Zoom">
+        <button type="button" class="zbtn" id="zoomOut" aria-label="Zoom out (Z)" title="Zoom out (Z or scroll)">−</button>
+        <span class="zlabel" id="zoomLabel" aria-live="polite">Surface</span>
+        <button type="button" class="zbtn" id="zoomIn" aria-label="Zoom in (X)" title="Zoom in (X or scroll)" disabled>+</button>
+      </div>
+
       <div class="banner" id="banner" hidden>
         <div class="card">
           <p class="eyebrow" data-banner-era></p>
@@ -39,6 +45,16 @@
         </div>
       </div>
     </div>
+
+    <aside class="galaxy-panel" id="galaxyPanel" hidden aria-labelledby="galaxyHeading">
+      <header>
+        <h3 id="galaxyHeading">Galaxy</h3>
+        <button type="button" class="btn btn-primary btn-small" id="makePlanet">Make planet</button>
+      </header>
+      <p class="mind-line" id="mindLine"></p>
+      <ul class="planet-list" id="planetList" aria-label="Worlds"></ul>
+      <ol class="galaxy-log" id="galaxyLog" aria-label="Galaxy news" aria-live="polite"></ol>
+    </aside>
 
     <aside class="advisor is-idle" id="advisor" data-mood="nervous" aria-live="polite">
       <canvas width="16" height="16" aria-hidden="true"></canvas>
@@ -97,7 +113,11 @@
       <div class="start-main">
         <button type="button" class="btn btn-primary" id="playSim">Play with the emulated headset</button>
         <p class="hint">Placeholder for the Muse: it sends the same signals, driven by your keyboard.
-          <kbd>Space</kbd> calm · <kbd>F</kbd> focus · <kbd>Shift</kbd> racing pulse · <kbd>B</kbd> or click to blink · mouse is head tilt. On a phone, hold the power tiles and tap the map.</p>
+          <kbd>Space</kbd> calm · <kbd>F</kbd> focus · <kbd>Shift</kbd> racing pulse · <kbd>B</kbd> or click to blink · mouse is head tilt. Scroll, pinch or <kbd>Z</kbd> / <kbd>X</kbd> to zoom out to the planet and the galaxy. On a phone, hold the power tiles and tap the map.</p>
+      </div>
+      <div class="start-sandbox">
+        <button type="button" class="btn" id="playSandbox">Galaxy sandbox</button>
+        <p class="hint">Skip the story: make planets and let their civilisations run on their own. Your calm, focus and pulse still steer all of them.</p>
       </div>
       <details class="start-real">
         <summary>Connect a real headset</summary>
@@ -130,7 +150,8 @@
     <p class="lede">From a fire pit to the stars. The sacred chicken stepped out first.</p>
     <dl class="end-stats" id="endStats"></dl>
     <div class="row">
-      <button type="button" class="btn btn-primary" id="againBtn">Play again</button>
+      <button type="button" class="btn btn-primary" id="galaxyBtn">Open the galaxy</button>
+      <button type="button" class="btn" id="againBtn">Play again</button>
       <button type="button" class="btn" id="endModelBtn">See the model of you</button>
     </div>
   </div>
