@@ -441,3 +441,87 @@ pub extern "C" fn civ_text_buf_ptr(p: *mut World) -> *const u8 {
 pub extern "C" fn civ_last_steps(p: *mut World) -> u32 {
     w(p).map(|w| w.last_steps).unwrap_or(0)
 }
+
+// ---- Staggered, player-initialised civilisations (#98) ----
+
+/// A staged run: the planet with four civilisations waiting to be founded one by one (0 for the
+/// default size).
+#[no_mangle]
+pub extern "C" fn civ_new_staged(seed: u32, w: u32, h: u32) -> *mut World {
+    let d = if w == 0 || h == 0 { crate::planet::Dims::DEFAULT } else { crate::planet::Dims::new(w as usize, h as usize) };
+    Box::into_raw(Box::new(World::new_staged(seed, d)))
+}
+
+/// 0 off, 1 choose, 2 place, 3 seed, 4 done.
+#[no_mangle]
+pub extern "C" fn civ_setup_phase(p: *mut World) -> u32 {
+    w(p).map(|w| w.setup.phase as u32).unwrap_or(0)
+}
+
+/// The civilisation being set up (-1 none).
+#[no_mangle]
+pub extern "C" fn civ_setup_slot(p: *mut World) -> i32 {
+    w(p).map(|w| if w.setup.slot == NO_F { -1 } else { w.setup.slot as i32 }).unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern "C" fn civ_setup_select(p: *mut World, f: u32) -> i32 {
+    w(p).map(|w| refreshed(w, |w| w.setup_select(f.min(255) as u8) as i32)).unwrap_or(0)
+}
+
+/// Tab: the next waiting civilisation.
+#[no_mangle]
+pub extern "C" fn civ_setup_next(p: *mut World) {
+    if let Some(w) = w(p) {
+        w.setup_next();
+    }
+}
+
+/// Where the player aims while placing (planet coordinates); 1 if a civilisation may begin there.
+#[no_mangle]
+pub extern "C" fn civ_setup_hover(p: *mut World, x: f32, y: f32) -> i32 {
+    w(p).map(|w| w.setup_hover(x, y) as i32).unwrap_or(0)
+}
+
+/// A click or blink on the planet during setup; returns the phase after it.
+#[no_mangle]
+pub extern "C" fn civ_setup_click(p: *mut World, x: f32, y: f32) -> u32 {
+    w(p).map(|w| refreshed(w, |w| w.setup_click(x, y) as u32)).unwrap_or(0)
+}
+
+/// Enter during setup; returns the phase after it.
+#[no_mangle]
+pub extern "C" fn civ_setup_enter(p: *mut World) -> u32 {
+    w(p).map(|w| refreshed(w, |w| w.setup_enter() as u32)).unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn civ_setup_blink(p: *mut World) {
+    if let Some(w) = w(p) {
+        w.setup_blink();
+    }
+}
+
+/// Seeding progress 0..1.
+#[no_mangle]
+pub extern "C" fn civ_setup_progress(p: *mut World) -> f32 {
+    w(p).map(|w| w.setup_progress()).unwrap_or(0.0)
+}
+
+/// Write the setup's words (what to do, then a line per civilisation) and return their length;
+/// read them at `civ_text_buf_ptr`.
+#[no_mangle]
+pub extern "C" fn civ_setup_text_build(p: *mut World) -> usize {
+    w(p).map(|w| {
+        w.text_buf = w.setup_text();
+        w.text_buf.len()
+    })
+    .unwrap_or(0)
+}
+
+/// Found civilisation `f` at (x, y) with these traits directly (tools and tests; the sandbox
+/// goes through the seeding window).
+#[no_mangle]
+pub extern "C" fn civ_found(p: *mut World, f: u32, x: i32, y: i32, friendliness: f32, aggressiveness: f32, violence: f32, fertility: f32, cohesion: f32) -> i32 {
+    w(p).map(|w| refreshed(w, |w| w.found_civ(f.min(255) as u8, x, y, Traits { friendliness, aggressiveness, violence, fertility, cohesion }) as i32)).unwrap_or(0)
+}

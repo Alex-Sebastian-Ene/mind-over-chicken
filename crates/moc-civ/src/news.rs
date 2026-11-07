@@ -57,6 +57,17 @@ impl News {
     }
 }
 
+/// A people's temper in words.
+fn describe(t: &Traits) -> String {
+    [
+        if t.friendliness > 0.6 { "friendly" } else if t.friendliness < 0.35 { "suspicious" } else { "wary" },
+        if t.aggressiveness > 0.55 { "quick to fight" } else if t.aggressiveness < 0.3 { "slow to anger" } else { "proud" },
+        if t.violence > 0.55 { "ruthless" } else { "merciful" },
+        if t.fertility > 0.6 { "and very fertile" } else { "and hard-working" },
+    ]
+    .join(", ")
+}
+
 fn strife(k: i32) -> &'static str {
     StrifeKind::NAMES.get(k.max(0) as usize).copied().unwrap_or("strife")
 }
@@ -247,6 +258,29 @@ impl World {
                 say(&mut l, "civ-festival", "They are dancing in the square, my lord. Your smile did that.".to_string(), 1, 40);
             }
             ev::COLONY => l.text = format!("The {a} found a colony across the sea"),
+            ev::CIV_FOUNDED => {
+                l.tone = TONE_GOOD;
+                let t = crate::setup::unpack_traits(e.extra);
+                let words = crate::setup::traits_line(&t);
+                let nth = match e.n {
+                    1 => "first".to_string(),
+                    2 => "second".to_string(),
+                    3 => "third".to_string(),
+                    4 => "fourth".to_string(),
+                    n => format!("{n}th"),
+                };
+                l.text = format!("The {a} are founded, {nth}: {words}");
+                log(&mut l, format!("Founded {nth}: the {a}"));
+                let mine = if self.is_player_civ(e.a) { " Your own people, my lord." } else { "" };
+                say(&mut l, "civ-founded", format!("The {a} are born: {}.{mine}", describe(&t)), 3, 3);
+            }
+            ev::SETUP => {
+                if e.n == 0 {
+                    say(&mut l, "civ-setup-place", format!("Where shall the {a} begin, my lord? Their homeland glows."), 2, 4);
+                } else {
+                    say(&mut l, "civ-setup-seed", format!("Think of the {a}, my lord. Calm makes them kind; anger and stress make them fierce."), 2, 4);
+                }
+            }
             ev::SUCCESSION if e.extra == 1 => {
                 l.tone = TONE_WARN;
                 l.text = format!("The {a}'s chief is dead: the succession is disputed");

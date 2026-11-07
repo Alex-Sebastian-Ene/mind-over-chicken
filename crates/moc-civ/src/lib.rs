@@ -36,6 +36,7 @@ pub mod planet;
 pub mod politics;
 pub mod powers;
 pub mod render;
+pub mod setup;
 pub mod terrain;
 pub mod world;
 

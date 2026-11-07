@@ -1,11 +1,12 @@
-// civ (#50): "Sandbox: four civilisations". Four peoples start on a big wrapping planet with
-// one village and four agents each; they grow, claim land, trade, raid, go to war and rebel.
+// civ (#50): "Sandbox: four civilisations". Four peoples on a big wrapping planet; the player
+// founds them one at a time (#98): choose one, place it, seed its temper from the mind for 5 s,
+// and it begins while the others wait. They grow, claim land, trade, raid, go to war and rebel.
 // The simulation is Rust (crates/moc-civ, loaded by ./civ.js); this scene feeds it the brain,
 // draws its view, and turns its event log into news and advisor lines.
 //
 // The player is a god, not a general: calm cools every chief, stress and an angry face heat
-// them up (stress = max(1 - calm, anger), from the brain when it reports it), focus fattens harvests, blinks throw lightning, and the camera casts
-// (#33: onCast/onMood) act on the world. Each civilisation climbs the twenty ages of
+// them up, focus fattens harvests, blinks throw lightning, and the camera casts (#33:
+// onCast/onMood) act on the world. Each civilisation climbs the twenty ages of
 // data/ages.json (#69) on its own, and its people fight each other as well as their neighbours.
 // The words on screen (headlines, the age and conflict log, advisor lines, HUD rows, capital
 // labels) and the speed control (Period or the ×1 button: ×1/×4/×16) live in the Rust crate;
@@ -16,9 +17,8 @@
 
 import { W, H, clamp } from '../sim/util.js';
 import { makeBolt, drawBolt, drawReticle } from '../render/sprites.js';
-import { createCiv, EVENT, CAST, TONE } from './civ.js';
+import { createCiv, EVENT, CAST, TONE, SETUP } from './civ.js';
 
-const MIND_SECONDS = 10;
 const DAY = 80;            // seconds per day–night cycle (DAY_SECONDS in the Rust sim)
 const PAN_SPEED = 140;     // planet pixels per second
 const NEWS_HOLD = 4;       // seconds each headline stays on the ticker
@@ -37,6 +37,13 @@ window.addEventListener('keydown', (e) => {
   if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
   if (e.code === 'Period' && !e.repeat) {
     active.cycleSpeed();
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    return;
+  }
+  // Tab offers the next civilisation while founding them (#98).
+  if (e.code === 'Tab' && active.setupActive()) {
+    active.civ.setupNext();
     e.preventDefault();
     e.stopImmediatePropagation();
     return;
@@ -62,7 +69,6 @@ function label(ctx, x, y, text, color, size = 6, align = 'center') {
 }
 
 const smoothstep = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
-const pct = (v) => `${Math.round(v * 100)}%`;
 
 export class CivSandbox {
   constructor({ cosmos = null, seed = null } = {}) {
@@ -71,7 +77,7 @@ export class CivSandbox {
     this.label = 'Sandbox · Four civilisations';
     this.intro = {
       title: 'Four civilisations',
-      goal: 'Four peoples share one big planet. Watch them grow, fight for land and split. Your mind tilts war and peace.',
+      goal: 'Found four peoples on one big planet, one at a time: choose one, place it, and seed its temper from your mind for 5 seconds. Then watch them climb twenty ages, fight and split. Your mind tilts war and peace.',
       how: [
         ['Calm', 'Hold Space: friendlier chiefs, trade, peace treaties, fewer rebels.'],
         ['Stress', 'Hold Shift (or frown at the camera): stress and anger bring raids, wars and rebellions.'],
@@ -100,7 +106,6 @@ export class CivSandbox {
     this.mini = null;
     this.miniTimer = 0;
     this.infoTimer = 0;
-    this.mind = { t: 0, calm: 0, focus: 0, stress: 0, n: 0, blinks0: null, done: false, shownUntil: 0, text: '' };
     this.moodHold = { calm: 0, stress: 0, anger: 0 };
     this.mood = null;
     this.perf = { stepMs: 0, renderMs: 0, worstStepMs: 0, samples: 0, sumStep: 0, sumRender: 0, ring: new Float32Array(600), per: new Float32Array(600), n: 0, avg: 0, p95: 0, stepAvg: 0, stepP95: 0, at: 0 };
@@ -143,7 +148,7 @@ export class CivSandbox {
     G.advisor.say('civ-intro', 'Four peoples, one planet, my lord. They will grow, squabble and split. Your moods are now everyone\'s problem.', { priority: 3, cooldown: 999 });
     // calibration (#54): one run seed for the planet, the civilisations and the dummy seed.
     this.seed = (this.seedArg ?? G.calibration?.config?.seed ?? Math.random() * 2 ** 32) >>> 0;
-    createCiv(this.seed)
+    createCiv(this.seed, { staged: true })
       .then((civ) => {
         if (G.scene !== this) { civ.free(); return; }
         this.civ = civ;
@@ -153,7 +158,6 @@ export class CivSandbox {
         this.miniCanvas = Object.assign(document.createElement('canvas'), { width: civ.miniW, height: civ.miniH });
         this.miniCanvas.getContext('2d').putImageData(this.mini, 0, 0);
         console.info(`[civ] planet ${civ.pw}×${civ.ph}, seed ${this.seed}`);
-        G.calibration?.onDone((result) => { if (G.scene === this) this.applyCalibration(result); });
       })
       .catch((err) => {
         this.error = err;
@@ -192,7 +196,8 @@ export class CivSandbox {
     civ.setInputs(calm, focus, stress, anger);
     civ.setJoy(G.mood && G.mood.active !== false ? (G.mood.joy || 0) : (this.mood?.joy || 0));
     if (this.speedBtn) this.speedBtn.hidden = !playing();
-    if (!this.G.calibration) this.readMind(dt, calm, focus, stress);
+    // Founding (#98): the aim shows where the civilisation being placed may begin.
+    if (civ.setupPhase === SETUP.place) { const p = this.aimPlanet(b.aim); civ.setupHover(p.x, p.y); }
 
     // The world runs at its own speed (×1/×4/×16) in steps of at most 0.1 s.
     const t0 = performance.now();
@@ -238,53 +243,6 @@ export class CivSandbox {
     this.reactToMood(dt, calm, stress, anger);
   }
 
-  // calibration (#54): the window's result seeds the player's civilisation. In sensor mode the
-  // mind read sets all five traits (calm → friendliness, stress → aggressiveness, blinks →
-  // violence and less cohesion, focus → fertility), with #54's formula for the README three.
-  // The dummy run leaves the player's civilisation as the run seed made it.
-  applyCalibration(r) {
-    const m = this.mind;
-    if (m.done || !this.civ) return;
-    m.done = true;
-    const f = r.features || {};
-    const sensor = r.source === 'sensor';
-    if (sensor) {
-      this.civ.seedMind(f.calm ?? 0, f.focus ?? 0, f.stress ?? stressOf(null, f.calm ?? 0, f.anger ?? 0), ((f.blinkRate ?? 0) * r.seconds) / 10);
-      this.civ.setPlayerTraits(r.friendliness, r.aggressiveness, r.violence);
-    }
-    this.refresh();
-    const me = this.player();
-    if (!me) return;
-    const words = describe(me);
-    m.text = sensor
-      ? `Read from your first ${r.seconds} s: calm ${pct(f.calm ?? 0)}, focus ${pct(f.focus ?? 0)} → ${me.name}: ${words.join(', ')}.`
-      : `Dummy run (seed ${r.seed}): the ${me.name} were born at random: ${words.join(', ')}. Add ?calib_mode=sensor to seed them from your mind.`;
-    m.shownUntil = this.t + 9;
-    this.G.advisor.say('civ-mind', sensor
-      ? `I have read your mind, my lord. The ${me.name} are made in your image: ${words.join(', ')}.`
-      : `The ${me.name} are yours, my lord: ${words.join(', ')}. The stars chose them, not your mind. Not yet.`, { mood: 'happy', priority: 3, cooldown: 999 });
-  }
-
-  // Without the calibration module: the first ten seconds of play shape the player's civilisation.
-  readMind(dt, calm, focus, stress) {
-    const m = this.mind;
-    if (m.done) return;
-    if (m.blinks0 == null) m.blinks0 = this.G.brain.stats.blinks;
-    m.t += dt; m.n++;
-    m.calm += calm; m.focus += focus; m.stress += stress;
-    if (m.t < MIND_SECONDS) return;
-    m.done = true;
-    const c = m.calm / m.n, f = m.focus / m.n, s = m.stress / m.n, blinks = this.G.brain.stats.blinks - m.blinks0;
-    this.civ.seedMind(c, f, s, blinks);
-    this.refresh();
-    const me = this.player();
-    if (!me) return;
-    const words = describe(me);
-    m.text = `Read from your first ${MIND_SECONDS} s: calm ${pct(c)}, focus ${pct(f)}, stress ${pct(s)}, ${blinks} blinks → ${me.name}: ${words.join(', ')}.`;
-    m.shownUntil = this.t + 9;
-    this.G.advisor.say('civ-mind', `I have read your mind, my lord. The ${me.name} are made in your image: ${words.join(', ')}.`, { mood: 'happy', priority: 3, cooldown: 999 });
-  }
-
   reactToMood(dt, calm, stress, anger) {
     const h = this.moodHold, say = this.G.advisor.say.bind(this.G.advisor);
     h.calm = calm > 0.65 ? h.calm + dt : 0;
@@ -323,10 +281,18 @@ export class CivSandbox {
     return this.civ.toPlanet(aim.x * (W - 1), aim.y * (H - 1));
   }
 
+  // Still founding the civilisations (#98)?
+  setupActive() {
+    const ph = this.civ?.setupPhase;
+    return ph === SETUP.choose || ph === SETUP.place || ph === SETUP.seed;
+  }
+
   onBlink(aim) {
     const civ = this.civ, G = this.G;
     if (!civ) return;
     const p = this.aimPlanet(aim);
+    // While founding, a click or blink chooses, places, or (seeding) makes the people wilder.
+    if (this.setupActive()) { civ.setupClick(p.x, p.y); this.refresh(); return; }
     const killed = civ.lightning(p.x, p.y);
     const s = civ.toScreen(p.x, p.y);
     this.bolts.push({ x: p.x, y: p.y, pts: makeBolt(s.x, s.y), sx: s.x, sy: s.y, life: 0.35 });
@@ -420,13 +386,11 @@ export class CivSandbox {
       ctx.strokeRect(x0 + cx, y0 + cy, Math.min(cw, mw - cx), ch);
       if (cx + cw > mw) ctx.strokeRect(x0, y0 + cy, cx + cw - mw, ch);
     }
-    // Mind read.
-    const m = this.mind;
-    const cal = this.G.calibration;
-    const left = cal ? cal.remaining : MIND_SECONDS - m.t;
-    if (!m.done) label(ctx, 4, 9, `${cal?.config?.mode === 'random' ? 'Seeding your civilisation' : 'Reading your mind'}… ${Math.max(0, Math.ceil(left))} s`, '#59d8c8', 5, 'left');
-    else if (this.t < m.shownUntil) wrapLabel(ctx, 4, 9, m.text, '#59d8c8', 5, W - 80);
-    else {
+    // Founding the civilisations (#98): the words come from Rust.
+    if (this.setupActive()) {
+      let y = 9;
+      for (const [i, line] of civ.setupLines().entries()) y = wrapLabel(ctx, 4, y, line, i === 0 ? '#59d8c8' : '#e8e4d8', 5, W - 80) + 1;
+    } else {
       // The age and conflict log: the last few age-ups, Dark Ages and escalations.
       let y = 9;
       for (const l of this.log) {
@@ -475,7 +439,8 @@ export class CivSandbox {
     return this.hud;
   }
 
-  skip() {}
+  // Enter: while founding, take the civilisation offered or begin it in its homeland.
+  skip() { if (this.setupActive()) { this.civ.setupEnter(); this.refresh(); } }
 }
 
 // Stress, 0..1 and 0 at rest: the brain's own reading when it has one (neutral at rest), else
@@ -487,15 +452,6 @@ function stressOf(brain, calm, anger) {
 }
 
 const TONE_COLOUR = ['#ffe066', '#9be38a', '#ff8a7a', '#ffb36b'];
-
-function describe(f) {
-  return [
-    f.friendliness > 0.6 ? 'friendly' : f.friendliness < 0.35 ? 'suspicious' : 'wary',
-    f.aggressiveness > 0.55 ? 'quick to fight' : f.aggressiveness < 0.3 ? 'slow to anger' : 'proud',
-    f.violence > 0.55 ? 'ruthless' : 'merciful',
-    f.fertility > 0.6 ? 'and very fertile' : 'and hard-working',
-  ];
-}
 
 function wrapLabel(ctx, x, y, text, color, size, maxW) {
   ctx.font = `${size}px "Pixelify Sans", monospace`;
@@ -509,4 +465,5 @@ function wrapLabel(ctx, x, y, text, color, size, maxW) {
     } else line = test;
   }
   if (line) label(ctx, x, y, line, color, size, 'left');
+  return y + size;
 }

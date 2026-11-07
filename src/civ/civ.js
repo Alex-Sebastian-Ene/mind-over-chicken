@@ -28,20 +28,24 @@ export function loadCivModule() {
   return compiled;
 }
 
-// width/height 0 = the default planet (1280×640).
-export async function createCiv(seed, { width = 0, height = 0 } = {}) {
+// width/height 0 = the default planet (1280×640). staged: the civilisations wait to be
+// chosen, placed and seeded by the player one at a time (#98).
+export async function createCiv(seed, { width = 0, height = 0, staged = false } = {}) {
   const module = await loadCivModule();
   const instance = await WebAssembly.instantiate(module, {});
-  return new Civ(instance.exports, seed, width, height);
+  return new Civ(instance.exports, seed, width, height, staged);
 }
+
+// The founding flow's phases (Rust `setup::Phase`).
+export const SETUP = { off: 0, choose: 1, place: 2, seed: 3, done: 4 };
 
 const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
 
 export class Civ {
-  constructor(ex, seed, width, height) {
+  constructor(ex, seed, width, height, staged) {
     this.ex = ex;
     this.seed = seed >>> 0;
-    this.w = ex.civ_new_sized(this.seed, width, height);
+    this.w = staged ? ex.civ_new_staged(this.seed, width, height) : ex.civ_new_sized(this.seed, width, height);
     this.pw = ex.civ_planet_w(this.w);
     this.ph = ex.civ_planet_h(this.w);
     this.slots = ex.civ_faction_slots();
@@ -96,6 +100,16 @@ export class Civ {
     });
   }
   capitalLabel(f) { const len = this.ex.civ_label_build(this.w, f); return this.str(this.ex.civ_text_buf_ptr(this.w), len); }
+
+  // ---- founding the civilisations one at a time (#98; the flow lives in Rust, setup.rs) ----
+  get setupPhase() { return this.ex.civ_setup_phase(this.w); }
+  setupHover(x, y) { return this.ex.civ_setup_hover(this.w, x, y) > 0; }
+  setupClick(x, y) { return this.ex.civ_setup_click(this.w, x, y); }
+  setupEnter() { return this.ex.civ_setup_enter(this.w); }
+  setupNext() { this.ex.civ_setup_next(this.w); }
+  setupBlink() { this.ex.civ_setup_blink(this.w); }
+  // What to do now, then a line per civilisation.
+  setupLines() { const len = this.ex.civ_setup_text_build(this.w); return this.str(this.ex.civ_text_buf_ptr(this.w), len).split('\n').filter(Boolean); }
   get time() { return this.ex.civ_time(this.w); }
   get agents() { return this.ex.civ_agent_count(this.w); }
 
@@ -144,7 +158,7 @@ export class Civ {
     const out = [];
     for (let i = 0; i < n; i++) {
       const o = i * s;
-      if (f[o] === 0) continue;
+      if (f[o] === 0 || f[o] === 2) continue;   // unused, or waiting to be founded (#98)
       const raw = names.subarray(i * this.nameLen, (i + 1) * this.nameLen);
       const end = raw.indexOf(0);
       const color = [f[o + 3], f[o + 4], f[o + 5]];

@@ -45,6 +45,7 @@ impl World {
         self.draw_villages();
         self.draw_agents();
         self.draw_effects();
+        self.draw_setup();
         if self.rain_t > 0.0 {
             self.draw_rain();
         }
@@ -371,6 +372,55 @@ impl World {
                 _ => {
                     self.ring(e.x, e.y, 2.0 + e.r * p, [255, 70, 60, fade]);
                     self.ring(e.x, e.y, 1.0 + e.r * p * 0.7, [255, 160, 60, fade]);
+                }
+            }
+        }
+    }
+
+    /// The founding flow (#98): waiting homelands glow in their people's colour; the spot being
+    /// chosen shows green (yes) or red (no); seeding fills a ring round it.
+    fn draw_setup(&mut self) {
+        use crate::setup::Phase;
+        let s = self.setup.clone();
+        if matches!(s.phase, Phase::Off | Phase::Done) {
+            return;
+        }
+        let pulse = 0.5 + 0.5 * (self.time * 4.0).sin();
+        for &f in &s.slots {
+            let fac = &self.factions[f as usize];
+            if !fac.pending {
+                continue;
+            }
+            let c = fac.color;
+            let a = if f == s.slot { 200 + (55.0 * pulse) as u8 } else { 110 };
+            let (x, y) = (fac.start.0 as f32 + 0.5, fac.start.1 as f32 + 0.5);
+            self.ring(x, y, 6.0 + if f == s.slot { pulse } else { 0.0 }, [c[0], c[1], c[2], a]);
+        }
+        if matches!(s.phase, Phase::Place | Phase::Seed) {
+            let (x, y) = (s.spot.0 as f32 + 0.5, s.spot.1 as f32 + 0.5);
+            let c: Rgba = if s.phase == Phase::Seed {
+                let k = self.factions[s.slot as usize].color;
+                [k[0], k[1], k[2], 255]
+            } else if s.spot_ok {
+                [120, 255, 140, 255]
+            } else {
+                [255, 80, 70, 255]
+            };
+            self.ring(x, y, 3.0, c);
+            let (sx, sy) = self.cam.to_screen(x, y);
+            let (sx, sy) = (sx.floor() as i32, sy.floor() as i32);
+            for k in -1..=1 {
+                self.view.px(sx + k, sy, c);
+                self.view.px(sx, sy + k, c);
+            }
+            if s.phase == Phase::Seed {
+                // The seeding ring fills clockwise from the top.
+                let p = (s.t / crate::setup::SEED_SECONDS).clamp(0.0, 1.0);
+                let n = 64;
+                for k in 0..(p * n as f32) as i32 {
+                    let ang = -std::f32::consts::FRAC_PI_2 + k as f32 / n as f32 * std::f32::consts::TAU;
+                    let (rx, ry) = (sx as f32 + ang.cos() * 8.0, sy as f32 + ang.sin() * 8.0);
+                    self.view.px(rx.round() as i32, ry.round() as i32, [255, 230, 120, 255]);
                 }
             }
         }

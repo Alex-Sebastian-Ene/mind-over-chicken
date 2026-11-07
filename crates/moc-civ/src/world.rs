@@ -93,6 +93,11 @@ pub mod ev {
     pub const INDEPENDENCE: i32 = 31;
     /// a's chief dies; extra 1 if the succession is disputed.
     pub const SUCCESSION: i32 = 32;
+    // Staggered starts (#98).
+    /// Civilisation a is founded, n-th, with traits `setup::unpack_traits(extra)`.
+    pub const CIV_FOUNDED: i32 = 33;
+    /// The player picks civilisation a to set up (n 0) or starts seeding it (n 1).
+    pub const SETUP: i32 = 34;
 }
 
 /// One log entry: what happened, between which civilisations, where, how much.
@@ -325,6 +330,8 @@ pub struct Faction {
     pub succession: bool,
     /// Seconds of manning the walls left (`politics::Decision::Fortify`).
     pub fortify_t: f32,
+    /// Waiting to be founded by the player (#98): not alive yet, and its slot is kept.
+    pub pending: bool,
 }
 
 impl Faction {
@@ -384,6 +391,7 @@ impl Faction {
             crisis_cd: 30.0,
             succession: false,
             fortify_t: 0.0,
+            pending: false,
         }
     }
 }
@@ -786,6 +794,8 @@ pub struct World {
     pub text_buf: String,
     /// Steps the last `advance` took (for per-step timing).
     pub last_steps: u32,
+    /// The player's founding of civilisations one by one (#98; `Phase::Off` when all start at once).
+    pub setup: crate::setup::Setup,
     #[cfg(not(target_arch = "wasm32"))]
     pub prof: [f64; 8],
 }
@@ -897,6 +907,7 @@ impl World {
             news: crate::news::News::default(),
             text_buf: String::new(),
             last_steps: 0,
+            setup: crate::setup::Setup::default(),
             #[cfg(not(target_arch = "wasm32"))]
             prof: [0.0; 8],
             terrain,
@@ -909,20 +920,7 @@ impl World {
     /// seed; each civilisation's traits come from its own seed alone. Seeds are redrawn until
     /// the four temperaments differ enough to make a story (one hot head, one cool head).
     pub fn populate(&mut self) {
-        let mut run = Rng::new(self.seed ^ 0x2545_f491);
-        let mut seeds = [0u32; START_CIVS];
-        for _ in 0..64 {
-            for s in seeds.iter_mut() {
-                *s = run.next_u32();
-            }
-            let tr: Vec<Traits> = seeds.iter().map(|&s| Traits::from_seed(s)).collect();
-            let amax = tr.iter().map(|t| t.aggressiveness).fold(0.0, f32::max);
-            let amin = tr.iter().map(|t| t.aggressiveness).fold(1.0, f32::min);
-            let fmax = tr.iter().map(|t| t.friendliness).fold(0.0, f32::max);
-            if amax >= 0.62 && amin <= 0.4 && fmax >= 0.55 {
-                break;
-            }
-        }
+        let seeds = self.civ_seeds(START_CIVS);
         for (i, &s) in seeds.iter().enumerate() {
             let region = i % self.terrain.regions.len().max(1);
             let start = self.terrain.regions.get(region).map(|r| r.start).unwrap_or((80 + 160 * i as i32, self.d.h as i32 / 2));
@@ -955,7 +953,13 @@ impl World {
 
     /// Create a civilisation in the first free slot. Returns its id.
     pub fn add_faction(&mut self, seed: u32, source: SeedSource, traits: Traits, parent: u8, name: Option<(String, String)>) -> u8 {
-        let slot = self.factions.iter().position(|f| !f.used).or_else(|| self.factions.iter().position(|f| !f.alive)).unwrap_or(MAX_FACTIONS - 1);
+        // Never a slot kept for a civilisation waiting to be founded (#98).
+        let slot = self
+            .factions
+            .iter()
+            .position(|f| !f.used)
+            .or_else(|| self.factions.iter().position(|f| !f.alive && !f.pending))
+            .unwrap_or(MAX_FACTIONS - 1);
         let (name, stem) = name.unwrap_or_else(|| make_name(seed));
         let used: Vec<[u8; 3]> = self.factions.iter().filter(|f| f.alive).map(|f| f.color).collect();
         let color = if slot < START_CIVS && !used.contains(&PALETTE[slot]) {
@@ -1247,8 +1251,11 @@ impl World {
     /// Run `real_dt` seconds of real time at the world's speed (×1, ×4, ×16), in steps of at
     /// most `MAX_SUBSTEP`; refresh the buffers JS reads once at the end.
     pub fn advance(&mut self, real_dt: f32) {
+        // Seeding a civilisation from the mind runs on real time (#98).
+        self.setup_tick(real_dt.max(0.0));
         let total = (real_dt.max(0.0) * self.speed).min(2.0);
         if total <= 0.0 {
+            self.refresh_info();
             return;
         }
         let n = (total / MAX_SUBSTEP).ceil().max(1.0);
@@ -1548,7 +1555,15 @@ impl World {
                 }
             };
             let vals = [
-                if f.alive { 1.0 } else if f.used { -1.0 } else { 0.0 },
+                if f.alive {
+                    1.0
+                } else if f.pending {
+                    2.0
+                } else if f.used {
+                    -1.0
+                } else {
+                    0.0
+                },
                 f.pop as f32,
                 f.villages as f32,
                 f.color[0] as f32,
