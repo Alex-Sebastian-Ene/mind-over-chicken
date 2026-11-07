@@ -14,7 +14,9 @@
 
 import { mulberry32, clamp } from '../sim/util.js';
 
-export const CALIBRATION_DEFAULTS = Object.freeze({ seconds: 10, mode: 'random' });
+// Default window length. 10 s is a placeholder (README §3.1); ?calib=<seconds> overrides it.
+export const CALIBRATION_SECONDS = 10;
+export const CALIBRATION_DEFAULTS = Object.freeze({ seconds: CALIBRATION_SECONDS, mode: 'random' });
 const STORAGE_KEY = 'moc.calibration';
 
 export function readCalibrationConfig(search = globalThis.location?.search ?? '', storage = safeStorage()) {
