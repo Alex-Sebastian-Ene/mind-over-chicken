@@ -11,9 +11,11 @@
 //! - `rules`: every civilisation on the rules; `ppo`: every one on the councils;
 //! - `mixed`: half on the councils, half on the rules (head to head: win rate and Elo);
 //! - `old`: half on the final councils, half on an earlier checkpoint (league progress);
-//! - `*_calm` / `*_stress`: the player held calm or stressed the whole game.
+//! - `*_calm` / `*_stress`: the player held calm or stressed the whole game;
+//! - `commander`: all on the final councils, half with the trained commander, half scripted.
 //! A civilisation "beats" another in its world when its score (alive × 10 + age + ln(1+pop)
-//! + 0.2 × villages) is higher at the end. Writes one JSON file.
+//! + 0.2 × villages) is higher at the end. Writes one JSON file. `--scenarios duel,four,eight,
+//! twelve_big` and `--conds rules,ppo,…` pick what to run.
 
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -41,6 +43,8 @@ enum Who {
     Rules,
     Ppo,
     Old,
+    /// The final council with the hand-written commander (to isolate the trained commander).
+    Scripted,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -154,6 +158,13 @@ fn run_world(seed: u32, sc: &Scenario, cond: &str, nets: &[Vec<u8>], cmd: &[u8])
                     Who::Old
                 }
             }
+            "commander" => {
+                if half {
+                    Who::Ppo
+                } else {
+                    Who::Scripted
+                }
+            }
             _ => Who::Rules,
         }
     };
@@ -175,6 +186,10 @@ fn run_world(seed: u32, sc: &Scenario, cond: &str, nets: &[Vec<u8>], cmd: &[u8])
                 }
                 Who::Old => {
                     c.set_brain(f, Brain::Net(1));
+                    c.set_cmd_brain(f, CmdBrain::Scripted);
+                }
+                Who::Scripted => {
+                    c.set_brain(f, Brain::Net(0));
                     c.set_cmd_brain(f, CmdBrain::Scripted);
                 }
             }
@@ -495,6 +510,13 @@ fn main() {
     if old_p.is_some() {
         conds.push("old");
     }
+    if !cmd_b.is_empty() {
+        conds.push("commander");
+    }
+    if let Some(c) = arg("--conds") {
+        let keep: Vec<String> = c.split(',').map(|s| s.to_string()).collect();
+        conds.retain(|x| keep.iter().any(|k| k == x));
+    }
     let mut jobs: Vec<(Scenario, &'static str, u32)> = Vec::new();
     for sc in all.iter().filter(|s| only.split(',').any(|o| o == s.name)) {
         for &c in &conds {
@@ -553,6 +575,9 @@ fn main() {
         });
         if old_p.is_some() {
             v["head_to_head_final_vs_old"] = head_to_head(&g("old"), "ppo", "old");
+        }
+        if !cmd_b.is_empty() {
+            v["head_to_head_trained_vs_scripted_commander"] = head_to_head(&g("commander"), "ppo", "scripted");
         }
         scen.insert(sc.name.into(), v);
     }
