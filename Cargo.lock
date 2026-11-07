@@ -263,6 +263,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "moc-diffusion"
+version = "0.1.0"
+
+[[package]]
 name = "moc-planet"
 version = "0.1.0"
 
