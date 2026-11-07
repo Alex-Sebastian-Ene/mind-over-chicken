@@ -1,8 +1,10 @@
+pub mod biosignal;
 mod font;
 mod gl;
 mod sprites;
 mod terrain;
 
+pub use biosignal::{RustBlinkClassifier, RustImuTracker};
 use gl::{Light, WebGlRenderer};
 use sprites::*;
 use terrain::{Terrain, Mulberry32};

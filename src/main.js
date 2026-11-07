@@ -6,6 +6,7 @@ import { SimSource, BridgeSource } from './brain/sources.js';
 import { Brain } from './brain/brain.js';
 import { Advisor } from './ui/advisor.js';
 import { Hud } from './ui/hud.js';
+import { EegPanel } from './ui/eeg-panel.js';
 import { Audio } from './audio.js';
 import { StoneAge } from './eras/stone.js';
 import { FarmingToKingdoms, InfoAge } from './eras/timeskip.js';
@@ -62,6 +63,35 @@ const cosmos = new Cosmos();
 const galaxyHudScene = { label: 'Galaxy', powers: ['calm', 'focus', 'heart'], objectives: () => cosmos.galaxy?.objectives() || [] };
 let hudScene = null;
 let G = null;
+let previewSource = null;
+let previewBrain = null;
+
+function setGameSource(nextSource) {
+  if (G) {
+    if (G.source && G.source !== nextSource) G.source.disconnect();
+    G.source = nextSource;
+    G.brain.source = nextSource;
+    G.brain.resetTelemetry();
+  } else {
+    if (previewSource && previewSource !== nextSource) previewSource.disconnect();
+    previewSource = nextSource;
+    previewBrain = nextSource ? new Brain(nextSource) : null;
+    if (previewBrain && nextSource?.kind === 'bridge') previewBrain.resetTelemetry();
+  }
+}
+
+const eegPanel = new EegPanel(document, {
+  getSource: () => G?.source || previewSource,
+  getBrain: () => G?.brain || previewBrain,
+  onConnectBridge: async (url) => {
+    const src = new BridgeSource(url);
+    await src.connect();
+    setGameSource(src);
+  },
+  onDisconnectBridge: () => {
+    setGameSource(new SimSource());
+  },
+});
 let fade = 0;           // 0..1 black overlay for transitions
 let pendingScene = null;
 let pendingTimer = 0;
@@ -69,6 +99,9 @@ let banner = null;      // {t}
 let lastTs = 0;
 
 function newGame(source, startIndex = 0) {
+  if (previewSource && previewSource !== source) previewSource.disconnect();
+  previewSource = null;
+  previewBrain = null;
   if (G?.source && G.source !== source) G.source.disconnect();
   const brain = new Brain(source);
   cosmos.reset();
@@ -269,6 +302,21 @@ function render() {
   textCtx.setTransform(K, 0, 0, K, 0, 0);
   textCtx.globalAlpha = visible;
   if (cosmic) cosmos.overlay(textCtx, G);
+  if (G.source?.kind === 'bridge' && G.source.streaming && G.brain?.aim) {
+    const ax = G.brain.aim.x * W, ay = G.brain.aim.y * H;
+    const locked = (G.brain.imuCalib ?? 1) >= 1 && (G.brain.neutralProgress ?? 1) >= 1;
+    textCtx.save();
+    textCtx.strokeStyle = locked ? 'rgba(126, 224, 138, 0.9)' : 'rgba(255, 207, 74, 0.9)';
+    textCtx.lineWidth = 1;
+    textCtx.beginPath();
+    textCtx.arc(ax, ay, 5, 0, Math.PI * 2);
+    textCtx.moveTo(ax - 8, ay); textCtx.lineTo(ax - 3, ay);
+    textCtx.moveTo(ax + 3, ay); textCtx.lineTo(ax + 8, ay);
+    textCtx.moveTo(ax, ay - 8); textCtx.lineTo(ax, ay - 3);
+    textCtx.moveTo(ax, ay + 3); textCtx.lineTo(ax, ay + 8);
+    textCtx.stroke();
+    textCtx.restore();
+  }
   textCtx.globalAlpha = 1;
 }
 
@@ -311,7 +359,12 @@ function frame(ts) {
     if (wanted !== hudScene) { hudScene = wanted; hud.setScene(wanted); }
     hud.update(dt, showGalaxyHud ? Object.assign(Object.create(G), { scene: galaxyHudScene }) : G);
     updateCosmosUi(dt);
+  } else if (previewBrain) {
+    previewBrain.update(dt);
+    $('sourceStatus').textContent = previewSource.status;
+    $('sourceStatus').dataset.ok = previewSource.connected ? '1' : '0';
   }
+  eegPanel.update();
   render();
 }
 function rafLoop() { frame(); requestAnimationFrame(rafLoop); }
@@ -383,6 +436,8 @@ const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'pa
 window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input')) return;
   if (e.code === 'KeyM') { toggleModel(); return; }
+  if (e.code === 'KeyE') { eegPanel.toggle(); return; }
+  if (e.code === 'KeyC') { eegPanel.calibrateCenter(); return; }
   if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { cosmos.zoomOut(G); return; }
   if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { cosmos.zoomIn(G); return; }
   if (G && !cosmos.active && (e.code === 'KeyA' || e.code === 'KeyD')) { cosmos.panVel = e.code === 'KeyA' ? 140 : -140; return; }
@@ -552,9 +607,9 @@ function begin(source) {
   $('titleScreen').hidden = true;
   newGame(source);
 }
-$('playSim').addEventListener('click', () => begin(new SimSource()));
+$('playSim').addEventListener('click', () => begin(previewSource?.kind === 'bridge' && previewSource.connected ? previewSource : new SimSource()));
 $('playSandbox').addEventListener('click', () => {
-  begin(new SimSource());
+  begin(previewSource?.kind === 'bridge' && previewSource.connected ? previewSource : new SimSource());
   dismissBanner();
   G.sandbox = true;
   cosmos.sandbox = true;

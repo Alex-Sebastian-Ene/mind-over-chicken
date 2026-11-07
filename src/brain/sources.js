@@ -87,13 +87,27 @@ export class SimSource {
     this.pendingBlink = false;
     const motion = clamp(this.aimVel * 6);
     this.aimVel = 0;
+    const rel = { delta: delta / sum, theta: theta / sum, alpha: alpha / sum, beta: beta / sum, gamma: gamma / sum };
+    const t0 = this.acc;
+    const mkWave = (seed) => Array.from({ length: 6 }, (_, i) => {
+      const ph = (t0 + i * 0.015 + seed) * Math.PI * 2;
+      const base = 18 * rel.alpha * Math.sin(ph * 10) + 12 * rel.beta * Math.sin(ph * 20) + 22 * rel.delta * Math.sin(ph * 2.5) + gauss() * 4;
+      return Math.round((base + (blink && (seed === 1 || seed === 2) && i >= 2 && i <= 4 ? 140 : 0)) * 10) / 10;
+    });
+    const pitch = Math.round((this.aim.y * 2 - 1) * 20 * 10) / 10;
+    const yaw = Math.round((this.aim.x * 2 - 1) * 25 * 10) / 10;
     return {
-      bands: { delta: delta / sum, theta: theta / sum, alpha: alpha / sum, beta: beta / sum, gamma: gamma / sum },
+      bands: rel,
       blink,
       hr: Math.round(this.hr * 10) / 10,
       tilt: { x: this.aim.x * 2 - 1, y: this.aim.y * 2 - 1 },
       motion,
       quality: 1,
+      eeg: { TP9: mkWave(0), AF7: mkWave(1), AF8: mkWave(2), TP10: mkWave(3) },
+      contact: { TP9: 'GOOD', AF7: 'GOOD', AF8: 'GOOD', TP10: 'GOOD' },
+      orientation: { pitch, roll: 0, yaw },
+      accel: [Math.round(Math.sin(pitch * Math.PI / 180) * 1000) / 1000, 0, Math.round(Math.cos(pitch * Math.PI / 180) * 1000) / 1000],
+      gyro: [0, 0, 0],
     };
   }
 }
@@ -107,27 +121,38 @@ export class BridgeSource {
   static NEUTRAL_FRAMES = 10;   // the first ~1 s of frames sets the neutral pose
   static YAW_ZERO_TAU = 20;     // s; the yaw neutral fades to 0 as the bridge re-centres yaw itself
   static AIM_SIGN = { yaw: 1, pitch: 1 };   // flip one if a headset aims mirrored
+  static DEADZONE_DEG = 0.85;   // degrees of micro-tremor deadband when interactive mode is active
 
   constructor(url) {
     this.kind = 'bridge';
     this.label = 'Headset bridge';
     this.url = url;
     this.connected = false;
+    this.streaming = false;
     this.status = 'Connecting…';
     this.queue = [];
     this.ws = null;
     this.lastFrameAt = 0;
+    this.imuCalib = 0;
+    this.sensitivity = 1.0;     // multiplier on AIM_RANGE_DEG (higher sensitivity = smaller angle needed)
+    this.invertYaw = false;
+    this.invertPitch = false;
+    this.useDeadzone = false;   // enabled in live browser session so stationary tremor is locked
     this.recenter();
   }
 
   // Forget the neutral pose; the next ~1 s of frames becomes the new straight-ahead.
-  recenter() {
+  recenter(recalibrateBridge = false) {
     this.tiltZero = null;
     this.tiltSamples = [];
-    this.aimZero = null;        // {yaw, pitch} neutral from frame.orientation
+    this.aimZero = null;        // {yaw, pitch, roll} neutral from frame.orientation
     this.aimSamples = [];
     this.aimTilt = null;
     this.lastT = null;
+    this.relAngles = { pitch: 0, roll: 0, yaw: 0 };
+    if (recalibrateBridge && this.ws && this.ws.readyState === 1) {
+      try { this.ws.send(JSON.stringify({ type: 'recenter' })); } catch {}
+    }
   }
 
   connect() {
@@ -142,18 +167,25 @@ export class BridgeSource {
       }, 4000);
       ws.onopen = () => {
         this.connected = true;
-        this.status = 'Headset streaming';
+        this.streaming = false;
+        this.useDeadzone = true;
+        this.status = 'Connected to bridge, waiting for Muse 2…';
         if (!settled) { settled = true; clearTimeout(timer); resolve(); }
       };
       ws.onerror = () => {
         this.status = 'Bridge error';
         if (!settled) { settled = true; clearTimeout(timer); reject(new Error(`No bridge answered at ${this.url}`)); }
       };
-      ws.onclose = () => { this.connected = false; this.status = 'Bridge disconnected'; };
+      ws.onclose = () => { this.connected = false; this.streaming = false; this.status = 'Bridge disconnected'; };
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
-          if (msg.type === 'status') { this.status = msg.text; return; }
+          if (msg.type === 'status') {
+            this.status = msg.text;
+            this.streaming = /^Streaming/i.test(msg.text);
+            return;
+          }
+          this.streaming = true;
           this.queue.push(this.normalise(msg));
           this.lastFrameAt = performance.now();
         } catch { /* ignore malformed frames */ }
@@ -184,6 +216,7 @@ export class BridgeSource {
       const z = this.tiltZero || [ax, ay];
       tilt = { x: clamp((ay - z[1]) * 2.6, -1, 1), y: clamp((ax - z[0]) * 2.6, -1, 1) };
     }
+    if (typeof msg.imu_calib === 'number') this.imuCalib = clamp(msg.imu_calib);
     return {
       bands: { delta: (b.delta || 0) / sum, theta: (b.theta || 0) / sum, alpha: (b.alpha || 0) / sum, beta: (b.beta || 0) / sum, gamma: (b.gamma || 0) / sum },
       blink: !!msg.blink,
@@ -191,6 +224,15 @@ export class BridgeSource {
       tilt,
       motion: clamp(msg.motion ?? 0),   // the bridge folds gyro rotation speed into this
       quality: clamp(msg.quality ?? 1),
+      eeg: msg.eeg || null,
+      ppg: Array.isArray(msg.ppg) ? msg.ppg : null,
+      contact: msg.contact || null,
+      orientation: o && Number.isFinite(o.yaw) && Number.isFinite(o.pitch) ? { pitch: o.pitch, roll: o.roll ?? 0, yaw: o.yaw } : null,
+      relOrientation: this.relAngles ? { ...this.relAngles } : null,
+      imuCalib: this.imuCalib,
+      neutralProgress: this.aimZero ? 1 : clamp(this.aimSamples.length / Math.max(1, BridgeSource.NEUTRAL_FRAMES)),
+      accel: Array.isArray(msg.accel) ? msg.accel : null,
+      gyro: Array.isArray(msg.gyro) ? msg.gyro : null,
     };
   }
 
@@ -203,20 +245,37 @@ export class BridgeSource {
     const dt = typeof t === 'number' && this.lastT != null ? clamp(t - this.lastT, 0, 1) : FRAME_DT;
     if (typeof t === 'number') this.lastT = t;
     if (!this.aimZero) {
-      this.aimSamples.push([o.yaw, o.pitch]);
+      if (typeof o.imu_calib === 'number' && o.imu_calib < 1) return { x: 0, y: 0 };
+      this.aimSamples.push([o.yaw, o.pitch, o.roll ?? 0]);
       if (this.aimSamples.length < S.NEUTRAL_FRAMES) return { x: 0, y: 0 };
       const y0 = this.aimSamples[0][0], n = this.aimSamples.length;
+      const rMean = this.aimSamples.reduce((s, v) => s + v[2], 0) / n;
       this.aimZero = {
         yaw: wrap(y0 + this.aimSamples.reduce((s, v) => s + wrap(v[0] - y0), 0) / n),
         pitch: this.aimSamples.reduce((s, v) => s + v[1], 0) / n,
       };
+      this.aimRollZero = rMean;
       this.aimTilt = { x: 0, y: 0 };
     } else {
       // The bridge leaks yaw back to 0, so a fixed yaw offset would turn into a permanent bias.
       this.aimZero.yaw *= Math.exp(-dt / S.YAW_ZERO_TAU);
     }
-    const x = clamp(S.AIM_SIGN.yaw * wrap(o.yaw - this.aimZero.yaw) / S.AIM_RANGE_DEG, -1, 1);
-    const y = clamp(S.AIM_SIGN.pitch * (o.pitch - this.aimZero.pitch) / S.AIM_RANGE_DEG, -1, 1);
+    let dyaw = wrap(o.yaw - this.aimZero.yaw);
+    let dpitch = o.pitch - this.aimZero.pitch;
+    const droll = (o.roll ?? 0) - (this.aimRollZero ?? 0);
+    this.relAngles = { pitch: dpitch, roll: droll, yaw: dyaw };
+
+    if (this.useDeadzone) {
+      const dz = S.DEADZONE_DEG;
+      dyaw = Math.abs(dyaw) <= dz ? 0 : Math.sign(dyaw) * (Math.abs(dyaw) - dz);
+      dpitch = Math.abs(dpitch) <= dz ? 0 : Math.sign(dpitch) * (Math.abs(dpitch) - dz);
+    }
+
+    const range = S.AIM_RANGE_DEG / Math.max(0.25, this.sensitivity || 1);
+    const sx = S.AIM_SIGN.yaw * (this.invertYaw ? -1 : 1);
+    const sy = S.AIM_SIGN.pitch * (this.invertPitch ? -1 : 1);
+    const x = clamp(sx * dyaw / range, -1, 1);
+    const y = clamp(sy * dpitch / range, -1, 1);
     this.aimTilt.x = smooth(this.aimTilt.x, x, S.AIM_SMOOTH, FRAME_DT);
     this.aimTilt.y = smooth(this.aimTilt.y, y, S.AIM_SMOOTH, FRAME_DT);
     return { x: this.aimTilt.x, y: this.aimTilt.y };
@@ -228,6 +287,9 @@ export class BridgeSource {
 
   update(dt, emit) {
     while (this.queue.length) emit(this.queue.shift());
-    if (this.connected && performance.now() - this.lastFrameAt > 3000) this.status = 'Waiting for headset data';
+    if (this.connected && this.lastFrameAt > 0 && performance.now() - this.lastFrameAt > 3000) {
+      this.streaming = false;
+      this.status = 'Waiting for headset data';
+    }
   }
 }

@@ -42,15 +42,14 @@ from websockets.exceptions import ConnectionClosed
 
 log = logging.getLogger("muse_bridge")
 
-# --board choice -> (BrainFlow board id, display name, config_board command that turns PPG on).
-# PPG commands come from BrainFlow's SupportedBoards docs: Muse 2 uses "p50" (which also
-# enables the 5th EEG channel), Muse S uses "p61". See README.md for the citation.
+# --board choice -> (BrainFlow board id, display name, config_board commands that turn PPG/IMU on).
+# On Muse 2, "p50" sets the 5-EEG+PPG preset and "p61" activates PPG + IMU streaming (same as muse-2/core/device.py).
 BOARDS = {
     "synthetic": (BoardIds.SYNTHETIC_BOARD, "Synthetic board", None),
-    "muse2": (BoardIds.MUSE_2_BOARD, "Muse 2", "p50"),
-    "muse2-bled": (BoardIds.MUSE_2_BLED_BOARD, "Muse 2 (BLED112)", "p50"),
-    "muses": (BoardIds.MUSE_S_BOARD, "Muse S", "p61"),
-    "muses-bled": (BoardIds.MUSE_S_BLED_BOARD, "Muse S (BLED112)", "p61"),
+    "muse2": (BoardIds.MUSE_2_BOARD, "Muse 2", ("p50", "p61")),
+    "muse2-bled": (BoardIds.MUSE_2_BLED_BOARD, "Muse 2 (BLED112)", ("p50", "p61")),
+    "muses": (BoardIds.MUSE_S_BOARD, "Muse S", ("p61",)),
+    "muses-bled": (BoardIds.MUSE_S_BLED_BOARD, "Muse S (BLED112)", ("p61",)),
 }
 
 DEFAULT = BrainFlowPresets.DEFAULT_PRESET.value
@@ -207,6 +206,19 @@ class HeadTracker:
         self.rate = 0.0             # deg/s, bias-corrected rotation speed of the latest sample
         self._reset_window()
 
+    def calib_progress(self):
+        """0.0..1.0 gyro bias calibration progress."""
+        if self.bias is not None:
+            return 1.0
+        return clamp(self._win_time / max(1e-6, self.bias_init))
+
+    def tare(self):
+        """Zero yaw heading and force a fresh gyro bias calibration on the next still hold."""
+        self.yaw = 0.0
+        self.bias = None
+        self.rate = 0.0
+        self._reset_window()
+
     def _reset_window(self):
         self._win_sum, self._win_n, self._win_time = [0.0, 0.0, 0.0], 0, 0.0
 
@@ -254,11 +266,15 @@ class HeadTracker:
             ux, uy, uz = self.up
             # w . up is the turn rate about the vertical, counter-clockwise from above by the
             # right-hand rule (a turn to the left), so negate it for "positive = right".
-            self.yaw -= (w[0] * ux + w[1] * uy + w[2] * uz) * dt
+            self.rate = math.sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2])
+            yaw_rate = -(w[0] * ux + w[1] * uy + w[2] * uz)
+            # Zero Angular Velocity Update (ZUPT): when the head is stationary (< 1.5 deg/s),
+            # do not integrate micro-tremor or residual bias into yaw.
+            if self.rate >= 1.5 or not math.isfinite(self.bias_tau):
+                self.yaw += yaw_rate * dt
             if math.isfinite(self.yaw_tau):
                 self.yaw *= math.exp(-dt / self.yaw_tau)
             self.yaw = (self.yaw + 180.0) % 360.0 - 180.0
-            self.rate = math.sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2])
         return self.rate
 
     def _remove_bias(self, gx, gy, gz, dt):
@@ -280,7 +296,8 @@ class HeadTracker:
             self._reset_window()
         d = [gx - self.bias[0], gy - self.bias[1], gz - self.bias[2]]
         if math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) < self.still and math.isfinite(self.bias_tau):
-            k = 1.0 - math.exp(-dt / self.bias_tau)
+            tau = 2.0 if math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) < 2.0 else self.bias_tau
+            k = 1.0 - math.exp(-dt / tau)
             self.bias = [b + k * v for b, v in zip(self.bias, d)]
             d = [gx - self.bias[0], gy - self.bias[1], gz - self.bias[2]]
         return d
@@ -306,6 +323,12 @@ class Bridge:
         self.eeg = find_sensor(bid, BoardShim.get_eeg_channels, [DEFAULT])
         if self.eeg is None:
             raise SystemExit(f"{self.label}: BrainFlow reports no EEG channels")
+        try:
+            raw_names = [n.strip() for n in BoardShim.get_eeg_names(bid)]
+        except BrainFlowError:
+            raw_names = []
+        self.eeg_names = (raw_names[:len(self.eeg.channels)] if len(raw_names) >= len(self.eeg.channels)
+                          else [f"CH{i + 1}" for i in range(len(self.eeg.channels))])
         self.frontal, frontal_labels = frontal_rows(bid, self.eeg.channels)
         self.accel = find_sensor(bid, BoardShim.get_accel_channels, [AUXILIARY, DEFAULT])
         # The gyro is fused with the accelerometer sample by sample, so it must come from the same
@@ -337,6 +360,8 @@ class Bridge:
         self.imu_last_at = None
         self.hr_estimates = deque(maxlen=5)
         self.hr = None
+        self.ppg_bpm = 72.0
+        self.ppg_wave = []
         self.last_hr_at = -1e9
         self.last_ppg_ts = None
         self.last_ppg_new_at = time.monotonic()
@@ -360,8 +385,14 @@ class Bridge:
         log.info("client connected %s (%d total)", peer, len(self.clients))
         try:
             await ws.send(json.dumps({"type": "status", "text": self.status}))
-            async for _ in ws:   # the game does not send anything; just drain
-                pass
+            async for raw in ws:
+                try:
+                    msg = json.loads(raw)
+                    if isinstance(msg, dict) and msg.get("type") in ("recenter", "calibrate"):
+                        self.head.tare()
+                        log.info("head orientation tared / recalibrating gyro bias")
+                except (ValueError, TypeError):
+                    pass
         except ConnectionClosed:
             pass
         finally:
@@ -379,8 +410,7 @@ class Bridge:
             p.mac_address = a.mac_address
         if a.serial_number:
             p.serial_number = a.serial_number
-        if a.timeout:
-            p.timeout = int(a.timeout)
+        p.timeout = int(a.timeout) if a.timeout else 15
         return p
 
     async def connect_board(self):
@@ -396,13 +426,16 @@ class Bridge:
                 await asyncio.to_thread(board.prepare_session)
                 self.ppg_enabled = False
                 if self.ppg is not None and self.ppg_command:
+                    cmds = (self.ppg_command,) if isinstance(self.ppg_command, str) else self.ppg_command
                     try:
-                        await asyncio.to_thread(board.config_board, self.ppg_command)
+                        for cmd in cmds:
+                            await asyncio.to_thread(board.config_board, cmd)
+                            await asyncio.sleep(0.25)
                         self.ppg_enabled = True
-                        log.info("PPG enabled with config_board(%r)", self.ppg_command)
+                        log.info("PPG enabled with config_board(%r)", cmds)
                     except BrainFlowError as e:
                         log.warning("could not enable PPG with %r: %s (continuing without heart rate)",
-                                    self.ppg_command, e)
+                                    cmds, e)
                 elif self.ppg is not None:
                     self.ppg_enabled = True   # synthetic: PPG is always streamed
                 board.start_stream(BUFFER_SAMPLES)
@@ -508,6 +541,7 @@ class Bridge:
         eeg_block = np.ascontiguousarray(np.vstack([rows[ch] for ch in eeg.channels]))
         bands = self.band_powers(eeg_block, fs)
         quality = self.signal_quality(eeg_block, now)
+        eeg_wave, contact = self.eeg_telemetry(eeg_block, fs, now)
         accel, gyro, orientation, motion = self.read_imu(board, now)
         blink = self.detect_blink([rows[ch] for ch in self.frontal], fs, now, motion)
         hr = self.read_hr(board, now)
@@ -517,11 +551,15 @@ class Bridge:
             "bands": bands,
             "blink": bool(blink),
             "hr": hr,
+            "ppg": self.ppg_wave,
             "accel": accel,
             "gyro": gyro,
             "orientation": orientation,
+            "imu_calib": finite(self.head.calib_progress(), 2),
             "motion": finite(motion, 3),
             "quality": finite(quality, 3),
+            "eeg": eeg_wave,
+            "contact": contact,
         }
 
     def band_powers(self, eeg_block, fs):
@@ -549,6 +587,33 @@ class Bridge:
             else:
                 scores.append(clamp(1.0 - (sd - 40.0) / 110.0))   # 1 up to 40 µV, 0 at 150 µV
         return float(np.mean(scores)) if scores else 0.0
+
+    def eeg_telemetry(self, eeg_block, fs, now):
+        """Per-electrode detrended recent samples (~0.1 s at ~64 Hz) and contact quality badges
+        (GOOD / FAIR / POOR, matching Muse 2 DSP thresholds) for the EEG side panel."""
+        wave = {}
+        contact = {}
+        stalled = now - self.last_eeg_new_at > STALL_STATUS
+        step = max(1, int(round(fs / 64)))
+        n_wave = max(4, int(round(FRAME_DT * fs)))
+        n_qual = min(eeg_block.shape[1], int(round(fs)))
+        for idx, name in enumerate(self.eeg_names[:4]):
+            if idx >= eeg_block.shape[0]:
+                break
+            raw = eeg_block[idx]
+            seg = raw[-n_qual:].copy()
+            DataFilter.detrend(seg, DetrendOperations.LINEAR.value)
+            sd = float(np.std(seg))
+            railed = float(np.count_nonzero(np.abs(seg) > 1000.0) / seg.size) if seg.size else 1.0
+            if stalled or railed > 0.15 or sd < 1.0 or sd > 450.0:
+                contact[name] = "POOR"
+            elif railed > 0.03 or sd > 180.0:
+                contact[name] = "FAIR"
+            else:
+                contact[name] = "GOOD"
+            tail = seg[-n_wave::step] if seg.size >= n_wave else seg[::step]
+            wave[name] = [finite(v, 1) for v in tail]
+        return wave, contact
 
     def detect_blink(self, frontal, fs, now, motion):
         n = int(BLINK_WINDOW * fs)
@@ -627,7 +692,9 @@ class Bridge:
                 # Rotation is what the gyro sees best: a turn barely moves the gravity vector.
                 spin = sum(rates) / len(rates)
                 raw = max(raw, clamp((spin - GYRO_MOTION_FLOOR) / (GYRO_MOTION_FULL - GYRO_MOTION_FLOOR)))
-            gyro = [finite(v, 3) for v in gyr[:, -n_frame:].mean(axis=1)]
+            g_mean = gyr[:, -n_frame:].mean(axis=1)
+            bias = self.head.bias or (0.0, 0.0, 0.0)
+            gyro = [finite(g_mean[k] - bias[k], 3) for k in range(3)]
             angles = self.head.angles()
             if angles is not None:
                 orientation = {k: finite(v, 2) for k, v in zip(("pitch", "roll", "yaw"), angles)}
@@ -649,10 +716,8 @@ class Bridge:
     def read_hr(self, board, now):
         s = self.ppg
         if s is None or not self.ppg_enabled:
+            self.ppg_wave = []
             return None
-        if now - self.last_hr_at < HR_EVERY:
-            return self.hr
-        self.last_hr_at = now
         fft = max(1024, next_pow2(int(HR_SECONDS * s.fs)))   # BrainFlow: even and >= 1024
         try:
             d = board.get_current_board_data(fft, s.preset)
@@ -665,10 +730,42 @@ class Bridge:
             elif now - self.last_ppg_new_at > 10:
                 self.hr_estimates.clear()     # PPG went quiet: stop reporting a stale pulse
                 self.hr = None
+                self.ppg_wave = []
                 return None
-        if d.shape[1] < fft:
-            return self.hr                   # not enough PPG yet (~16 s on a Muse)
+
         ch = s.channels
+        # PPGProcessor from muse-2/core/dsp.py: ambient cancellation (IR - Ambient), invert so systolic
+        # peak points upward, normalize by 3*std, and detect inter-beat peaks over a 2.5s window.
+        if len(ch) >= 2 and d.shape[1] >= 16:
+            win_n = min(d.shape[1], int(s.fs * 3))
+            ambient = np.asarray(d[ch[0], -win_n:], dtype=np.float64)
+            ir_sig = np.asarray(d[ch[1], -win_n:], dtype=np.float64)
+            sig = -(ir_sig - ambient - np.mean(ir_sig - ambient))
+            std_val = float(np.std(sig))
+            norm_wave = sig / (std_val * 3.0) if std_val > 1e-3 else sig
+            tail_n = max(4, int(round(FRAME_DT * s.fs)))
+            self.ppg_wave = [finite(v, 3) for v in norm_wave[-tail_n:]]
+
+            if d.shape[1] >= int(s.fs * 2):
+                recent = norm_wave[-int(s.fs * 2.5):]
+                thresh = float(np.mean(recent) + 0.45 * np.std(recent))
+                peaks = [
+                    i for i in range(1, len(recent) - 1)
+                    if recent[i] > thresh and recent[i] > recent[i - 1] and recent[i] > recent[i + 1]
+                ]
+                if len(peaks) >= 2:
+                    intervals = np.diff(peaks) / s.fs
+                    med_int = float(np.median(intervals))
+                    if 0.35 <= med_int <= 1.5:  # 40 to 170 BPM
+                        raw_bpm = 60.0 / med_int
+                        self.ppg_bpm = 0.92 * self.ppg_bpm + 0.08 * raw_bpm
+                        self.hr = round(self.ppg_bpm, 1)
+
+        if now - self.last_hr_at < HR_EVERY:
+            return self.hr
+        self.last_hr_at = now
+        if d.shape[1] < fft:
+            return self.hr                   # not enough PPG for BrainFlow FFT yet (~16 s on a Muse)
         # Muse PPG rows are ambient, infrared, red (in GATT characteristic order).
         ir, red = (d[ch[1]], d[ch[2]]) if len(ch) >= 3 else (d[ch[0]], d[ch[-1]])
         try:
@@ -680,7 +777,7 @@ class Bridge:
         if math.isfinite(bpm) and 40 <= bpm <= 200:
             self.hr_estimates.append(bpm)
             log.debug("heart rate estimate %.1f bpm", bpm)
-        if self.hr_estimates:
+        if self.hr_estimates and self.hr is None:
             self.hr = round(float(np.median(self.hr_estimates)), 1)
         return self.hr
 
