@@ -1,0 +1,4 @@
+# Python 3.9+. Tested with brainflow 5.23.0, websockets 17.4, numpy 2.5.4 on Windows 11 / Python 3.12.
+brainflow>=5.10.0     # BrainFlowPresets (AUXILIARY/ANCILLARY), native-BLE + BLED112 Muse boards, get_heart_rate
+websockets>=13.0      # websockets.asyncio.server (serve, broadcast) API
+numpy>=1.24

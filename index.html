@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mind over Chicken</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="A pixel god game you play with your brain: guide one civilisation from the fire pit to a new world.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Pixelify+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-era="title">
+<div class="app" id="app">
+  <header class="bar">
+    <div class="brand" aria-label="Mind over Chicken">Mind <span>over</span> Chicken</div>
+    <div class="era-chip" id="eraChip">Choose your headset</div>
+    <ul class="objectives" id="objectives" aria-label="Objectives"></ul>
+    <div class="bar-tools">
+      <span class="source" id="sourceStatus" data-ok="0">No headset</span>
+      <span class="clock" id="clock" aria-label="Run time">0:00</span>
+      <button type="button" class="tool" id="modelBtn" aria-pressed="false" title="Show the model of your brain (M)">Model <kbd>M</kbd></button>
+      <button type="button" class="tool" id="soundBtn" aria-pressed="true">Sound on</button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="frame">
+      <canvas id="screen" width="960" height="540" aria-label="The island"></canvas>
+
+      <div class="banner" id="banner" hidden>
+        <div class="card">
+          <p class="eyebrow" data-banner-era></p>
+          <h2 data-banner-title></h2>
+          <p class="goal" data-banner-goal></p>
+          <ul class="how" data-banner-how></ul>
+          <button type="button" class="btn" id="bannerGo">Begin <kbd>Enter</kbd></button>
+        </div>
+      </div>
+    </div>
+
+    <aside class="advisor is-idle" id="advisor" data-mood="nervous" aria-live="polite">
+      <canvas width="16" height="16" aria-hidden="true"></canvas>
+      <div class="bubble">
+        <p class="advisor-name" data-advisor-name>Oog · High Priest of the Flame</p>
+        <p class="advisor-text" data-advisor-text></p>
+      </div>
+    </aside>
+  </main>
+
+  <nav class="powers" aria-label="God powers">
+    <button type="button" class="power" data-power="blink">
+      <canvas class="power-icon" width="8" height="8" aria-hidden="true"></canvas>
+      <span class="power-name">Lightning</span>
+      <span class="power-sub">Blink <kbd>B</kbd> or click the map</span>
+      <span class="power-value">0</span>
+    </button>
+    <button type="button" class="power" data-power="calm">
+      <canvas class="power-icon" width="8" height="8" aria-hidden="true"></canvas>
+      <span class="power-name">Kindle</span>
+      <span class="power-sub">Calm · hold <kbd>Space</kbd></span>
+      <span class="power-value">0%</span>
+      <span class="meter"><span></span></span>
+    </button>
+    <button type="button" class="power" data-power="focus">
+      <canvas class="power-icon" width="8" height="8" aria-hidden="true"></canvas>
+      <span class="power-name">Inspire</span>
+      <span class="power-sub">Focus · hold <kbd>F</kbd></span>
+      <span class="power-value">0%</span>
+      <span class="meter"><span></span></span>
+    </button>
+    <button type="button" class="power" data-power="heart">
+      <canvas class="power-icon" width="8" height="8" aria-hidden="true"></canvas>
+      <span class="power-name">Markets</span>
+      <span class="power-sub">Heart rate</span>
+      <span class="power-value">-- bpm</span>
+      <span class="meter"><span></span></span>
+    </button>
+  </nav>
+</div>
+
+<section class="overlay title-screen" id="titleScreen" aria-labelledby="titleHeading">
+  <div class="title-inner">
+    <p class="eyebrow">A god game you play with your brain</p>
+    <h1 id="titleHeading">Mind <span>over</span> Chicken</h1>
+    <p class="lede">You are the god of one small tribe. Keep it alive through the ages with calm, focus, blinks and a steady heart, until it builds a rocket and leaves for a new world.</p>
+
+    <ol class="eras">
+      <li><b>Stone Age</b><span>Blink to throw lightning. Stay calm to keep the fire alive.</span></li>
+      <li class="skip"><b>Farming · Kingdoms</b><span>Ten thousand years in a montage. The scholars ask you some sums.</span></li>
+      <li><b>Industry</b><span>Your pulse moves the goat market. Stay steady or it crashes.</span></li>
+      <li><b>Space Age</b><span>Hold focus through a ten-second countdown.</span></li>
+    </ol>
+
+    <div class="start">
+      <div class="start-main">
+        <button type="button" class="btn btn-primary" id="playSim">Play with the emulated headset</button>
+        <p class="hint">Placeholder for the Muse: it sends the same signals, driven by your keyboard.
+          <kbd>Space</kbd> calm · <kbd>F</kbd> focus · <kbd>Shift</kbd> racing pulse · <kbd>B</kbd> or click to blink · mouse is head tilt. On a phone, hold the power tiles and tap the map.</p>
+      </div>
+      <details class="start-real">
+        <summary>Connect a real headset</summary>
+        <p class="hint">Run <code>python bridge/muse_bridge.py --board muse2</code> on this computer, then connect.</p>
+        <div class="row">
+          <label for="bridgeUrl">Bridge address</label>
+          <input id="bridgeUrl" type="text" value="ws://localhost:8765" spellcheck="false" autocomplete="off">
+          <button type="button" class="btn" id="playBridge">Connect</button>
+        </div>
+        <p class="hint" id="bridgeStatus" aria-live="polite"></p>
+      </details>
+    </div>
+    <p class="judges">Judges: press <kbd>M</kbd> at any time to see the model the game is quietly training on your brain.</p>
+  </div>
+</section>
+
+<section class="overlay fail-screen" id="failScreen" hidden aria-live="assertive">
+  <div class="card">
+    <p class="eyebrow">Collapse</p>
+    <h2 id="failReason">The tribe has perished.</h2>
+    <p class="goal">Only this era restarts. Everything you built before it stays.</p>
+    <button type="button" class="btn btn-primary" id="retryBtn">Retry this era <kbd>Enter</kbd></button>
+  </div>
+</section>
+
+<section class="overlay end-screen" id="endScreen" hidden aria-labelledby="endHeading">
+  <div class="title-inner">
+    <p class="eyebrow">Ending</p>
+    <h1 id="endHeading">A new world</h1>
+    <p class="lede">From a fire pit to the stars. The sacred chicken stepped out first.</p>
+    <dl class="end-stats" id="endStats"></dl>
+    <div class="row">
+      <button type="button" class="btn btn-primary" id="againBtn">Play again</button>
+      <button type="button" class="btn" id="endModelBtn">See the model of you</button>
+    </div>
+  </div>
+</section>
+
+<aside class="model-panel" id="modelPanel" hidden aria-labelledby="modelHeading">
+  <header>
+    <h2 id="modelHeading">The model of you</h2>
+    <button type="button" class="tool" id="modelClose">Close <kbd>M</kbd></button>
+  </header>
+  <div id="modelBody"></div>
+</aside>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
