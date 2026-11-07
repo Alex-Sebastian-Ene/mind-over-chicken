@@ -16,6 +16,7 @@ export class Engine {
     bind_dom_shell(): void;
     clear_3d_billboards(): void;
     draw_chicken(x: number, y: number, facing: number, frame: number, halo: boolean): void;
+    draw_era_3d(): void;
     draw_fire(x: number, y: number, heat: number, t: number): void;
     draw_goat(x: number, y: number, facing: number): void;
     draw_lightning(tx: number, ty: number, seed: number, alpha: number): void;
@@ -401,6 +402,7 @@ export interface InitOutput {
     readonly engine_bind_dom_shell: (a: number) => [number, number];
     readonly engine_clear_3d_billboards: (a: number) => void;
     readonly engine_draw_chicken: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly engine_draw_era_3d: (a: number) => void;
     readonly engine_draw_fire: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly engine_draw_goat: (a: number, b: number, c: number, d: number) => void;
     readonly engine_draw_lightning: (a: number, b: number, c: number, d: number, e: number) => void;

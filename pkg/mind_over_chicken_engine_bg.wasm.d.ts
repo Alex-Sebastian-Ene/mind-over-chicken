@@ -26,6 +26,7 @@ export const engine_begin_frame: (a: number) => void;
 export const engine_bind_dom_shell: (a: number) => [number, number];
 export const engine_clear_3d_billboards: (a: number) => void;
 export const engine_draw_chicken: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+export const engine_draw_era_3d: (a: number) => void;
 export const engine_draw_fire: (a: number, b: number, c: number, d: number, e: number) => void;
 export const engine_draw_goat: (a: number, b: number, c: number, d: number) => void;
 export const engine_draw_lightning: (a: number, b: number, c: number, d: number, e: number) => void;

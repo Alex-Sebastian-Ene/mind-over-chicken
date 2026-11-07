@@ -1,4 +1,4 @@
-use super::{BrainInput, Era, EraEvent, Objective, SoundKind};
+use super::{BrainInput, Era, EraBillboard, EraEvent, EraLight, Objective, SoundKind};
 
 const POP_TARGET: usize = 15;
 const CALM_TARGET: u32 = 2;
@@ -262,6 +262,34 @@ impl Era for StoneAge {
             });
         }
 
+        // Mammoths graze slowly
+        for (i, m) in self.mammoths.iter_mut().enumerate() {
+            if m.alive {
+                m.x += (if m.facing > 0 { 3.0 } else { -3.0 }) * dt;
+                if m.x > 270.0 {
+                    m.facing = -1;
+                } else if m.x < 45.0 {
+                    m.facing = 1;
+                }
+                m.frame = (((self.time * 2.5) as u32) + i as u32) % 2;
+            }
+        }
+
+        // People wander and react
+        for (i, p) in self.people.iter_mut().enumerate() {
+            if p.alive {
+                p.frame = (((self.time * 4.0) as u32) + i as u32) % 2;
+                if self.hold.active {
+                    p.state = "dance".to_string();
+                } else if p.fear > 0.5 {
+                    p.state = "panic".to_string();
+                    p.fear = (p.fear - dt * 0.1).max(0.0);
+                } else {
+                    p.state = "idle".to_string();
+                }
+            }
+        }
+
         // Win condition
         if !self.done
             && living >= POP_TARGET
@@ -397,6 +425,109 @@ impl Era for StoneAge {
 
     fn is_failed(&self) -> Option<String> {
         self.failed.clone()
+    }
+
+    fn billboards_3d(&self) -> Vec<EraBillboard> {
+        let mut list = Vec::new();
+
+        // 1. Fire pit: sprite 4 (variant 0 if lit, variant 1 if firewood)
+        list.push(EraBillboard {
+            sprite_id: 4,
+            x: self.fire.x,
+            z: self.fire.y,
+            facing: 1,
+            frame: ((self.time * 6.0) as u32) % 3,
+            variant: if self.fire.lit { 0 } else { 1 },
+        });
+
+        // 2. Mammoths: sprite 1 (variant 0 if alive, variant 1 if fallen barbecue)
+        for m in &self.mammoths {
+            list.push(EraBillboard {
+                sprite_id: 1,
+                x: m.x,
+                z: m.y,
+                facing: m.facing,
+                frame: m.frame,
+                variant: if m.alive { 0 } else { 1 },
+            });
+        }
+
+        // 3. People: sprite 0 (poses: 0 walk, 1 pray/dance, 2 panic, 3 smitten)
+        for p in &self.people {
+            let pose = if !p.alive {
+                3
+            } else if p.state == "dance" {
+                1
+            } else if p.state == "panic" {
+                2
+            } else {
+                0
+            };
+            list.push(EraBillboard {
+                sprite_id: 0,
+                x: p.x,
+                z: p.y,
+                facing: p.facing,
+                frame: p.frame,
+                variant: pose,
+            });
+        }
+
+        // 4. Holy Chicken: sprite 3 (variant 1 with radiant halo)
+        list.push(EraBillboard {
+            sprite_id: 3,
+            x: self.fire.x - 9.0,
+            z: self.fire.y - 4.0,
+            facing: 1,
+            frame: ((self.time * 4.0) as u32) % 2,
+            variant: 1,
+        });
+
+        // 5. Colony fires
+        if self.colonies > 1 {
+            for i in 1..self.colonies {
+                let cx = (self.fire.x + (i as f32) * 55.0).rem_euclid(320.0);
+                let cy = (self.fire.y + (i as f32) * 15.0).rem_euclid(180.0);
+                list.push(EraBillboard {
+                    sprite_id: 4,
+                    x: cx,
+                    z: cy,
+                    facing: 1,
+                    frame: (((self.time * 6.0) as u32) + i) % 3,
+                    variant: 0,
+                });
+            }
+        }
+
+        list
+    }
+
+    fn lights_3d(&self) -> Vec<EraLight> {
+        let mut list = Vec::new();
+        if self.fire.lit {
+            let flicker = (self.time * 13.0).sin() * 1.5;
+            list.push(EraLight {
+                x: self.fire.x,
+                y: 10.0,
+                z: self.fire.y,
+                radius: 25.0 + self.fire.heat * 30.0 + flicker,
+                intensity: 1.8,
+            });
+        }
+        if self.colonies > 1 {
+            for i in 1..self.colonies {
+                let cx = (self.fire.x + (i as f32) * 55.0).rem_euclid(320.0);
+                let cy = (self.fire.y + (i as f32) * 15.0).rem_euclid(180.0);
+                list.push(EraLight {
+                    x: cx,
+                    y: 10.0,
+                    z: cy,
+                    radius: 22.0 + (self.time * 11.0 + i as f32).sin() * 1.5,
+                    intensity: 1.4,
+                });
+            }
+        }
+        list
     }
 }
 

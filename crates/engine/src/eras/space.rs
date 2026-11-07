@@ -1,4 +1,4 @@
-use super::{BrainInput, Era, EraEvent, Objective, SoundKind, STRESS_LIMIT};
+use super::{BrainInput, Era, EraBillboard, EraEvent, EraLight, Objective, SoundKind, STRESS_LIMIT};
 
 const MIN_PASSENGERS: u32 = 8;
 const COUNT_FROM: f32 = 10.0;
@@ -213,6 +213,112 @@ impl Era for SpaceAge {
 
     fn is_failed(&self) -> Option<String> {
         self.failed.clone()
+    }
+
+    fn billboards_3d(&self) -> Vec<EraBillboard> {
+        let mut list = Vec::new();
+
+        // 1. Rocket: sprite 12 at pad (198.0, 104.0)
+        let is_launch = self.phase == "launch";
+        let rocket_y = if is_launch {
+            (self.time * 20.0).min(60.0)
+        } else {
+            0.0
+        };
+        list.push(EraBillboard {
+            sprite_id: 12,
+            x: 198.0,
+            z: 104.0 - rocket_y,
+            facing: 1,
+            frame: ((self.progress * 100.0) as u32),
+            variant: if is_launch { 1 } else { 0 },
+        });
+
+        // 2. Engineers: sprite 0 (work clothes, near pad)
+        let eng_coords = [
+            (190.0, 104.0),
+            (192.0, 110.0),
+            (206.0, 106.0),
+        ];
+        for (i, &(ex, ez)) in eng_coords.iter().enumerate() {
+            list.push(EraBillboard {
+                sprite_id: 0,
+                x: ex,
+                z: ez,
+                facing: if i % 2 == 0 { 1 } else { -1 },
+                frame: (((self.time * 3.0) as u32) + i as u32) % 2,
+                variant: 0,
+            });
+        }
+
+        // 3. Citizens: sprite 0 (crowd cheering or boarding)
+        let cit_coords = [
+            (168.0, 94.0),
+            (172.0, 98.0),
+            (165.0, 90.0),
+            (170.0, 104.0),
+        ];
+        for (i, &(cx, cz)) in cit_coords.iter().enumerate() {
+            let pose = if self.phase == "launch" || self.countdown < 3.0 {
+                1 // cheer
+            } else if self.scrubs > 0 && self.phase == "countdown" {
+                2 // panic
+            } else {
+                0 // walk
+            };
+            list.push(EraBillboard {
+                sprite_id: 0,
+                x: cx,
+                z: cz,
+                facing: 1,
+                frame: (((self.time * 4.0) as u32) + i as u32) % 2,
+                variant: pose,
+            });
+        }
+
+        // 4. Holy Chicken: sprite 3 (with halo)
+        list.push(EraBillboard {
+            sprite_id: 3,
+            x: 188.0,
+            z: 108.0,
+            facing: 1,
+            frame: ((self.time * 4.0) as u32) % 2,
+            variant: 1,
+        });
+
+        list
+    }
+
+    fn lights_3d(&self) -> Vec<EraLight> {
+        let mut list = Vec::new();
+        if self.phase == "launch" {
+            // Thruster fire flash
+            list.push(EraLight {
+                x: 198.0,
+                y: 12.0,
+                z: 104.0,
+                radius: 65.0,
+                intensity: 3.0,
+            });
+        } else if self.phase == "countdown" && self.countdown < 3.0 {
+            let strobe = (self.time * 20.0).sin() * 5.0;
+            list.push(EraLight {
+                x: 198.0,
+                y: 8.0,
+                z: 104.0,
+                radius: 40.0 + strobe,
+                intensity: 2.0,
+            });
+        } else {
+            list.push(EraLight {
+                x: 198.0,
+                y: 8.0,
+                z: 104.0,
+                radius: 24.0,
+                intensity: 1.2,
+            });
+        }
+        list
     }
 }
 
