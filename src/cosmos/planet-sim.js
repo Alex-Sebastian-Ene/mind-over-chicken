@@ -3,7 +3,7 @@
 //
 // A world hears ONE brain channel loudly (weight 1) and the others softly (OFF_CHANNEL):
 //   calm  → growth and harvests      focus → research and era progress
-//   pulse → goat-market volatility   blink → storms (each blink)
+//   stress → goat-market volatility  blink → storms (each blink)
 // The world the player is zoomed into ("attended") hears EVERY channel at weight 1, and a blink
 // strikes it directly. The player's brain always applies; an optional AI god (p.god) only chooses
 // the civilisation's effort split and never touches the player's input.
@@ -20,11 +20,11 @@
 //     by storage, which grows with housing.
 //   - Stability drifts toward a target that rises with the effort put into order and with calm,
 //     and falls with hunger, overcrowding, internal conflict, the player's anger (camera mood)
-//     and racing pulse.
+//     and stress.
 //   - Setbacks: famine (sustained hunger), plague (overcrowding), unrest (low stability burns
 //     stores) and collapse (stability or people too low for the tier: drop one tier).
 //   - Internal conflict: a world alone still fights itself. Tension from hunger, inequality,
-//     instability, the player's anger and pulse climbs the ladder feud → revolt → civil war (calm
+//     instability, the player's anger and stress climbs the ladder feud → revolt → civil war (calm
 //     and order bring it back down); a civil war ends with the rebels crushed, the world split
 //     into two factions, or a tier collapsing.
 //   - Eras stay fixed content levels; an era only begins once research is done AND the world has
@@ -35,6 +35,8 @@
 // ERAS and CONFLICT, each entry with `enter: { all: { metric: value } }` read through
 // metrics()/meets(). #69 can swap ERAS for the twenty ages in data/ages.json without touching
 // the step functions.
+
+import { stressFrom } from '../brain/brain.js';
 
 // ---- progression tables (the one place thresholds live) ----
 
@@ -73,13 +75,13 @@ export const SIM = {
   CAP: ERAS.map((e) => e.cap),  // population cap per era (also capped by housing, see popCap)
   MIN_POP: 3,
   OFF_CHANNEL: 0.25,            // how much a world hears the channels that aren't its own
-  // growth (per second, logistic): (BASE + CALM*w_calm*calm - STRESS*w_pulse*stress) * (0.5 + alloc.growth) * (1 - hunger)
+  // growth (per second, logistic): (BASE + CALM*w_calm*calm - STRESS*w_stress*stress) * (0.5 + alloc.growth) * (1 - hunger)
   GROWTH_BASE: 0.03, GROWTH_CALM: 0.2, GROWTH_STRESS: 0.1,
-  // research rate: clamp(BASE + FOCUS*w_focus*focus + CALM*calm - STRESS*w_pulse*stress, MIN, MAX) * (0.5 + alloc.research) * (TIER_RESEARCH_BASE + TIER_RESEARCH*tier)
+  // research rate: clamp(BASE + FOCUS*w_focus*focus + CALM*calm - STRESS*w_stress*stress, MIN, MAX) * (0.5 + alloc.research) * (TIER_RESEARCH_BASE + TIER_RESEARCH*tier)
   RESEARCH_BASE: 0.45, RESEARCH_FOCUS: 1.5, RESEARCH_CALM: 0.2, RESEARCH_STRESS: 0.4, RESEARCH_MIN: 0.1, RESEARCH_MAX: 2.4,
   TIER_RESEARCH_BASE: 0.85, TIER_RESEARCH: 0.15,
-  // goat market (log-price): dlnM = REVERT*ln(100/M)*dt + (SIGMA_BASE + SIGMA_PULSE*w_pulse*stress)*sqrt(dt)*N(0,1)
-  MARKET_START: 100, MARKET_REVERT: 0.15, MARKET_SIGMA_BASE: 0.02, MARKET_SIGMA_PULSE: 0.22,
+  // goat market (log-price): dlnM = REVERT*ln(100/M)*dt + (SIGMA_BASE + SIGMA_STRESS*w_stress*stress)*sqrt(dt)*N(0,1)
+  MARKET_START: 100, MARKET_REVERT: 0.15, MARKET_SIGMA_BASE: 0.02, MARKET_SIGMA_STRESS: 0.22,
   MARKET_PEAK_DECAY: 0.05,      // peak relaxes toward price at this rate per second
   CRASH_RATIO: 0.78, CRASH_RESET: 0.92, BOOM_LEVEL: 128, BOOM_RESET: 115,
   CRASH_POP: 0.92, CRASH_PROGRESS: 0.2, BOOM_PROGRESS: 0.15,
@@ -97,8 +99,6 @@ export const SIM = {
   LAUNCH_EVERY: 7,              // launch charge needed; charge += dt * (0.6 + focus)
   LESSER_TARGET_CHANCE: 0.35,   // chance to reinforce a less advanced world when nothing is barren
   SHIP_MIN: 5, SHIP_MAX: 7, SETTLE_POP: 12, REINFORCE_POP: 8, REINFORCE_PROGRESS: 0.1,
-  // stress = clamp(hrDelta / STRESS_BPM, 0, STRESS_MAX)
-  STRESS_BPM: 20, STRESS_MAX: 1.5,
   // mind snapshot
   MIND_SECONDS: 10,
 
@@ -122,7 +122,7 @@ export const SIM = {
   STARVE: 0.08,                 // people lost per second per unit of hunger above STARVE_FROM
   STARVE_FROM: 0.2,
   // stability target = BASE + ALLOC*alloc.stability + CALM*w_calm*calm - HUNGER*hunger
-  //   - CROWD*max(0, crowding - 1) - ANGER*w_mood*anger - STRESS*w_pulse*stress
+  //   - CROWD*max(0, crowding - 1) - ANGER*w_mood*anger - STRESS*w_stress*stress
   //   - CONFLICT[level].stability - SPLIT (while two factions share the world)
   // stability moves toward it at STAB_RATE/s
   STAB_START: 0.7, STAB_BASE: 0.62, STAB_ALLOC: 0.35, STAB_CALM: 0.15, STAB_HUNGER: 0.7, STAB_CROWD: 0.8,
@@ -143,7 +143,7 @@ export const SIM = {
   INEQ_START: 0.15, INEQ_BASE: 0.12, INEQ_TIER: 0.12, INEQ_BOOM: 0.6, INEQ_ORDER: 0.2, INEQ_RATE: 0.1,
   // tension (0..TENSION_MAX) changes by (pressure - relief) per second:
   //   pressure = HUNGER*hunger + INEQ*max(0, inequality - INEQ_FROM) + ANGER*w_mood*anger
-  //            + STRESS*w_pulse*stress + UNSTABLE*max(0, UNSTABLE_FROM - stability) + SPLIT (two factions)
+  //            + STRESS*w_stress*stress + UNSTABLE*max(0, UNSTABLE_FROM - stability) + SPLIT (two factions)
   //   relief   = RELIEF + CALM*w_calm*calm + ORDER*alloc.stability
   T_HUNGER: 0.5, T_INEQ: 0.8, T_INEQ_FROM: 0.35, T_ANGER: 0.45, T_STRESS: 0.15, T_UNSTABLE: 0.4, T_UNSTABLE_FROM: 0.45,
   T_SPLIT: 0.04, T_RELIEF: 0.06, T_CALM: 0.12, T_ORDER: 0.08, TENSION_MAX: 1.2,
@@ -172,13 +172,13 @@ export const BIOME_YIELD = {
   alien: { food: 1, wood: 0.9, stone: 1.2 },
 };
 
-export const CHANNEL_KEYS = ['calm', 'focus', 'pulse', 'blink'];
+export const CHANNEL_KEYS = ['calm', 'focus', 'stress', 'blink'];
 
 // How strongly each channel showed up in the first MIND_SECONDS of play (comparable scales).
 export const CHANNEL_SCORE = {
   calm: (m) => m.calm / 0.35,
   focus: (m) => m.focus / 0.3,
-  pulse: (m) => Math.max(0, m.hrDelta ? m.hrDelta / 8 : (m.stress ?? 0) * 2.5),
+  stress: (m) => (m.stress ?? 0) * 2.5,
   blink: (m) => m.blinks / 3,
 };
 
@@ -186,7 +186,7 @@ export const CHANNEL_SCORE = {
 export const TEMPERAMENT = {
   calm: { growth: 0.55, research: 0.25, stability: 0.2 },
   focus: { growth: 0.2, research: 0.6, stability: 0.2 },
-  pulse: { growth: 0.4, research: 0.5, stability: 0.1 },
+  stress: { growth: 0.4, research: 0.5, stability: 0.1 },
   blink: { growth: 0.3, research: 0.4, stability: 0.3 },
   mixed: { growth: 0.4, research: 0.4, stability: 0.2 },
 };
@@ -266,13 +266,16 @@ export function trackCampaignPop(p, home) {
   return p.pop;
 }
 
-// Brain readings every world sees this frame. Stress comes from the EEG (panic, low calm) and,
-// when a pulse sensor is connected, a racing pulse (#95). `anger` is the camera mood (0..1).
-export function brainEffects({ calm, focus, hrDelta, blinksLast10s, panic, anger = 0 }) {
-  const pulseStress = hrDelta ? clamp(hrDelta / SIM.STRESS_BPM, 0, SIM.STRESS_MAX) : 0;
-  const eegStress = Math.max(panic || 0, calm < 0.35 ? (0.35 - calm) * 1.5 : 0);
-  const stress = Math.max(pulseStress, clamp(eegStress, 0, SIM.STRESS_MAX));
-  return { calm, focus, hrDelta: hrDelta || 0, stress, blinkRate: blinksLast10s / 10, anger: clamp(anger || 0) };
+// Brain readings every world sees this frame. `stress` is brain.stress (src/brain/brain.js):
+// EEG agitation or face anger, about 0.15 at rest, 0..1. Without it, it is worked out from calm
+// and anger with stressFrom. `anger` is the camera mood (0..1).
+export function brainEffects({ calm, focus, stress, blinksLast10s, anger = 0 }) {
+  return {
+    calm, focus,
+    stress: clamp(stress ?? stressFrom(calm, anger)),
+    blinkRate: blinksLast10s / 10,
+    anger: clamp(anger || 0),
+  };
 }
 
 // Housing of the current tier, and the population the world can hold right now.
@@ -350,14 +353,14 @@ export function eraReady(p) {
 export function stabilityTarget(p, fx, alloc, w) {
   return SIM.STAB_BASE + SIM.STAB_ALLOC * alloc.stability + SIM.STAB_CALM * w('calm') * fx.calm
     - SIM.STAB_HUNGER * p.hunger - SIM.STAB_CROWD * Math.max(0, p.crowding - 1)
-    - SIM.STAB_ANGER * w('mood') * (fx.anger || 0) - SIM.STAB_STRESS * w('pulse') * fx.stress
+    - SIM.STAB_ANGER * w('mood') * (fx.anger || 0) - SIM.STAB_STRESS * w('stress') * fx.stress
     - CONFLICT[p.conflict ?? 0].stability - (p.factions ? SIM.STAB_SPLIT : 0);
 }
 
 // How fast tension builds (positive) or eases (negative) right now.
 export function tensionRate(p, fx, alloc, w) {
   const pressure = SIM.T_HUNGER * p.hunger + SIM.T_INEQ * Math.max(0, p.inequality - SIM.T_INEQ_FROM)
-    + SIM.T_ANGER * w('mood') * (fx.anger || 0) + SIM.T_STRESS * w('pulse') * fx.stress
+    + SIM.T_ANGER * w('mood') * (fx.anger || 0) + SIM.T_STRESS * w('stress') * fx.stress
     + SIM.T_UNSTABLE * Math.max(0, SIM.T_UNSTABLE_FROM - p.stability) + (p.factions ? SIM.T_SPLIT : 0);
   const relief = SIM.T_RELIEF + SIM.T_CALM * w('calm') * fx.calm + SIM.T_ORDER * alloc.stability;
   return pressure - relief;
@@ -555,7 +558,7 @@ function conflictCause(p, fx, w) {
     [SIM.T_HUNGER * p.hunger, 'hungry clans fought over food'],
     [SIM.T_INEQ * Math.max(0, p.inequality - SIM.T_INEQ_FROM), 'the poor rose against the rich'],
     [SIM.T_ANGER * w('mood') * (fx.anger || 0), "your anger stirred them up"],
-    [SIM.T_STRESS * w('pulse') * fx.stress, 'your racing pulse set them on edge'],
+    [SIM.T_STRESS * w('stress') * fx.stress, 'your stress set them on edge'],
     [SIM.T_UNSTABLE * Math.max(0, SIM.T_UNSTABLE_FROM - p.stability), 'nobody trusts the elders'],
     [p.factions ? SIM.T_SPLIT : 0, 'old grudges between the factions'],
   ];
@@ -579,16 +582,16 @@ export function stepPlanet(p, dt, fx, rng = Math.random, attended = false) {
   const cap = popCap(p);
 
   // Population: logistic growth driven by calm, dragged by stress and hunger, capped by housing.
-  const growth = (SIM.GROWTH_BASE + SIM.GROWTH_CALM * w('calm') * fx.calm - SIM.GROWTH_STRESS * w('pulse') * fx.stress) * (0.5 + alloc.growth) * (1 - p.hunger);
+  const growth = (SIM.GROWTH_BASE + SIM.GROWTH_CALM * w('calm') * fx.calm - SIM.GROWTH_STRESS * w('stress') * fx.stress) * (0.5 + alloc.growth) * (1 - p.hunger);
   p.pop = clamp(p.pop + p.pop * growth * (1 - p.pop / cap) * dt, SIM.MIN_POP, Math.max(cap, SIM.MIN_POP));
 
   // Research: focus speeds it up, stress slows it, bigger settlements think faster.
-  const research = clamp(SIM.RESEARCH_BASE + SIM.RESEARCH_FOCUS * w('focus') * fx.focus + SIM.RESEARCH_CALM * fx.calm - SIM.RESEARCH_STRESS * w('pulse') * fx.stress, SIM.RESEARCH_MIN, SIM.RESEARCH_MAX)
+  const research = clamp(SIM.RESEARCH_BASE + SIM.RESEARCH_FOCUS * w('focus') * fx.focus + SIM.RESEARCH_CALM * fx.calm - SIM.RESEARCH_STRESS * w('stress') * fx.stress, SIM.RESEARCH_MIN, SIM.RESEARCH_MAX)
     * (0.5 + alloc.research) * (SIM.TIER_RESEARCH_BASE + SIM.TIER_RESEARCH * p.tier);
   p.progress = Math.min(1, p.progress + (dt / SIM.ERA_SECONDS) * research);
 
-  // Goat market: a log-price random walk whose volatility is the player's pulse.
-  const sigma = SIM.MARKET_SIGMA_BASE + SIM.MARKET_SIGMA_PULSE * w('pulse') * fx.stress;
+  // Goat market: a log-price random walk whose volatility is the player's stress.
+  const sigma = SIM.MARKET_SIGMA_BASE + SIM.MARKET_SIGMA_STRESS * w('stress') * fx.stress;
   p.market *= Math.exp(SIM.MARKET_REVERT * Math.log(SIM.MARKET_START / p.market) * dt + sigma * Math.sqrt(dt) * gaussOf(rng));
   p.marketPeak = Math.max(p.market, p.marketPeak - (p.marketPeak - p.market) * SIM.MARKET_PEAK_DECAY * dt);
 
@@ -621,20 +624,18 @@ export function stepPlanet(p, dt, fx, rng = Math.random, attended = false) {
     }
     if (rng() < SIM.FLAVOUR_CHANCE) events.push({ kind: 'flavour', text: pickOf(FLAVOUR[p.eraIndex], rng) });
   }
-  if (ch === 'pulse' || ch === 'mixed') {
+  if (ch === 'stress' || ch === 'mixed') {
     if (!p.crashed && p.market < p.marketPeak * SIM.CRASH_RATIO) {
       p.crashed = true;
       p.pop = Math.max(SIM.MIN_POP, p.pop * (1 - (1 - SIM.CRASH_POP) * steady));
       p.progress = Math.max(0, p.progress - SIM.CRASH_PROGRESS * steady);
       p.goats *= SIM.CRASH_GOATS;
-      const cause = fx.hrDelta ? `your pulse at ${fx.hrDelta >= 0 ? '+' : ''}${Math.round(fx.hrDelta)} bpm` : 'your tension';
-      events.push({ kind: 'bad', text: 'goat crash', cause });
+      events.push({ kind: 'bad', text: 'goat crash', cause: `your stress at ${Math.round(fx.stress * 100)}%` });
     } else if (!p.boomed && p.market > SIM.BOOM_LEVEL) {
       p.boomed = true;
       p.progress = Math.min(1, p.progress + SIM.BOOM_PROGRESS);
       p.goats = Math.min(storage(p), p.goats * SIM.BOOM_GOATS);
-      const boomCause = fx.hrDelta ? 'a lively pulse' : 'a lively mind';
-      events.push({ kind: 'good', text: 'goat boom', cause: boomCause });
+      events.push({ kind: 'good', text: 'goat boom', cause: 'a lively mind' });
     }
     if (p.market > p.marketPeak * SIM.CRASH_RESET) p.crashed = false;
     if (p.market < SIM.BOOM_RESET) p.boomed = false;
@@ -717,16 +718,15 @@ export function arriveShip(to) {
 }
 
 // Mind snapshot accumulator. Returns the channels ranked strongest-first once done.
-export function newMind() { return { t: 0, calm: 0, focus: 0, hr: 0, stress: 0, blinks0: null, blinks: 0, hrDelta: 0, done: false, ranked: null }; }
+export function newMind() { return { t: 0, calm: 0, focus: 0, stress: 0, blinks0: null, blinks: 0, done: false, ranked: null }; }
 export function stepMind(m, playDt, fx, blinksTotal) {
   if (m.done || playDt <= 0) return null;
   if (m.blinks0 == null) m.blinks0 = blinksTotal;
   m.t += playDt;
-  m.calm += fx.calm * playDt; m.focus += fx.focus * playDt; m.hr += fx.hrDelta * playDt;
-  m.stress = (m.stress || 0) + (fx.stress || 0) * playDt;
+  m.calm += fx.calm * playDt; m.focus += fx.focus * playDt; m.stress += (fx.stress || 0) * playDt;
   if (m.t < SIM.MIND_SECONDS) return null;
   m.done = true;
-  m.calm /= m.t; m.focus /= m.t; m.hrDelta = m.hr / m.t; m.stress /= m.t;
+  m.calm /= m.t; m.focus /= m.t; m.stress /= m.t;
   m.blinks = blinksTotal - m.blinks0;
   m.ranked = CHANNEL_KEYS.map((ch) => ({ ch, s: CHANNEL_SCORE[ch](m) })).sort((a, b) => b.s - a.s);
   return m.ranked;

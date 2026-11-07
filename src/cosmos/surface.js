@@ -40,7 +40,7 @@ export class PlanetSurface {
     this.v = world.vast;
     this.id = 'surface';
     this.era = 'surface';
-    this.powers = ['blink', 'calm', 'focus', 'heart'];
+    this.powers = ['blink', 'calm', 'focus', 'stress'];
     this.base = makeCanvas(VW, VH);
     const bctx = this.base.getContext('2d');
     const img = bctx.createImageData(VW, VH);

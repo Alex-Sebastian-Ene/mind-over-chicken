@@ -138,13 +138,12 @@ const audio = {
   tick() { if (engine) engine.audio_play('tick'); else jsAudio.tick(); },
   rumble(dur) { if (engine) engine.audio_play('rumble'); else jsAudio.rumble(dur); },
   fanfare() { if (engine) engine.audio_play('fanfare'); else jsAudio.fanfare(); },
-  heartbeat(now, bpm, intensity) { if (engine) engine.audio_heartbeat(now, bpm, intensity); else jsAudio.heartbeat(now, bpm, intensity); },
 };
 const advisor = new Advisor($('advisor'));
 const hud = new Hud(document);
 const cosmos = new Cosmos();
 // What the HUD shows while you look at the galaxy.
-const galaxyHudScene = { label: 'Galaxy', powers: ['calm', 'focus', 'heart'], objectives: () => cosmos.galaxy?.objectives() || [] };
+const galaxyHudScene = { label: 'Galaxy', powers: ['calm', 'focus', 'stress'], objectives: () => cosmos.galaxy?.objectives() || [] };
 let hudScene = null;
 let G = null;
 let previewSource = null;
@@ -353,7 +352,6 @@ function showEnd() {
     ['Countdown scrubs', x.scrubs ?? 0],
     ['Seconds of calm', Math.round(b.stats.calmSeconds)],
     ['Seconds of focus', Math.round(b.stats.focusSeconds)],
-    ['Peak heart rate', b.stats.peakHr ? `${Math.round(b.stats.peakHr)} bpm` : 'n/a'],
     ['Brain windows recorded', m.total()],
     ['Personal model accuracy', m.trained ? `${Math.round(m.accuracy * 100)}% (chance ${Math.round(m.chance * 100)}%)` : 'not trained'],
   ];
@@ -485,22 +483,10 @@ function frame(ts) {
   const dt = Math.min(0.05, (ts - lastTs) / 1000 || 0.016);
   lastTs = ts;
   if (G) {
-    G.brain.update(dt);
+    G.brain.update(dt, G.mood);   // the camera's face anger counts toward brain.stress
     if (engine) {
       const b = G.brain;
-      engine.game_tick(
-        dt,
-        b.calm || 0,
-        b.focus || 0,
-        0,
-        b.hr || 0,
-        b.restHr || 70,
-        b.hrDelta(),
-        b.stats?.blinks || 0
-      );
-      if (b.hr > 0) {
-        engine.audio_heartbeat(performance.now() / 1000, b.hr, Math.max(0, b.hrDelta() / 30));
-      }
+      engine.game_tick(dt, b.calm || 0, b.focus || 0, b.stress ?? 0, b.stats?.blinks || 0);
     }
     if (banner) {
       banner.t += dt;
@@ -661,7 +647,7 @@ screen.addEventListener('pointerdown', (e) => {
     cosmos.pointerDown(e.pointerId, p.x, p.y);
     return;
   }
-  // Right-drag or Alt-drag orbits the camera, in 3D only. (Shift is the racing-pulse key.)
+  // Right-drag or Alt-drag orbits the camera, in 3D only. (Shift is the Stress key.)
   if (G && engine && engine.is_3d_mode() && !cosmos.active && (e.button === 2 || (e.button === 0 && e.altKey))) {
     e.preventDefault();
     screen.setPointerCapture?.(e.pointerId);
@@ -736,6 +722,7 @@ screen.addEventListener('wheel', (e) => {
 }, { passive: false });
 screen.addEventListener('contextmenu', (e) => e.preventDefault());
 
+// Shift is the Stress demo key: full agitation on the emulated headset (input.panic).
 const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'panic' };
 window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input')) return;
@@ -779,7 +766,7 @@ window.addEventListener('blur', () => { const s = sim(); if (s) Object.keys(s.in
 // Toolbar tiles double as touch controls for the simulated brain.
 document.querySelectorAll('[data-power]').forEach((tile) => {
   const power = tile.dataset.power;
-  const map = { calm: 'calm', focus: 'focus', heart: 'panic' };
+  const map = { calm: 'calm', focus: 'focus', stress: 'panic' };
   tile.addEventListener('pointerdown', (e) => {
     audio.unlock();
     const s = sim(); if (!s) return;
@@ -883,11 +870,8 @@ function updateCosmosUi(dt) {
     }));
   }
   const m = gal.mind;
-  const pulseStr = (G?.brain?.hr && G.brain.hr > 0)
-    ? `pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, `
-    : (m.stress ? `tension ${Math.round(m.stress * 100)}%, ` : '');
   $('mindLine').textContent = m.done
-    ? `Read from your first 10 s: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, ${pulseStr}${m.blinks} blinks.`
+    ? `Read from your first 10 s: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, stress ${Math.round((m.stress || 0) * 100)}%, ${m.blinks} blinks.`
     : `Reading your mind: ${Math.max(0, Math.ceil(SIM.MIND_SECONDS - m.t))} s of play left.`;
   $('galaxyLog').replaceChildren(...gal.log.slice(0, 4).map((l) => { const li = document.createElement('li'); li.textContent = l.text; return li; }));
 }
@@ -927,7 +911,7 @@ $('galaxyBtn').addEventListener('click', () => {
   $('endScreen').hidden = true;
   audio.unlock();
   openGalaxy({ fromEnding: true });
-  advisor.say('galaxy', 'Behold, my lord: the galaxy. Make planets. Keep your calm and focus near them.', { mood: 'happy', priority: 3, cooldown: 999 });
+  advisor.say('galaxy', 'Behold, my lord: the galaxy. Make planets. Stay calm near them.', { mood: 'happy', priority: 3, cooldown: 999 });
 });
 
 // ---------- title screen ----------

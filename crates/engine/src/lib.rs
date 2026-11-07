@@ -892,10 +892,6 @@ impl Engine {
         }
     }
 
-    pub fn audio_heartbeat(&mut self, now: f64, bpm: f32, intensity: f32) {
-        self.audio.heartbeat(now, bpm, intensity);
-    }
-
     pub fn game_start_era(&mut self, index: usize) {
         self.game.start_era(index);
         self.set_era(index as u8);
@@ -910,24 +906,13 @@ impl Engine {
         self.advisor.set_era(self.game.era.id());
     }
 
-    pub fn game_tick(
-        &mut self,
-        dt: f32,
-        calm: f32,
-        focus: f32,
-        panic: f32,
-        hr: f32,
-        rest_hr: f32,
-        hr_delta: f32,
-        blinks: u32,
-    ) {
+    /// One tick of the Rust eras. `stress` is the JS brain's `brain.stress`
+    /// (EEG agitation or face anger, 0..1, about 0.15 at rest).
+    pub fn game_tick(&mut self, dt: f32, calm: f32, focus: f32, stress: f32, blinks: u32) {
         let brain = eras::BrainInput {
             calm,
             focus,
-            panic,
-            hr,
-            rest_hr,
-            hr_delta,
+            stress,
             blinks,
         };
 
@@ -936,7 +921,7 @@ impl Engine {
 
         self.advisor.update(dt);
         self.hud.update_clock(self.game.stats.runtime);
-        self.hud.update_meters(calm, None, focus, None, hr, rest_hr, hr_delta, blinks, panic);
+        self.hud.update_meters(calm, None, focus, None, stress, blinks);
         self.hud.update_objectives(&self.game.era.objectives());
     }
 

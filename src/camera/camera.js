@@ -15,7 +15,8 @@
 //
 // The player stays in control: casts and moods are an extra channel on top of the headset and
 // keyboard. They call scene hooks and move the aim the way the mouse does; they never change
-// the brain's calm, focus or heart-rate signals and never block another input.
+// the brain's calm or focus and never block another input. Face anger (G.mood) does count toward
+// brain.stress = max(agitation, anger, 0.15·(1 - calm)).
 
 import { W, H, clamp } from '../sim/util.js';
 import { SPELLS, SPELL_BY_ID, GESTURE_LABEL, spellForKeyCode, CAMERA_CASTS_ENABLED } from './spells.js';
