@@ -9,6 +9,8 @@
 //! World generation lives behind one function, [`Terrain::generate`], so another world shape
 //! (for example a disc, see #52) can be swapped in without touching the simulation.
 
+use std::f32::consts::{PI, TAU};
+
 use moc_planet::noise::WrapNoise;
 use moc_planet::rng::Rng;
 
@@ -115,83 +117,170 @@ impl Terrain {
         let moist = WrapNoise::new(&mut rng, period(c_moist), 4);
         let icy = WrapNoise::new(&mut rng, period(c_ice), 3);
 
-        // Four home continents in a row along the equator, one per civilisation.
-        let gap = (w / 4.0).min(115.0 * s);
-        let base = rng.range(0.0, w);
+        // Continents spread unevenly and shaped like real ones (Alex). Each is a chain of
+        // overlapping, rotated, stretched lobes along a wandering (sometimes branching) spine,
+        // and the whole map is domain-warped, so they come out with arms, peninsulas and bays.
+        // Sizes follow a power law (a few big continents among many smaller ones), most land
+        // is placed in clusters next to other land, and island chains trail off the coasts,
+        // leaving wide open oceans elsewhere.
+        let (c_warp, warp_amp) = (150.0 * s, 34.0 * s);
+        let warp_x = WrapNoise::new(&mut rng, period(c_warp), 3);
+        let warp_y = WrapNoise::new(&mut rng, period(c_warp), 3);
+        let mut lobes: Vec<Lobe> = Vec::new();
         let mut regions: Vec<Region> = Vec::new();
+        // Each continent's reach from its centre, for spacing.
+        let mut reach: Vec<f32> = Vec::new();
+        // The four home continents (one per civilisation): a loose cluster, each one budding
+        // off one placed before it and joined to it by an isthmus, so the first peoples can
+        // meet on foot.
+        let mut home_parent = [0usize; HOME_REGIONS];
+        let mut home_r = [0.0f32; HOME_REGIONS];
         for i in 0..HOME_REGIONS {
-            let cx = (base + i as f32 * gap + rng.range(-0.08, 0.08) * gap).rem_euclid(w);
-            let cy = h / 2.0 + rng.range(-0.075, 0.075) * h;
-            regions.push(Region { cx, cy, rx: gap * rng.range(0.56, 0.64), ry: (rng.range(58.0, 74.0) * s).min(h * 0.2), start: (0, 0) });
+            let r = rng.range(66.0, 100.0) * s;
+            let (cx, cy) = if i == 0 {
+                (rng.range(0.0, w), h * rng.range(0.42, 0.58))
+            } else {
+                let p = rng.below(i);
+                home_parent[i] = p;
+                let mut pos = (0.0, 0.0);
+                for _ in 0..12 {
+                    // Bud off sideways rather than in a line, and away from the other homes.
+                    let a = rng.range(0.0, TAU);
+                    let dist = (home_r[p] + r) * rng.range(0.85, 1.1);
+                    pos = (d.wrap_xf(regions[p].cx + a.cos() * dist), (regions[p].cy + a.sin() * dist * 0.7).clamp(0.28 * h, 0.72 * h));
+                    if (0..i).all(|j| d.dist(regions[j].cx, regions[j].cy, pos.0, pos.1) > (home_r[j] + r) * 0.8) {
+                        break;
+                    }
+                }
+                pos
+            };
+            let (reg, ext) = continent(&mut rng, &mut lobes, regions.len(), cx, cy, r, s, h);
+            regions.push(reg);
+            reach.push(ext);
+            home_r[i] = r;
         }
-        // More continents on a bigger planet, waiting to be settled.
-        // (A few more per area on a scaled-up planet, for its crowd of peoples.)
-        let per = 2.5 + (s - 1.0).min(1.0) * 1.5;
-        let extra = ((d.n() as f32 / (640.0 * 320.0 * s * s) * per).round() as usize).saturating_sub(HOME_REGIONS).min(12);
+        // The other continents, waiting to be settled; more on a bigger planet.
+        let per = 3.2 + (s - 1.0).min(1.0) * 1.8;
+        let extra = ((d.n() as f32 / (640.0 * 320.0 * s * s) * per).round() as usize).saturating_sub(HOME_REGIONS).min(18);
         let mut tries = 0;
-        while regions.len() < HOME_REGIONS + extra && tries < 600 {
+        while regions.len() < HOME_REGIONS + extra && tries < 900 {
             tries += 1;
-            let (rx, ry) = (rng.range(60.0, 110.0) * s, rng.range(45.0, 80.0) * s);
-            let (cx, cy) = (rng.range(0.0, w), rng.range(0.24 * h, 0.76 * h));
-            let clear = regions.iter().all(|r| {
-                let dx = d.dx(r.cx, cx).abs() / (r.rx + rx);
-                let dy = (r.cy - cy).abs() / (r.ry + ry);
-                dx * dx + dy * dy > 1.0
-            });
+            let r = (30.0 + 110.0 * rng.range(0.0, 1.0).powf(2.0)) * s;
+            // Mostly next to land already placed (clusters), sometimes out in the open ocean.
+            let (cx, cy) = if rng.chance(0.65) {
+                let p = rng.below(regions.len());
+                let a = rng.range(0.0, TAU);
+                let dist = (reach[p] * 0.7 + r) * rng.range(0.9, 1.5);
+                (d.wrap_xf(regions[p].cx + a.cos() * dist), regions[p].cy + a.sin() * dist * 0.7)
+            } else {
+                (rng.range(0.0, w), rng.range(0.25 * h, 0.75 * h))
+            };
+            if !(0.22 * h..0.78 * h).contains(&cy) {
+                continue;
+            }
+            let clear = regions.iter().zip(&reach).all(|(o, &oe)| d.dist(o.cx, o.cy, cx, cy) > (oe * 0.6 + r) * 0.9);
             if clear {
-                regions.push(Region { cx, cy, rx, ry, start: (0, 0) });
+                let (reg, ext) = continent(&mut rng, &mut lobes, regions.len(), cx, cy, r, s, h);
+                regions.push(reg);
+                reach.push(ext);
             }
         }
-        // Land bridges: between neighbouring home continents (closing the ring on a small
-        // planet), and from each other continent to its nearest neighbour half the time.
-        let mut bridges = Vec::new();
-        for i in 0..HOME_REGIONS - 1 {
-            bridges.push((i, i + 1, rng.range(9.0, 13.0) * s));
+        // Island chains trailing off some coasts (not continents: no region of their own).
+        let n_cont = lobes.len();
+        for k in 0..regions.len() {
+            if !rng.chance(0.4) {
+                continue;
+            }
+            let own: Vec<Lobe> = lobes[..n_cont].iter().copied().filter(|l| l.owner == k).collect();
+            let l = own[rng.below(own.len())];
+            let mut a = rng.range(0.0, TAU);
+            let lr = l.rx.max(l.ry);
+            let (mut x, mut y) = (l.cx + a.cos() * (lr + 14.0 * s), l.cy + a.sin() * (lr + 14.0 * s));
+            for _ in 0..(3 + rng.below(5)) {
+                let ir = rng.range(5.0, 15.0) * s;
+                if (0.2 * h..0.8 * h).contains(&y) {
+                    lobes.push(Lobe::new(d.wrap_xf(x), y, ir * rng.range(1.0, 1.6), ir, rng.range(0.0, PI), usize::MAX));
+                }
+                a += rng.range(-0.6, 0.6);
+                let step = ir * rng.range(2.0, 3.6);
+                (x, y) = (x + a.cos() * step, y + a.sin() * step);
+            }
         }
-        if gap * 4.0 >= w - 1.0 && rng.chance(0.7) {
-            bridges.push((HOME_REGIONS - 1, 0, rng.range(9.0, 13.0) * s));
+        // Land bridges: between consecutive home continents, and from each other continent to
+        // its nearest neighbour half the time, only across a narrow strait: a long bridge over
+        // open sea reads as a strip of land drawn with a ruler (Alex). Each runs between the two
+        // continents' closest lobes.
+        let closest = |a: usize, b: usize| -> (Region, Region, f32) {
+            let mut best = (Region::at(0.0, 0.0, 1.0), Region::at(0.0, 0.0, 1.0), f32::MAX);
+            for la in lobes[..n_cont].iter().filter(|l| l.owner == a) {
+                for lb in lobes[..n_cont].iter().filter(|l| l.owner == b) {
+                    let (ra, rb) = ((la.rx * la.ry).sqrt(), (lb.rx * lb.ry).sqrt());
+                    let gap = d.dist(la.cx, la.cy, lb.cx, lb.cy) - ra - rb;
+                    if gap < best.2 {
+                        best = (Region::at(la.cx, la.cy, ra), Region::at(lb.cx, lb.cy, rb), gap);
+                    }
+                }
+            }
+            best
+        };
+        let mut bridges: Vec<(Region, Region, f32)> = Vec::new();
+        for i in 1..HOME_REGIONS {
+            let (a, b, _) = closest(i, home_parent[i]);
+            bridges.push((a, b, rng.range(9.0, 13.0) * s));
         }
         for e in HOME_REGIONS..regions.len() {
-            let near = (0..regions.len())
-                .filter(|&j| j != e)
-                .min_by(|&a, &b| {
-                    let da = d.dist(regions[e].cx, regions[e].cy, regions[a].cx, regions[a].cy);
-                    let db = d.dist(regions[e].cx, regions[e].cy, regions[b].cx, regions[b].cy);
-                    da.total_cmp(&db)
-                })
-                .unwrap_or(0);
-            // Only across a narrow strait: a long bridge over open sea reads as a strip of land
-            // drawn with a ruler (Alex), so far-off continents stay islands.
+            let near = (0..regions.len()).filter(|&j| j != e).map(|j| (j, closest(e, j))).min_by(|a, b| a.1 .2.total_cmp(&b.1 .2));
             let bw = rng.range(8.0, 12.0) * s;
-            if rng.chance(0.5) && coast_gap(d, &regions[e], &regions[near]) < 5.0 * bw {
-                bridges.push((e, near, bw));
+            if let Some((_, (a, b, gap))) = near {
+                if rng.chance(0.5) && gap < 5.0 * bw {
+                    bridges.push((a, b, bw));
+                }
             }
         }
         // The bridges as land: bent, wiggling isthmuses, never ruler-straight strips (Alex).
         let mut bmap = vec![-1.0f32; d.n()];
         let mut spine = vec![false; d.n()];
-        for &(ia, ib, bw) in &bridges {
-            stamp_bridge(d, &regions[ia], &regions[ib], bw, &mut rng, &mut bmap, &mut spine);
+        for (a, b, bw) in &bridges {
+            stamp_bridge(d, a, b, *bw, &mut rng, &mut bmap, &mut spine);
         }
 
+        // Which lobes can reach each 64-tile cell (with the warp), so a tile only tests a few.
+        const CELL: usize = 64;
+        let (gw, gh) = (d.w.div_ceil(CELL), d.h.div_ceil(CELL));
+        let mut grid: Vec<Vec<u16>> = vec![Vec::new(); gw * gh];
+        for (k, l) in lobes.iter().enumerate() {
+            let rr = 1.75 * l.rx.max(l.ry) + warp_amp;
+            let (x0, x1) = (((l.cx - rr) / CELL as f32).floor() as i32, ((l.cx + rr) / CELL as f32).floor() as i32);
+            let (y0, y1) = ((((l.cy - rr) / CELL as f32).floor() as i32).max(0), (((l.cy + rr) / CELL as f32).floor() as i32).min(gh as i32 - 1));
+            for gy in y0..=y1 {
+                for gx in x0..=x1.min(x0 + gw as i32 - 1) {
+                    grid[gy as usize * gw + gx.rem_euclid(gw as i32) as usize].push(k as u16);
+                }
+            }
+        }
         let mut kind = vec![DEEP; d.n()];
         // Height of each tile (continent shape plus noise), kept for the rivers.
         let mut elev = vec![-2.0f32; d.n()];
         for y in 0..d.h {
             let yf = y as f32;
             let lat = ((yf + 0.5) / h - 0.5).abs() * 2.0;
-            // Only continents within reach of this row can lift it out of the open ocean
-            // (`e` below -0.72 is deep sea whatever the noise).
-            let near: Vec<(f32, f32, f32)> =
-                regions.iter().filter(|r| (yf - r.cy).abs() < 1.75 * r.ry).map(|r| (r.cx, r.rx, (yf - r.cy) / r.ry)).collect();
+            let row = &grid[(y / CELL) * gw..(y / CELL + 1) * gw];
             for x in 0..d.w {
                 let xf = x as f32;
                 let u = xf / w;
                 let mut e = -2.0f32;
-                for &(cx, rx, dy) in &near {
-                    let dx = d.dx(cx, xf) / rx;
-                    if dx.abs() < 1.75 {
-                        e = e.max(1.0 - (dx * dx + dy * dy).sqrt());
+                // Only lobes that reach this cell (plus the warp) can lift it out of the open
+                // ocean (`e` below -0.72 is deep sea whatever the noise).
+                let near = &row[x / CELL];
+                if !near.is_empty() {
+                    // Domain warp: bends coasts into bays and peninsulas at the continent scale.
+                    let wx = xf + (warp_x.fbm(u, yf / c_warp, 3) - 0.5) * 2.0 * warp_amp;
+                    let wy = yf + (warp_y.fbm(u, yf / c_warp + 17.0, 3) - 0.5) * 2.0 * warp_amp;
+                    for &k in near {
+                        let l = &lobes[k as usize];
+                        let (dx, dy) = (d.dx(l.cx, wx), wy - l.cy);
+                        let (a, b) = ((dx * l.cos + dy * l.sin) / l.rx, (dy * l.cos - dx * l.sin) / l.ry);
+                        e = e.max(1.0 - (a * a + b * b).sqrt());
                     }
                 }
                 let i = y * d.w + x;
@@ -383,13 +472,62 @@ impl Terrain {
     }
 }
 
-/// Open sea between two continents' nominal coasts, along the line between their centres.
-fn coast_gap(d: Dims, a: &Region, b: &Region) -> f32 {
-    let (vx, vy) = (d.dx(a.cx, b.cx), b.cy - a.cy);
-    let len = (vx * vx + vy * vy).sqrt().max(1.0);
-    let (c, s) = (vx / len, vy / len);
-    let radius = |r: &Region| 1.0 / ((c / r.rx).powi(2) + (s / r.ry).powi(2)).sqrt();
-    len - radius(a) - radius(b)
+/// One lobe of a continent (or an island): a rotated ellipse.
+#[derive(Clone, Copy, Debug)]
+struct Lobe {
+    cx: f32,
+    cy: f32,
+    rx: f32,
+    ry: f32,
+    cos: f32,
+    sin: f32,
+    /// The continent (`regions` index) it belongs to; `usize::MAX` for an island.
+    owner: usize,
+}
+
+impl Lobe {
+    fn new(cx: f32, cy: f32, rx: f32, ry: f32, angle: f32, owner: usize) -> Lobe {
+        Lobe { cx, cy, rx, ry, cos: angle.cos(), sin: angle.sin(), owner }
+    }
+}
+
+impl Region {
+    /// A round region (bridge ends).
+    fn at(cx: f32, cy: f32, r: f32) -> Region {
+        Region { cx, cy, rx: r, ry: r, start: (0, 0) }
+    }
+}
+
+/// Lay out one continent of size `r` round (`cx`, `cy`): a big stretched lobe, then more
+/// along a spine that wanders and now and then branches back from the middle (arms and
+/// peninsulas). Returns its region (centred on the main lobe) and its reach from the centre.
+#[allow(clippy::too_many_arguments)]
+fn continent(rng: &mut Rng, lobes: &mut Vec<Lobe>, owner: usize, cx: f32, cy: f32, r: f32, s: f32, h: f32) -> (Region, f32) {
+    let main = r * rng.range(0.74, 0.9);
+    let aspect = rng.range(1.0, 1.9).sqrt();
+    let mut heading = rng.range(0.0, TAU);
+    lobes.push(Lobe::new(cx, cy, main * aspect, main / aspect, heading, owner));
+    let n = (1 + rng.below(3) + (r / (32.0 * s)) as usize).min(7);
+    let (mut x, mut y, mut lr) = (cx, cy, main);
+    let mut ext = main * aspect;
+    for _ in 1..n {
+        if rng.chance(0.3) {
+            // Branch: a new arm from the middle.
+            (x, y, lr) = (cx, cy, main);
+            heading += rng.range(1.6, 4.7);
+        } else {
+            heading += rng.range(-0.9, 0.9);
+        }
+        let nr = r * rng.range(0.36, 0.7);
+        let step = (lr + nr) * rng.range(0.42, 0.72);
+        x += heading.cos() * step;
+        y = (y + heading.sin() * step * 0.8).clamp(0.16 * h, 0.84 * h);
+        let st = rng.range(1.2, 2.6).sqrt();
+        lobes.push(Lobe::new(x, y, nr * st, nr / st, heading + rng.range(-0.4, 0.4), owner));
+        ext = ext.max(((x - cx).powi(2) + (y - cy).powi(2)).sqrt() + nr * st);
+        lr = nr;
+    }
+    (Region::at(cx, cy, main), ext)
 }
 
 /// Paint one land bridge from continent `a` to `b` into `bmap` (0.5 on the spine, 0 at the
@@ -397,7 +535,6 @@ fn coast_gap(d: Dims, a: &Region, b: &Region) -> f32 {
 /// the width swells and narrows along it, and it flares where it leaves each continent, so
 /// it reads as a natural isthmus rather than a straight strip.
 fn stamp_bridge(d: Dims, a: &Region, b: &Region, bw: f32, rng: &mut Rng, bmap: &mut [f32], spine: &mut [bool]) {
-    use std::f32::consts::{PI, TAU};
     let (vx, vy) = (d.dx(a.cx, b.cx), b.cy - a.cy);
     let len = (vx * vx + vy * vy).sqrt().max(1.0);
     let (nx, ny) = (-vy / len, vx / len);
