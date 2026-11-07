@@ -345,12 +345,16 @@ export class Engine {
         return v1;
     }
     /**
-     * Generate realistic procedural terrain using moc-terrain (#109).
-     * Updates the engine's internal heightmap, 3D relief mesh, and base pixel texture.
+     * Generate a home world with moc-terrain (#109) and make it the engine's: heights, tiles,
+     * colours, sites and the 3D relief. `width`/`height` 0 (or left out) mean the engine's
+     * 320×180. Any size drives the 3D mesh, raycast and billboards (#129); the Rust 2D port's
+     * own tiles stay 320×180.
      * @param {number} seed
+     * @param {number} width
+     * @param {number} height
      */
-    generate_terrain(seed) {
-        const ret = wasm.engine_generate_terrain(this.__wbg_ptr, seed);
+    generate_terrain(seed, width, height) {
+        const ret = wasm.engine_generate_terrain(this.__wbg_ptr, seed, width, height);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -2012,9 +2016,19 @@ export class RustSimSource {
 if (Symbol.dispose) RustSimSource.prototype[Symbol.dispose] = RustSimSource.prototype.free;
 
 /**
- * Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109, #19, #128)
+ * A generated world for JS (#109, from #112): the JS `World` is a thin wrapper that fills its
+ * arrays from this. `new(seed)` is the 320×180 home world; `home(seed, w, h)` any size;
+ * `planet(seed, biome)` a galaxy planet's 640×360 surface with its 320×180 capital (the AI
+ * tribe's world) cut from it at (0, 90). Accessors without `surface_` describe the world (the
+ * capital for a planet); `surface_*` describe the whole surface.
  */
 export class RustWorldGen {
+    static __wrap(ptr) {
+        const obj = Object.create(RustWorldGen.prototype);
+        obj.__wbg_ptr = ptr;
+        RustWorldGenFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
@@ -2024,6 +2038,13 @@ export class RustWorldGen {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_rustworldgen_free(ptr, 0);
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    biomes() {
+        const ret = wasm.rustworldgen_biomes(this.__wbg_ptr);
+        return ret;
     }
     /**
      * @returns {string}
@@ -2041,6 +2062,21 @@ export class RustWorldGen {
         }
     }
     /**
+     * @returns {boolean}
+     */
+    has_surface() {
+        const ret = wasm.rustworldgen_has_surface(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {number}
+     */
+    height() {
+        const ret = wasm.rustworldgen_height(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Heights 0..1, sea level 0.33 (like the old maps, so the 3D water level is unchanged).
      * @returns {Float32Array}
      */
     heights() {
@@ -2048,6 +2084,40 @@ export class RustWorldGen {
         return ret;
     }
     /**
+     * A home world of any size (0 × 0: the game's 320×180) for a planet biome (temperate,
+     * desert, ice, jungle, alien).
+     * @param {number} seed
+     * @param {number} width
+     * @param {number} height
+     * @param {string} biome
+     * @returns {RustWorldGen}
+     */
+    static home(seed, width, height, biome) {
+        const val2 = +seed;
+        const val3 = +width;
+        const val4 = +height;
+        const ptr0 = passStringToWasm0(biome, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustworldgen_home(val2, val3, val4, ptr0, len0);
+        return RustWorldGen.__wrap(ret);
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    lakes() {
+        const ret = wasm.rustworldgen_lakes(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Generation time, ms.
+     * @returns {number}
+     */
+    ms() {
+        const ret = wasm.rustworldgen_ms(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * The 320×180 home world.
      * @param {number} seed
      */
     constructor(seed) {
@@ -2057,10 +2127,39 @@ export class RustWorldGen {
         return this;
     }
     /**
+     * Campaign landmass per tile (index into `continents_json`), 255 for none.
+     * @returns {Uint8Array}
+     */
+    owner() {
+        const ret = wasm.rustworldgen_owner(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * A galaxy planet: its 640×360 surface, and the 320×180 capital at (0, 90) as the world.
+     * @param {number} seed
+     * @param {string} biome
+     * @returns {RustWorldGen}
+     */
+    static planet(seed, biome) {
+        const val2 = +seed;
+        const ptr0 = passStringToWasm0(biome, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustworldgen_planet(val2, ptr0, len0);
+        return RustWorldGen.__wrap(ret);
+    }
+    /**
+     * The base colour layer, RGBA.
      * @returns {Uint8Array}
      */
     rgba() {
         const ret = wasm.rustworldgen_rgba(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    rivers() {
+        const ret = wasm.rustworldgen_rivers(this.__wbg_ptr);
         return ret;
     }
     /**
@@ -2079,11 +2178,101 @@ export class RustWorldGen {
         }
     }
     /**
+     * @returns {string}
+     */
+    stats_json() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.rustworldgen_stats_json(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {number}
+     */
+    surface_height() {
+        const ret = wasm.rustworldgen_surface_height(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {Float32Array}
+     */
+    surface_heights() {
+        const ret = wasm.rustworldgen_surface_heights(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * The surface's landmasses and settlement spots (capital first, then nearest first), as
+     * the galaxy's surface view expects them: {tile, continents, spots}.
+     * @returns {string}
+     */
+    surface_json() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.rustworldgen_surface_json(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    surface_rgba() {
+        const ret = wasm.rustworldgen_surface_rgba(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {string}
+     */
+    surface_stats_json() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.rustworldgen_surface_stats_json(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    surface_types() {
+        const ret = wasm.rustworldgen_surface_types(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    surface_width() {
+        const ret = wasm.rustworldgen_surface_width(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Game tiles (the JS `T` codes).
      * @returns {Uint8Array}
      */
     types() {
         const ret = wasm.rustworldgen_types(this.__wbg_ptr);
         return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    width() {
+        const ret = wasm.rustworldgen_width(this.__wbg_ptr);
+        return ret >>> 0;
     }
 }
 if (Symbol.dispose) RustWorldGen.prototype[Symbol.dispose] = RustWorldGen.prototype.free;
@@ -2281,6 +2470,66 @@ export class ViewCamera {
     }
 }
 if (Symbol.dispose) ViewCamera.prototype[Symbol.dispose] = ViewCamera.prototype.free;
+
+/**
+ * The era's land use (farms, roads, paving: tiles whose type differs from the base type)
+ * painted over the base colour layer, in a planet biome's colours.
+ * @param {Uint8Array | number[]} base
+ * @param {Uint8Array | number[]} types
+ * @param {Uint8Array | number[]} base_types
+ * @param {number} width
+ * @param {string} biome
+ * @returns {Uint8Array}
+ */
+export function paint_land_use(base, types, base_types, width, biome) {
+    const val5 = +width;
+    let ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3;
+    try {
+        ptr0 = passArray8ToWasm0(base, wasm.__wbindgen_malloc);
+        len0 = WASM_VECTOR_LEN;
+        ptr1 = passArray8ToWasm0(types, wasm.__wbindgen_malloc);
+        len1 = WASM_VECTOR_LEN;
+        ptr2 = passArray8ToWasm0(base_types, wasm.__wbindgen_malloc);
+        len2 = WASM_VECTOR_LEN;
+        ptr3 = passStringToWasm0(biome, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len3 = WASM_VECTOR_LEN;
+    } catch (e) {
+        if (ptr3) { wasm.__wbindgen_free(ptr3, len3 * 1, 1); }
+        if (ptr2) { wasm.__wbindgen_free(ptr2, len2 * 1, 1); }
+        if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+        if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
+        throw e;
+    }
+    const ret = wasm.paint_land_use(ptr0, len0, ptr1, len1, ptr2, len2, val5, ptr3, len3);
+    var v6 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v6;
+}
+
+/**
+ * Walking distance (8-neighbour steps, no wrap) from every tile to (tx, ty) over walkable
+ * tiles, or over water with `sea`; -1 where unreachable. The JS `World.field`/`seaField`.
+ * @param {Uint8Array | number[]} types
+ * @param {number} width
+ * @param {number} height
+ * @param {number} tx
+ * @param {number} ty
+ * @param {boolean} sea
+ * @returns {Int16Array}
+ */
+export function walk_field(types, width, height, tx, ty, sea) {
+    const val2 = +width;
+    const val3 = +height;
+    const val4 = +tx;
+    const val5 = +ty;
+    const val6 = +sea;
+    const ptr0 = passArray8ToWasm0(types, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.walk_field(ptr0, len0, val2, val3, val4, val5, val6);
+    var v7 = getArrayI16FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 2, 2);
+    return v7;
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -2607,6 +2856,10 @@ function __wbg_get_imports() {
         },
         __wbg_new_with_length_5c0c9043ebd9ec32: function(arg0) {
             const ret = new Float32Array(arg0 >>> 0);
+            return ret;
+        },
+        __wbg_now_463ac581d2fc7ea3: function() {
+            const ret = Date.now();
             return ret;
         },
         __wbg_ownerDocument_adefd47fd596fe80: function(arg0) {
@@ -2999,6 +3252,13 @@ function handleError(f, args) {
 
 function isLikeNone(x) {
     return x === undefined || x === null;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
 }
 
 function passArrayF32ToWasm0(arg, malloc) {

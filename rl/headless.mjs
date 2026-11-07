@@ -47,3 +47,10 @@ export function mulberry32(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+// The worlds come from Rust (#109): load the engine wasm before any World is made.
+{
+  const { readFileSync } = await import('node:fs');
+  const { initTerrainSync } = await import('../src/world/terrain.js');
+  initTerrainSync(readFileSync(new URL('../pkg/mind_over_chicken_engine_bg.wasm', import.meta.url)));
+}
