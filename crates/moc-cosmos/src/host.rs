@@ -161,12 +161,13 @@ impl SpaceWar {
         )
     }
 
-    /// The HUD rows for the player's power: "label\tvalue\tbad" lines (empty without one).
+    /// The HUD rows for the player's power: "label\tvalue\tbad" lines (the galaxy's leader,
+    /// coalition and dominance when the player has no world in space).
     pub fn hud_rows(&self) -> String {
-        let Some(p) = self.player() else { return String::new() };
+        let Some(p) = self.player() else { return crate::endgame::galaxy_rows(self) };
         let pw = &self.powers[p as usize];
         if !pw.space {
-            return String::new();
+            return crate::endgame::galaxy_rows(self);
         }
         let home = &self.bodies[pw.home];
         let mut s = String::new();

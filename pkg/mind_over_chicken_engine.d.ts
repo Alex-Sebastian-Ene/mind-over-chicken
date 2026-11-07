@@ -297,7 +297,7 @@ export class RustGalaxy {
     static war_body_stride(): number;
     war_fleets(): Float32Array;
     /**
-     * HUD rows for the player's power: "label	value	bad" lines.
+     * HUD rows for the player's power (or the galaxy's): "label\tvalue\tbad" lines.
      */
     war_hud(): string;
     war_name(idx: number, name: string): void;

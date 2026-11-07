@@ -518,6 +518,8 @@ pub struct SpaceWar {
     /// The galaxy's leader and whether a coalition stands against it (`crate::endgame`).
     pub leader: Option<u16>,
     pub coalition_against: Option<u16>,
+    /// Seconds the coalition has stood.
+    pub coalition_t: f32,
     /// A power that has held galactic dominance long enough (`crate::endgame`).
     pub dominant: Option<u16>,
     pub dominance_t: f32,
@@ -547,6 +549,7 @@ impl Clone for SpaceWar {
             player_home: self.player_home,
             leader: self.leader,
             coalition_against: self.coalition_against,
+            coalition_t: self.coalition_t,
             dominant: self.dominant,
             dominance_t: self.dominance_t,
             councils: self.councils,
@@ -588,6 +591,7 @@ impl SpaceWar {
             player_home: None,
             leader: None,
             coalition_against: None,
+            coalition_t: 0.0,
             dominant: None,
             dominance_t: 0.0,
             councils: 0,
@@ -960,11 +964,14 @@ impl SpaceWar {
             let mut e = self.powers[p].external.map(|_| self.powers[p].econ).unwrap_or_default();
             let external = self.powers[p].external.is_some();
             let home = self.powers[p].home;
+            // An empire overstretches: each colony is worth less the more it holds.
+            let colonies = self.bodies.iter().enumerate().filter(|(i, b)| b.owner == Some(p as u16) && (*i != home || external)).count();
+            let share = COLONY_SHARE / (colonies.max(1) as f32).sqrt();
             for (i, b) in self.bodies.iter().enumerate() {
                 if b.owner != Some(p as u16) {
                     continue;
                 }
-                e.add_scaled(&b.econ, if i == home && !external { 1.0 } else { COLONY_SHARE });
+                e.add_scaled(&b.econ, if i == home && !external { 1.0 } else { share });
             }
             let pw = &mut self.powers[p];
             let fx = crate::endgame::tier_fx(pw.tier);
@@ -1034,12 +1041,37 @@ impl SpaceWar {
             for &l in out.iter() {
                 if self.powers[p as usize].fleet >= MIN_LAUNCH && self.can_target(p, l.target, l.target_power.or(self.bodies[l.target].owner)) {
                     self.launch(p, l);
+                    if l.motive == Motive::Coalition {
+                        self.joint_strike(p, l);
+                    }
                     break;
                 }
             }
         }
         self.launches = out;
         self.policy = policy;
+    }
+
+    /// The coalition strikes together: every member with ships ready joins a member's attack on
+    /// the leader.
+    fn joint_strike(&mut self, first: u16, l: Launch) {
+        let mut joined = vec![self.powers[first as usize].name.clone()];
+        for q in 0..self.powers.len() as u16 {
+            let pw = &self.powers[q as usize];
+            if q == first || !pw.alive || !pw.space || !pw.coalition || pw.external.is_some() || pw.kind == PowerKind::Player || pw.cooldown > 0.0 {
+                continue;
+            }
+            if pw.fleet < MIN_LAUNCH || pw.fleet < 0.3 * pw.fleet_cap || !self.can_target(q, l.target, l.target_power.or(self.bodies[l.target].owner)) {
+                continue;
+            }
+            joined.push(pw.name.clone());
+            self.launch(q, Launch { commit: 0.6, ..l });
+        }
+        if joined.len() > 1 {
+            let target = self.bodies[l.target].name.clone();
+            let names = joined.join(" and ");
+            self.say(TONE_WARN, false, format!("{names} strike {target} together: the coalition's fleets fly as one."));
+        }
     }
 
     /// A deterministic die for councils: 0..1, different for every council, pair and question.
@@ -1104,7 +1136,7 @@ impl SpaceWar {
         let mut loot = 0.0;
         let mut taken = false;
         let mut hits = 0.0;
-        let detail: String;
+        let mut detail: String;
         let econ = self.bodies[to].econ;
         let its = if self.is_player(d_id) { "your" } else { "its" };
         match m.order {
@@ -1194,6 +1226,25 @@ impl SpaceWar {
                     }
                 }
             }
+        }
+        // The campaign's scene isn't the war's to hurt: an attack on the hand-played home takes
+        // its toll in the player's orbit instead (docked ships and research).
+        if hand_played && won {
+            let pw = &mut self.powers[d_id as usize];
+            let (ships, research) = match m.order {
+                Order::Raid => (0.0, (1.0 - fx.stock_mul) * 0.6),
+                Order::Bombard => ((1.0 - fx.pop_mul) * 1.5, 0.0),
+                Order::Invade => (0.3, 0.1),
+            };
+            let lost = pw.fleet * ships.min(0.6);
+            pw.fleet -= lost;
+            let floor = crate::endgame::TIERS[(pw.tier as usize).min(crate::endgame::TIERS.len() - 1)].xp;
+            pw.tier_xp = (pw.tier_xp - pw.tier_xp * research).max(floor);
+            detail = match m.order {
+                Order::Raid => format!("stole {:.0}% of your research", research * 100.0),
+                Order::Bombard => format!("{lost:.0} of your docked ships burned in orbit"),
+                Order::Invade => "they held a beachhead and wrecked your spaceport".to_string(),
+            };
         }
         // Write the fight back.
         if shared {
@@ -1293,7 +1344,20 @@ impl SpaceWar {
         let fallen = held.is_empty() && self.powers[from as usize].external.is_none();
         let player = self.is_player(by);
         let now = if player { "your colony".to_string() } else { format!("ruled by {by_name}") };
-        if fallen {
+        // A people driven from its homeworld that takes it back is home again.
+        let homecoming = self.is_homeworld(by, i);
+        if homecoming {
+            self.powers[by as usize].home = i;
+            self.powers[by as usize].results.colonies -= 1;
+        }
+        if homecoming && !fallen {
+            let who = if player { "You".to_string() } else { by_name.clone() };
+            let home = if self.powers[from as usize].home == i { held.first().copied() } else { None };
+            if let Some(h) = home {
+                self.powers[from as usize].home = h;
+            }
+            self.say(TONE_GOOD, player || self.is_player(from), format!("{who} took back {world}, its homeworld, from {name}."));
+        } else if fallen {
             let pw = &mut self.powers[from as usize];
             pw.alive = false;
             pw.fleet = 0.0;
@@ -1341,6 +1405,16 @@ impl SpaceWar {
             captures: 0,
         });
         id
+    }
+
+    /// Is planet `i` where power `p`'s people come from (a world's own civilisation)?
+    pub fn is_homeworld(&self, p: u16, i: usize) -> bool {
+        self.powers.get(p as usize).is_some_and(|x| x.kind != PowerKind::Civ && x.key == i as u32)
+    }
+
+    /// The living power whose people come from planet `i`, if it lives elsewhere now.
+    pub fn exiles_of(&self, i: usize) -> Option<u16> {
+        self.powers.iter().find(|x| x.alive && x.kind != PowerKind::Civ && x.key == i as u32).map(|x| x.id)
     }
 
     pub fn is_player(&self, p: u16) -> bool {

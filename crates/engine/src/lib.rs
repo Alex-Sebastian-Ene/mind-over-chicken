@@ -1657,7 +1657,7 @@ impl RustGalaxy {
         }
     }
 
-    /// HUD rows for the player's power: "label	value	bad" lines.
+    /// HUD rows for the player's power (or the galaxy's): "label\tvalue\tbad" lines.
     pub fn war_hud(&self) -> String {
         self.inner.war.hud_rows()
     }

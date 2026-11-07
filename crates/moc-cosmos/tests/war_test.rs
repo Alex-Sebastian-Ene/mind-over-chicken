@@ -17,12 +17,14 @@ fn war_of(seed: u32, worlds: &[(&str, WorldStats)]) -> SpaceWar {
     for (i, (name, s)) in worlds.iter().enumerate() {
         w.sync_body(i, name, *s);
     }
-    // Long enough for shields, defences and garrisons to grow to their caps, no fleets yet.
-    for _ in 0..80 {
+    // Long enough for shields, defences and garrisons to grow to their caps, no fleets yet, and
+    // no endgame tiers (endgame_test.rs has those).
+    for _ in 0..60 {
         w.step(0.5, NEUTRAL);
         for p in w.powers.iter_mut() {
             p.fleet = 0.0;
             p.cooldown = 99.0;
+            p.tier_xp = -1e6;
         }
     }
     w.fleets.clear();
@@ -89,9 +91,14 @@ fn a_bombardment_breaks_shields_first_then_people() {
         let shields = w.bodies[1].shields;
         w.powers[0].fleet = fleet / PLAYER_COMMIT;
         w.order(0, 1, Order::Bombard).unwrap();
-        settle(&mut w);
+        let mut low = shields;
+        for _ in 0..40 {
+            w.powers[1].cooldown = 99.0;
+            w.step(0.25, NEUTRAL);
+            low = low.min(w.bodies[1].shields);
+        }
         let fx = w.take_fx(1);
-        assert!(w.bodies[1].shields < shields, "shields take the first hits");
+        assert!(low < shields * 0.9, "shields take the first hits: {shields} → {low}");
         dmg.push(1.0 - fx.pop_mul);
     }
     assert_eq!(dmg[0], 0.0, "a small fleet only dents the shields");

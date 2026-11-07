@@ -1772,7 +1772,7 @@ export class RustGalaxy {
         return v1;
     }
     /**
-     * HUD rows for the player's power: "label	value	bad" lines.
+     * HUD rows for the player's power (or the galaxy's): "label\tvalue\tbad" lines.
      * @returns {string}
      */
     war_hud() {
