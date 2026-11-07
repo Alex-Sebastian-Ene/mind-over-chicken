@@ -20,6 +20,7 @@
 // ?camworker=2 (default) one worker per model.
 
 import { loadVision } from './vision.js';
+import { loading } from '../ui/loading.js'; // loading screen
 import { RateMeter, Ema } from './meter.js';
 
 export const FRAME_WIDTH = { gesture: 320, face: 256 };
@@ -114,7 +115,7 @@ class WorkerEngine extends Engine {
   async init(onStatus) {
     onStatus('Loading the camera models in a background worker…');
     const t0 = performance.now();
-    await Promise.all(this.lanes.map((lane) => this.startLane(lane)));
+    await loading.track('camera', 'Loading the camera models', Promise.all(this.lanes.map((lane) => this.startLane(lane))), { doneText: 'Camera models ready' }); // loading screen
     this.timings.total = Math.round(performance.now() - t0);
   }
 

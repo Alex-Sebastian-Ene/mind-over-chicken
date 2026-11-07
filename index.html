@@ -34,6 +34,16 @@
     <div class="frame">
       <canvas id="screen" width="960" height="540" aria-label="The island"></canvas>
       <canvas id="textLayer" width="960" height="540" aria-hidden="true"></canvas>
+      <!-- loading screen (src/ui/loading.js): shown until the game engine is up -->
+      <div class="loading-screen" id="loadingScreen" role="status" aria-live="polite">
+        <div class="ls-inner">
+          <p class="ls-title">Mind <span>over</span> Chicken</p>
+          <ul class="ls-steps" id="loadingSteps"><li class="ls-step is-run">… Starting the game engine</li></ul>
+          <div class="ls-bar" id="loadingBar" aria-hidden="true"></div>
+          <p class="ls-hint" id="loadingHint"></p>
+        </div>
+      </div>
+      <div class="loading-pill" id="loadingPill" role="status" aria-live="polite" hidden></div>
 
       <div class="zoom" role="group" aria-label="Zoom">
         <button type="button" class="zbtn" id="zoomOut" aria-label="Zoom out (Z)" title="Zoom out (Z or scroll)">−</button>
