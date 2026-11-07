@@ -86,7 +86,7 @@ fn same_seed_same_history_different_seed_different_world() {
     let mut b = World::new_sized(9, Dims::SMALL);
     let mut c = World::new_sized(10, Dims::SMALL);
     for w in [&mut a, &mut b, &mut c] {
-        w.inputs = Inputs { calm: 0.3, focus: 0.4, stress: 0.7, anger: 0.1 };
+        w.inputs = Inputs { calm: 0.3, focus: 0.4, stress: 0.7, anger: 0.1, ..Default::default() };
         run(w, 40.0);
     }
     assert_eq!(a.checksum(), b.checksum());
@@ -98,7 +98,7 @@ fn same_seed_same_history_different_seed_different_world() {
 #[test]
 fn villages_grow_from_food_surplus_and_settle_new_villages() {
     let mut w = flat(1, GRASS);
-    let (f, _) = civ(&mut w, 100, 160, 4, Job::Gatherer, traits(0.3, 0.6));
+    let (f, _) = civ(&mut w, 100, 160, 4, Job::Forage, traits(0.3, 0.6));
     run(&mut w, 75.0);
     w.recount();
     let fac = &w.factions[f as usize];
@@ -110,7 +110,7 @@ fn villages_grow_from_food_surplus_and_settle_new_villages() {
 #[test]
 fn gatherers_bring_food_home() {
     let mut w = flat(2, GRASS);
-    let (_, v) = civ(&mut w, 100, 160, 4, Job::Gatherer, traits(0.3, 0.6));
+    let (_, v) = civ(&mut w, 100, 160, 4, Job::Forage, traits(0.3, 0.6));
     w.villages[v as usize].food = 0.0;
     run(&mut w, 12.0);
     // Passive income alone is ~0.4 food in 12 s; four gatherers bring in much more.
@@ -122,7 +122,7 @@ fn agents_starve_without_food_and_the_civilisation_dies_out() {
     let mut w = flat(3, SAND);
     w.food.amt.iter_mut().for_each(|a| *a = 0.0);
     w.food.t.iter_mut().for_each(|t| *t = 1e9); // no regrowth
-    let (f, v) = civ(&mut w, 100, 160, 4, Job::Gatherer, traits(0.3, 0.6));
+    let (f, v) = civ(&mut w, 100, 160, 4, Job::Forage, traits(0.3, 0.6));
     w.villages[v as usize].food = 0.0;
     run(&mut w, 100.0);
     assert!(w.agents.iter().all(|a| a.faction != f), "everyone starved");
@@ -134,7 +134,7 @@ fn agents_starve_without_food_and_the_civilisation_dies_out() {
 #[test]
 fn agents_die_of_old_age() {
     let mut w = flat(4, GRASS);
-    civ(&mut w, 100, 160, 2, Job::Gatherer, traits(0.3, 0.6));
+    civ(&mut w, 100, 160, 2, Job::Forage, traits(0.3, 0.6));
     let life = w.agents[0].life;
     w.agents[0].age = life - 0.05;
     run(&mut w, 0.5);
@@ -166,8 +166,8 @@ fn combat_has_casualties_and_the_stronger_side_wins() {
 #[test]
 fn an_undefended_village_is_captured_and_its_land_changes_hands() {
     let mut w = flat(6, GRASS);
-    let (a, _) = civ(&mut w, 100, 160, 0, Job::Gatherer, traits(0.8, 0.2));
-    let (b, vb) = civ(&mut w, 125, 160, 0, Job::Gatherer, traits(0.3, 0.5));
+    let (a, _) = civ(&mut w, 100, 160, 0, Job::Forage, traits(0.8, 0.2));
+    let (b, vb) = civ(&mut w, 125, 160, 0, Job::Forage, traits(0.3, 0.5));
     let (bx, by) = (w.villages[vb as usize].x, w.villages[vb as usize].y);
     let claimed: Vec<usize> = (0..w.d.n()).filter(|&i| w.claim[i] == vb).collect();
     assert!(claimed.len() > 50);
@@ -186,7 +186,7 @@ fn an_undefended_village_is_captured_and_its_land_changes_hands() {
 #[test]
 fn villages_claim_free_land_but_not_their_neighbours() {
     let mut w = flat(7, GRASS);
-    let (a, va) = civ(&mut w, 100, 160, 0, Job::Gatherer, traits(0.3, 0.5));
+    let (a, va) = civ(&mut w, 100, 160, 0, Job::Forage, traits(0.3, 0.5));
     let r = START_RADIUS;
     for (ox, oy) in [(0, 0), (r - 1, 0), (0, -(r - 1)), (-3, 3)] {
         let i = w.d.idx(100 + ox, 160 + oy);
@@ -194,7 +194,7 @@ fn villages_claim_free_land_but_not_their_neighbours() {
     }
     assert_eq!(w.owner[w.d.idx(100 + r + 3, 160)], NO_F);
     // A neighbour founded 8 tiles away gets only the free land.
-    let (b, vb) = civ(&mut w, 108, 160, 0, Job::Gatherer, traits(0.3, 0.5));
+    let (b, vb) = civ(&mut w, 108, 160, 0, Job::Forage, traits(0.3, 0.5));
     assert_eq!(w.owner[w.d.idx(103, 160)], a, "a's land stays a's");
     assert_eq!((w.owner[w.d.idx(110, 160)], w.claim[w.d.idx(110, 160)]), (b, vb));
     // Growing the radius claims the ring.
@@ -206,8 +206,8 @@ fn villages_claim_free_land_but_not_their_neighbours() {
 #[test]
 fn meeting_another_civilisation_is_an_event() {
     let mut w = flat(8, GRASS);
-    let (a, _) = civ(&mut w, 100, 160, 0, Job::Gatherer, traits(0.3, 0.5));
-    let (b, _) = civ(&mut w, 160, 160, 0, Job::Gatherer, traits(0.3, 0.5));
+    let (a, _) = civ(&mut w, 100, 160, 0, Job::Forage, traits(0.3, 0.5));
+    let (b, _) = civ(&mut w, 160, 160, 0, Job::Forage, traits(0.3, 0.5));
     w.spawn_agent(a, 0, Job::Warrior, 130, 160);
     w.spawn_agent(b, 1, Job::Warrior, 131, 161);
     w.step(DT);
@@ -225,8 +225,8 @@ fn the_players_mood_tilts_war_and_peace() {
     let mut outcomes = Vec::new();
     for inputs in [Inputs::with_stress(0.95, 0.0, 0.0), Inputs::with_stress(0.0, 0.0, 0.8)] {
         let mut w = flat(9, GRASS);
-        let (a, _) = civ(&mut w, 100, 160, 3, Job::Gatherer, traits(0.55, 0.45));
-        let (b, _) = civ(&mut w, 125, 160, 3, Job::Gatherer, traits(0.55, 0.45));
+        let (a, _) = civ(&mut w, 100, 160, 3, Job::Forage, traits(0.55, 0.45));
+        let (b, _) = civ(&mut w, 125, 160, 3, Job::Forage, traits(0.55, 0.45));
         w.factions[a as usize].is_player = true;
         w.rel_mut(a, b).met = true;
         w.rel_mut(b, a).met = true;
@@ -243,10 +243,10 @@ fn the_players_mood_tilts_war_and_peace() {
 #[test]
 fn restless_far_villages_split_off_as_a_new_civilisation() {
     let mut w = flat(10, GRASS);
-    let (p, cap) = civ(&mut w, 100, 160, 4, Job::Gatherer, traits(0.5, 0.4));
+    let (p, cap) = civ(&mut w, 100, 160, 4, Job::Forage, traits(0.5, 0.4));
     let far: Vec<u16> = (0..4).map(|k| w.found_village(p, 180 + 16 * k, 160, 5.0, false)).collect();
     for &v in &far {
-        w.spawn_agent(p, v, Job::Gatherer, w.villages[v as usize].x, 160);
+        w.spawn_agent(p, v, Job::Forage, w.villages[v as usize].x, 160);
         w.villages[v as usize].unrest = 1.2;
     }
     w.time = 50.0;
@@ -274,7 +274,7 @@ fn walkers_take_the_short_way_across_the_date_line() {
     for d in [Dims::SMALL, Dims::DEFAULT] {
         let t = Terrain::uniform(d, GRASS);
         let mut w = World::with_terrain(1, t);
-        let (f, v) = civ(&mut w, 40, 100, 0, Job::Gatherer, traits(0.3, 0.5));
+        let (f, v) = civ(&mut w, 40, 100, 0, Job::Forage, traits(0.3, 0.5));
         let i = w.spawn_agent(f, v, Job::Warrior, d.w as i32 - 3, 100).unwrap();
         let mut paths = Paths::new();
         let mut a = w.agents[i].clone();
@@ -296,9 +296,9 @@ fn walkers_take_the_short_way_across_the_date_line() {
 #[test]
 fn lightning_smites_scatters_and_burns() {
     let mut w = flat(11, GRASS);
-    let (f, _) = civ(&mut w, 100, 160, 0, Job::Gatherer, traits(0.3, 0.5));
-    let hit = w.spawn_agent(f, 0, Job::Gatherer, 120, 160).unwrap();
-    let near = w.spawn_agent(f, 0, Job::Gatherer, 125, 160).unwrap();
+    let (f, _) = civ(&mut w, 100, 160, 0, Job::Forage, traits(0.3, 0.5));
+    let hit = w.spawn_agent(f, 0, Job::Forage, 120, 160).unwrap();
+    let near = w.spawn_agent(f, 0, Job::Forage, 125, 160).unwrap();
     let id_near = w.agents[near].id;
     let killed = lightning(&mut w, 120.5, 160.5);
     assert_eq!(killed, 1);
@@ -328,7 +328,7 @@ fn the_calibration_hook_sets_the_players_civilisation() {
 #[test]
 fn the_bookkeeping_tick_runs_without_agents() {
     let mut w = flat(13, GRASS);
-    civ(&mut w, 100, 160, 0, Job::Gatherer, traits(0.3, 0.5));
+    civ(&mut w, 100, 160, 0, Job::Forage, traits(0.3, 0.5));
     slow_tick(&mut w);
     run(&mut w, 1.0);
 }
@@ -336,8 +336,8 @@ fn the_bookkeeping_tick_runs_without_agents() {
 #[test]
 fn fighters_are_wounded_before_they_die_and_break_when_morale_fails() {
     let mut w = flat(14, GRASS);
-    let (a, _) = civ(&mut w, 100, 160, 0, Job::Gatherer, traits(0.8, 0.2));
-    let (b, _) = civ(&mut w, 130, 160, 0, Job::Gatherer, traits(0.5, 0.3));
+    let (a, _) = civ(&mut w, 100, 160, 0, Job::Forage, traits(0.8, 0.2));
+    let (b, _) = civ(&mut w, 130, 160, 0, Job::Forage, traits(0.5, 0.3));
     w.spawn_agent(a, 0, Job::Warrior, 115, 160);
     let victim = w.spawn_agent(b, 1, Job::Warrior, 116, 160).unwrap();
     let id = w.agents[victim].id;
@@ -357,8 +357,8 @@ fn fighters_are_wounded_before_they_die_and_break_when_morale_fails() {
     assert!(seen_wounded, "wounded before dying or fleeing");
     // A fighter whose morale has broken runs instead of fighting.
     let mut w = flat(15, GRASS);
-    let (a, _) = civ(&mut w, 100, 160, 0, Job::Gatherer, traits(0.8, 0.2));
-    let (b, _) = civ(&mut w, 130, 160, 0, Job::Gatherer, traits(0.5, 0.3));
+    let (a, _) = civ(&mut w, 100, 160, 0, Job::Forage, traits(0.8, 0.2));
+    let (b, _) = civ(&mut w, 130, 160, 0, Job::Forage, traits(0.5, 0.3));
     w.spawn_agent(a, 0, Job::Warrior, 115, 160);
     let coward = w.spawn_agent(b, 1, Job::Warrior, 117, 160).unwrap();
     w.agents[coward].morale = 0.1;
@@ -370,10 +370,10 @@ fn fighters_are_wounded_before_they_die_and_break_when_morale_fails() {
 #[test]
 fn a_lone_unstable_civilisation_splits_without_any_rival() {
     let mut w = flat(16, GRASS);
-    let (p, _) = civ(&mut w, 100, 160, 4, Job::Gatherer, traits(0.5, 0.4));
+    let (p, _) = civ(&mut w, 100, 160, 4, Job::Forage, traits(0.5, 0.4));
     for k in 0..4 {
         let v = w.found_village(p, 130 + 16 * k, 160, 5.0, false);
-        w.spawn_agent(p, v, Job::Gatherer, 130 + 16 * k, 160);
+        w.spawn_agent(p, v, Job::Forage, 130 + 16 * k, 160);
         w.villages[v as usize].unrest = 0.8;
     }
     assert_eq!(w.alive_factions().count(), 1, "alone on the planet");

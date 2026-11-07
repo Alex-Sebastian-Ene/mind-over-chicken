@@ -9,10 +9,15 @@
 //!   alive(1)/dead(-1)/unused(0), pop, villages, r, g, b, capital x, capital y, friendliness,
 //!   aggressiveness, violence, fertility, cohesion, parent (-1 none), wars, raids, food, kills,
 //!   losses, mean unrest, seed source (0 run, 1 calibration, 2 mind, 3 rebellion), region,
-//!   is player, warriors
+//!   is player, warriors; then (#69) age, seconds in it, stability, knowledge, wealth, faith,
+//!   production, links, territory, inequality, vassals, colonies, Dark Age seconds left,
+//!   overlord (-1 none), strife level inside it, conflict level, highest age reached, food days,
+//!   coastal, contact, collapses, seconds the next age's conditions have held
 //! - names: slots × `civ_name_len` bytes, ASCII, NUL-padded
 //! - villages: `civ_village_count` × `civ_village_stride` f32: x, y, owner, pop, food, unrest,
-//!   capital, state (0 dead, 1 alive, 2 under siege)
+//!   capital, state (0 dead, 1 alive, 2 under siege), buildings, plague, strife side (0 none,
+//!   1 loyal, 2 rebel), mood (1 festival, -1 mourning)
+//! - text: `civ_text_ptr(kind, i)` / `civ_text_len(kind, i)`, UTF-8 (see `civ_text_ptr`)
 //! - events: `civ_events_len` × 8 i32: kind, a, b, x, y, n, t_ms, extra (`civ_events_clear`)
 //! - stats: `civ_stats_len` f32 (see `World::refresh_info`)
 
@@ -61,11 +66,20 @@ pub extern "C" fn civ_free(p: *mut World) {
     }
 }
 
-/// The player this step: calm, focus, stress (`max(1 − calm, anger)`), anger, all 0..1.
+/// The player this step, all 0..1: calm, focus, stress (0 at rest: the brain's `stress`, or
+/// the sandbox's fallback from calm and anger) and anger.
 #[no_mangle]
 pub extern "C" fn civ_set_inputs(p: *mut World, calm: f32, focus: f32, stress: f32, anger: f32) {
     if let Some(w) = w(p) {
-        w.inputs = Inputs { calm, focus, stress, anger };
+        w.inputs = Inputs { calm, focus, stress, anger, joy: w.inputs.joy };
+    }
+}
+
+/// A smile on camera, 0..1 (festivals).
+#[no_mangle]
+pub extern "C" fn civ_set_joy(p: *mut World, joy: f32) {
+    if let Some(w) = w(p) {
+        w.inputs.joy = joy;
     }
 }
 
@@ -74,6 +88,62 @@ pub extern "C" fn civ_step(p: *mut World, dt: f32) {
     if let Some(w) = w(p) {
         w.step(dt);
     }
+}
+
+/// Run `dt` seconds of real time at the world's speed, in steps of at most 0.1 s.
+#[no_mangle]
+pub extern "C" fn civ_advance(p: *mut World, dt: f32) {
+    if let Some(w) = w(p) {
+        w.advance(dt);
+    }
+}
+
+/// Time speed: 1, 4 or 16 in the sandbox (clamped to 0.25..32).
+#[no_mangle]
+pub extern "C" fn civ_set_speed(p: *mut World, k: f32) {
+    if let Some(w) = w(p) {
+        w.set_speed(k);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn civ_speed(p: *mut World) -> f32 {
+    w(p).map(|w| w.speed).unwrap_or(1.0)
+}
+
+#[no_mangle]
+pub extern "C" fn civ_age_count() -> usize {
+    crate::ages_table::AGE_COUNT
+}
+
+fn text(kind: u32, i: u32) -> &'static str {
+    use crate::ages_table::{Building, Job, AGES, CRISES};
+    let i = i as usize;
+    match kind {
+        0 => AGES.get(i.wrapping_sub(1)).map(|a| a.name).unwrap_or(""),
+        1 => AGES.get(i.wrapping_sub(1)).map(|a| a.key).unwrap_or(""),
+        2 => CRISES.get(i).copied().unwrap_or(""),
+        3 => crate::conflict::StrifeKind::NAMES.get(i).copied().unwrap_or(""),
+        4 => Job::ALL.get(i).map(|j| j.key()).unwrap_or(""),
+        5 => Building::ALL.get(i).map(|b| b.key()).unwrap_or(""),
+        6 => AGES.get(i.wrapping_sub(1)).map(|a| a.weapon.name).unwrap_or(""),
+        7 => crate::conflict::LEVELS.get(i).copied().unwrap_or(""),
+        8 => AGES.get(i.wrapping_sub(1)).map(|a| a.brain).unwrap_or(""),
+        _ => "",
+    }
+}
+
+/// Static text: kind 0 age name (i = 1..20), 1 age key, 2 crisis key (event `extra`), 3 strife
+/// kind, 4 job key, 5 building key, 6 the age's weapon, 7 conflict level name, 8 the age's
+/// brain moment.
+#[no_mangle]
+pub extern "C" fn civ_text_ptr(kind: u32, i: u32) -> *const u8 {
+    text(kind, i).as_ptr()
+}
+
+#[no_mangle]
+pub extern "C" fn civ_text_len(kind: u32, i: u32) -> usize {
+    text(kind, i).len()
 }
 
 #[no_mangle]

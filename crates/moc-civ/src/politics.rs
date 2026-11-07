@@ -17,20 +17,33 @@
 //!   after at least 20 s of war.
 //! - **Capture:** hostile warriors within 3 tiles of a village with no defending warriors
 //!   within 5 build siege at 0.35/s each; at `SIEGE_TO_CAPTURE` the village changes owner.
-//! - **Unrest** per village: 0.03 · (crowding + 1.3·hunger + distance from capital
-//!   + 2·war losses + god's anger) · (1.35 − cohesion), minus 0.012 · (0.4 + cohesion + 0.8·calm).
+//! - **Unrest** per village settles (4 %/s) toward 0.5 · (crowding + 1.3·hunger + distance
+//!   from capital + 2·war losses + the god's anger and agitation) · (1.35 − cohesion) − 0.25·calm.
 //!   A non-capital village at `REBEL_UNREST` splits off with nearby restless villages (up to
 //!   half the civilisation) as a new civilisation with drifted traits, which usually declares
-//!   war on its parent.
+//!   war on its parent. Unrest also rises with inequality and mourning and falls with
+//!   festivals, chiefs, law, faith and parliaments (`ages::economy`, `life`), and roads shorten
+//!   the distance that feeds it; an empire's far provinces feel it more (overextension).
+//!
+//! With the ages (#69): new agents take jobs by need (`jobs::choose`); villages put up their
+//! age's buildings (`jobs::construct`); settlers go further and land claims grow from the
+//! Villages age (5) on; colonists sail from the Age of Sail (13). Each second the ladder is
+//! measured and climbed (`ages`), conflict levels and strifes move (`conflict`), and wars are
+//! declared from age 7 (or after two battles). A civilisation fighting a civil war inside
+//! itself is not also split by the unrest rule; the war decides it.
 
 use std::f32::consts::TAU;
 
 use crate::agents::{los, set_goal, tile};
+use crate::conflict::{self, BATTLE, CIVIL_WAR, RAID};
+use crate::jobs::{self, Job};
 use crate::terrain::{food_max, SAND};
 use crate::world::*;
 
 pub const TENSION_RATE: f32 = 0.04;
-pub const UNREST_RATE: f32 = 0.03;
+/// How fast unrest settles toward its target (per second), and the target per unit of pressure.
+pub const UNREST_RATE: f32 = 0.04;
+pub const UNREST_GAIN: f32 = 0.5;
 pub const NEAR_DIST: f32 = 42.0;
 
 /// Bookkeeping, spread over four phases a quarter-second apart so no single frame carries it
@@ -57,6 +70,8 @@ pub fn slow_tick(w: &mut World) {
 fn village_tick(w: &mut World) {
     let dt = SLOW_DT;
     w.recount();
+    crate::life::villages(w, dt);
+    jobs::construct(w);
     for f in w.factions.iter_mut() {
         f.recent_losses *= 0.97;
         f.starved_recent *= 0.96;
@@ -69,10 +84,19 @@ fn village_tick(w: &mut World) {
 }
 
 fn politics_tick(w: &mut World, rebels: bool) {
+    let dt = 1.0;
     w.recount();
     scan_borders(w);
-    update_metrics(w);
-    diplomacy(w, 1.0);
+    crate::ages::economy(w, dt);
+    crate::ages::update_metrics(w, dt);
+    crate::ages::climb(w, dt);
+    diplomacy(w, dt);
+    conflict::update_levels(w, dt);
+    conflict::strife_tick(w, dt);
+    conflict::vassals(w, dt);
+    crate::ages::crises(w, dt);
+    crate::life::spread_plague(w, dt);
+    jobs::rebalance(w);
     w.refresh_hostility();
     plan_marches(w);
     trade(w);
@@ -80,6 +104,23 @@ fn politics_tick(w: &mut World, rebels: bool) {
         rebellion(w);
     }
     w.refresh_hostility();
+}
+
+/// Days of food a village keeps in store before it feeds another mouth or sends settlers: the
+/// storage habit, which grows with the first ages (hunter-gatherers barely keep any).
+/// Settlements one civilisation can hold together: more with each age (roads, law, empire).
+pub fn max_villages(age: u8) -> u32 {
+    32 + 4 * age as u32
+}
+
+pub fn reserve_days(age: u8) -> f32 {
+    match age {
+        0 | 1 => 0.0,
+        2 => 2.1,
+        3 => 3.1,
+        // Granaries, trade and carriers carry the load from the Villages age on.
+        _ => 1.5,
+    }
 }
 
 fn too_close(w: &World, x: i32, y: i32, spacing: f32) -> bool {
@@ -155,7 +196,7 @@ pub fn settle(w: &mut World, i: usize) {
                 if moved >= 2 {
                     break;
                 }
-                if a.alive && a.faction == f && a.home == origin && a.job == Job::Gatherer && a.carry <= 0.0 {
+                if a.alive && a.faction == f && a.home == origin && !a.job.fights() && a.job.role() != jobs::Role::Settle && a.carry <= 0.0 {
                     a.home = v;
                     a.state = State::ToHome;
                     moved += 1;
@@ -168,8 +209,23 @@ pub fn settle(w: &mut World, i: usize) {
         if !cap_ok {
             fac.capital = v;
         }
+        // A settlement founded far away starts a new clan; one across the sea is a colony.
+        let (ox, oy) = (w.villages.get(origin as usize).map(|o| (o.x, o.y))).unwrap_or((cx, cy));
+        let far = w.d.dist(ox as f32, oy as f32, cx as f32, cy as f32) > 24.0;
+        if far && w.factions[f as usize].clans < 8 && w.rng.chance(0.25) {
+            w.factions[f as usize].clans += 1;
+            w.villages[v as usize].clan = w.factions[f as usize].clans - 1;
+        } else if let Some(o) = w.villages.get(origin as usize) {
+            let clan = o.clan;
+            w.villages[v as usize].clan = clan;
+        }
+        if w.agents[i].job == Job::Colonist || w.terrain.land(ox, oy) != w.terrain.land(cx, cy) {
+            w.log(ev::COLONY, f, NO_F, cx, cy, 0);
+        }
+        let age = w.factions[f as usize].age;
+        w.villages[v as usize].fx = jobs::village_fx(w.villages[v as usize].built, age);
         let a = &mut w.agents[i];
-        a.job = Job::Gatherer;
+        a.job = Job::Forage;
         a.home = v;
         a.state = State::Idle;
         a.carry = 0.0;
@@ -181,7 +237,7 @@ pub fn settle(w: &mut World, i: usize) {
     let home = w.agents[i].home;
     if w.agents[i].tries > 4 && home != NO_V {
         let a = &mut w.agents[i];
-        a.job = Job::Gatherer;
+        a.job = Job::Forage;
         a.state = State::ToHome;
         return;
     }
@@ -252,36 +308,56 @@ fn update_villages(w: &mut World, dt: f32) {
         let cap = w.village_cap(v16);
         w.villages[vi].cap = cap;
         w.villages[vi].spawn_t += dt * (0.6 + 0.8 * tr.fertility) * (1.0 + 0.5 * focus);
-        let (pop, warriors, food) = (w.villages[vi].pop, w.villages[vi].warriors, w.villages[vi].food);
-        if w.villages[vi].spawn_t >= SPAWN_EVERY && pop < cap && food >= SPAWN_COST + 0.5 && w.agents.len() < MAX_AGENTS {
+        let (pop, food) = (w.villages[vi].pop, w.villages[vi].food);
+        let reserve = pop as f32 * EAT_RATE * DAY_SECONDS * reserve_days(fac.age);
+        if w.villages[vi].spawn_t >= SPAWN_EVERY && pop < cap && food >= SPAWN_COST + 0.5 + reserve && w.agents.len() < MAX_AGENTS {
             w.villages[vi].spawn_t = 0.0;
             w.villages[vi].food -= SPAWN_COST;
             let at_war = w.at_war[f as usize];
-            let want = if at_war { 0.3 + 0.4 * tr.aggressiveness } else { 0.06 + 0.16 * tr.aggressiveness };
-            let job = if (warriors as f32) < want * (pop as f32 + 1.0) { Job::Warrior } else { Job::Gatherer };
+            let job = jobs::choose(w, v16);
             if let Some(a) = w.spawn_agent(f, v16, job, vx, vy) {
-                if job == Job::Warrior {
-                    let g = w.rng.chance(if at_war { 0.3 } else { 0.5 });
+                if job.fights() && job != Job::Hunt {
+                    let g = job == Job::Guard || w.rng.chance(if at_war { 0.3 } else { 0.5 });
                     w.agents[a].garrison = g;
                     w.villages[vi].warriors += 1;
                 }
                 w.villages[vi].pop += 1;
             }
         }
-        // ---- settlers ----
+        // ---- settlers (from the Villages age, more often; colonists cross the sea) ----
         let (pop, food) = (w.villages[vi].pop, w.villages[vi].food);
+        if fac.age >= Job::Colonist.unlock_age()
+            && w.villages[vi].settler_t <= 0.0
+            && w.villages[vi].coast
+            && jobs::has(&w.villages[vi], Building::Shipyard, fac.age)
+            && food >= SETTLER_COST + 2.0
+            && w.rng.chance(0.15)
+            && alive_villages < MAX_VILLAGES
+            && w.agents.len() < MAX_AGENTS
+        {
+            if let Some((sx, sy)) = pick_overseas(w, f, vx, vy) {
+                w.villages[vi].food -= SETTLER_COST;
+                w.villages[vi].settler_t = 20.0;
+                if let Some(a) = w.spawn_agent(f, v16, Job::Colonist, vx, vy) {
+                    let ag = &mut w.agents[a];
+                    ag.carry = SETTLER_COST - SPAWN_COST;
+                    set_goal(ag, w.d, sx, sy);
+                    ag.state = State::Sail;
+                }
+            }
+        }
         if w.villages[vi].settler_t <= 0.0
             && pop as f32 >= (cap as f32 * 0.45).max(3.0)
-            && food >= SETTLER_COST + 1.0
+            && food >= SETTLER_COST + 1.0 + reserve
             && alive_villages < MAX_VILLAGES
-            && fac.villages < 48
+            && fac.villages < max_villages(fac.age)
             && w.agents.len() < MAX_AGENTS
         {
             match pick_site(w, f, vx, vy, vx, vy) {
                 Some((sx, sy)) => {
                     w.villages[vi].food -= SETTLER_COST;
-                    w.villages[vi].settler_t = 7.0 / (0.5 + tr.fertility);
-                    if let Some(a) = w.spawn_agent(f, v16, Job::Settler, vx, vy) {
+                    w.villages[vi].settler_t = 7.0 / (0.5 + tr.fertility) * if fac.age >= Job::Settle.unlock_age() { 0.75 } else { 1.0 };
+                    if let Some(a) = w.spawn_agent(f, v16, Job::Settle, vx, vy) {
                         let ag = &mut w.agents[a];
                         ag.carry = SETTLER_COST - SPAWN_COST;
                         set_goal(ag, w.d, sx, sy);
@@ -291,10 +367,12 @@ fn update_villages(w: &mut World, dt: f32) {
                 None => w.villages[vi].settler_t = 4.0,
             }
         }
-        // ---- territory grows with the village ----
-        let max_r = if fac.capital == v16 { 12 } else { 10 };
+        // ---- territory grows with the village (and, from the Villages age, with the age) ----
+        let territory = fac.age >= Job::Settle.unlock_age();
+        let bonus = if territory { ((fac.age as i32 - 5) / 3).min(5) } else { -1 };
+        let max_r = if fac.capital == v16 { 12 } else { 10 } + bonus;
         let r = w.villages[vi].radius;
-        if r < max_r && w.villages[vi].pop as i32 >= r - 2 && w.rng.chance(dt * 0.2) {
+        if r < max_r && w.villages[vi].pop as i32 >= r - 2 - bonus.max(0) && w.rng.chance(dt * if territory { 0.3 } else { 0.2 }) {
             w.villages[vi].radius = r + 1;
             w.claim_land(v16, r + 1);
         }
@@ -308,15 +386,20 @@ fn update_villages(w: &mut World, dt: f32) {
             } else {
                 0.0
             };
+            let roads = w.villages[vi].fx.links >= 0.5;
+            let overextended = if fac.age >= 11 { 1.0 + 2.0 * fac.metrics.territory } else { 1.0 };
             let v = &mut w.villages[vi];
-            let dist_term = ((d - 18.0) / 45.0).clamp(0.0, 1.5);
+            let dist_term = ((d - 18.0) / 45.0).clamp(0.0, 1.5) * if roads { 0.6 } else { 1.0 } * overextended;
             let crowd = ((v.pop as f32 / v.cap.max(1) as f32) - 0.8).max(0.0) * 2.5;
             let hunger = v.hungry as f32 / v.pop.max(1) as f32 + if v.food < 1.0 { 0.15 } else { 0.0 };
             let losses = (fac.recent_losses / fac.pop.max(8) as f32).min(1.0);
-            let pressure = crowd + hunger * 1.3 + dist_term + losses * 2.0 + mood;
-            let rise = UNREST_RATE * pressure * (1.35 - tr.cohesion);
-            let fall = 0.012 * (0.4 + tr.cohesion + calm * 0.8);
-            v.unrest = (v.unrest + (rise - fall) * dt).clamp(0.0, 1.5);
+            // Inequality rankles once there are kings and taxes to resent.
+            let unequal = (fac.metrics.inequality - 0.35).max(0.0) * if fac.age >= 9 { 1.2 } else { 0.3 };
+            let pressure = crowd + hunger * 1.3 + dist_term + losses * 2.0 + mood + unequal;
+            // Unrest settles toward what the village's lot warrants (so stability measures
+            // today's conditions, not every grievance since the founding).
+            let target = (UNREST_GAIN * pressure * (1.35 - tr.cohesion) - 0.25 * calm).clamp(0.0, 1.5);
+            v.unrest = (v.unrest + (target - v.unrest) * UNREST_RATE * dt).clamp(0.0, 1.5);
             if is_cap {
                 v.unrest = (v.unrest - dt * 0.05).max(0.0);
             }
@@ -325,20 +408,30 @@ fn update_villages(w: &mut World, dt: f32) {
         // ---- siege: hostile warriors at the gates and nobody to hold them ----
         let mut att = 0u32;
         let mut def = 0u32;
+        let mut inner = 0u32;
+        let mut inner_def = 0u32;
         let mut by_f = [0u16; MAX_FACTIONS];
+        let (vcamp, vside) = (w.villages[vi].camp, w.villages[vi].side);
         {
             let agents = &w.agents;
             let hostile = &w.hostile;
             let (cxf, cyf) = (vx as f32 + 0.5, vy as f32 + 0.5);
             w.grid.near(cxf, cyf, 5.0, |j| {
                 let b = &agents[j];
-                if !b.alive || b.job != Job::Warrior {
+                if !b.alive || !b.job.fights() || b.prisoner > 0.0 {
                     return;
                 }
                 let d = w.d.dist(cxf, cyf, b.x, b.y);
                 if b.faction == f {
-                    if d <= 5.0 {
+                    if vcamp != 0 && b.camp == vcamp && b.side != vside {
+                        if d <= 3.0 {
+                            inner += 1;
+                        }
+                    } else if d <= 5.0 {
                         def += 1;
+                        if vcamp != 0 && b.camp == vcamp {
+                            inner_def += 1;
+                        }
                     }
                 } else if hostile[f as usize * MAX_FACTIONS + b.faction as usize] && d <= 3.0 {
                     att += 1;
@@ -346,17 +439,34 @@ fn update_villages(w: &mut World, dt: f32) {
                 }
             });
         }
+        // A civil war inside the civilisation: the other side takes the village over.
+        if inner > 0 && inner_def == 0 && vcamp != 0 {
+            let level = w.strifes[vcamp as usize - 1].level;
+            if level >= CIVIL_WAR {
+                w.villages[vi].siege += dt * inner as f32 * 0.35;
+                if w.villages[vi].siege >= SIEGE_TO_CAPTURE {
+                    conflict::turn_village(w, v16, 1 - vside);
+                }
+            } else if level >= RAID {
+                let v = &mut w.villages[vi];
+                v.food = (v.food - dt * 0.3 * inner as f32).max(0.0);
+                v.raided_t = w.time;
+            }
+        }
+        let walls = w.villages[vi].fx.walls;
         if att > 0 && def == 0 {
             let by = (0..MAX_FACTIONS).max_by_key(|&k| (by_f[k], MAX_FACTIONS - k)).unwrap_or(0) as u8;
             let raid_only = w.rel(by, f).war != 2 && w.rel(f, by).war != 2;
+            w.villages[vi].raided_t = w.time;
             if !raid_only {
-                w.villages[vi].siege += dt * att as f32 * 0.35;
+                // Walls hold a village twice as long.
+                w.villages[vi].siege += dt * att as f32 * 0.35 * if walls { 0.5 } else { 1.0 };
                 w.villages[vi].besieger = by;
                 if w.villages[vi].siege >= SIEGE_TO_CAPTURE {
                     capture(w, v16, by);
                 }
             }
-        } else {
+        } else if inner == 0 {
             let v = &mut w.villages[vi];
             v.siege = (v.siege - dt * 0.5).max(0.0);
         }
@@ -374,6 +484,7 @@ pub fn capture(w: &mut World, v: u16, by: u8) {
         return;
     }
     {
+        let age = w.factions[by as usize].age;
         let vil = &mut w.villages[v as usize];
         vil.owner = by;
         vil.siege = 0.0;
@@ -381,7 +492,11 @@ pub fn capture(w: &mut World, v: u16, by: u8) {
         vil.food *= 0.5;
         vil.hp = vil.hp.max(0.5);
         vil.besieger = NO_F;
+        vil.camp = 0;
+        vil.side = 0;
+        vil.fx = jobs::village_fx(vil.built, age);
     }
+    w.rel_mut(old, by).grudge += 0.3;
     w.transfer_land(v, by);
     let violence = w.factions[by as usize].traits.violence;
     let has_other = w.villages.iter().enumerate().any(|(i, o)| i != v as usize && o.alive && o.owner == old);
@@ -407,6 +522,7 @@ pub fn capture(w: &mut World, v: u16, by: u8) {
             a.faction = by;
             a.state = State::Idle;
             a.carry = 0.0;
+            a.camp = 0;
             taken += 1;
         }
     }
@@ -421,9 +537,12 @@ pub fn capture(w: &mut World, v: u16, by: u8) {
 
 /// A village is destroyed (fire, disaster, abandonment).
 pub fn raze(w: &mut World, v: u16, by: u8) {
+    let now = w.time;
     let (owner, x, y) = {
         let vil = &mut w.villages[v as usize];
         vil.alive = false;
+        vil.died = now;
+        vil.camp = 0;
         (vil.owner, vil.x, vil.y)
     };
     w.release_land(v);
@@ -499,6 +618,26 @@ fn contacts(w: &mut World) {
                     found.push((a.faction, b.faction, a.x as i32, a.y as i32));
                 }
             });
+        }
+    }
+    // Coastal exploration (from the Toolmakers' rafts): a coastal village with a raft or a dock
+    // may find a people across up to 70 tiles of water.
+    let mut sea: Vec<(u8, u8, i32, i32)> = Vec::new();
+    for v in w.villages.iter().filter(|v| v.alive && v.coast) {
+        let f = &w.factions[v.owner as usize];
+        let boats = v.built & ((1u64 << Building::Raft as u8) | (1u64 << Building::Dock as u8) | (1u64 << Building::Port as u8)) != 0;
+        if !boats || f.age < Building::Raft.unlock_age() {
+            continue;
+        }
+        for o in w.villages.iter().filter(|o| o.alive && o.owner != v.owner && o.coast) {
+            if !w.rel(v.owner, o.owner).met && w.d.dist(v.x as f32, v.y as f32, o.x as f32, o.y as f32) < 70.0 && !sea.iter().any(|s| s.0 == v.owner && s.1 == o.owner) {
+                sea.push((v.owner, o.owner, o.x, o.y));
+            }
+        }
+    }
+    for (a, b, x, y) in sea {
+        if w.rng.chance(0.05) {
+            found.push((a, b, x, y));
         }
     }
     for (a, b, x, y) in found {
@@ -597,45 +736,6 @@ fn scan_borders(w: &mut World) {
     }
 }
 
-/// The `data/ages.json` metrics the age ladder (#69) will read (see `Metrics`).
-fn update_metrics(w: &mut World) {
-    let land = w.land_tiles;
-    for f in 0..MAX_FACTIONS {
-        if !w.factions[f].alive {
-            continue;
-        }
-        let cap_land = w.villages.get(w.factions[f].capital as usize).map(|v| w.terrain.land(v.x, v.y)).unwrap_or(0);
-        let (mut n, mut unrest, mut coastal, mut colonies) = (0u32, 0.0f32, 0u32, 0u32);
-        for v in w.villages.iter().filter(|v| v.alive && v.owner as usize == f) {
-            n += 1;
-            unrest += v.unrest;
-            let sea = (-2..=2).any(|oy| (-2..=2).any(|ox| matches!(w.terrain.kind_at(v.x + ox, v.y + oy), crate::terrain::WATER | crate::terrain::DEEP)));
-            coastal += sea as u32;
-            colonies += (cap_land != 0 && w.terrain.land(v.x, v.y) != cap_land) as u32;
-        }
-        let (mut contact, mut links) = (0u32, 0u32);
-        for o in 0..MAX_FACTIONS {
-            if o == f || !w.factions[o].alive {
-                continue;
-            }
-            let r = w.rel[f * MAX_FACTIONS + o];
-            contact += r.met as u32;
-            links += (r.met && r.near && r.war == 0 && r.tension < -0.05) as u32;
-        }
-        let fac = &mut w.factions[f];
-        let m = &mut fac.metrics;
-        m.population = fac.pop;
-        m.settlements = n;
-        m.food_days = fac.food / (fac.pop.max(1) as f32 * EAT_RATE * DAY_SECONDS);
-        m.stability = if n > 0 { (1.0 - unrest / n as f32).clamp(0.0, 1.0) } else { 0.0 };
-        m.territory = w.owned_tiles[f] as f32 / land.max(1) as f32;
-        m.contact = contact > 0;
-        m.links = links;
-        m.coastal = coastal > 0;
-        m.colonies = colonies;
-    }
-}
-
 pub fn declare_war(w: &mut World, a: u8, b: u8) {
     if a == b || w.rel(a, b).war == 2 {
         return;
@@ -660,6 +760,7 @@ pub fn make_peace(w: &mut World, a: u8, b: u8) {
         return;
     }
     let was_war = w.rel(a, b).war == 2;
+    let battles = w.rel(a, b).battles;
     for (p, q) in [(a, b), (b, a)] {
         let r = w.rel_mut(p, q);
         r.war = 0;
@@ -667,6 +768,9 @@ pub fn make_peace(w: &mut World, a: u8, b: u8) {
         r.weariness = 0.0;
         r.tension = -0.4;
         r.cooldown = 30.0;
+    }
+    if was_war {
+        conflict::on_peace(w, a, b, battles);
     }
     if was_war {
         w.stats.peaces += 1;
@@ -693,7 +797,10 @@ fn diplomacy(w: &mut World, dt: f32) {
                 continue;
             }
             let grudge = if fa.parent == b || w.factions[b as usize].parent == a { 0.35 } else { 0.0 };
+            // A vassal and its lord don't come to blows lightly.
+            let bound = fa.overlord == b || w.factions[b as usize].overlord == a;
             let r = w.rel_mut(a, b);
+            let grudge = grudge + 0.5 * r.grudge.min(1.0) - if bound { 0.4 } else { 0.0 };
             r.cooldown -= dt;
             r.trade_t -= dt;
             r.trade_news_t -= dt;
@@ -723,8 +830,9 @@ fn diplomacy(w: &mut World, dt: f32) {
             let ta = w.factions[a as usize].traits;
             let hungry = w.factions[a as usize].hungry;
             let (r, rb) = (*w.rel(a, b), *w.rel(b, a));
-            if r.war == 0 && rb.war != 2 && r.cooldown <= 0.0 && r.near && r.met {
-                if r.tension >= WAR_TENSION {
+            let bound = w.factions[a as usize].overlord == b || w.factions[b as usize].overlord == a;
+            if r.war == 0 && rb.war != 2 && r.cooldown <= 0.0 && r.near && r.met && !bound {
+                if r.tension >= WAR_TENSION && conflict::may_declare(w, a, b) {
                     declare_war(w, a, b);
                     continue;
                 }
@@ -744,6 +852,15 @@ fn diplomacy(w: &mut World, dt: f32) {
                     rr.war = 0;
                     rr.cooldown = 12.0;
                     w.rel_mut(b, a).tension += 0.2;
+                }
+            }
+            if r.war == 2 && r.war_t > 20.0 {
+                let (pa, pb) = (w.factions[a as usize].pop, w.factions[b as usize].pop);
+                let (la, lb) = (w.factions[a as usize].recent_losses, w.factions[b as usize].recent_losses);
+                if pa * 10 < pb * 4 && la > lb && w.factions[a as usize].overlord == NO_F && w.factions[b as usize].overlord != a && w.rng.chance(0.1) {
+                    make_peace(w, a, b);
+                    conflict::make_vassal(w, a, b, 0);
+                    continue;
                 }
             }
             if r.war == 2 && a < b {
@@ -776,14 +893,61 @@ fn plan_marches(w: &mut World) {
             if a == b || war == 0 || !w.factions[b].alive {
                 continue;
             }
-            let (_, _, vb) = w.near_pairs[a * MAX_FACTIONS + b];
+            let (_, va, vb) = w.near_pairs[a * MAX_FACTIONS + b];
             if vb == NO_V {
                 continue;
             }
             let (x, y) = (w.villages[vb as usize].x, w.villages[vb as usize].y);
-            w.marches[a].push(March { enemy: b as u8, village: vb, x, y, raid: war == 1 });
+            let dir = heading(w, va, x, y);
+            w.marches[a].push(March { enemy: b as u8, village: vb, x, y, raid: war == 1, field: false, camp: 0, side: 0, dir });
+        }
+        // A battle: both armies take the field between them.
+        for b in 0..MAX_FACTIONS {
+            let r = w.rel[a * MAX_FACTIONS + b];
+            if a == b || r.war != 0 || w.rel[b * MAX_FACTIONS + a].war != 0 || r.level != BATTLE || !w.factions[b].alive {
+                continue;
+            }
+            let (_, va, _) = w.near_pairs[a * MAX_FACTIONS + b];
+            if va == NO_V {
+                continue;
+            }
+            let (x, y) = conflict::battle_field(w, a as u8, b as u8);
+            let dir = heading(w, va, x, y);
+            w.marches[a].push(March { enemy: b as u8, village: NO_V, x, y, raid: false, field: true, camp: 0, side: 0, dir });
         }
     }
+    conflict::strife_marches(w);
+}
+
+/// Unit vector from village `from` toward (x, y).
+fn heading(w: &World, from: u16, x: i32, y: i32) -> (f32, f32) {
+    let Some(v) = w.villages.get(from as usize) else { return (1.0, 0.0) };
+    let (dx, dy) = (w.d.dxi(v.x, x) as f32, (y - v.y) as f32);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1e-3 {
+        (1.0, 0.0)
+    } else {
+        (dx / len, dy / len)
+    }
+}
+
+/// A coast across the sea for colonists: walkable, free, on another landmass, 25–90 tiles out.
+pub fn pick_overseas(w: &mut World, f: u8, ox: i32, oy: i32) -> Option<(i32, i32)> {
+    let home = w.terrain.land(ox, oy);
+    for _ in 0..24 {
+        let ang = w.rng.range(0.0, TAU);
+        let d = w.rng.range(25.0, 90.0);
+        let sx = w.d.wrap_x((ox as f32 + ang.cos() * d).round() as i32);
+        let sy = (oy as f32 + ang.sin() * d).round() as i32;
+        if sy < 4 || sy > w.d.h as i32 - 5 || !w.terrain.walkable(sx, sy) || w.terrain.land(sx, sy) == home {
+            continue;
+        }
+        let o = w.owner[w.d.idx(sx, sy)];
+        if (o == NO_F || o == f) && !too_close(w, sx, sy, MIN_SPACING) && food_max(w.terrain.kind_at(sx, sy)) >= 0.45 {
+            return Some((sx, sy));
+        }
+    }
+    None
 }
 
 /// Friendly neighbours at peace share food: the richest village feeds the hungriest.
@@ -804,6 +968,12 @@ fn trade(w: &mut World) {
             w.villages[ri].food -= 2.0;
             w.villages[pi].food += 2.0;
             w.stats.trades += 1;
+            w.rel_mut(a, b).traded_t = 0.0;
+            w.rel_mut(b, a).traded_t = 0.0;
+            // Disease travels with the grain.
+            if w.villages[ri].plague > 0.3 && w.villages[pi].plague < 0.05 && w.rng.chance(0.3) {
+                w.villages[pi].plague = 0.2;
+            }
             w.rel_mut(a, b).trade_t = 6.0;
             w.rel_mut(a, b).tension -= 0.03;
             w.rel_mut(b, a).tension -= 0.05;
@@ -828,6 +998,10 @@ fn rebellion(w: &mut World) {
     for f in alive {
         let fac = &w.factions[f as usize];
         if fac.rebel_cd > 0.0 || fac.villages < 3 {
+            continue;
+        }
+        // A civilisation already fighting its rebels in the field lets the fight decide.
+        if w.strifes.iter().any(|s| s.alive && s.civ == f && s.by_village && s.level >= RAID) {
             continue;
         }
         let capital = fac.capital;
@@ -872,6 +1046,27 @@ pub fn split(w: &mut World, parent: u8, seed: u16) -> u8 {
         }
         set.push(v);
     }
+    let c = split_set(w, parent, &set, true);
+    let t = w.factions[c as usize].traits;
+    // A small province of a big, cohesive realm may settle for paying tribute.
+    let (pp, pc) = (w.factions[parent as usize].pop, w.factions[c as usize].pop);
+    if pp > 2 * pc.max(1) && w.factions[parent as usize].overlord == NO_F && w.rng.chance(0.25 + 0.3 * pf.traits.cohesion) {
+        conflict::make_vassal(w, c, parent, 2);
+    } else if w.rng.chance(0.45 + 0.5 * t.aggressiveness) {
+        declare_war(w, c, parent);
+    }
+    w.recount();
+    c
+}
+
+/// Villages `set` (the first is the new capital) leave `parent` as a new civilisation with
+/// the parent's traits drifted, its knowledge of the world, a grudge, and the highest age its
+/// people can hold. `rebellion`: logged as a REBELLION (a civil war's split is logged by
+/// `conflict`, also as a REBELLION).
+pub fn split_set(w: &mut World, parent: u8, set: &[u16], rebellion: bool) -> u8 {
+    let pf = w.factions[parent as usize].clone();
+    let seed = set[0];
+    let _ = rebellion;
     let child_seed = w.rng.next_u32();
     let p = pf.traits;
     let mut g = || w.rng.gauss() * 0.12;
@@ -893,22 +1088,41 @@ pub fn split(w: &mut World, parent: u8, seed: u16) -> u8 {
         cf.capital = seed;
         cf.rebel_cd = 30.0;
     }
-    for &v in &set {
+    for &v in set {
         let vil = &mut w.villages[v as usize];
         vil.owner = c;
         vil.unrest = 0.15;
         vil.siege = 0.0;
+        vil.camp = 0;
+        vil.side = 0;
         w.transfer_land(v, c);
     }
+    let mut pop = 0;
     for a in w.agents.iter_mut() {
         if a.alive && a.faction == parent && set.contains(&a.home) {
             a.faction = c;
             a.target = NO_V;
+            a.camp = 0;
+            pop += 1;
             if matches!(a.state, State::March | State::Siege) {
                 a.state = State::ToHome;
             }
         }
     }
+    // The rebels keep their parent's ways, as far as their numbers can hold them, and a share
+    // of its learning.
+    {
+        let age = crate::ages::sustainable_age(pf.age, pop);
+        let cf = &mut w.factions[c as usize];
+        cf.age = age;
+        cf.peak_age = age;
+        cf.clans = pf.clans;
+        cf.metrics.knowledge = pf.metrics.knowledge * 0.6;
+        cf.metrics.faith = pf.metrics.faith;
+        // It remembers the ages it can't hold: their jobs stop (`jobs::rebalance`).
+        cf.peak_age = pf.peak_age;
+    }
+    crate::ages::refresh_fx(w, c);
     // The rebels know everyone their parent knew, and hate the parent.
     for o in 0..MAX_FACTIONS as u8 {
         if o != c && o != parent && w.rel(parent, o).met {
@@ -935,10 +1149,6 @@ pub fn split(w: &mut World, parent: u8, seed: u16) -> u8 {
     w.stats.rebellions += 1;
     w.log(ev::REBELLION, parent, c, sx, sy, set.len() as i32);
     w.effect(sx as f32 + 0.5, sy as f32 + 0.5, 7, 2.0, 14.0);
-    let fight = w.rng.chance(0.45 + 0.5 * t.aggressiveness);
-    if fight {
-        declare_war(w, c, parent);
-    }
     w.recount();
     c
 }
@@ -969,6 +1179,16 @@ fn wipe(w: &mut World, f: u8) {
     let (x, y) = w.factions[f as usize].start;
     w.stats.wiped += 1;
     w.log(ev::WIPED, f, by, x, y, 0);
+    for o in w.factions.iter_mut() {
+        if o.overlord == f {
+            o.overlord = NO_F;
+        }
+    }
+    for k in 0..w.strifes.len() {
+        if w.strifes[k].alive && w.strifes[k].civ == f {
+            conflict::end(w, k, None);
+        }
+    }
     w.refresh_hostility();
 }
 

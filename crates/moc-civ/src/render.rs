@@ -5,13 +5,13 @@
 use moc_planet::color::Rgba;
 use moc_planet::{VH, VW};
 
+use crate::jobs::{binfo, info, Building, Role};
 use crate::planet::blit;
 use crate::world::*;
 
 const SKIN: Rgba = [236, 200, 160, 255];
 const WALL: Rgba = [150, 108, 68, 255];
 const DOOR: Rgba = [58, 38, 28, 255];
-const SPEAR: Rgba = [214, 214, 226, 255];
 const PACK: Rgba = [140, 92, 52, 255];
 const GRAIN: Rgba = [242, 220, 96, 255];
 
@@ -138,6 +138,8 @@ impl World {
             let capital = f.capital as usize == vi;
             let big = capital || v.pop >= 6;
             let siege = v.siege > 0.0;
+            let age = f.age;
+            let (built, plague, camp, side, fest, mourn) = (v.built, v.plague, v.camp, v.side, v.festival_t > 0.0, v.mourn_t > 0.0);
             let px = |s: &mut Self, x: i32, y: i32, c: Rgba| s.view.px(sx + x, sy + y, c);
             if big {
                 px(self, 0, -3, roof);
@@ -170,6 +172,90 @@ impl World {
                     px(self, k, 2, [255, 60, 50, 230]);
                 }
             }
+            // The age's buildings round the village, newest last (grey while dormant).
+            self.draw_buildings(sx, sy, built, age, roof);
+            // A rebel flag over a village that has risen against its own crown.
+            if camp != 0 && side == 1 {
+                for y in -8..=-4 {
+                    px(self, -3, y, [60, 40, 30, 255]);
+                }
+                px(self, -2, -8, [220, 30, 40, 255]);
+                px(self, -1, -8, [220, 30, 40, 255]);
+                px(self, -2, -7, [20, 20, 20, 255]);
+                px(self, -1, -7, [220, 30, 40, 255]);
+            }
+            if mourn {
+                px(self, 2, -4, [20, 20, 24, 255]);
+                px(self, 2, -5, [20, 20, 24, 255]);
+            }
+            if plague > 0.2 {
+                let h = hash(vi as u32 ^ (self.time * 3.0) as u32);
+                px(self, (h % 7) as i32 - 3, -(((h >> 4) % 3) as i32) - 1, [120, 200, 60, 220]);
+                px(self, ((h >> 8) % 7) as i32 - 3, ((h >> 12) % 2) as i32, [150, 220, 70, 200]);
+            }
+            if fest {
+                let t = (self.time * 8.0) as u32;
+                for k in 0..4u32 {
+                    let h = hash(vi as u32 * 31 + k + t);
+                    let c = [[255, 220, 80, 255], [255, 120, 200, 255], [120, 220, 255, 255], [170, 255, 120, 255]][(h % 4) as usize];
+                    px(self, ((h >> 3) % 9) as i32 - 4, -(((h >> 7) % 6) as i32) - 2, c);
+                }
+            }
+        }
+    }
+
+    /// Up to eight of a village's buildings, 4x4 sprites in a ring round it.
+    fn draw_buildings(&mut self, sx: i32, sy: i32, built: u64, age: u8, roof: Rgba) {
+        const SLOTS: [(i32, i32); 8] = [(-8, -3), (4, -3), (-8, 2), (4, 2), (-2, 3), (-13, -1), (9, -1), (-2, -9)];
+        if built == 0 {
+            return;
+        }
+        let mut list = [0usize; 8];
+        let mut n = 0;
+        // The newest eight (highest bits), drawn oldest first.
+        let mut bits = built;
+        while bits != 0 && n < 8 {
+            let k = 63 - bits.leading_zeros() as usize;
+            bits &= !(1u64 << k);
+            list[n] = k;
+            n += 1;
+        }
+        for s in 0..n {
+            let b = Building::ALL[list[n - 1 - s]];
+            let dormant = b.unlock_age() > age;
+            let (ox, oy) = SLOTS[s];
+            let spr = binfo(b).sprite;
+            for (ry, row) in spr.iter().enumerate() {
+                for (rx, ch) in row.bytes().enumerate() {
+                    let c: Rgba = match ch {
+                        b'r' => roof,
+                        b'w' => WALL,
+                        b'd' => DOOR,
+                        b's' => [150, 150, 160, 255],
+                        b'f' => [255, 150, 40, 255],
+                        b'y' => [240, 210, 90, 255],
+                        b'g' => [90, 170, 70, 255],
+                        b'b' => [80, 140, 220, 255],
+                        b'k' => [50, 50, 60, 255],
+                        b'l' => [255, 240, 170, 255],
+                        b'm' => [200, 205, 215, 255],
+                        b'o' => [190, 100, 60, 255],
+                        b'p' => [150, 90, 190, 255],
+                        b'h' => [240, 240, 240, 255],
+                        b'c' => [90, 220, 230, 255],
+                        b'n' => [120, 80, 45, 255],
+                        b'R' => [210, 50, 40, 255],
+                        _ => continue,
+                    };
+                    let c = if dormant {
+                        let g = ((c[0] as u32 + c[1] as u32 + c[2] as u32) / 3 / 2 + 40) as u8;
+                        [g, g, g, 255]
+                    } else {
+                        c
+                    };
+                    self.view.px(sx + ox + rx as i32, sy + oy + ry as i32, c);
+                }
+            }
         }
     }
 
@@ -185,18 +271,43 @@ impl World {
                 continue;
             }
             let c = self.factions[a.faction as usize].color;
-            let body: Rgba = [c[0], c[1], c[2], 255];
-            let (job, fight, carry) = (a.job, a.fight, a.carry);
+            let (job, fight, carry, state, prisoner, side, camp) = (a.job, a.fight, a.carry, a.state, a.prisoner, a.side, a.camp);
+            let body: Rgba = if prisoner > 0.0 {
+                [120, 120, 120, 255]
+            } else if camp != 0 && side == 1 {
+                // Rebels: their people's colour, darkened.
+                [c[0] / 2 + 20, c[1] / 2, c[2] / 2, 255]
+            } else {
+                [c[0], c[1], c[2], 255]
+            };
+            if state == State::Sleep {
+                // Asleep: lying down.
+                self.view.px(sx, sy, [body[0] / 2, body[1] / 2, body[2] / 2, 255]);
+                self.view.px(sx + 1, sy, [SKIN[0] / 2, SKIN[1] / 2, SKIN[2] / 2, 255]);
+                continue;
+            }
+            if state == State::Sail {
+                for k in -1..=1 {
+                    self.view.px(sx + k, sy + 1, [110, 72, 40, 255]);
+                }
+                self.view.px(sx, sy - 2, [240, 240, 240, 255]);
+            }
             self.view.px(sx, sy, body);
-            self.view.px(sx, sy - 1, SKIN);
-            match job {
-                Job::Warrior => self.view.px(sx + 1, sy - 1, SPEAR),
-                Job::Settler => self.view.px(sx - 1, sy, PACK),
-                Job::Gatherer => {
+            self.view.px(sx, sy - 1, if camp != 0 && side == 1 { [220, 40, 40, 255] } else { SKIN });
+            let ji = info(job);
+            let t = ji.tool;
+            match ji.role {
+                Role::Fight | Role::Hunt => self.view.px(sx + 1, sy - 1, [t[0], t[1], t[2], 255]),
+                Role::Settle => self.view.px(sx - 1, sy, PACK),
+                Role::Gather | Role::Haul => {
                     if carry > 0.0 {
-                        self.view.px(sx + 1, sy, GRAIN);
+                        self.view.px(sx + 1, sy, if ji.out == crate::jobs::Out::Food { GRAIN } else { [t[0], t[1], t[2], 255] });
                     }
                 }
+                Role::Work | Role::Lead => self.view.px(sx + 1, sy, [t[0], t[1], t[2], 255]),
+            }
+            if job == crate::jobs::Job::Chief {
+                self.view.px(sx, sy - 2, [250, 210, 70, 255]);
             }
             if fight > 0.0 && blink {
                 self.view.px(sx, sy - 2, [255, 255, 255, 255]);

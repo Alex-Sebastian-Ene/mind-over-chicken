@@ -14,11 +14,23 @@
 //!
 //! Everything is deterministic for a run seed and a sequence of steps and inputs.
 //!
+//! **The ages and conflict (#69).** Civilisations climb a ladder of twenty ages
+//! ([`ages`], from `data/ages.json` through the generated [`ages_table`]): they are reached by
+//! meeting each age's conditions on the simulation's own metrics, not researched, and lost
+//! again in a Dark Age. Each age brings jobs and buildings ([`jobs`]), daily life ([`life`])
+//! and its crises; fights run up and down an escalation ladder, between civilisations and
+//! inside one ([`conflict`]).
+//!
 //! The browser loads this crate as a plain `extern "C"` WebAssembly module ([`ffi`]); build
 //! it with `crates/moc-civ/build-wasm.sh` (no wasm-bindgen needed).
 
+pub mod ages;
+pub mod ages_table;
 pub mod agents;
+pub mod conflict;
 pub mod ffi;
+pub mod jobs;
+pub mod life;
 pub mod planet;
 pub mod politics;
 pub mod powers;

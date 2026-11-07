@@ -266,7 +266,7 @@ pub struct Paths {
 }
 
 pub const FIELD_RADIUS: i32 = 80;
-const FIELD_CAP: usize = 32;
+const FIELD_CAP: usize = 48;
 
 impl Default for Paths {
     fn default() -> Self {
