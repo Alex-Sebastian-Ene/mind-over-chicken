@@ -420,7 +420,7 @@ export class CivSandbox {
     if (s) {
       ctx.textAlign = 'right';
       ctx.fillStyle = '#7d80a0';
-      ctx.fillText(`${Math.round(s.agents)} people · wars ${s.wars} · rebellions ${s.rebellions} · sim ${this.perf.stepMs.toFixed(1)} ms`, W - 3, H - 2.6);
+      ctx.fillText(`${Math.round(s.agents)} people · wars ${s.wars} · rebellions ${s.rebellions} · ${this.civ?.ppo ? 'PPO councils' : 'rules'} · sim ${this.perf.stepMs.toFixed(1)} ms`, W - 3, H - 2.6);
     }
     ctx.textAlign = 'left';
   }

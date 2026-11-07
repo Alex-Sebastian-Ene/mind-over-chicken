@@ -36,6 +36,11 @@ export class Civ {
     this.ex = ex;
     this.seed = seed >>> 0;
     this.w = ex.civ_new_sized(this.seed, width, height);
+    // #100: the trained war councils (Rust, weights compiled into the module) drive the rival
+    // civilisations; 0 back means no valid weights and the rules decide. ?wars=rules keeps the
+    // rules, ?wars=all also drives the player's own civilisation.
+    const wars = new URLSearchParams(globalThis.location?.search ?? '').get('wars');
+    this.ppo = ex.civ_ppo_enable ? ex.civ_ppo_enable(this.w, wars === 'rules' ? 0 : wars === 'all' ? 2 : 1) : 0;
     this.pw = ex.civ_planet_w(this.w);
     this.ph = ex.civ_planet_h(this.w);
     this.slots = ex.civ_faction_slots();
