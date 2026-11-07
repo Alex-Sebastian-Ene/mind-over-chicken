@@ -16,7 +16,7 @@ pub struct Light3D {
 #[derive(Clone, Copy, Debug)]
 pub struct BillboardVertex {
     pub center: [f32; 3],
-    pub offset: [f32; 2],
+    pub offset: [f32; 3],
     pub uv: [f32; 2],
 }
 
@@ -74,8 +74,9 @@ pub struct WebGl3DRenderer {
     // Billboard uniforms
     pub u_billboard_vp: WebGlUniformLocation,
     pub u_billboard_cam_right: WebGlUniformLocation,
+    pub u_billboard_cam_up: WebGlUniformLocation,
+    pub u_billboard_ground_forward: WebGlUniformLocation,
     pub u_billboard_night: WebGlUniformLocation,
-    pub u_billboard_up_scale: WebGlUniformLocation,
     pub u_billboard_sun_dir: Option<WebGlUniformLocation>,
     pub u_billboard_light_count: Option<WebGlUniformLocation>,
     pub u_billboard_light_pos: Option<WebGlUniformLocation>,
@@ -278,12 +279,13 @@ void main() {
 
 const BILLBOARD_VS: &str = r#"
 attribute vec3 a_center;
-attribute vec2 a_offset;
+attribute vec3 a_offset;
 attribute vec2 a_texCoord;
 
 uniform mat4 u_viewProjection;
 uniform vec3 u_camRight;
-uniform float u_upScale; // 1 / cos(pitch): an upright sprite keeps its pixel height when seen from above
+uniform vec3 u_camUp;
+uniform vec3 u_groundForward;
 uniform float u_offsetX;
 
 varying vec2 v_texCoord;
@@ -291,9 +293,17 @@ varying vec3 v_worldPos;
 
 void main() {
     v_texCoord = a_texCoord;
-    vec3 camUp = vec3(0.0, u_upScale, 0.0);
-    // 1.25x size boost so pixel sprites stand out clearly from orbit distance 300
-    vec3 worldPos = a_center + vec3(u_offsetX, 0.0, 0.0) + u_camRight * (a_offset.x * 1.25) + camUp * (a_offset.y * 1.25);
+    // Diorama cylindrical tilt: blend world-up with camera-up so sprites face the player comfortably
+    vec3 spriteUp = normalize(mix(vec3(0.0, 1.0, 0.0), u_camUp, 0.68));
+
+    // a_offset.x is along camRight
+    // a_offset.y is along spriteUp (height)
+    // a_offset.z is along groundForward (ground contact shadow)
+    vec3 worldPos = a_center + vec3(u_offsetX, 0.0, 0.0)
+                  + u_camRight * (a_offset.x * 1.25)
+                  + spriteUp * (a_offset.y * 1.25)
+                  + u_groundForward * (a_offset.z * 1.25);
+
     v_worldPos = worldPos;
     gl_Position = u_viewProjection * vec4(worldPos, 1.0);
 }
@@ -315,7 +325,7 @@ uniform float u_lightInt[16];
 
 void main() {
     vec4 c = texture2D(u_texture, v_texCoord);
-    if (c.a < 0.1) discard;
+    if (c.a < 0.02) discard;
 
     // Sprite day vs night lighting
     vec3 nightTint = vec3(0.20, 0.28, 0.50);
@@ -535,12 +545,15 @@ impl WebGl3DRenderer {
         let u_billboard_cam_right = gl
             .get_uniform_location(&billboard_program, "u_camRight")
             .ok_or("Missing u_camRight in billboard shader")?;
+        let u_billboard_cam_up = gl
+            .get_uniform_location(&billboard_program, "u_camUp")
+            .ok_or("Missing u_camUp in billboard shader")?;
+        let u_billboard_ground_forward = gl
+            .get_uniform_location(&billboard_program, "u_groundForward")
+            .ok_or("Missing u_groundForward in billboard shader")?;
         let u_billboard_night = gl
             .get_uniform_location(&billboard_program, "u_night")
             .ok_or("Missing u_night in billboard shader")?;
-        let u_billboard_up_scale = gl
-            .get_uniform_location(&billboard_program, "u_upScale")
-            .ok_or("Missing u_upScale in billboard shader")?;
         let u_billboard_sun_dir = gl.get_uniform_location(&billboard_program, "u_sunDir");
         let u_billboard_light_count = gl.get_uniform_location(&billboard_program, "u_lightCount");
         let u_billboard_light_pos = gl.get_uniform_location(&billboard_program, "u_lightPos");
@@ -594,8 +607,9 @@ impl WebGl3DRenderer {
             u_water_light_int,
             u_billboard_vp,
             u_billboard_cam_right,
+            u_billboard_cam_up,
+            u_billboard_ground_forward,
             u_billboard_night,
-            u_billboard_up_scale,
             u_billboard_sun_dir,
             u_billboard_light_count,
             u_billboard_light_pos,
@@ -716,6 +730,12 @@ impl WebGl3DRenderer {
         let aspect = 320.0 / 180.0;
         let (_view, _proj, view_proj) = camera.compute_matrices(aspect);
         let cam_right = Vec3::new(camera.yaw.cos(), 0.0, -camera.yaw.sin());
+        let ground_forward = Vec3::new(-camera.yaw.sin(), 0.0, -camera.yaw.cos());
+        let cam_up = Vec3::new(
+            -camera.yaw.sin() * camera.pitch.sin(),
+            camera.pitch.cos(),
+            -camera.yaw.cos() * camera.pitch.sin(),
+        );
 
         gl.enable(WebGlRenderingContext::DEPTH_TEST);
         gl.depth_func(WebGlRenderingContext::LEQUAL);
@@ -830,8 +850,19 @@ impl WebGl3DRenderer {
                 cam_right.y,
                 cam_right.z,
             );
+            gl.uniform3f(
+                Some(&self.u_billboard_cam_up),
+                cam_up.x,
+                cam_up.y,
+                cam_up.z,
+            );
+            gl.uniform3f(
+                Some(&self.u_billboard_ground_forward),
+                ground_forward.x,
+                ground_forward.y,
+                ground_forward.z,
+            );
             gl.uniform1f(Some(&self.u_billboard_night), night);
-            gl.uniform1f(Some(&self.u_billboard_up_scale), 1.0 / camera.pitch.cos().max(0.4));
             if let Some(loc) = self.u_billboard_sun_dir.as_ref() {
                 gl.uniform3f(Some(loc), sun_dir.x, sun_dir.y, sun_dir.z);
             }
@@ -867,8 +898,8 @@ impl WebGl3DRenderer {
             let b_stride = std::mem::size_of::<BillboardVertex>() as i32;
             let billboard_attrs = [
                 bind_attr(gl, &self.billboard_program, "a_center", 3, b_stride, 0),
-                bind_attr(gl, &self.billboard_program, "a_offset", 2, b_stride, 3 * 4),
-                bind_attr(gl, &self.billboard_program, "a_texCoord", 2, b_stride, 5 * 4),
+                bind_attr(gl, &self.billboard_program, "a_offset", 3, b_stride, 3 * 4),
+                bind_attr(gl, &self.billboard_program, "a_texCoord", 2, b_stride, 6 * 4),
             ];
 
             for off in WRAP_OFFSETS {

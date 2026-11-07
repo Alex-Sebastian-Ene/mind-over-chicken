@@ -234,9 +234,6 @@ export class SpaceAge {
     }
 
     // Billboards
-    // Pad / Gantry (SPRITE_PAD = 11)
-    engine.add_billboard(11, pad.x, pad.y, 1, 0, 0);
-
     // Rocket (SPRITE_ROCKET = 12)
     engine.add_billboard(12, pad.x, pad.y, 1, Math.floor(this.progress * 100), this.phase === 'launch' ? 1 : 0);
 
@@ -267,7 +264,8 @@ export class SpaceAge {
   draw(ctx) {
     if (this.phase === 'voyage') return this.drawVoyage(ctx);
     const G = this.G;
-    ctx.drawImage(this.layer, 0, 0);
+    const base = G.render3d ? (G.world?.layers3d?.space || this.layer) : this.layer;
+    ctx.drawImage(base, 0, 0);
     if (!G.render3d) G.world.drawWater(ctx, this.t);
     // In 3D, draw3d stands rocket, pad, engineers, citizens and chicken up as billboards
     if (G.render3d) {

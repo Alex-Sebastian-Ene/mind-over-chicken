@@ -327,12 +327,12 @@ export class EegPanel {
     modal.innerHTML = `
       <div class="calib-wiz-top">
         <div>
-          <span class="calib-wiz-step" data-wiz-step>STEP 1 OF 3 · 9-DOT FULL-EDGE HEAD CALIBRATION</span>
-          <h2 data-wiz-title>Point Your Head at Each Edge Dot &amp; Hold Still</h2>
-          <p data-wiz-sub>Look at the active glowing dot, hold your head steady, and <b>DO NOT BLINK</b> while the green ring fills.</p>
+          <span class="calib-wiz-step" data-wiz-step>STEP 1 OF 3 · HYBRID SMOOTH-PURSUIT + BOUNDARY + REVERSE CALIBRATION</span>
+          <h2 data-wiz-title>Follow the Moving White Dot Out to Each Edge, Hold, and Reverse Back</h2>
+          <p data-wiz-sub>Smoothly follow the glowing white dot with your head as it sweeps out to each boundary, pauses at the edge, and reverses back through Center. <b>DO NOT BLINK</b>.</p>
         </div>
         <div class="calib-wiz-actions">
-          <button type="button" class="btn btn-primary btn-small" data-wiz-lock>Lock Dot Now</button>
+          <button type="button" class="btn btn-small btn-primary" data-wiz-lock hidden>Lock Point</button>
           <button type="button" class="btn btn-small" data-wiz-skip>Skip Step</button>
           <button type="button" class="btn btn-small" data-wiz-close>Close <kbd>Esc</kbd></button>
         </div>
@@ -388,11 +388,11 @@ export class EegPanel {
         { x: 0.94, y: 0.94, short: 'BOT-RIGHT ↘',  holdReq: 1.4, prompt: '9/9 · Tilt DOWN-RIGHT to Corner & HOLD — DO NOT BLINK' },
       ],
     };
-    this.wiz.closeBtn.addEventListener('click', () => this.closeWizard());
-    this.wiz.skipBtn.addEventListener('click', () => this.advanceWizardPhase());
-    this.wiz.lockBtn.addEventListener('click', () => this.lockCurrentDotManually());
-    this.wiz.canvas.addEventListener('click', () => {
-      if (this.wiz?.active && this.wiz.phase === 'motion') {
+    this.wiz.closeBtn?.addEventListener('click', () => this.closeWizard());
+    this.wiz.skipBtn?.addEventListener('click', () => this.advanceWizardPhase());
+    this.wiz.lockBtn?.addEventListener('click', () => this.lockCurrentDotManually());
+    this.wiz.canvas?.addEventListener('click', () => {
+      if (this.wiz?.active && this.wiz.phase === 'motion' && this.wiz.lockBtn && !this.wiz.lockBtn.hidden) {
         this.lockCurrentDotManually();
       }
     });
@@ -469,13 +469,13 @@ export class EegPanel {
 
     if (phase === 'motion') {
       this.wiz.stepEl.textContent = this.wiz.mode === 'both'
-        ? 'STEP 1 OF 3 · 9 SEPARATE FULL-EDGE DOTS (HOLD & DO NOT BLINK)'
-        : '9-DOT FULL-EDGE HEAD CALIBRATION (RUST ML)';
-      this.wiz.titleEl.textContent = 'Point Head at Each Dot, HOLD STILL & Do NOT Blink';
-      this.wiz.subEl.textContent = 'Move your head to each separate dot at the full Top, Bottom, Left, Right & Corners. Hold still without blinking until the green ring locks (or click Lock Dot Now).';
-      if (this.wiz.lockBtn) this.wiz.lockBtn.hidden = false;
+        ? 'STEP 1 OF 3 · HYBRID PURSUIT + BOUNDARY HOLD + REVERSE CALIBRATION'
+        : 'HYBRID PURSUIT + BOUNDARY + REVERSE HEAD CALIBRATION (RUST ML)';
+      this.wiz.titleEl.textContent = 'Follow the White Dot Out to Each Boundary, Pause at Edge & Reverse Back';
+      this.wiz.subEl.textContent = 'Follow the white dot smoothly with your head: Center → Left Edge (hold) → Reverse to Center → Right Edge (hold) → Top Edge (hold) → Bottom Edge (hold) → 4-Corner Figure-8. Keep eyes open (DO NOT BLINK).';
+      if (this.wiz.lockBtn) this.wiz.lockBtn.hidden = true;
       this.wiz.skipBtn.textContent = this.wiz.mode === 'both' ? 'Skip to Noise Canceler →' : 'Finish';
-      this.addLog('Started 9-Dot Full-Edge Head Calibration: hold still at each dot (do NOT blink).');
+      this.addLog('Started Hybrid Smooth-Pursuit + Boundary-Hold + Reverse Head Calibration (24.5s).');
     } else if (phase === 'noise') {
       this.wiz.stepEl.textContent = 'STEP 2 OF 3 · HEAD-MOTION EEG NOISE CANCELLATION (DO NOT BLINK)';
       this.wiz.titleEl.textContent = 'Move Your Head Around Freely — DO NOT BLINK!';
@@ -568,111 +568,134 @@ export class EegPanel {
     const motionVal = b?.motion ?? 0;
 
     if (this.wiz.phase === 'motion') {
-      const dots = this.wiz.dots;
-      const curIdx = this.wiz.dotIdx;
-      const dot = dots[curIdx];
-      if (!dot) {
+      // Hybrid Smooth-Pursuit + Boundary-Hold + Center-Reverse Trajectory (24.5s total)
+      // Keyframes: [t_sec, x, y, label, isBoundaryHold]
+      const keyframes = [
+        { t: 0.0,  x: 0.50, y: 0.50, label: '1/7 · Look at CENTER & Hold Still (Locking 3D Gyro Zero)', hold: true },
+        { t: 1.8,  x: 0.50, y: 0.50, label: '2/7 · Follow Dot Smoothly LEFT to Full Left Boundary ←', hold: false },
+        { t: 3.3,  x: 0.04, y: 0.50, label: '2/7 · HOLD LEFT BOUNDARY ← (Do NOT Blink)', hold: true },
+        { t: 4.5,  x: 0.04, y: 0.50, label: '2/7 · REVERSE Smoothly Back to CENTER →', hold: false },
+        { t: 5.8,  x: 0.50, y: 0.50, label: 'Center Checkpoint — Re-Anchoring Zero', hold: true },
+        { t: 6.2,  x: 0.50, y: 0.50, label: '3/7 · Follow Dot Smoothly RIGHT to Full Right Boundary →', hold: false },
+        { t: 7.7,  x: 0.96, y: 0.50, label: '3/7 · HOLD RIGHT BOUNDARY → (Do NOT Blink)', hold: true },
+        { t: 8.9,  x: 0.96, y: 0.50, label: '3/7 · REVERSE Smoothly Back to CENTER ←', hold: false },
+        { t: 10.2, x: 0.50, y: 0.50, label: 'Center Checkpoint — Re-Anchoring Zero', hold: true },
+        { t: 10.6, x: 0.50, y: 0.50, label: '4/7 · Follow Dot Smoothly UP to Full Top Boundary ↑', hold: false },
+        { t: 12.0, x: 0.50, y: 0.04, label: '4/7 · HOLD TOP BOUNDARY ↑ (Do NOT Blink)', hold: true },
+        { t: 13.3, x: 0.50, y: 0.04, label: '4/7 · REVERSE Smoothly Down to CENTER ↓', hold: false },
+        { t: 14.5, x: 0.50, y: 0.50, label: 'Center Checkpoint — Re-Anchoring Zero', hold: true },
+        { t: 14.9, x: 0.50, y: 0.50, label: '5/7 · Follow Dot Smoothly DOWN to Full Bottom Boundary ↓', hold: false },
+        { t: 16.3, x: 0.50, y: 0.96, label: '5/7 · HOLD BOTTOM BOUNDARY ↓ (Do NOT Blink)', hold: true },
+        { t: 17.6, x: 0.50, y: 0.96, label: '5/7 · REVERSE Smoothly Up to CENTER ↑', hold: false },
+        { t: 18.8, x: 0.50, y: 0.50, label: '6/7 · Follow Full-Corner Figure-8 Sweep (Top-Left ↖)', hold: false },
+        { t: 19.9, x: 0.06, y: 0.06, label: '6/7 · Sweep Left Boundary to Bottom-Left Corner ↙', hold: false },
+        { t: 21.0, x: 0.06, y: 0.94, label: '6/7 · Cross Diagonally Through Center to Top-Right ↗', hold: false },
+        { t: 22.3, x: 0.94, y: 0.06, label: '6/7 · Sweep Right Boundary to Bottom-Right Corner ↘', hold: false },
+        { t: 23.4, x: 0.94, y: 0.94, label: '7/7 · Return Smoothly to CENTER & Hold', hold: false },
+        { t: 24.4, x: 0.50, y: 0.50, label: '7/7 · Locking Final Center Reference…', hold: true },
+        { t: 25.0, x: 0.50, y: 0.50, label: 'Complete!', hold: true },
+      ];
+
+      const totalDur = keyframes[keyframes.length - 1].t;
+      if (elapsed >= totalDur) {
         this.advanceWizardPhase();
         return;
       }
 
-      const dotElapsed = (now - this.wiz.dotEnteredAt) / 1000;
-      const transitGrace = curIdx === 0 ? 0.65 : 0.95;
-      const inHoldWindow = dotElapsed >= transitGrace;
-      const isSteady = motionVal < 0.34;
-
-      if (inHoldWindow && isSteady) {
-        this.wiz.dotHoldSec += frameDt;
-        if (curIdx === 0 && !this.wiz.taredAtCenter && this.wiz.dotHoldSec >= 0.45) {
-          this.wiz.taredAtCenter = true;
-          if (src?.beginMotionCalibration) {
-            src.beginMotionCalibration();
-            this.addLog(`3D Center Tare locked (raw P:${b?.orientation?.pitch?.toFixed(1) ?? 0}° Y:${b?.orientation?.yaw?.toFixed(1) ?? 0}°). Collecting 9 full-edge dots...`);
-          }
+      // Find active keyframe segment and cosine-smooth interpolate
+      let segIdx = 0;
+      for (let i = 0; i < keyframes.length - 1; i++) {
+        if (elapsed >= keyframes[i].t && elapsed <= keyframes[i + 1].t) {
+          segIdx = i;
+          break;
         }
-        if ((curIdx > 0 || this.wiz.taredAtCenter) && now - this.wiz.lastSampleAt >= 95) {
-          this.wiz.lastSampleAt = now;
-          this.wiz.dotSamplesTaken += 1;
-          if (src?.addMotionCalibPoint) {
-            src.addMotionCalibPoint(dot.x, dot.y);
-          }
-          // Also record eyes-open non-blink EEG sample while holding at each dot!
-          if (this.wiz.dotSamplesTaken % 2 === 0 && src?.recordBaselineSample) {
-            src.recordBaselineSample();
-          }
+      }
+      const k0 = keyframes[segIdx];
+      const k1 = keyframes[segIdx + 1];
+      const segSpan = Math.max(0.01, k1.t - k0.t);
+      const rawU = Math.max(0, Math.min(1, (elapsed - k0.t) / segSpan));
+      // Smooth cosine ease-in-out on moving segments so turnaround velocity is natural
+      const smoothU = 0.5 - 0.5 * Math.cos(rawU * Math.PI);
+      const dotX = k0.x + (k1.x - k0.x) * smoothU;
+      const dotY = k0.y + (k1.y - k0.y) * smoothU;
+      const isHold = Math.hypot(k1.x - k0.x, k1.y - k0.y) < 0.01;
+
+      if (!this.wiz.taredAtCenter && elapsed >= 1.2) {
+        this.wiz.taredAtCenter = true;
+        if (src?.beginMotionCalibration) {
+          src.beginMotionCalibration();
+          this.addLog(`3D Center Tare locked (raw P:${b?.orientation?.pitch?.toFixed(1) ?? 0}° Y:${b?.orientation?.yaw?.toFixed(1) ?? 0}°). Recording hybrid pursuit + boundary holds + reverse sweeps...`);
         }
       }
 
-      // Draw all 9 dots on screen so the user sees the separate edge & corner positions
-      dots.forEach((d, idx) => {
-        const px = d.x * w;
-        const py = d.y * h;
-        if (idx < curIdx) {
-          // Completed dot
-          ctx.fillStyle = 'rgba(126, 224, 138, 0.22)';
-          ctx.strokeStyle = '#7ee08a';
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(px, py, 14, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-          ctx.fillStyle = '#7ee08a';
-          ctx.font = '700 12px "Pixelify Sans", monospace';
-          ctx.textAlign = 'center';
-          ctx.fillText('✓', px, py + 4);
-        } else if (idx > curIdx) {
-          // Upcoming dot
-          ctx.strokeStyle = 'rgba(163, 166, 196, 0.35)';
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.arc(px, py, 13, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.fillStyle = 'rgba(163, 166, 196, 0.55)';
-          ctx.font = '11px "Pixelify Sans", monospace';
-          ctx.textAlign = 'center';
-          ctx.fillText(`${idx + 1}`, px, py + 4);
+      if (this.wiz.taredAtCenter && now - this.wiz.lastSampleAt >= 75) {
+        this.wiz.lastSampleAt = now;
+        this.wiz.dotSamplesTaken += 1;
+        if (src?.addMotionCalibPoint) {
+          src.addMotionCalibPoint(dotX, dotY);
         }
-      });
+        // Record non-blink baseline during holds so eye classifier rejects stationary & edge hum
+        if (isHold && this.wiz.dotSamplesTaken % 3 === 0 && src?.recordBaselineSample) {
+          src.recordBaselineSample();
+        }
+      }
 
-      // Draw active target dot + hold progress ring
-      const dx = dot.x * w;
-      const dy = dot.y * h;
-      const holdFrac = Math.max(0, Math.min(1, this.wiz.dotHoldSec / dot.holdReq));
-      const pulse = 1 + 0.14 * Math.sin(now * 0.01);
-
-      // Direction arrow from center to active dot
-      if (curIdx > 0) {
-        ctx.strokeStyle = 'rgba(255, 207, 74, 0.45)';
-        ctx.lineWidth = 2.5;
-        ctx.setLineDash([8, 6]);
+      // Draw boundary anchor guides at Left, Right, Top, Bottom, Center, and 4 Corners
+      const anchors = [
+        [0.50, 0.50, 'CENTER'],
+        [0.04, 0.50, 'LEFT'],
+        [0.96, 0.50, 'RIGHT'],
+        [0.50, 0.04, 'TOP'],
+        [0.50, 0.96, 'BOTTOM'],
+        [0.06, 0.06, 'TL'],
+        [0.94, 0.06, 'TR'],
+        [0.06, 0.94, 'BL'],
+        [0.94, 0.94, 'BR'],
+      ];
+      for (const [ax, ay, alabel] of anchors) {
+        const px = ax * w;
+        const py = ay * h;
+        const near = Math.hypot(dotX - ax, dotY - ay) < 0.06;
+        ctx.strokeStyle = near ? '#7ee08a' : 'rgba(163, 166, 196, 0.28)';
+        ctx.lineWidth = near ? 2.5 : 1.2;
         ctx.beginPath();
-        ctx.moveTo(w / 2, h / 2);
-        ctx.lineTo(dx, dy);
+        ctx.arc(px, py, 12, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = near ? '#7ee08a' : 'rgba(163, 166, 196, 0.45)';
+        ctx.font = '10px "Pixelify Sans", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(alabel, px, py + (ay < 0.15 ? 24 : -16));
+      }
+
+      // Draw trajectory direction arrow from current dot to next target
+      if (!isHold) {
+        ctx.strokeStyle = 'rgba(255, 207, 74, 0.40)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.moveTo(dotX * w, dotY * h);
+        ctx.lineTo(k1.x * w, k1.y * h);
         ctx.stroke();
         ctx.setLineDash([]);
       }
 
-      const grad = ctx.createRadialGradient(dx, dy, 4, dx, dy, 44 * pulse);
+      const dx = dotX * w;
+      const dy = dotY * h;
+      const pulse = 1 + 0.14 * Math.sin(now * 0.012);
+      const grad = ctx.createRadialGradient(dx, dy, 4, dx, dy, 42 * pulse);
       grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
-      grad.addColorStop(0.4, inHoldWindow ? 'rgba(126, 224, 138, 0.85)' : 'rgba(255, 230, 150, 0.85)');
+      grad.addColorStop(0.45, isHold ? 'rgba(126, 224, 138, 0.88)' : 'rgba(255, 230, 150, 0.88)');
       grad.addColorStop(1, 'rgba(255, 207, 74, 0)');
       ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.arc(dx, dy, 44 * pulse, 0, Math.PI * 2);
+      ctx.arc(dx, dy, 42 * pulse, 0, Math.PI * 2);
       ctx.fill();
 
-      // Hold progress ring
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.arc(dx, dy, 24, 0, Math.PI * 2);
-      ctx.stroke();
-
-      if (holdFrac > 0) {
+      if (isHold) {
         ctx.strokeStyle = '#7ee08a';
-        ctx.lineWidth = 5;
+        ctx.lineWidth = 4;
         ctx.beginPath();
-        ctx.arc(dx, dy, 24, -Math.PI / 2, -Math.PI / 2 + holdFrac * Math.PI * 2);
+        ctx.arc(dx, dy, 22, -Math.PI / 2, -Math.PI / 2 + rawU * Math.PI * 2);
         ctx.stroke();
       }
 
@@ -692,33 +715,31 @@ export class EegPanel {
         ctx.stroke();
       }
 
-      // Big instruction banner in center of screen
-      ctx.fillStyle = 'rgba(9, 10, 18, 0.82)';
-      ctx.fillRect(w * 0.16, h * 0.42, w * 0.68, 72);
-      ctx.strokeStyle = inHoldWindow ? '#7ee08a' : '#ffcf4a';
+      // Instruction banner at bottom-center so it never blocks top/center targets
+      const bannerY = dotY > 0.62 ? h * 0.16 : h * 0.76;
+      ctx.fillStyle = 'rgba(9, 10, 18, 0.84)';
+      ctx.fillRect(w * 0.16, bannerY, w * 0.68, 64);
+      ctx.strokeStyle = isHold ? '#7ee08a' : '#ffcf4a';
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(w * 0.16, h * 0.42, w * 0.68, 72);
+      ctx.strokeRect(w * 0.16, bannerY, w * 0.68, 64);
 
       ctx.fillStyle = '#f4f0e4';
-      ctx.font = '700 20px "Pixelify Sans", sans-serif';
+      ctx.font = '700 19px "Pixelify Sans", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(dot.prompt, w / 2, h * 0.42 + 30);
+      ctx.fillText(k0.label, w / 2, bannerY + 26);
 
-      ctx.fillStyle = inHoldWindow ? '#7ee08a' : '#ffcf4a';
-      ctx.font = '15px "Atkinson Hyperlegible", sans-serif';
-      const subStatus = !inHoldWindow
-        ? `Move your head to ${dot.short}…`
-        : isSteady
-          ? `HOLDING STILL (DO NOT BLINK)… ${Math.round(holdFrac * 100)}%`
-          : `Hold your head steady at ${dot.short} (DO NOT BLINK)…`;
-      ctx.fillText(subStatus, w / 2, h * 0.42 + 56);
+      const overallPct = Math.round((elapsed / totalDur) * 100);
+      ctx.fillStyle = isHold ? '#7ee08a' : '#ffcf4a';
+      ctx.font = '14px "Atkinson Hyperlegible", sans-serif';
+      ctx.fillText(
+        isHold
+          ? `HOLD BOUNDARY STEADY (DO NOT BLINK)… ${overallPct}% total (${this.wiz.dotSamplesTaken} pts)`
+          : `FOLLOW WHITE DOT SMOOTHLY WITH YOUR HEAD (DO NOT BLINK)… ${overallPct}% total (${this.wiz.dotSamplesTaken} pts)`,
+        w / 2,
+        bannerY + 50,
+      );
 
-      this.wiz.statsEl.textContent = `Dot ${curIdx + 1}/9 (${dot.short}) · Hold: ${Math.round(holdFrac * 100)}% · Head ΔYaw: ${rel.yaw.toFixed(1)}° · ΔPitch: ${rel.pitch.toFixed(1)}° · Rest EEG Samples: ${bm?.baselines ?? 0}`;
-
-      if (this.wiz.dotHoldSec >= dot.holdReq) {
-        this.addLog(`Completed Dot #${curIdx + 1}/9 (${dot.short}): ΔYaw=${rel.yaw.toFixed(1)}° ΔPitch=${rel.pitch.toFixed(1)}° (${this.wiz.dotSamplesTaken} pts)`);
-        this.advanceToNextDot();
-      }
+      this.wiz.statsEl.textContent = `Hybrid Calib: ${overallPct}% (${this.wiz.dotSamplesTaken} pts) · Target: (${dotX.toFixed(2)}, ${dotY.toFixed(2)}) · Head ΔYaw: ${rel.yaw.toFixed(1)}° · ΔPitch: ${rel.pitch.toFixed(1)}° · Rest EEG: ${bm?.baselines ?? 0}`;
     } else if (this.wiz.phase === 'noise') {
       // 4.5-second "Move Head Around Without Blinking" noise-rejection stage
       const totalDur = 4.5;

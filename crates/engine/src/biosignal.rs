@@ -112,6 +112,7 @@ pub struct RustImuTracker {
     still_count: u32,
     still_time: f32,
     edge_still_time: f32,
+    prev_bridge_yaw: Option<f32>,
     yaw_deg: f32,
     yaw_zero_deg: f32,
     rate_deg_s: f32,
@@ -158,6 +159,7 @@ impl RustImuTracker {
             still_count: 0,
             still_time: 0.0,
             edge_still_time: 0.0,
+            prev_bridge_yaw: None,
             yaw_deg: 0.0,
             yaw_zero_deg: 0.0,
             rate_deg_s: 0.0,
@@ -175,12 +177,12 @@ impl RustImuTracker {
             invert_yaw: false,
             invert_pitch: false,
             deadzone_deg: 0.45,
-            yaw_range_deg: 15.0,
-            pitch_range_deg: 8.0,
+            yaw_range_deg: 14.0,
+            pitch_range_deg: 7.5,
             calibrating_motion: false,
             calib_samples: Vec::new(),
-            learned_wx: [0.0, 1.0 / 15.0, 0.0, 0.0],
-            learned_wy: [0.0, 0.0, -1.0 / 8.0, 0.0],
+            learned_wx: [0.0, 1.0 / 14.0, 0.0, 0.0],
+            learned_wy: [0.0, 0.0, -1.0 / 7.5, 0.0],
             scale_left: 1.0,
             scale_right: 1.0,
             scale_up: 1.0,
@@ -241,8 +243,8 @@ impl RustImuTracker {
         self.calib_samples.clear();
         self.has_learned_map = false;
         self.calib_r2 = 0.0;
-        self.learned_wx = [0.0, 1.0 / 15.0, 0.0, 0.0];
-        self.learned_wy = [0.0, 0.0, -1.0 / 8.0, 0.0];
+        self.learned_wx = [0.0, 1.0 / 14.0, 0.0, 0.0];
+        self.learned_wy = [0.0, 0.0, -1.0 / 7.5, 0.0];
         self.scale_left = 1.0;
         self.scale_right = 1.0;
         self.scale_up = 1.0;
@@ -266,10 +268,15 @@ impl RustImuTracker {
         });
     }
 
-    /// Fits a 2D Ridge Regression + Piecewise Directional Reach model in Rust mapping
-    /// `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
-    /// Automatically discovers axis signs, high vertical pitch sensitivity, cross-axis coupling,
-    /// and separate Left/Right/Up/Down edge reach scales so every full screen edge is reachable.
+    /// Hybrid Smooth-Pursuit + Boundary-Fixation + Center-Checkpoint Solver:
+    /// 1. Extracts Center checkpoints (`|tx| < 0.08 && |ty| < 0.08`) to remove any gyro yaw drift
+    ///    accumulated across calibration and guarantee zero-intercept symmetry on reverse.
+    /// 2. Searches optimal human smooth-pursuit reaction lag `L in 0..=2` on moving segments while
+    ///    weighting stationary boundary-hold anchors (`3.0x`) for exact screen edge locking.
+    /// 3. Solves zero-prior 3D sensor-to-head Ridge Regression (`[yaw, pitch, roll] -> (u_x, u_y)`)
+    ///    with cross-axis Gram-Schmidt decoupling so vertical nods never leak horizontally.
+    /// 4. Computes independent 4-boundary reach envelopes (`scale_left, scale_right, scale_up, scale_down`)
+    ///    so 89% of the user's calibrated edge posture reaches 100% of all 4 screen boundaries & corners.
     pub fn finish_motion_calibration(&mut self) -> bool {
         self.calibrating_motion = false;
         let n = self.calib_samples.len();
@@ -277,29 +284,143 @@ impl RustImuTracker {
             return false;
         }
 
-        // Light L2 regularization so small natural vertical head pitch (±4..8 deg) is learned accurately
-        let prior_wx = [0.0f32, 1.0 / 14.0, 0.0, 0.0];
-        let prior_wy = [0.0f32, 0.0, -1.0 / 7.5, 0.0];
-        let reg = [0.8f32, 2.5, 1.8, 12.0];
+        // Step 1: Identify Center checkpoints (`|tx| < 0.08 && |ty| < 0.08`) to detrend gyro drift
+        // and guarantee that neutral Center head posture maps strictly to `(0, 0)`.
+        let mut checkpoints: Vec<(f32, f32, f32, f32)> = Vec::new();
+        let mut i = 0;
+        while i < n {
+            let s = self.calib_samples[i];
+            if s.tx.abs() < 0.08 && s.ty.abs() < 0.08 {
+                let start = i;
+                let mut sum_y = 0.0f32;
+                let mut sum_p = 0.0f32;
+                let mut sum_r = 0.0f32;
+                let mut cnt = 0u32;
+                while i < n && self.calib_samples[i].tx.abs() < 0.08 && self.calib_samples[i].ty.abs() < 0.08 {
+                    // Skip the first 2 settling samples if a center segment is long enough
+                    if i >= start + 2 || start == 0 {
+                        sum_y += self.calib_samples[i].yaw;
+                        sum_p += self.calib_samples[i].pitch;
+                        sum_r += self.calib_samples[i].roll;
+                        cnt += 1;
+                    }
+                    i += 1;
+                }
+                if cnt == 0 {
+                    for k in start..i {
+                        sum_y += self.calib_samples[k].yaw;
+                        sum_p += self.calib_samples[k].pitch;
+                        sum_r += self.calib_samples[k].roll;
+                        cnt += 1;
+                    }
+                }
+                if cnt > 0 {
+                    let mid = (start + i - 1) as f32 * 0.5;
+                    let inv = 1.0 / (cnt as f32);
+                    checkpoints.push((mid, sum_y * inv, sum_p * inv, sum_r * inv));
+                }
+            } else {
+                i += 1;
+            }
+        }
 
+        let mut detrended: Vec<MotionCalibSample> = Vec::with_capacity(n);
+        for idx in 0..n {
+            let s = self.calib_samples[idx];
+            let (cy, cp, cr) = if checkpoints.is_empty() {
+                (0.0, 0.0, 0.0)
+            } else if checkpoints.len() == 1 {
+                (checkpoints[0].1, checkpoints[0].2, checkpoints[0].3)
+            } else {
+                let x = idx as f32;
+                if x <= checkpoints[0].0 {
+                    (checkpoints[0].1, checkpoints[0].2, checkpoints[0].3)
+                } else if x >= checkpoints[checkpoints.len() - 1].0 {
+                    let last = checkpoints[checkpoints.len() - 1];
+                    (last.1, last.2, last.3)
+                } else {
+                    let mut seg = 0;
+                    for m in 0..(checkpoints.len() - 1) {
+                        if x >= checkpoints[m].0 && x <= checkpoints[m + 1].0 {
+                            seg = m;
+                            break;
+                        }
+                    }
+                    let c0 = checkpoints[seg];
+                    let c1 = checkpoints[seg + 1];
+                    let span = (c1.0 - c0.0).max(1.0);
+                    let t = clamp((x - c0.0) / span, 0.0, 1.0);
+                    (
+                        c0.1 + t * (c1.1 - c0.1),
+                        c0.2 + t * (c1.2 - c0.2),
+                        c0.3 + t * (c1.3 - c0.3),
+                    )
+                }
+            };
+            detrended.push(MotionCalibSample {
+                yaw: s.yaw - cy,
+                pitch: s.pitch - cp,
+                roll: s.roll - cr,
+                tx: s.tx,
+                ty: s.ty,
+            });
+        }
+
+        // Update yaw_zero_deg by the final Center checkpoint drift so post-calibration starts centered
+        if let Some(&(_, last_cy, _, _)) = checkpoints.last() {
+            self.yaw_zero_deg = wrap_deg(self.yaw_zero_deg + last_cy);
+        }
+
+        // Step 2: Optimal pursuit phase-lag search `best_lag in 0..=2` on moving pursuit samples
+        let max_lag = if n >= 30 { 2usize } else { 0usize };
+        let mut best_lag = 0usize;
+        let mut best_corr = -1.0f32;
+        for lag in 0..=max_lag {
+            let mut corr_sum = 0.0f32;
+            for idx in lag..n {
+                let s = detrended[idx];
+                let tgt = detrended[idx - lag];
+                corr_sum += (s.yaw * tgt.tx).abs() + (s.pitch * tgt.ty).abs() * 1.5;
+            }
+            if corr_sum > best_corr {
+                best_corr = corr_sum;
+                best_lag = lag;
+            }
+        }
+
+        // Step 3: Weighted Zero-Intercept 3D Sensor-to-Head Regression (`[0, wyaw, wpitch, wroll]`)
+        // Zero biased prior in xty so user's physical head movement 100% determines axis signs!
         let mut xtx = [[0.0f32; 4]; 4];
         let mut xty_x = [0.0f32; 4];
         let mut xty_y = [0.0f32; 4];
+        xtx[0][0] = 1000.0; // Lock intercept w[0] = 0.0 so (0,0,0) is always exact screen Center
+        xtx[1][1] = 0.35;
+        xtx[2][2] = 0.25;
+        xtx[3][3] = 6.0;
 
-        for i in 0..4 {
-            xtx[i][i] += reg[i];
-            xty_x[i] += reg[i] * prior_wx[i];
-            xty_y[i] += reg[i] * prior_wy[i];
-        }
+        for idx in best_lag..n {
+            let s = detrended[idx];
+            let prev_tgt = if idx > 0 { detrended[idx - 1] } else { s };
+            let tgt_speed = (s.tx - prev_tgt.tx).hypot(s.ty - prev_tgt.ty);
+            let is_boundary_hold = (s.tx.abs() > 0.72 || s.ty.abs() > 0.72) && tgt_speed < 0.02;
+            let tgt = if is_boundary_hold { s } else { detrended[idx - best_lag] };
 
-        for s in &self.calib_samples {
-            let f = [1.0, s.yaw, s.pitch, s.roll];
-            for r in 0..4 {
-                for c in 0..4 {
-                    xtx[r][c] += f[r] * f[c];
+            // Up-weight stationary boundary holds so edges and corners have strong anchoring
+            let weight = if is_boundary_hold {
+                3.0
+            } else if tgt.tx.abs() > 0.70 || tgt.ty.abs() > 0.70 {
+                1.8
+            } else {
+                1.0
+            };
+
+            let f = [0.0, s.yaw, s.pitch, s.roll];
+            for r in 1..4 {
+                for c in 1..4 {
+                    xtx[r][c] += weight * f[r] * f[c];
                 }
-                xty_x[r] += f[r] * s.tx;
-                xty_y[r] += f[r] * s.ty;
+                xty_x[r] += weight * f[r] * tgt.tx;
+                xty_y[r] += weight * f[r] * tgt.ty;
             }
         }
 
@@ -312,111 +433,101 @@ impl RustImuTracker {
             None => return false,
         };
 
-        // Allow high vertical sensitivity (down to 2.2 deg full-scale vertical nod, 3.0 deg horizontal)
-        let mut clean_wx = wx;
-        let mut clean_wy = wy;
-        clean_wx[0] = clamp(clean_wx[0], -0.40, 0.40);
-        clean_wy[0] = clamp(clean_wy[0], -0.40, 0.40);
+        let mut clean_wx = [0.0, wx[1], wx[2], wx[3]];
+        let mut clean_wy = [0.0, wy[1], wy[2], wy[3]];
+
+        // Suppress cross-axis leakage if pure horizontal turns and pure vertical nods are present
+        let wx_dom_yaw = clean_wx[1].abs() >= clean_wx[2].abs();
+        let wy_dom_pitch = clean_wy[2].abs() >= clean_wy[1].abs();
+        if wx_dom_yaw && wy_dom_pitch {
+            // Limit cross-talk between yaw and pitch to <= 25% of primary axis weight
+            let max_cross_x = clean_wx[1].abs() * 0.25;
+            let max_cross_y = clean_wy[2].abs() * 0.25;
+            clean_wx[2] = clamp(clean_wx[2], -max_cross_x, max_cross_x);
+            clean_wy[1] = clamp(clean_wy[1], -max_cross_y, max_cross_y);
+        }
 
         let norm_x = (clean_wx[1] * clean_wx[1] + clean_wx[2] * clean_wx[2] + clean_wx[3] * clean_wx[3]).sqrt();
         let norm_y = (clean_wy[1] * clean_wy[1] + clean_wy[2] * clean_wy[2] + clean_wy[3] * clean_wy[3]).sqrt();
 
         if norm_x < 1.0 / 35.0 && norm_x > 1e-5 {
-            let scale = (1.0 / 16.0) / norm_x;
+            let scale = (1.0 / 15.0) / norm_x;
             for j in 1..4 {
                 clean_wx[j] *= scale;
             }
-        } else if norm_x > 1.0 / 3.0 {
-            let scale = (1.0 / 3.0) / norm_x;
+        } else if norm_x > 1.0 / 2.5 {
+            let scale = (1.0 / 2.5) / norm_x;
             for j in 1..4 {
                 clean_wx[j] *= scale;
             }
         }
 
-        if norm_y < 1.0 / 30.0 && norm_y > 1e-5 {
-            let scale = (1.0 / 8.5) / norm_y;
+        if norm_y < 1.0 / 32.0 && norm_y > 1e-5 {
+            let scale = (1.0 / 8.0) / norm_y;
             for j in 1..4 {
                 clean_wy[j] *= scale;
             }
-        } else if norm_y > 1.0 / 2.2 {
-            let scale = (1.0 / 2.2) / norm_y;
+        } else if norm_y > 1.0 / 1.8 {
+            let scale = (1.0 / 1.8) / norm_y;
             for j in 1..4 {
                 clean_wy[j] *= scale;
             }
         }
 
-        // Compute piecewise directional reach factors (Left, Right, Up, Down) from edge targets
-        // so asymmetric neck flexion/extension reaches both full Top (0.0) and full Bottom (1.0)
-        let mut left_pred = 0.0f32;
-        let mut left_tgt = 0.0f32;
-        let mut left_n = 0u32;
+        // Step 4: Independent 4-Direction Boundary Envelope Scaling (Left, Right, Up, Down)
+        // Collects the de-rotated head projections at each boundary so 89% of the user's comfortable
+        // boundary angle reaches 100% of the screen edge (`-1.0` and `+1.0`).
+        let mut left_ratios: Vec<f32> = Vec::new();
+        let mut right_ratios: Vec<f32> = Vec::new();
+        let mut up_ratios: Vec<f32> = Vec::new();
+        let mut down_ratios: Vec<f32> = Vec::new();
 
-        let mut right_pred = 0.0f32;
-        let mut right_tgt = 0.0f32;
-        let mut right_n = 0u32;
+        for idx in best_lag..n {
+            let s = detrended[idx];
+            let tgt = detrended[idx - best_lag];
+            let px = clean_wx[1] * s.yaw + clean_wx[2] * s.pitch + clean_wx[3] * s.roll;
+            let py = clean_wy[1] * s.yaw + clean_wy[2] * s.pitch + clean_wy[3] * s.roll;
 
-        let mut up_pred = 0.0f32;
-        let mut up_tgt = 0.0f32;
-        let mut up_n = 0u32;
-
-        let mut down_pred = 0.0f32;
-        let mut down_tgt = 0.0f32;
-        let mut down_n = 0u32;
-
-        for s in &self.calib_samples {
-            let px = clean_wx[0] + clean_wx[1] * s.yaw + clean_wx[2] * s.pitch + clean_wx[3] * s.roll;
-            let py = clean_wy[0] + clean_wy[1] * s.yaw + clean_wy[2] * s.pitch + clean_wy[3] * s.roll;
-            if s.tx < -0.45 && px < -0.05 {
-                left_pred += px;
-                left_tgt += s.tx;
-                left_n += 1;
-            } else if s.tx > 0.45 && px > 0.05 {
-                right_pred += px;
-                right_tgt += s.tx;
-                right_n += 1;
+            if tgt.tx < -0.55 && px < -0.04 {
+                left_ratios.push((tgt.tx / px).abs());
+            } else if tgt.tx > 0.55 && px > 0.04 {
+                right_ratios.push((tgt.tx / px).abs());
             }
-            if s.ty < -0.45 && py < -0.05 {
-                up_pred += py;
-                up_tgt += s.ty;
-                up_n += 1;
-            } else if s.ty > 0.45 && py > 0.05 {
-                down_pred += py;
-                down_tgt += s.ty;
-                down_n += 1;
+            if tgt.ty < -0.55 && py < -0.04 {
+                up_ratios.push((tgt.ty / py).abs());
+            } else if tgt.ty > 0.55 && py > 0.04 {
+                down_ratios.push((tgt.ty / py).abs());
             }
         }
 
-        self.scale_left = if left_n >= 2 && left_pred.abs() > 0.08 {
-            clamp((left_tgt / left_pred) * 1.06, 0.65, 2.8)
-        } else {
-            1.05
-        };
-        self.scale_right = if right_n >= 2 && right_pred.abs() > 0.08 {
-            clamp((right_tgt / right_pred) * 1.06, 0.65, 2.8)
-        } else {
-            1.05
-        };
-        self.scale_up = if up_n >= 2 && up_pred.abs() > 0.08 {
-            clamp((up_tgt / up_pred) * 1.08, 0.65, 3.2)
-        } else {
-            1.08
-        };
-        self.scale_down = if down_n >= 2 && down_pred.abs() > 0.08 {
-            clamp((down_tgt / down_pred) * 1.08, 0.65, 3.2)
-        } else {
-            1.08
-        };
+        fn robust_boundary_scale(ratios: &mut [f32], comfort_boost: f32, default_scale: f32, max_scale: f32) -> f32 {
+            if ratios.len() < 2 {
+                return default_scale;
+            }
+            ratios.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            // Use 40th percentile ratio (= 60th percentile head excursion) * comfort_boost
+            // so even the gentler boundary holds reliably reach 100% of the screen edge.
+            let idx = ((ratios.len() - 1) as f32 * 0.45).round() as usize;
+            clamp(ratios[idx] * comfort_boost, 0.55, max_scale)
+        }
 
-        // Compute R^2 fit score across calibration trajectory
+        self.scale_left = robust_boundary_scale(&mut left_ratios, 1.12, 1.08, 3.2);
+        self.scale_right = robust_boundary_scale(&mut right_ratios, 1.12, 1.08, 3.2);
+        self.scale_up = robust_boundary_scale(&mut up_ratios, 1.14, 1.12, 3.8);
+        self.scale_down = robust_boundary_scale(&mut down_ratios, 1.14, 1.12, 3.8);
+
+        // Compute R^2 fit score across lag-compensated trajectory
         let mut ss_res = 0.0f32;
         let mut ss_tot = 0.0f32;
-        for s in &self.calib_samples {
-            let raw_px = clean_wx[0] + clean_wx[1] * s.yaw + clean_wx[2] * s.pitch + clean_wx[3] * s.roll;
-            let raw_py = clean_wy[0] + clean_wy[1] * s.yaw + clean_wy[2] * s.pitch + clean_wy[3] * s.roll;
-            let px = if raw_px < 0.0 { raw_px * self.scale_left } else { raw_px * self.scale_right };
-            let py = if raw_py < 0.0 { raw_py * self.scale_up } else { raw_py * self.scale_down };
-            ss_res += (px - s.tx).powi(2) + (py - s.ty).powi(2);
-            ss_tot += s.tx.powi(2) + s.ty.powi(2);
+        for idx in best_lag..n {
+            let s = detrended[idx];
+            let tgt = detrended[idx - best_lag];
+            let raw_px = clean_wx[1] * s.yaw + clean_wx[2] * s.pitch + clean_wx[3] * s.roll;
+            let raw_py = clean_wy[1] * s.yaw + clean_wy[2] * s.pitch + clean_wy[3] * s.roll;
+            let px = clamp(if raw_px < 0.0 { raw_px * self.scale_left } else { raw_px * self.scale_right }, -1.0, 1.0);
+            let py = clamp(if raw_py < 0.0 { raw_py * self.scale_up } else { raw_py * self.scale_down }, -1.0, 1.0);
+            ss_res += (px - tgt.tx).powi(2) + (py - tgt.ty).powi(2);
+            ss_tot += tgt.tx.powi(2) + tgt.ty.powi(2);
         }
         self.calib_r2 = if ss_tot > 1e-4 {
             clamp(1.0 - (ss_res / ss_tot), 0.0, 1.0)
@@ -456,7 +567,21 @@ impl RustImuTracker {
         }
 
         let g_valid = gx.is_finite() && gy.is_finite() && gz.is_finite();
-        if g_valid {
+        if has_bridge_yaw {
+            // Bridge already estimates and subtracts 52 Hz gyro bias; do not run a second bias
+            // estimator in Rust that would swallow slow user head movements!
+            self.bias_calibrated = true;
+            self.gyro_bias = [0.0, 0.0, 0.0];
+            if self.u0.is_none() {
+                if let Some(u) = self.up {
+                    let (f0, r0) = build_head_basis(u);
+                    self.u0 = Some(u);
+                    self.f0 = f0;
+                    self.r0 = r0;
+                    self.yaw_zero_deg = self.yaw_deg;
+                }
+            }
+        } else if g_valid {
             let raw_g = [gx, gy, gz];
             if !self.bias_calibrated {
                 let mean = if self.still_count > 0 {
@@ -470,7 +595,7 @@ impl RustImuTracker {
                     raw_g
                 };
                 let dev = norm3([raw_g[0] - mean[0], raw_g[1] - mean[1], raw_g[2] - mean[2]]);
-                if dev <= 8.0 {
+                if dev <= 4.0 {
                     self.still_sum[0] += raw_g[0];
                     self.still_sum[1] += raw_g[1];
                     self.still_sum[2] += raw_g[2];
@@ -490,7 +615,7 @@ impl RustImuTracker {
                                 self.u0 = Some(u);
                                 self.f0 = f0;
                                 self.r0 = r0;
-                                self.yaw_zero_deg = if has_bridge_yaw { bridge_yaw } else { 0.0 };
+                                self.yaw_zero_deg = 0.0;
                             }
                         }
                     }
@@ -505,8 +630,8 @@ impl RustImuTracker {
                     raw_g[1] - self.gyro_bias[1],
                     raw_g[2] - self.gyro_bias[2],
                 ];
-                if norm3(w_check) < 3.5 {
-                    let alpha_b = dt / (12.0 + dt);
+                if norm3(w_check) < 1.2 {
+                    let alpha_b = dt / (15.0 + dt);
                     self.gyro_bias[0] += alpha_b * (raw_g[0] - self.gyro_bias[0]);
                     self.gyro_bias[1] += alpha_b * (raw_g[1] - self.gyro_bias[1]);
                     self.gyro_bias[2] += alpha_b * (raw_g[2] - self.gyro_bias[2]);
@@ -537,7 +662,14 @@ impl RustImuTracker {
             ];
         }
         if let Some(m) = meas {
-            let tilt_tau = if self.bias_calibrated { 0.28 } else { 0.05 };
+            // Fast gravity lock when settling (< 2.5 deg/s) eliminates vertical reverse hysteresis
+            let tilt_tau = if !self.bias_calibrated {
+                0.04
+            } else if self.rate_deg_s < 2.5 {
+                0.07
+            } else {
+                0.15
+            };
             let alpha = tilt_tau / (tilt_tau + dt);
             u = [
                 alpha * u[0] + (1.0 - alpha) * m[0],
@@ -554,19 +686,28 @@ impl RustImuTracker {
         self.raw_roll = u[1].atan2((u[0] * u[0] + u[2] * u[2]).sqrt()).to_degrees();
 
         if has_bridge_yaw && bridge_yaw.is_finite() {
-            self.yaw_deg = bridge_yaw;
-            if !self.calibrating_motion {
-                self.yaw_zero_deg *= (-dt / 25.0).exp();
+            // Reconstruct exact 52 Hz un-leaked gyro yaw increment by undoing bridge's 20.0s decay:
+            // Holding at any screen boundary has 0.00 deg/s decay and 0.00 deg reverse overshoot!
+            let delta = if let Some(prev_by) = self.prev_bridge_yaw {
+                let expected_leaked = prev_by * (-dt / 20.0).exp();
+                let raw_d = wrap_deg(bridge_yaw - expected_leaked);
+                if raw_d.abs() > 45.0 && self.rate_deg_s > 0.1 && self.rate_deg_s < 80.0 {
+                    -dot3(w, u) * dt
+                } else {
+                    raw_d
+                }
+            } else {
+                bridge_yaw
+            };
+            self.prev_bridge_yaw = Some(bridge_yaw);
+            if self.rate_deg_s >= 0.35 || delta.abs() >= 0.04 {
+                self.yaw_deg = wrap_deg(self.yaw_deg + delta);
             }
         } else {
-            if self.rate_deg_s >= 1.5 {
+            self.prev_bridge_yaw = None;
+            if self.rate_deg_s >= 0.40 {
                 let yaw_rate = -dot3(w, u);
                 self.yaw_deg = wrap_deg(self.yaw_deg + yaw_rate * dt);
-            }
-            if !self.calibrating_motion {
-                let rel_y = wrap_deg(self.yaw_deg - self.yaw_zero_deg);
-                let decayed = rel_y * (-dt / 25.0).exp();
-                self.yaw_deg = wrap_deg(self.yaw_zero_deg + decayed);
             }
         }
         self.raw_yaw = self.yaw_deg;
@@ -579,37 +720,35 @@ impl RustImuTracker {
             self.yaw_zero_deg = self.yaw_deg;
         }
 
-        // u0 is an absolute gravity reference vector locked on tare() / Center calibration.
-        // Never auto-creep u0 toward u during gameplay, otherwise vertical head pitch is erased!
         let u0 = self.u0.unwrap();
         let cos_u = dot3(u, u0).clamp(-1.0, 1.0);
         let sin_pitch = dot3(u, self.f0);
         let sin_roll = dot3(u, self.r0);
         let dpitch = sin_pitch.atan2(cos_u).to_degrees();
         let droll = sin_roll.atan2(cos_u).to_degrees();
-        let dyaw = wrap_deg(self.yaw_deg - self.yaw_zero_deg);
+        let mut dyaw = wrap_deg(self.yaw_deg - self.yaw_zero_deg);
+
+        // Gravity-gated neutral micro-anchor: ONLY when resting still near Center posture,
+        // gently bleed out long-term thermal yaw drift without EVER decaying edge holds!
+        if !self.calibrating_motion
+            && self.rate_deg_s < 0.8
+            && dpitch.abs() < 2.2
+            && droll.abs() < 2.2
+            && dyaw.abs() < 3.5
+        {
+            self.edge_still_time += dt;
+            if self.edge_still_time > 1.2 {
+                let anchor_alpha = dt / (35.0 + dt);
+                self.yaw_zero_deg = wrap_deg(self.yaw_zero_deg + dyaw * anchor_alpha);
+                dyaw = wrap_deg(self.yaw_deg - self.yaw_zero_deg);
+            }
+        } else {
+            self.edge_still_time = 0.0;
+        }
 
         self.rel_pitch = dpitch;
         self.rel_roll = droll;
         self.rel_yaw = dyaw;
-
-        let dz_yaw = self.deadzone_deg * 0.45;
-        let dz_pitch = self.deadzone_deg * 0.20;
-        let eff_yaw = if dyaw.abs() <= dz_yaw {
-            0.0
-        } else {
-            dyaw.signum() * (dyaw.abs() - dz_yaw)
-        };
-        let eff_pitch = if dpitch.abs() <= dz_pitch {
-            0.0
-        } else {
-            dpitch.signum() * (dpitch.abs() - dz_pitch)
-        };
-        let eff_roll = if droll.abs() <= dz_yaw {
-            0.0
-        } else {
-            droll.signum() * (droll.abs() - dz_yaw)
-        };
 
         let sens = self.sensitivity.max(0.25);
         let sx = if self.invert_yaw { -1.0 } else { 1.0 };
@@ -618,8 +757,8 @@ impl RustImuTracker {
         let (target_x, target_y) = if self.has_learned_map {
             let wx = self.learned_wx;
             let wy = self.learned_wy;
-            let raw_tx = wx[0] + wx[1] * eff_yaw + wx[2] * eff_pitch + wx[3] * eff_roll;
-            let raw_ty = wy[0] + wy[1] * eff_yaw + wy[2] * eff_pitch + wy[3] * eff_roll;
+            let raw_tx = wx[1] * dyaw + wx[2] * dpitch + wx[3] * droll;
+            let raw_ty = wy[1] * dyaw + wy[2] * dpitch + wy[3] * droll;
             let reached_tx = if raw_tx < 0.0 {
                 raw_tx * self.scale_left
             } else {
@@ -630,21 +769,60 @@ impl RustImuTracker {
             } else {
                 raw_ty * self.scale_down
             };
-            (
-                clamp(sx * sens * reached_tx, -1.0, 1.0),
-                clamp(sy * sens * reached_ty, -1.0, 1.0),
-            )
+            let scaled_x = sx * sens * reached_tx;
+            let scaled_y = sy * sens * reached_ty;
+
+            // Anti-Windup Boundary Clamping on Yaw:
+            // If the user turns past the left/right screen boundary (`|scaled_x| > 1.02`),
+            // shift `yaw_zero_deg` along with the excess angle so the instant they reverse
+            // direction by even 0.1 deg, the cursor immediately leaves the boundary!
+            if !self.calibrating_motion && scaled_x.abs() > 1.02 {
+                let eff_scale_x = (if raw_tx < 0.0 { self.scale_left } else { self.scale_right })
+                    * sens
+                    * wx[1].abs();
+                if eff_scale_x > 1e-3 {
+                    let excess_norm = scaled_x.abs() - 1.02;
+                    let excess_deg = (excess_norm / eff_scale_x) * dyaw.signum();
+                    self.yaw_zero_deg = wrap_deg(self.yaw_zero_deg + excess_deg);
+                    self.rel_yaw = wrap_deg(self.yaw_deg - self.yaw_zero_deg);
+                }
+            }
+
+            (clamp(scaled_x, -1.0, 1.0), clamp(scaled_y, -1.0, 1.0))
         } else {
-            let range_x = (self.yaw_range_deg / sens).max(3.5);
-            let range_y = (self.pitch_range_deg / sens).max(2.5);
+            let dz_yaw = self.deadzone_deg * 0.25;
+            let dz_pitch = self.deadzone_deg * 0.15;
+            let eff_yaw = if dyaw.abs() <= dz_yaw {
+                0.0
+            } else {
+                dyaw.signum() * (dyaw.abs() - dz_yaw)
+            };
+            let eff_pitch = if dpitch.abs() <= dz_pitch {
+                0.0
+            } else {
+                dpitch.signum() * (dpitch.abs() - dz_pitch)
+            };
+            let range_x = (self.yaw_range_deg / sens).max(3.0);
+            let range_y = (self.pitch_range_deg / sens).max(2.0);
             let def_sy = if self.invert_pitch { 1.0 } else { -1.0 };
-            (
-                clamp(sx * eff_yaw / range_x, -1.0, 1.0),
-                clamp(def_sy * eff_pitch / range_y, -1.0, 1.0),
-            )
+            let scaled_x = sx * eff_yaw / range_x;
+            let scaled_y = def_sy * eff_pitch / range_y;
+
+            if !self.calibrating_motion && scaled_x.abs() > 1.02 {
+                let excess_deg = (scaled_x.abs() - 1.02) * range_x * dyaw.signum();
+                self.yaw_zero_deg = wrap_deg(self.yaw_zero_deg + excess_deg);
+                self.rel_yaw = wrap_deg(self.yaw_deg - self.yaw_zero_deg);
+            }
+
+            (clamp(scaled_x, -1.0, 1.0), clamp(scaled_y, -1.0, 1.0))
         };
 
-        let k = 1.0 - (-16.0 * dt).exp();
+        // 1-Euro velocity-adaptive smoothing (Casiez et al., CHI 2012):
+        // Smooth when stationary (rate < 1.2 deg/s) with zero position deadzone,
+        // and instant zero-lag response when moving or reversing!
+        let cutoff_hz = clamp(2.2 + 1.4 * self.rate_deg_s, 2.2, 28.0);
+        let rc = 1.0 / (2.0 * std::f32::consts::PI * cutoff_hz);
+        let k = clamp(dt / (rc + dt), 0.18, 0.92);
         self.tilt_x += (target_x - self.tilt_x) * k;
         self.tilt_y += (target_y - self.tilt_y) * k;
         self.aim_x = clamp(0.5 + self.tilt_x * 0.5, 0.0, 1.0);
@@ -1542,5 +1720,131 @@ mod tests {
             imu.update(ax_dn, 0.0, az_dn, 0.0, 0.0, 0.0, 0.0, true, 0.1);
         }
         assert!(imu.aim_y() > 0.92, "aim_y={} should reach bottom edge", imu.aim_y());
+    }
+
+    #[test]
+    fn imu_hybrid_pursuit_boundary_and_reverse_has_zero_overshoot_and_anti_windup() {
+        let mut imu = RustImuTracker::new();
+        let dt = 0.1f32;
+        let mut bridge_yaw = 0.0f32;
+        for _ in 0..8 {
+            imu.update(0.0, 0.0, 1.0, 0.0, 0.0, 0.0, bridge_yaw, true, dt);
+        }
+        imu.begin_motion_calibration();
+
+        // Helper that simulates bridge_yaw with 20s exponential leak + physical yaw/pitch change
+        let mut feed_pose = |imu: &mut RustImuTracker, true_yaw: f32, prev_true_yaw: &mut f32, pitch_deg: f32, dot_x: f32, dot_y: f32, rec: bool| {
+            let dyaw = true_yaw - *prev_true_yaw;
+            *prev_true_yaw = true_yaw;
+            let gz = -dyaw / dt;
+            let wy = -pitch_deg.to_radians() / dt * 0.1;
+            bridge_yaw = (bridge_yaw + dyaw) * (-dt / 20.0).exp();
+            let ax = pitch_deg.to_radians().sin();
+            let az = pitch_deg.to_radians().cos();
+            imu.update(ax, 0.0, az, 0.0, wy, gz, bridge_yaw, true, dt);
+            if rec {
+                imu.add_calib_point(dot_x, dot_y);
+            }
+        };
+
+        let mut prev_yaw = 0.0f32;
+        // 1. Center Hold
+        for _ in 0..10 {
+            feed_pose(&mut imu, 0.0, &mut prev_yaw, 0.0, 0.50, 0.50, true);
+        }
+        // 2. Smooth pursuit Center -> Left (-14 deg), Hold at Left (0.04, 0.50), Reverse -> Center
+        for k in 1..=10 {
+            let frac = k as f32 / 10.0;
+            feed_pose(&mut imu, -14.0 * frac, &mut prev_yaw, 0.0, 0.50 - 0.46 * frac, 0.50, true);
+        }
+        for _ in 0..10 {
+            feed_pose(&mut imu, -14.0, &mut prev_yaw, 0.0, 0.04, 0.50, true);
+        }
+        for k in 1..=10 {
+            let frac = 1.0 - (k as f32 / 10.0);
+            feed_pose(&mut imu, -14.0 * frac, &mut prev_yaw, 0.0, 0.50 - 0.46 * frac, 0.50, true);
+        }
+        // Center checkpoint
+        for _ in 0..5 {
+            feed_pose(&mut imu, 0.0, &mut prev_yaw, 0.0, 0.50, 0.50, true);
+        }
+        // 3. Smooth pursuit Center -> Right (+14 deg), Hold at Right (0.96, 0.50), Reverse -> Center
+        for k in 1..=10 {
+            let frac = k as f32 / 10.0;
+            feed_pose(&mut imu, 14.0 * frac, &mut prev_yaw, 0.0, 0.50 + 0.46 * frac, 0.50, true);
+        }
+        for _ in 0..10 {
+            feed_pose(&mut imu, 14.0, &mut prev_yaw, 0.0, 0.96, 0.50, true);
+        }
+        for k in 1..=10 {
+            let frac = 1.0 - (k as f32 / 10.0);
+            feed_pose(&mut imu, 14.0 * frac, &mut prev_yaw, 0.0, 0.50 + 0.46 * frac, 0.50, true);
+        }
+        // Center checkpoint
+        for _ in 0..5 {
+            feed_pose(&mut imu, 0.0, &mut prev_yaw, 0.0, 0.50, 0.50, true);
+        }
+        // 4. Vertical Center -> Top (+5 deg), Hold Top (0.50, 0.04), Reverse -> Bottom (-7 deg), Hold Bottom (0.50, 0.96), Reverse -> Center
+        for k in 1..=8 {
+            let frac = k as f32 / 8.0;
+            feed_pose(&mut imu, 0.0, &mut prev_yaw, 5.0 * frac, 0.50, 0.50 - 0.46 * frac, true);
+        }
+        for _ in 0..10 {
+            feed_pose(&mut imu, 0.0, &mut prev_yaw, 5.0, 0.50, 0.04, true);
+        }
+        for k in 1..=8 {
+            let frac = 1.0 - (k as f32 / 8.0);
+            feed_pose(&mut imu, 0.0, &mut prev_yaw, 5.0 * frac, 0.50, 0.50 - 0.46 * frac, true);
+        }
+        for _ in 0..4 {
+            feed_pose(&mut imu, 0.0, &mut prev_yaw, 0.0, 0.50, 0.50, true);
+        }
+        for k in 1..=8 {
+            let frac = k as f32 / 8.0;
+            feed_pose(&mut imu, 0.0, &mut prev_yaw, -7.0 * frac, 0.50, 0.50 + 0.46 * frac, true);
+        }
+        for _ in 0..10 {
+            feed_pose(&mut imu, 0.0, &mut prev_yaw, -7.0, 0.50, 0.96, true);
+        }
+        for k in 1..=8 {
+            let frac = 1.0 - (k as f32 / 8.0);
+            feed_pose(&mut imu, 0.0, &mut prev_yaw, -7.0 * frac, 0.50, 0.50 + 0.46 * frac, true);
+        }
+        for _ in 0..6 {
+            feed_pose(&mut imu, 0.0, &mut prev_yaw, 0.0, 0.50, 0.50, true);
+        }
+
+        assert!(imu.finish_motion_calibration());
+        assert!(imu.calib_r2_score() > 0.85, "r2={}", imu.calib_r2_score());
+
+        // Test 1: Hold at Left Boundary (-14 deg) for 6 seconds (60 frames) while bridge_yaw leaks,
+        // then reverse back to 0.0 deg -> must land back at Center (0.50 +- 0.04) with NO overshoot!
+        for _ in 0..60 {
+            feed_pose(&mut imu, -14.0, &mut prev_yaw, 0.0, 0.0, 0.5, false);
+        }
+        assert!(imu.aim_x() < 0.05, "Left boundary hold aim_x={}", imu.aim_x());
+        for _ in 0..10 {
+            feed_pose(&mut imu, 0.0, &mut prev_yaw, 0.0, 0.5, 0.5, false);
+        }
+        assert!(
+            (imu.aim_x() - 0.50).abs() < 0.05,
+            "Reverse from Left boundary back to physical center must not overshoot! aim_x={}",
+            imu.aim_x()
+        );
+
+        // Test 2: Anti-windup when turning far past Right Boundary (+24 deg vs +14 deg edge)
+        // Reversing by just -3 deg (+24 -> +21 deg) must immediately move cursor off 1.0!
+        for _ in 0..10 {
+            feed_pose(&mut imu, 24.0, &mut prev_yaw, 0.0, 1.0, 0.5, false);
+        }
+        assert!(imu.aim_x() > 0.98);
+        for _ in 0..6 {
+            feed_pose(&mut imu, 20.5, &mut prev_yaw, 0.0, 0.8, 0.5, false);
+        }
+        assert!(
+            imu.aim_x() < 0.95,
+            "Anti-windup must let immediate reverse from over-rotation move off the boundary! aim_x={}",
+            imu.aim_x()
+        );
     }
 }

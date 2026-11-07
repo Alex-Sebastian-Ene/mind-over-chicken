@@ -2,6 +2,7 @@ pub mod audio;
 pub mod biosignal;
 mod camera3d;
 pub mod eras;
+pub mod input; // pointer gestures: tap blinks, drag pans
 mod font;
 mod gl;
 mod gl3d;
@@ -309,31 +310,75 @@ impl Engine {
     ) {
         let h_norm = self.get_terrain_height_at(x, z);
         let ground_y = (h_norm * 24.0).max(7.92); // Never sink below sea level
+        let center = [x, ground_y, z];
+
+        // Soft ground contact shadow beneath entities, trees, and structures
+        let shadow_variant = match sprite_id {
+            sprites::SPRITE_VILLAGER | sprites::SPRITE_CHICKEN | sprites::SPRITE_GOAT => Some(0),
+            sprites::SPRITE_MAMMOTH
+            | sprites::SPRITE_HUT
+            | sprites::SPRITE_HOUSE
+            | sprites::SPRITE_TOWER
+            | sprites::SPRITE_ROCKET
+            | sprites::SPRITE_TREE => Some(1),
+            sprites::SPRITE_FACTORY
+            | sprites::SPRITE_EXCHANGE
+            | sprites::SPRITE_HANGAR
+            | sprites::SPRITE_PAD => Some(2),
+            _ => None,
+        };
+
+        if let Some(sv) = shadow_variant {
+            let s_entry = sprites::get_sprite_atlas_entry(sprites::SPRITE_SHADOW, 1, 0, sv);
+            let shw = s_entry.world_w * 0.5;
+            let shd = s_entry.world_h * 0.5;
+            let s_tl = BillboardVertex {
+                center,
+                offset: [-shw, 0.02, -shd],
+                uv: [s_entry.u0, s_entry.v0],
+            };
+            let s_bl = BillboardVertex {
+                center,
+                offset: [-shw, 0.02, shd],
+                uv: [s_entry.u0, s_entry.v1],
+            };
+            let s_tr = BillboardVertex {
+                center,
+                offset: [shw, 0.02, -shd],
+                uv: [s_entry.u1, s_entry.v0],
+            };
+            let s_br = BillboardVertex {
+                center,
+                offset: [shw, 0.02, shd],
+                uv: [s_entry.u1, s_entry.v1],
+            };
+            self.billboards_3d
+                .extend_from_slice(&[s_tl, s_bl, s_tr, s_tr, s_bl, s_br]);
+        }
 
         let entry = sprites::get_sprite_atlas_entry(sprite_id, facing, frame, variant);
-        let center = [x, ground_y, z];
         let hw = entry.world_w * 0.5;
         let h = entry.world_h;
         let (u0, v0, u1, v1) = (entry.u0, entry.v0, entry.u1, entry.v1);
 
         let v_tl = BillboardVertex {
             center,
-            offset: [-hw, h],
+            offset: [-hw, h, 0.0],
             uv: [u0, v0],
         };
         let v_bl = BillboardVertex {
             center,
-            offset: [-hw, 0.0],
+            offset: [-hw, 0.0, 0.0],
             uv: [u0, v1],
         };
         let v_tr = BillboardVertex {
             center,
-            offset: [hw, h],
+            offset: [hw, h, 0.0],
             uv: [u1, v0],
         };
         let v_br = BillboardVertex {
             center,
-            offset: [hw, 0.0],
+            offset: [hw, 0.0, 0.0],
             uv: [u1, v1],
         };
 
@@ -358,22 +403,22 @@ impl Engine {
 
         let v_tl = BillboardVertex {
             center,
-            offset: [-hw, h],
+            offset: [-hw, h, 0.0],
             uv: [u0, v0],
         };
         let v_bl = BillboardVertex {
             center,
-            offset: [-hw, 0.0],
+            offset: [-hw, 0.0, 0.0],
             uv: [u0, v1],
         };
         let v_tr = BillboardVertex {
             center,
-            offset: [hw, h],
+            offset: [hw, h, 0.0],
             uv: [u1, v0],
         };
         let v_br = BillboardVertex {
             center,
-            offset: [hw, 0.0],
+            offset: [hw, 0.0, 0.0],
             uv: [u1, v1],
         };
 

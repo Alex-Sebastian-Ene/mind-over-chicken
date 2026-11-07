@@ -21,7 +21,7 @@
 import { rand, pick, chance } from '../sim/util.js';
 import { generateWorld } from './worldgen.js';
 import { label } from '../eras/stone.js';
-import { SIM, TEMPERAMENT, ERAS, newPlanetState, brainEffects, stepPlanet, blinkPlanet, arriveShip, newMind, stepMind, logHistory, reachMilestone } from './planet-sim.js';
+import { SIM, TEMPERAMENT, ERAS, newPlanetState, brainEffects, stepPlanet, blinkPlanet, arriveShip, newMind, stepMind, logHistory, reachMilestone, trackCampaignPop } from './planet-sim.js';
 import { PlanetSurface } from './surface.js';
 
 export const ERA_NAMES = ['stone', 'farming', 'industry', 'space'];
@@ -250,7 +250,8 @@ export class Galaxy {
             const era = ERAS[home.eraIndex];
             if (era) { logHistory(p, `Reached ${era.name}`, 'event'); reachMilestone(p, era.key); }
           }
-          p.eraIndex = home.eraIndex; p.pop = home.pop;
+          trackCampaignPop(p, home);   // never "barren" through a time-skip; the civilisation's size (#105)
+          p.eraIndex = home.eraIndex;
           if (home.canLaunch && (p.launchT += dt * (0.6 + fx.focus)) >= SIM.LAUNCH_EVERY) { p.launchT = 0; this.launch(p); }
         }
         p.effect = 'You play this one by hand';

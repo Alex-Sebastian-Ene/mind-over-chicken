@@ -160,7 +160,9 @@ export class Cosmos extends ZoomState {
   homeInfo(G) {
     const s = G.scene;
     if (!s) return null;
-    const pop = s.living ? s.living().length : s.agents ? s.agents.length : s.citizens ? s.citizens.length + (s.engineers?.length || 0) + (s.passengers || 0) : s.people ? s.people.length : 0;
+    // Scenes with people count them. The time-skip montages (Farming → Kingdoms, the Information
+    // Age) have none: they report null so the galaxy keeps the count instead of "barren" (#105).
+    const pop = s.living ? s.living().length : s.agents ? s.agents.length : s.citizens ? s.citizens.length + (s.engineers?.length || 0) + (s.passengers || 0) : s.people ? s.people.length : null;
     return { eraIndex: ERA_INDEX[s.era] ?? 0, pop, canLaunch: !!(G.finished || s.phase === 'voyage' || s.phase === 'launch') };
   }
 
@@ -258,7 +260,7 @@ export class Cosmos extends ZoomState {
       const w = this.world();
       const name = campaign ? 'Home' : w?.name || 'Home';
       const era = !campaign && w ? (w.pop > 0 ? `${tierName(w)} · ${ERA_LABEL[ERA_NAMES[w.eraIndex]]}` : 'barren') : ERA_LABEL[ERA_NAMES[info?.eraIndex ?? 0]];
-      const pop = !campaign && w ? fmtPop(w.pop) : `${info?.pop ?? 0} people`;
+      const pop = !campaign && w ? fmtPop(w.pop) : `${this.galaxy?.home?.pop ?? info?.pop ?? 0} people`;
       ctx.globalAlpha = clamp(a);
       label(ctx, CENTER.x, 14, `${name} · ${era} · ${pop}`, '#f2e8d5', 7);
       const ch = !campaign && w ? CHANNELS[w.channel] : null;
