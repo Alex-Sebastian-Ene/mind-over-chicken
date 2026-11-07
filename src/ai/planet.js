@@ -23,9 +23,10 @@ export const silentAudio = new Proxy({}, { get: () => noop });
 export class SimPlanet {
   // brain: 'sim' = the real Brain fed by an emulated headset that belongs to the AI (what the
   // policy was trained against, default); 'proxy' = a cheaper stand-in for many background planets.
-  constructor({ seed, biome, brain = 'sim', advisor = silentAdvisor, audio = silentAudio } = {}) {
+  // world: an already generated World for this seed (e.g. built off-thread by the galaxy, #68).
+  constructor({ seed, biome, brain = 'sim', advisor = silentAdvisor, audio = silentAudio, world = null } = {}) {
     this.seed = Number.isFinite(seed) ? seed >>> 0 : (Math.random() * 1e9) >>> 0;
-    this.world = new World(this.seed, { biome });
+    this.world = world || new World(this.seed, { biome });
     if (brain === 'sim') {
       this.aiBrain = new Brain(new SimSource());
       this.aiInput = this.aiBrain.source.input;
@@ -53,6 +54,18 @@ export class SimPlanet {
     this.scene.label = 'Simulated planet · Stone Age';
     this.G.scene = this.scene;
     this.scene.enter(this.G);
+  }
+
+  // A fresh Stone Age (a new tribe) on the same world, e.g. after a win or a loss (#68).
+  restart() {
+    this.outcome = null;
+    this.aiLastBolt = -Infinity;
+    this.scene = new StoneAge();
+    this.scene.label = 'Simulated planet · Stone Age';
+    this.G.scene = this.scene;
+    this.scene.enter(this.G);
+    if (this.god) { this.god.timer = 0; this.god.last = null; }
+    return this;
   }
 
   // Opt-in, per planet: let an AI god (src/ai/autopilot.js) drive this world.
