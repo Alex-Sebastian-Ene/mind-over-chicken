@@ -496,6 +496,21 @@ export class Engine {
         wasm.engine_set_era(this.__wbg_ptr, era);
     }
     /**
+     * Use the JS world's heights (row-major W×H, 0..1, sea level 0.33) for the 3D mesh, the
+     * raycast and where billboards stand. The engine's own `Terrain` is still the old single
+     * island, so without this the relief doesn't match the map the simulation runs on.
+     * Call after `init_world`.
+     * @param {Float32Array | number[]} heights
+     */
+    set_heightmap(heights) {
+        const ptr0 = passArrayF32ToWasm0(heights, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.engine_set_heightmap(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @param {HTMLCanvasElement} canvas
      */
     upload_canvas(canvas) {
@@ -599,6 +614,9 @@ function __wbg_get_imports() {
         },
         __wbg_depthMask_276856a569045897: function(arg0, arg1) {
             arg0.depthMask(arg1 !== 0);
+        },
+        __wbg_disableVertexAttribArray_5c66375eba552ee7: function(arg0, arg1) {
+            arg0.disableVertexAttribArray(arg1 >>> 0);
         },
         __wbg_disable_2ead6c11cefd0322: function(arg0, arg1) {
             arg0.disable(arg1 >>> 0);
@@ -950,6 +968,13 @@ function handleError(f, args) {
 
 function isLikeNone(x) {
     return x === undefined || x === null;
+}
+
+function passArrayF32ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 4, 4) >>> 0;
+    getFloat32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
 }
 
 function passStringToWasm0(arg, malloc, realloc) {

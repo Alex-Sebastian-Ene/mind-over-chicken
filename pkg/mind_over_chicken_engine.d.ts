@@ -57,6 +57,13 @@ export class Engine {
     set_3d_mode(enabled: boolean): void;
     set_camera_target(tx: number, tz: number): void;
     set_era(era: number): void;
+    /**
+     * Use the JS world's heights (row-major W×H, 0..1, sea level 0.33) for the 3D mesh, the
+     * raycast and where billboards stand. The engine's own `Terrain` is still the old single
+     * island, so without this the relief doesn't match the map the simulation runs on.
+     * Call after `init_world`.
+     */
+    set_heightmap(heights: Float32Array | number[]): void;
     upload_canvas(canvas: HTMLCanvasElement): void;
     zoom_camera(factor: number): void;
 }
@@ -119,6 +126,7 @@ export interface InitOutput {
     readonly engine_set_3d_mode: (a: number, b: number) => void;
     readonly engine_set_camera_target: (a: number, b: number, c: number) => void;
     readonly engine_set_era: (a: number, b: number) => void;
+    readonly engine_set_heightmap: (a: number, b: number, c: number) => [number, number];
     readonly engine_upload_canvas: (a: number, b: any) => [number, number];
     readonly engine_zoom_camera: (a: number, b: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
