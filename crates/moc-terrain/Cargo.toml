@@ -1,0 +1,9 @@
+[package]
+name = "moc-terrain"
+description = "Terrain for every Mind over Chicken map: plates, DLA mountain ranges, diffusion and erosion, rivers and lakes, climate, Whittaker biomes and a chunky pixel-art colour layer. Pure Rust, no dependencies, deterministic per seed, wasm-friendly."
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Alex-Sebastian-Ene/mind-over-chicken"
+
+[dependencies]
