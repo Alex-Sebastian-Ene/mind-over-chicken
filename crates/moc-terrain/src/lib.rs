@@ -183,17 +183,72 @@ impl TerrainMap {
             (village.1 + 18).min(map.height - 10),
         );
 
+        let ridge = (
+            village.0.saturating_sub(48).max(10),
+            village.1.saturating_sub(30).max(10),
+        );
+        let cave_mouth = cave;
+        let fire = village;
+        let picket = (
+            (factory.0 + 2).min(map.width - 10),
+            (factory.1 + 9).min(map.height - 10),
+        );
+        let crowd = (
+            pad.0.saturating_sub(30).max(10),
+            pad.1.saturating_sub(10).max(10),
+        );
+
         map.campaign_sites = Some(CampaignSites {
             village,
             pad,
+            ridge,
             cave,
+            cave_mouth,
+            fire,
             factory,
             exchange,
+            picket,
             hangar,
+            crowd,
             harbour,
         });
 
         map
+    }
+
+    /// Serialization helper for campaign sites
+    pub fn sites_json(&self) -> String {
+        if let Some(s) = &self.campaign_sites {
+            format!(
+                "{{\"village\":{{\"x\":{},\"y\":{}}},\"pad\":{{\"x\":{},\"y\":{}}},\"ridge\":{{\"x\":{},\"y\":{}}},\"cave\":{{\"x\":{},\"y\":{}}},\"caveMouth\":{{\"x\":{},\"y\":{}}},\"fire\":{{\"x\":{},\"y\":{}}},\"factory\":{{\"x\":{},\"y\":{}}},\"exchange\":{{\"x\":{},\"y\":{}}},\"picket\":{{\"x\":{},\"y\":{}}},\"hangar\":{{\"x\":{},\"y\":{}}},\"crowd\":{{\"x\":{},\"y\":{}}},\"harbour\":{{\"x\":{},\"y\":{}}}}}",
+                s.village.0, s.village.1,
+                s.pad.0, s.pad.1,
+                s.ridge.0, s.ridge.1,
+                s.cave.0, s.cave.1,
+                s.cave_mouth.0, s.cave_mouth.1,
+                s.fire.0, s.fire.1,
+                s.factory.0, s.factory.1,
+                s.exchange.0, s.exchange.1,
+                s.picket.0, s.picket.1,
+                s.hangar.0, s.hangar.1,
+                s.crowd.0, s.crowd.1,
+                s.harbour.0, s.harbour.1,
+            )
+        } else {
+            "{}".to_string()
+        }
+    }
+
+    /// Serialization helper for continents list
+    pub fn continents_json(&self) -> String {
+        let items: Vec<String> = self.continents.iter().enumerate().map(|(i, c)| {
+            let id_str = if i == 0 { "home" } else if i == 1 { "north" } else { "south" };
+            format!(
+                "{{\"id\":\"{}\",\"cx\":{},\"cy\":{},\"rx\":60,\"ry\":40,\"village\":{{\"x\":{},\"y\":{}}}}}",
+                id_str, c.center_x, c.center_y, c.primary_site.0, c.primary_site.1
+            )
+        }).collect();
+        format!("[{}]", items.join(","))
     }
 
     /// Generates the Civ Sandbox Planet (default 640x320 or up to 2560x1280).

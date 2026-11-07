@@ -220,6 +220,20 @@ export class RustImuTracker {
     update(ax: number, ay: number, az: number, gx: number, gy: number, gz: number, bridge_yaw: number, has_bridge_yaw: boolean, dt: number): void;
 }
 
+/**
+ * Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109)
+ */
+export class RustWorldGen {
+    free(): void;
+    [Symbol.dispose](): void;
+    continents_json(): string;
+    heights(): Float32Array;
+    constructor(seed: number);
+    rgba(): Uint8Array;
+    sites_json(): string;
+    types(): Uint8Array;
+}
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -228,6 +242,7 @@ export interface InitOutput {
     readonly __wbg_pointergesture_free: (a: number, b: number) => void;
     readonly __wbg_rustblinkclassifier_free: (a: number, b: number) => void;
     readonly __wbg_rustimutracker_free: (a: number, b: number) => void;
+    readonly __wbg_rustworldgen_free: (a: number, b: number) => void;
     readonly engine_add_3d_light: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly engine_add_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly engine_add_custom_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
@@ -369,6 +384,12 @@ export interface InitOutput {
     readonly rustimutracker_tilt_x: (a: number) => number;
     readonly rustimutracker_tilt_y: (a: number) => number;
     readonly rustimutracker_update: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
+    readonly rustworldgen_continents_json: (a: number) => [number, number];
+    readonly rustworldgen_heights: (a: number) => any;
+    readonly rustworldgen_new: (a: number) => number;
+    readonly rustworldgen_rgba: (a: number) => any;
+    readonly rustworldgen_sites_json: (a: number) => [number, number];
+    readonly rustworldgen_types: (a: number) => any;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

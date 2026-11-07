@@ -1040,3 +1040,39 @@ impl Engine {
         self.game.stats.restarts
     }
 }
+
+/// Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109)
+#[wasm_bindgen]
+pub struct RustWorldGen {
+    map: moc_terrain::TerrainMap,
+}
+
+#[wasm_bindgen]
+impl RustWorldGen {
+    #[wasm_bindgen(constructor)]
+    pub fn new(seed: u32) -> Self {
+        Self {
+            map: moc_terrain::TerrainMap::generate_home_world(seed),
+        }
+    }
+
+    pub fn heights(&self) -> js_sys::Float32Array {
+        js_sys::Float32Array::from(&self.map.heights[..])
+    }
+
+    pub fn types(&self) -> js_sys::Uint8Array {
+        js_sys::Uint8Array::from(&self.map.types[..])
+    }
+
+    pub fn rgba(&self) -> js_sys::Uint8Array {
+        js_sys::Uint8Array::from(&self.map.rgba[..])
+    }
+
+    pub fn sites_json(&self) -> String {
+        self.map.sites_json()
+    }
+
+    pub fn continents_json(&self) -> String {
+        self.map.continents_json()
+    }
+}

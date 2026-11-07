@@ -16,10 +16,15 @@ pub struct Continent {
 pub struct CampaignSites {
     pub village: (usize, usize),
     pub pad: (usize, usize),
+    pub ridge: (usize, usize),
     pub cave: (usize, usize),
+    pub cave_mouth: (usize, usize),
+    pub fire: (usize, usize),
     pub factory: (usize, usize),
     pub exchange: (usize, usize),
+    pub picket: (usize, usize),
     pub hangar: (usize, usize),
+    pub crowd: (usize, usize),
     pub harbour: (usize, usize),
 }
 
