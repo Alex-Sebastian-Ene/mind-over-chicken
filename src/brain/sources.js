@@ -14,12 +14,25 @@ import { clamp, gauss, rand, smooth } from '../sim/util.js';
 
 const FRAME_DT = 0.1;
 
+let RustSimSourceClass = null;
+
+export function setRustSimSource(cls) {
+  RustSimSourceClass = cls;
+}
+
 export class SimSource {
   constructor() {
     this.kind = 'sim';
     this.label = 'Emulated headset';
     this.connected = true;
     this.status = 'Emulated headset (keyboard)';
+    if (RustSimSourceClass) {
+      try {
+        this.wasm = new RustSimSourceClass(Math.floor(Math.random() * 100000));
+      } catch {
+        this.wasm = null;
+      }
+    }
     // What the player is pressing right now. `panic` is the Stress demo key (Shift): full
     // agitation (beta and gamma up, alpha and calm down), so brain.stress rises.
     this.input = { calm: false, focus: false, panic: false };
@@ -43,7 +56,10 @@ export class SimSource {
   connect() { return Promise.resolve(); }
   disconnect() {}
 
-  blink() { this.pendingBlink = true; }
+  blink() {
+    this.pendingBlink = true;
+    if (this.wasm) this.wasm.blink();
+  }
   setAim(x, y) {
     this.aimVel += Math.hypot(x - this.aim.x, y - this.aim.y);
     this.aim.x = clamp(x); this.aim.y = clamp(y);
@@ -54,6 +70,27 @@ export class SimSource {
 
   update(dt, emit) {
     const L = this.latent, I = this.input;
+    if (this.wasm) {
+      this.wasm.set_input(!!I.calm, !!I.focus, !!I.panic);
+      this.acc += dt;
+      while (this.acc >= FRAME_DT) {
+        this.acc -= FRAME_DT;
+        const out = this.wasm.step(FRAME_DT);
+        if (out && out[10] > 0) {
+          emit({
+            bands: { delta: out[0], theta: out[1], alpha: out[2], beta: out[3], gamma: out[4] },
+            blink: out[5] > 0.5,
+            hr: out[6] > 0 ? out[6] : null,
+            tilt: [out[7], out[8]],
+            motion: out[9],
+            quality: out[10],
+          });
+        } else {
+          emit(this.makeFrame());
+        }
+      }
+      return;
+    }
     // The Stress key wins over the calm key, so stress can spike mid-calm (e.g. during the IPO).
     L.calm = smooth(L.calm, I.panic ? 0.02 : I.calm ? 0.95 : 0.15, I.calm && !I.panic ? 1.1 : 1.6, dt);
     L.focus = smooth(L.focus, I.focus ? 0.95 : 0.12, I.focus ? 1.3 : 1.8, dt);
@@ -96,6 +133,7 @@ export class SimSource {
     const pitch = Math.round((this.aim.y * 2 - 1) * 20 * 10) / 10;
     const yaw = Math.round((this.aim.x * 2 - 1) * 25 * 10) / 10;
     return {
+      isSim: true,
       bands: rel,
       blink,
       tilt: { x: this.aim.x * 2 - 1, y: this.aim.y * 2 - 1 },

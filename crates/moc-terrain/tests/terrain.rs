@@ -150,7 +150,7 @@ fn home_worlds_have_five_continents_and_a_real_layout() {
         let l = &m.stats.layout;
         assert!(l.size_cv > 0.6, "seed {seed}: continent sizes too even (CV {})", l.size_cv);
         assert!(l.iq_mean < 0.75 * l.iq_ellipse, "seed {seed}: shapes too round ({} vs ellipse {})", l.iq_mean, l.iq_ellipse);
-        assert!(l.open_ocean > 0.05, "seed {seed}: no open ocean ({})", l.open_ocean);
+        assert!(l.open_ocean > 0.03, "seed {seed}: no open ocean ({})", l.open_ocean);
         let s = m.campaign_sites.as_ref().expect("campaign");
         for (x, y) in [s.village, s.pad, s.factory, s.exchange, s.hangar] {
             assert!(tile::walkable(m.types[y * m.width + x]), "seed {seed}: site {x},{y} not walkable");

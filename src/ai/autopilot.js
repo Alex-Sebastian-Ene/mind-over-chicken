@@ -15,16 +15,17 @@
 
 import { scriptedAction, ACTIONS, DECISION_DT, OBS_SIZE } from './observe.js';
 import { loadPolicy } from './policy.js';
+import { loading } from '../ui/loading.js'; // loading screen: the corner pill while the policy loads
 
 const cache = new Map(); // one fetch per policy URL, shared by every planet
 
 export function sharedPolicy(url) {
   const key = String(url || 'default');
   if (!cache.has(key)) {
-    cache.set(key, loadPolicy(url).then((p) => {
+    cache.set(key, loading.track(`policy:${key}`, 'Loading the AI god (PPO policy)', loadPolicy(url).then((p) => {
       if (p.obsSize !== OBS_SIZE) throw new Error(`policy expects ${p.obsSize} inputs, observe.js gives ${OBS_SIZE}`);
       return p;
-    }));
+    }), { doneText: 'AI god ready' }));
   }
   return cache.get(key);
 }

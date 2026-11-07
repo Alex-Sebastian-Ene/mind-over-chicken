@@ -187,9 +187,12 @@ impl TerrainParams {
         let mut p = TerrainParams::base(w, h, seed);
         // Six or seven planned, so at least five major ones survive the crowding (#129).
         p.continents = 6 + (r.f32() < 0.4) as usize;
-        p.land_fraction = r.range(0.4, 0.48);
+        // Small maps lose more land to the coast rules, so they plan a little more of it, and a
+        // gentler size law keeps their smallest continents above the island minimum.
+        let small = k < 1.5;
+        p.land_fraction = if small { r.range(0.44, 0.5) } else { r.range(0.4, 0.48) };
         p.size_spread = 0.15;
-        p.size_power = r.range(1.05, 1.35);
+        p.size_power = if small { r.range(0.85, 1.05) } else { r.range(1.05, 1.35) };
         let m = 14.0 * k;
         // Home lands anywhere away from the seams, so every run's map is laid out differently.
         p.anchor = Some(Anchor { x: w as f32 * r.range(0.2, 0.8), y: h as f32 * r.range(0.3, 0.7), share: r.range(1.3, 1.9), bounds: Some([m, m * 1.1, w as f32 - m, h as f32 - m * 1.1]) });
@@ -776,7 +779,13 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
 
     // Each continent's character (mountainous, arid, wet, broken, highland, plains), drawn at
     // random each run and spread over its territory (smoothly, across the open sea).
-    let chars = landform::characters(nc, p.campaign, &mut rng);
+    let mut chars = landform::characters(nc, p.campaign, &mut rng);
+    // Only a big continent can be broken into islands that clear the minimum island size.
+    for (c, ch) in chars.iter_mut().enumerate() {
+        if ch.broken > 0.0 && areas[c] < 12.0 * p.min_island * n_tiles {
+            ch.broken = 0.0;
+        }
+    }
     let terr_s: Vec<u8> = (0..sd.n())
         .map(|i| {
             let (x, y) = sd.xy(i);
@@ -856,17 +865,35 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
     let mut h = vec![0.0f32; n];
     let mut coast = vec![0.0f32; n];
     let mut land_f = vec![0.0f32; n];
+    // The coast field before and after the straits between continents; the shift `lift_sea`
+    // makes the land add up to the plan (crowded continents and straits eat into it).
+    // The channel between two continents varies in width, so its shores wiggle instead of
+    // following the straight territory line.
+    let raw: Vec<f32> = (0..n).map(|i| sdist[i] + coast_nf[i] * coast_amp * ch_rough[i]).collect();
+    let cap: Vec<f32> = (0..n).map(|i| dmid[i] - 0.5 * (strait + 0.12 * scale * (1.0 + strait_f[i] * 1.4).max(0.0))).collect();
+    let broken_cut: Vec<f32> = (0..n).map(|i| if ch_broken[i] > 0.01 { ch_broken[i] * 0.5 * scale * smoothstep(-0.05, -0.45, strait_f[i]) } else { 0.0 }).collect();
+    let coast_at = |i: usize, d: f32| {
+        let c = (raw[i] + d).min(cap[i]);
+        if c > 0.0 { c - broken_cut[i] } else { c }
+    };
+    let want = (areas.iter().sum::<f32>() / n_tiles).min(0.6);
+    let lift_sea = {
+        let frac = |d: f32| (0..n).filter(|&i| coast_at(i, d) > 0.0).count() as f32 / n as f32;
+        let (mut lo, mut hi) = (-0.05 * scale, 0.12 * scale);
+        if frac(0.0) >= want {
+            0.0
+        } else {
+            for _ in 0..14 {
+                let mid = 0.5 * (lo + hi);
+                if frac(mid) < want { lo = mid } else { hi = mid }
+            }
+            hi
+        }
+    };
     for y in 0..sd.h {
         for x in 0..sd.w {
             let i = y * sd.w + x;
-            // The channel between two continents varies in width (0.5×–2.5× `strait`), so its
-            // shores wiggle instead of following the straight territory line.
-            let channel = strait + 0.12 * scale * (1.0 + strait_f[i] * 1.4).max(0.0);
-            let mut c = (sdist[i] + coast_nf[i] * coast_amp * ch_rough[i]).min(dmid[i] - channel * 0.5);
-            // Broken continents: inland seas and straits where the strait noise dips.
-            if ch_broken[i] > 0.01 && c > 0.0 {
-                c -= ch_broken[i] * 0.5 * scale * smoothstep(-0.05, -0.45, strait_f[i]);
-            }
+            let c = coast_at(i, lift_sea);
             coast[i] = c;
             let lf = smoothstep(-0.02 * scale, 0.06 * scale, c);
             land_f[i] = lf;

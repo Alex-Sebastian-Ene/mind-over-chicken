@@ -16,6 +16,7 @@ export class Engine {
     bind_dom_shell(): void;
     clear_3d_billboards(): void;
     draw_chicken(x: number, y: number, facing: number, frame: number, halo: boolean): void;
+    draw_era_3d(): void;
     draw_fire(x: number, y: number, heat: number, t: number): void;
     draw_goat(x: number, y: number, facing: number): void;
     draw_lightning(tx: number, ty: number, seed: number, alpha: number): void;
@@ -91,6 +92,8 @@ export class Engine {
     init_3d(): void;
     init_world(seed: number): void;
     is_3d_mode(): boolean;
+    is_game_era_complete(): boolean;
+    is_game_era_failed(): string | undefined;
     is_game_failed(): string | undefined;
     is_game_finished(): boolean;
     is_terrain_reachable(x: number, y: number): boolean;
@@ -425,6 +428,10 @@ export class RustWorldGen {
  */
 export function paint_land_use(base: Uint8Array | number[], types: Uint8Array | number[], base_types: Uint8Array | number[], width: number, biome: string): Uint8Array;
 
+export function rust_animate_agent(clock: number, dt: number, rate: number): Float32Array;
+
+export function rust_villager_look(era: string, seed: number): Array<any>;
+
 /**
  * Walking distance (8-neighbour steps, no wrap) from every tile to (tx, ty) over walkable
  * tiles, or over water with `sea`; -1 where unreachable. The JS `World.field`/`seaField`.
@@ -460,6 +467,7 @@ export interface InitOutput {
     readonly engine_bind_dom_shell: (a: number) => [number, number];
     readonly engine_clear_3d_billboards: (a: number) => void;
     readonly engine_draw_chicken: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly engine_draw_era_3d: (a: number) => void;
     readonly engine_draw_fire: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly engine_draw_goat: (a: number, b: number, c: number, d: number) => void;
     readonly engine_draw_lightning: (a: number, b: number, c: number, d: number, e: number) => void;
@@ -522,6 +530,8 @@ export interface InitOutput {
     readonly engine_init_3d: (a: number) => [number, number];
     readonly engine_init_world: (a: number, b: number) => void;
     readonly engine_is_3d_mode: (a: number) => number;
+    readonly engine_is_game_era_complete: (a: number) => number;
+    readonly engine_is_game_era_failed: (a: number) => [number, number];
     readonly engine_is_game_failed: (a: number) => [number, number];
     readonly engine_is_game_finished: (a: number) => number;
     readonly engine_is_terrain_reachable: (a: number, b: number, c: number) => number;
@@ -550,6 +560,8 @@ export interface InitOutput {
     readonly pointergesture_pan_dx: (a: number) => number;
     readonly pointergesture_pan_dy: (a: number) => number;
     readonly pointergesture_up: (a: number, b: number, c: number) => number;
+    readonly rust_animate_agent: (a: number, b: number, c: number) => any;
+    readonly rust_villager_look: (a: number, b: number, c: number) => any;
     readonly rustaipolicy_act: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly rustaipolicy_new: () => number;
     readonly rustaipolicy_probs: (a: number, b: number, c: number) => any;
