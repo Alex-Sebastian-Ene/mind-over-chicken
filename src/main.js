@@ -550,7 +550,8 @@ function drawMinimap(ctx, scene) {
   ctx.globalAlpha = 1;
 }
 
-let perfSample = { n: 0, ms: 0 };
+// Frame cost for playtests (#129): render ms and whole-frame ms, read and reset via __moc.perf().
+let perfSample = { n: 0, ms: 0, frames: 0, frameMs: 0, maxFrameMs: 0 };
 function render() {
   const t0 = performance.now();
   const scene = aiPlanet ? aiPlanet.scene : (G ? cosmos.viewScene(G) : null); // AI god autopilot, else the world in view (planets #68)
@@ -742,6 +743,8 @@ function frame(ts) {
   }
   eegPanel?.update();
   render();
+  const fms = performance.now() - ts;
+  perfSample.frames++; perfSample.frameMs += fms; perfSample.maxFrameMs = Math.max(perfSample.maxFrameMs, fms);
 }
 function rafLoop() { frame(); requestAnimationFrame(rafLoop); }
 setInterval(() => { if (performance.now() - lastFrameAt > 45) frame(); }, 33);
@@ -1232,7 +1235,22 @@ $('playBridge').addEventListener('click', async () => {
 });
 
 // Debug handle for the console (and for automated playtests).
-window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos, get engine() { return engine; } };
+window.__moc = {
+  get G() { return G; }, startScene: (i) => startScene(i), cosmos, get engine() { return engine; },
+  // Average render and frame cost since the last call (ms), then reset.
+  perf() {
+    const p = perfSample;
+    perfSample = { n: 0, ms: 0, frames: 0, frameMs: 0, maxFrameMs: 0 };
+    return { renderMs: p.n ? p.ms / p.n : 0, frameMs: p.frames ? p.frameMs / p.frames : 0, maxFrameMs: p.maxFrameMs, frames: p.frames };
+  },
+  // CPU cost of n back-to-back frames (sim step + render), ms per frame: a playtest benchmark
+  // that doesn't depend on how often the browser schedules frames.
+  bench(n = 120) {
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) { lastFrameAt = 0; lastTs = performance.now() - 16.7; frame(); }
+    return (performance.now() - t0) / n;
+  },
+};
 
 // camera (#33, #116–#123): opt-in webcam. Hands perform actions (pinch-grab, 2-hand zoom, palm, fist, wave)
 // with coach visual demonstration. Face sets mood.
