@@ -268,9 +268,7 @@ class HeadTracker:
             # right-hand rule (a turn to the left), so negate it for "positive = right".
             self.rate = math.sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2])
             yaw_rate = -(w[0] * ux + w[1] * uy + w[2] * uz)
-            # Zero Angular Velocity Update (ZUPT): when the head is stationary (< 1.5 deg/s),
-            # do not integrate micro-tremor or residual bias into yaw.
-            if self.rate >= 1.5 or not math.isfinite(self.bias_tau):
+            if self.rate >= 0.25 or not math.isfinite(self.bias_tau):
                 self.yaw += yaw_rate * dt
             if math.isfinite(self.yaw_tau):
                 self.yaw *= math.exp(-dt / self.yaw_tau)
@@ -296,8 +294,7 @@ class HeadTracker:
             self._reset_window()
         d = [gx - self.bias[0], gy - self.bias[1], gz - self.bias[2]]
         if math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) < self.still and math.isfinite(self.bias_tau):
-            tau = 2.0 if math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) < 2.0 else self.bias_tau
-            k = 1.0 - math.exp(-dt / tau)
+            k = 1.0 - math.exp(-dt / self.bias_tau)
             self.bias = [b + k * v for b, v in zip(self.bias, d)]
             d = [gx - self.bias[0], gy - self.bias[1], gz - self.bias[2]]
         return d

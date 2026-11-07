@@ -1099,10 +1099,15 @@ export class RustImuTracker {
         wasm.rustimutracker_cancel_motion_calibration(this.__wbg_ptr);
     }
     /**
-     * Fits a 2D Ridge Regression + Piecewise Directional Reach model in Rust mapping
-     * `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
-     * Automatically discovers axis signs, high vertical pitch sensitivity, cross-axis coupling,
-     * and separate Left/Right/Up/Down edge reach scales so every full screen edge is reachable.
+     * Hybrid Smooth-Pursuit + Boundary-Fixation + Center-Checkpoint Solver:
+     * 1. Extracts Center checkpoints (`|tx| < 0.08 && |ty| < 0.08`) to remove any gyro yaw drift
+     *    accumulated across calibration and guarantee zero-intercept symmetry on reverse.
+     * 2. Searches optimal human smooth-pursuit reaction lag `L in 0..=2` on moving segments while
+     *    weighting stationary boundary-hold anchors (`3.0x`) for exact screen edge locking.
+     * 3. Solves zero-prior 3D sensor-to-head Ridge Regression (`[yaw, pitch, roll] -> (u_x, u_y)`)
+     *    with cross-axis Gram-Schmidt decoupling so vertical nods never leak horizontally.
+     * 4. Computes independent 4-boundary reach envelopes (`scale_left, scale_right, scale_up, scale_down`)
+     *    so 89% of the user's calibrated edge posture reaches 100% of all 4 screen boundaries & corners.
      * @returns {boolean}
      */
     finish_motion_calibration() {
