@@ -91,6 +91,30 @@ pub const GOALS: [&str; 5] = ["raid", "village", "capital", "punish", "defend_al
 pub const COALITIONS: [&str; 3] = ["none", "join_ally", "gang_up"];
 pub const REBELS: [&str; 3] = ["rules", "crush", "concede"];
 
+/// Fingerprint of the observation layout (names in order) and the action heads, for
+/// `OBS_VERSION` 1. A test checks the two agree: change the layout and the test fails until
+/// `OBS_VERSION` and this are bumped together (and the policy retrained), so weights trained on
+/// one layout are refused on another at load (`policy_rt::Mlp::load` checks the version and the
+/// sizes) and the world keeps the rules instead of misreading its inputs.
+pub const LAYOUT_FINGERPRINT: u32 = 3_424_858_842;
+
+/// FNV-1a over the observation names and head sizes.
+pub fn layout_fingerprint() -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    let mut eat = |b: u8| {
+        h ^= b as u32;
+        h = h.wrapping_mul(0x0100_0193);
+    };
+    for n in obs_names() {
+        n.bytes().for_each(&mut eat);
+        eat(b'|');
+    }
+    for &k in &HEADS {
+        eat(k as u8);
+    }
+    h
+}
+
 /// All observation names, in order.
 pub fn obs_names() -> Vec<String> {
     let mut v: Vec<String> = OBS_NAMES_SELF.iter().map(|s| s.to_string()).collect();
@@ -321,6 +345,9 @@ pub struct Council {
     /// Wall-clock cost of decisions (native builds only; ms total and count).
     pub decide_ms: f64,
     pub decide_n: u64,
+    /// Decisions a network couldn't make (non-finite input or output) that the rules (or the
+    /// scripted commander) made instead.
+    pub fallbacks: u64,
     obs: Vec<f32>,
     mask: Vec<bool>,
 }
@@ -343,6 +370,7 @@ impl Council {
             rng: Rng::new(seed ^ 0x00c0_4ac1),
             decide_ms: 0.0,
             decide_n: 0,
+            fallbacks: 0,
             obs: vec![0.0; OBS_SIZE],
             mask: vec![true; N_LOGITS],
         }
@@ -517,14 +545,19 @@ impl Council {
                     masks(w, self, a, &mut mask);
                     let mut act = [0u8; 7];
                     let u: [f32; 7] = std::array::from_fn(|_| self.rng.f32());
-                    if let Some(net) = self.nets.get(i as usize) {
-                        net.act(&obs, &mask, self.greedy, &u, &mut act);
-                    }
+                    let ok = self.nets.get(i as usize).map_or(false, |net| net.act(&obs, &mask, self.greedy, &u, &mut act));
                     self.obs = obs;
                     self.mask = mask;
-                    self.set_orders(w, a, act);
                     self.decide_ms += now() - t0;
                     self.decide_n += 1;
+                    if !ok {
+                        // No usable answer (a NaN, a missing network): the rules decide this time.
+                        self.fallbacks += 1;
+                        self.minds[ai].fresh = false;
+                        politics::decide_into(w, a, out);
+                        return;
+                    }
+                    self.set_orders(w, a, act);
                 } else {
                     self.minds[ai].fresh = false;
                 }
@@ -770,12 +803,15 @@ impl Council {
                     commander::masks(&targets, &mut mask);
                     let u: [f32; 3] = std::array::from_fn(|_| self.rng.f32());
                     let mut act = [0u8; 3];
-                    if let Some(net) = self.cmd_nets.get(i as usize) {
-                        net.act(&obs, &mask, self.greedy, &u, &mut act);
-                    }
+                    let ok = self.cmd_nets.get(i as usize).map_or(false, |net| net.act(&obs, &mask, self.greedy, &u, &mut act));
                     self.decide_ms += now() - t0;
                     self.decide_n += 1;
-                    CmdOrders::from(act, &targets)
+                    if ok {
+                        CmdOrders::from(act, &targets)
+                    } else {
+                        self.fallbacks += 1;
+                        commander::scripted(w, &self.agg, a, &targets, self.minds[ai].orders.goal)
+                    }
                 }
                 CmdBrain::External => match self.minds[ai].cmd_pending.take() {
                     Some(act) => CmdOrders::from(act, &targets),

@@ -35,6 +35,26 @@ pub const TARGETS: [&str; 4] = ["nearest", "weakest", "capital", "home"];
 pub const SPLITS: [&str; 3] = ["all", "flank", "home_reserve"];
 pub const POSTURES: [&str; 3] = ["assault", "stage", "regroup"];
 
+/// Fingerprint of the commander's observation layout and heads for `OBS_VERSION` 1 (see
+/// `council::LAYOUT_FINGERPRINT`).
+pub const LAYOUT_FINGERPRINT: u32 = 3_887_697_527;
+
+pub fn layout_fingerprint() -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    let mut eat = |b: u8| {
+        h ^= b as u32;
+        h = h.wrapping_mul(0x0100_0193);
+    };
+    for n in obs_names() {
+        n.bytes().for_each(&mut eat);
+        eat(b'|');
+    }
+    for &k in &HEADS {
+        eat(k as u8);
+    }
+    h
+}
+
 pub fn obs_names() -> Vec<String> {
     let mut v: Vec<String> = [
         "age", "formations", "warrior_share", "warriors", "in_field", "morale", "recent_losses", "fronts", "home_threat",

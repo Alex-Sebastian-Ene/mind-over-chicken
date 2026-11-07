@@ -6,6 +6,11 @@
 //! the rules and the call returns 0. Other weights can be handed in at run time with
 //! `civ_ppo_alloc` + `civ_ppo_load` (then `civ_ppo_enable` again).
 //!
+//! The weights carry the observation layout version they were trained on; weights for another
+//! layout (or with the wrong sizes, a failed self-check, or NaNs) are refused and the rules
+//! decide, and `civ_ppo_error_ptr`/`_len` say why. At run time a decision whose numbers aren't
+//! finite falls back to the rules too (`civ_ppo_fallbacks`).
+//!
 //! The councils only drive simulated civilisations: the player's inputs and casts are untouched
 //! and still apply on top (mode 1 also leaves the player's own civilisation to the rules).
 
@@ -24,25 +29,40 @@ thread_local! {
     static HANDLES: RefCell<Vec<(usize, Rc<RefCell<Council>>)>> = const { RefCell::new(Vec::new()) };
     static CUSTOM: RefCell<[Option<Vec<u8>>; 2]> = const { RefCell::new([None, None]) };
     static BUF: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    static LAST_ERR: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 /// Plug the councils into `w`: mode 0 the rules, 1 every civilisation but the player's, 2 all.
 /// Returns (0 rules / 1 council with the scripted commander / 2 council and commander, handle).
 pub fn enable_with(w: &mut World, mode: u32, council_bytes: &[u8], commander_bytes: &[u8]) -> (i32, Option<Rc<RefCell<Council>>>) {
+    let (status, rc, _) = enable_with_reason(w, mode, council_bytes, commander_bytes);
+    (status, rc)
+}
+
+/// `enable_with`, plus what went wrong (empty when nothing did): weights missing, for another
+/// observation layout (`council::OBS_VERSION`, sizes), corrupt, or failing their self-check.
+pub fn enable_with_reason(w: &mut World, mode: u32, council_bytes: &[u8], commander_bytes: &[u8]) -> (i32, Option<Rc<RefCell<Council>>>, String) {
     w.policy = None;
     if mode == 0 {
-        return (0, None);
+        return (0, None, String::new());
     }
     let mut c = Council::new(w.seed);
-    if c.load_net(council_bytes).is_err() {
-        return (0, None);
+    if let Err(e) = c.load_net(council_bytes) {
+        return (0, None, format!("war councils off, the rules decide: council weights refused ({e:?}; this build expects observation v{} of {} inputs)", council::OBS_VERSION, council::OBS_SIZE));
     }
-    let cmd = c.load_cmd_net(commander_bytes).is_ok();
+    let mut why = String::new();
+    let cmd = match c.load_cmd_net(commander_bytes) {
+        Ok(_) => true,
+        Err(e) => {
+            why = format!("commander weights refused ({e:?}); the scripted commander leads the armies");
+            false
+        }
+    };
     c.new_brain = Brain::Net(0);
     c.new_cmd = if cmd { CmdBrain::Net(0) } else { CmdBrain::Scripted };
     c.spare_player = mode == 1;
     let rc = council::install(w, c);
-    (if cmd { 2 } else { 1 }, Some(rc))
+    (if cmd { 2 } else { 1 }, Some(rc), why)
 }
 
 fn world<'a>(p: *mut World) -> Option<&'a mut World> {
@@ -63,7 +83,8 @@ pub extern "C" fn civ_ppo_enable(p: *mut World, mode: u32) -> i32 {
         let c = c.borrow();
         (c[0].clone().unwrap_or_else(|| COUNCIL_WEIGHTS.to_vec()), c[1].clone().unwrap_or_else(|| COMMANDER_WEIGHTS.to_vec()))
     });
-    let (status, rc) = enable_with(w, mode, &cb, &kb);
+    let (status, rc, why) = enable_with_reason(w, mode, &cb, &kb);
+    LAST_ERR.with(|e| *e.borrow_mut() = why);
     HANDLES.with(|h| {
         let mut h = h.borrow_mut();
         // Forget worlds that are gone (only this table still holds their council).
@@ -147,4 +168,22 @@ pub extern "C" fn civ_ppo_driven(p: *mut World, civ: u32) -> i32 {
 #[no_mangle]
 pub extern "C" fn civ_ppo_decisions(p: *mut World) -> f64 {
     handle(p).map_or(0.0, |c| c.borrow().decide_n as f64)
+}
+
+/// Why the last `civ_ppo_enable` fell back (UTF-8 at `civ_ppo_error_ptr`, `civ_ppo_error_len`
+/// bytes; empty when it didn't). JS logs it as a console warning.
+#[no_mangle]
+pub extern "C" fn civ_ppo_error_ptr() -> *const u8 {
+    LAST_ERR.with(|e| e.borrow().as_ptr())
+}
+
+#[no_mangle]
+pub extern "C" fn civ_ppo_error_len() -> usize {
+    LAST_ERR.with(|e| e.borrow().len())
+}
+
+/// Decisions the networks couldn't make (non-finite numbers) that the rules made instead.
+#[no_mangle]
+pub extern "C" fn civ_ppo_fallbacks(p: *mut World) -> f64 {
+    handle(p).map_or(0.0, |c| c.borrow().fallbacks as f64)
 }

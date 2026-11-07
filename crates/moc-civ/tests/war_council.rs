@@ -288,3 +288,56 @@ fn runtime_matches_the_encoded_logits() {
     // Truncated files are refused.
     assert!(Mlp::load(&b[..b.len() - 10], Kind::Council, OBS_VERSION, OBS_SIZE, &HEADS).is_err());
 }
+
+#[test]
+fn observation_layout_is_versioned() {
+    // Changing what the councils observe (or their heads) without bumping OBS_VERSION would let
+    // old weights misread their inputs. If this fails: bump council::OBS_VERSION (or
+    // commander::OBS_VERSION), update the fingerprint, and retrain/re-export the weights; until
+    // then the shipped weights are refused at load and the rules decide.
+    assert_eq!(council::layout_fingerprint(), council::LAYOUT_FINGERPRINT, "council observation layout changed: bump OBS_VERSION");
+    assert_eq!(commander::layout_fingerprint(), commander::LAYOUT_FINGERPRINT, "commander observation layout changed: bump OBS_VERSION");
+}
+
+#[test]
+fn weights_for_another_layout_are_refused_with_a_reason() {
+    let mut w = World::new(5);
+    let other = policy_rt::random(Kind::Council, OBS_VERSION + 1, OBS_SIZE, &HEADS, &[16], 1);
+    let (status, rc, why) = moc_civ::war_ffi::enable_with_reason(&mut w, 1, &policy_rt::encode(&other, &[]), b"");
+    assert_eq!(status, 0);
+    assert!(rc.is_none() && w.policy.is_none());
+    assert!(why.contains("WrongObsVersion") && why.contains("rules decide"), "{why}");
+    // One input more than this build observes: refused too.
+    let wide = policy_rt::random(Kind::Council, OBS_VERSION, OBS_SIZE + 1, &HEADS, &[16], 1);
+    let (status, _, why) = moc_civ::war_ffi::enable_with_reason(&mut w, 1, &policy_rt::encode(&wide, &[]), b"");
+    assert_eq!(status, 0);
+    assert!(why.contains("observation size"), "{why}");
+    // Valid council, broken commander: the councils run with the scripted commander, and say so.
+    let (status, _, why) = moc_civ::war_ffi::enable_with_reason(&mut w, 1, &random_council(2), b"junk");
+    assert_eq!(status, 1);
+    assert!(why.contains("scripted commander"), "{why}");
+}
+
+#[test]
+fn a_network_that_returns_nan_falls_back_to_the_rules() {
+    // A non-finite observation or output is never acted on.
+    let m = policy_rt::random(Kind::Council, OBS_VERSION, OBS_SIZE, &HEADS, &[16], 3);
+    let mut out = [0u8; 7];
+    let mut obs = vec![0.5; OBS_SIZE];
+    assert!(m.act(&obs, &[true; N_LOGITS], true, &[0.5; 7], &mut out));
+    obs[3] = f32::NAN;
+    assert!(!m.act(&obs, &[true; N_LOGITS], true, &[0.5; 7], &mut out));
+    assert!(!m.act(&obs[..OBS_SIZE - 1], &[true; N_LOGITS], true, &[0.5; 7], &mut out), "wrong size");
+    // A network gone bad after loading (NaN weights): every civilisation keeps deciding by the rules.
+    let mut w = new_world(8, 4, Dims::new(640, 320));
+    let (status, rc) = enable_with(&mut w, 2, &random_council(4), b"");
+    assert_eq!(status, 1);
+    let rc = rc.unwrap();
+    rc.borrow_mut().nets[0].layers[0].w[0] = f32::NAN;
+    w.inputs = Inputs::with_stress(0.05, 0.1, 0.8);
+    for _ in 0..1200 {
+        w.step(0.1);
+    }
+    assert!(rc.borrow().fallbacks > 0, "the bad network's decisions went to the rules");
+    assert!(w.alive_factions().count() > 0);
+}

@@ -216,12 +216,21 @@ impl Mlp {
 
     /// Pick one option per head: the best legal one (`greedy`), or a sample from the masked
     /// softmax with uniform draws `u` (one per head). `mask[i]` false = option i is illegal;
-    /// a head with no legal option picks 0.
-    pub fn act(&self, obs: &[f32], mask: &[bool], greedy: bool, u: &[f32], out: &mut [u8]) {
+    /// a head with no legal option picks 0. Returns false (and picks nothing) if the
+    /// observation has the wrong size or anything in it or the logits is not finite: the
+    /// caller then falls back to the rules.
+    pub fn act(&self, obs: &[f32], mask: &[bool], greedy: bool, u: &[f32], out: &mut [u8]) -> bool {
+        if obs.len() != self.obs_size || !obs.iter().all(|x| x.is_finite()) {
+            return false;
+        }
         let total: usize = self.heads.iter().sum();
         let mut z = [0.0f32; MAX_WIDTH];
         self.logits(obs, &mut z[..total]);
+        if !z[..total].iter().all(|x| x.is_finite()) {
+            return false;
+        }
         pick(&self.heads, &z[..total], mask, greedy, u, out);
+        true
     }
 }
 
