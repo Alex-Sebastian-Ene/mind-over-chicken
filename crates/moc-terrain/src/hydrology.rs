@@ -21,7 +21,12 @@ impl Hydrology {
         x.rem_euclid(self.width as i32) as usize
     }
 
-    /// Computes D8 downhill flow directions and flow accumulation across the wrapping cylinder.
+    #[inline]
+    fn wrap_y(&self, y: i32) -> usize {
+        y.rem_euclid(self.height as i32) as usize
+    }
+
+    /// Computes D8 downhill flow directions and flow accumulation across the wrapping torus (#111).
     /// Returns:
     /// - `flow_accum`: total upstream catchment area for each cell
     /// - `river_mask`: boolean mask indicating 1-px river channel locations
@@ -63,12 +68,9 @@ impl Hydrology {
                 let mut best_target = usize::MAX;
 
                 for &(dx, dy, dist) in &neighbors {
-                    let ny = y as i32 + dy;
-                    if ny < 0 || ny >= self.height as i32 {
-                        continue;
-                    }
+                    let ny = self.wrap_y(y as i32 + dy);
                     let nx = self.wrap_x(x as i32 + dx);
-                    let target_idx = self.idx(nx, ny as usize);
+                    let target_idx = self.idx(nx, ny);
                     let target_h = heights[target_idx];
 
                     let drop = curr_h - target_h;

@@ -190,12 +190,11 @@ impl Engine {
     // Unproject screen coordinates to 3D terrain surface for click aiming & lightning
     pub fn screen_to_ground(&self, sx: f32, sy: f32, cw: f32, ch: f32) -> js_sys::Float32Array {
         let result = js_sys::Float32Array::new_with_length(2);
-        // Land on the terrain surface (hills included), never below the sea. The map repeats
-        // east-west, so wrap x; beyond the poles, clamp to the edge row.
-        let ground_at = |x: f32, z: f32| (self.get_terrain_height_at(x.rem_euclid(W as f32), z) * 24.0).max(7.92);
+        // Land on the terrain surface (hills included), never below the sea. Seamless torus (#111).
+        let ground_at = |x: f32, z: f32| (self.get_terrain_height_at(x.rem_euclid(W as f32), z.rem_euclid(H as f32)) * 24.0).max(7.92);
         if let Some([hx, hz]) = self.camera_3d.screen_to_terrain(sx, sy, cw, ch, 24.0, ground_at) {
             let hx = hx.rem_euclid(W as f32);
-            let hz = hz.clamp(0.0, H as f32 - 1.0);
+            let hz = hz.rem_euclid(H as f32);
             result.set_index(0, hx);
             result.set_index(1, hz);
         } else {
@@ -208,9 +207,22 @@ impl Engine {
     // Project 3D terrain world coordinates [wx, wz] to screen pixels [sx, sy]
     pub fn project_to_screen(&self, wx: f32, wz: f32, cw: f32, ch: f32) -> js_sys::Float32Array {
         let result = js_sys::Float32Array::new_with_length(2);
-        let h_norm = self.get_terrain_height_at(wx.rem_euclid(W as f32), wz);
+        let mut wrapped_x = wx.rem_euclid(W as f32);
+        let mut wrapped_z = wz.rem_euclid(H as f32);
+        // Torus seam wrapping relative to camera target (#111)
+        if wrapped_x - self.camera_3d.target.x > (W as f32) * 0.5 {
+            wrapped_x -= W as f32;
+        } else if self.camera_3d.target.x - wrapped_x > (W as f32) * 0.5 {
+            wrapped_x += W as f32;
+        }
+        if wrapped_z - self.camera_3d.target.z > (H as f32) * 0.5 {
+            wrapped_z -= H as f32;
+        } else if self.camera_3d.target.z - wrapped_z > (H as f32) * 0.5 {
+            wrapped_z += H as f32;
+        }
+        let h_norm = self.get_terrain_height_at(wrapped_x.rem_euclid(W as f32), wrapped_z.rem_euclid(H as f32));
         let wy = (h_norm * 24.0).max(7.92);
-        if let Some([sx, sy]) = self.camera_3d.world_to_screen(wx, wy, wz, cw, ch) {
+        if let Some([sx, sy]) = self.camera_3d.world_to_screen(wrapped_x, wy, wrapped_z, cw, ch) {
             result.set_index(0, sx);
             result.set_index(1, sy);
         } else {
@@ -441,8 +453,9 @@ impl Engine {
         canvas_h: i32,
     ) {
         self.time_3d += dt;
-        // East-west wrap camera target
+        // Torus wrap camera target along both axes (#111)
         self.camera_3d.target.x = self.camera_3d.target.x.rem_euclid(W as f32);
+        self.camera_3d.target.z = self.camera_3d.target.z.rem_euclid(H as f32);
 
         let sun_dir = Vec3::new(sun_x, sun_y, sun_z).normalize();
 

@@ -42,19 +42,30 @@ impl TerrainMesh {
             for c in 0..=cols {
                 let x = c as f32 * dx_world;
                 let z = r as f32 * dz_world;
-                let h = sample_h(c, r);
+                // Seamless torus boundary alignment (#111): boundary vertices match their wrapped counterparts
+                let h = if c == cols && r == rows {
+                    sample_h(0, 0)
+                } else if c == cols {
+                    sample_h(0, r)
+                } else if r == rows {
+                    sample_h(c, 0)
+                } else {
+                    sample_h(c, r)
+                };
                 let y = h * height_scale;
 
                 let u = c as f32 / cols as f32;
                 let v = r as f32 / rows as f32;
 
-                // Compute normal from neighbors with east-west planetary wrapping
+                // Compute normal from neighbors with dual east-west and north-south planetary wrapping (#111)
                 let c_left = if c > 0 { c - 1 } else { cols - 1 };
                 let c_right = if c < cols { c + 1 } else { 0 };
+                let r_up = if r > 0 { r - 1 } else { rows - 1 };
+                let r_down = if r < rows { r + 1 } else { 0 };
                 let h_l = sample_h(c_left, r);
                 let h_r = sample_h(c_right, r);
-                let h_u = if r > 0 { sample_h(c, r - 1) } else { h };
-                let h_d = if r < rows { sample_h(c, r + 1) } else { h };
+                let h_u = sample_h(c, r_up);
+                let h_d = sample_h(c, r_down);
 
                 let normal = Vec3::new(
                     (h_l - h_r) * height_scale,
