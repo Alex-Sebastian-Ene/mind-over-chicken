@@ -262,6 +262,7 @@ export class EegPanel {
     this.wasStreaming = false;
     this.wiz = null;
     this.buildWizardModal();
+    this.toggle(true);
     this.addLog('EEG & Rust/WASM calibration panel ready.');
 
     this.btn.addEventListener('click', () => this.toggle());

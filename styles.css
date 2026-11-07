@@ -683,8 +683,10 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 }
 @media (max-width: 420px) {
   .dbg-brain { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 /* ---------- EEG & biosensing side panel ---------- */
+.eeg-panel[hidden] { display: none !important; }
 .eeg-btn { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .eeg-btn::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
 .eeg-btn[data-live="wait"] { border-color: var(--focus); }
