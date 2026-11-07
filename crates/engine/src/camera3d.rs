@@ -1,5 +1,12 @@
 use crate::math3d::{Mat4, Vec3};
 
+/// Default view: a steep (~60 degree) look down a narrow 30 degree lens from far back, so the
+/// island reads like a tilted diorama of the 2D map instead of a low wide-angle shot.
+pub const DEFAULT_PITCH: f32 = 1.05;
+pub const DEFAULT_DISTANCE: f32 = 300.0;
+pub const MIN_DISTANCE: f32 = 40.0;
+pub const MAX_DISTANCE: f32 = 600.0;
+
 #[derive(Clone, Debug)]
 pub struct OrbitCamera {
     pub target: Vec3,
@@ -16,9 +23,9 @@ impl OrbitCamera {
         Self {
             target: Vec3::new(target_x, 0.0, target_z),
             yaw: 0.0,
-            pitch: 0.65, // ~37 degrees tilt down
-            distance: 120.0,
-            fov: std::f32::consts::FRAC_PI_4, // 45 degrees
+            pitch: DEFAULT_PITCH,
+            distance: DEFAULT_DISTANCE,
+            fov: std::f32::consts::FRAC_PI_6, // 30 degrees: little perspective distortion
             near: 1.0,
             far: 2000.0,
         }
@@ -28,13 +35,13 @@ impl OrbitCamera {
         self.yaw += delta_yaw;
         // Clamp pitch so camera cannot flip upside down
         let min_pitch = 0.15; // ~8 degrees
-        let max_pitch = 1.45; // ~83 degrees
+        let max_pitch = 1.55; // ~89 degrees: straight down, for the hand-over to the globe
         self.pitch = (self.pitch + delta_pitch).clamp(min_pitch, max_pitch);
     }
 
     pub fn zoom(&mut self, factor: f32) {
         // Zoom in/out clamped between close ground view and high orbit
-        self.distance = (self.distance * factor).clamp(25.0, 600.0);
+        self.distance = (self.distance * factor).clamp(MIN_DISTANCE, MAX_DISTANCE);
     }
 
     pub fn pan(&mut self, dx: f32, dz: f32) {
@@ -70,6 +77,9 @@ impl OrbitCamera {
     }
 
     // Casts a ray from screen coordinates (0..w, 0..h) to plane Y = ground_y
+    /// Where a screen point meets the flat plane y = `ground_y` (the engine now raycasts onto
+    /// the terrain with `screen_to_terrain`; this stays as the flat reference).
+    #[allow(dead_code)]
     pub fn screen_to_ground(
         &self,
         screen_x: f32,
@@ -78,50 +88,80 @@ impl OrbitCamera {
         screen_h: f32,
         ground_y: f32,
     ) -> Option<[f32; 2]> {
-        if screen_w <= 0.0 || screen_h <= 0.0 {
-            return None;
-        }
-
-        // Convert screen (top-left 0,0) to NDC (-1..1, bottom-to-top)
-        let ndc_x = (screen_x / screen_w) * 2.0 - 1.0;
-        let ndc_y = 1.0 - (screen_y / screen_h) * 2.0;
-
-        let aspect = screen_w / screen_h;
-        let (_view, _proj, view_proj) = self.compute_matrices(aspect);
-        let inv_vp = view_proj.inverse()?;
-
-        // Unproject near plane (z = -1) and far plane (z = 1)
-        let p_near = inv_vp.transform_vec4([ndc_x, ndc_y, -1.0, 1.0]);
-        let p_far = inv_vp.transform_vec4([ndc_x, ndc_y, 1.0, 1.0]);
-
-        if p_near[3].abs() < 1e-6 || p_far[3].abs() < 1e-6 {
-            return None;
-        }
-
-        let near_w = Vec3::new(
-            p_near[0] / p_near[3],
-            p_near[1] / p_near[3],
-            p_near[2] / p_near[3],
-        );
-        let far_w = Vec3::new(
-            p_far[0] / p_far[3],
-            p_far[1] / p_far[3],
-            p_far[2] / p_far[3],
-        );
-
-        let ray_dir = far_w.sub(near_w).normalize();
-        if ray_dir.y.abs() < 1e-6 {
+        let (o, d) = self.screen_ray(screen_x, screen_y, screen_w, screen_h)?;
+        if d.y.abs() < 1e-6 {
             return None; // Parallel to ground plane
         }
-
-        let t = (ground_y - near_w.y) / ray_dir.y;
+        let t = (ground_y - o.y) / d.y;
         if t < 0.0 {
             return None; // Behind camera
         }
+        Some([o.x + d.x * t, o.z + d.z * t])
+    }
 
-        let hit_x = near_w.x + ray_dir.x * t;
-        let hit_z = near_w.z + ray_dir.z * t;
-        Some([hit_x, hit_z])
+    /// The world ray under a screen point: (origin on the near plane, unit direction).
+    pub fn screen_ray(&self, screen_x: f32, screen_y: f32, screen_w: f32, screen_h: f32) -> Option<(Vec3, Vec3)> {
+        if screen_w <= 0.0 || screen_h <= 0.0 {
+            return None;
+        }
+        let ndc_x = (screen_x / screen_w) * 2.0 - 1.0;
+        let ndc_y = 1.0 - (screen_y / screen_h) * 2.0;
+        let (_view, _proj, view_proj) = self.compute_matrices(screen_w / screen_h);
+        let inv_vp = view_proj.inverse()?;
+        let n = inv_vp.transform_vec4([ndc_x, ndc_y, -1.0, 1.0]);
+        let f = inv_vp.transform_vec4([ndc_x, ndc_y, 1.0, 1.0]);
+        if n[3].abs() < 1e-6 || f[3].abs() < 1e-6 {
+            return None;
+        }
+        let near_w = Vec3::new(n[0] / n[3], n[1] / n[3], n[2] / n[3]);
+        let far_w = Vec3::new(f[0] / f[3], f[1] / f[3], f[2] / f[3]);
+        Some((near_w, far_w.sub(near_w).normalize()))
+    }
+
+    /// Where a screen point lands on a heightfield, so a click on a hillside strikes the
+    /// hillside rather than the sea-level plane behind it. `ground_at(x, z)` is the surface
+    /// height in world units; `max_y` bounds it. Marches the ray, then bisects the crossing.
+    pub fn screen_to_terrain(
+        &self,
+        screen_x: f32,
+        screen_y: f32,
+        screen_w: f32,
+        screen_h: f32,
+        max_y: f32,
+        ground_at: impl Fn(f32, f32) -> f32,
+    ) -> Option<[f32; 2]> {
+        let (o, d) = self.screen_ray(screen_x, screen_y, screen_w, screen_h)?;
+        if d.y > -1e-4 {
+            return None; // Looking at or above the horizon
+        }
+        let above = |t: f32| {
+            let p = o.add(d.scale(t));
+            p.y - ground_at(p.x, p.z)
+        };
+        // Start where the ray drops below the highest possible ground; end at y = 0.
+        let t_start = ((max_y - o.y) / d.y).max(0.0);
+        let t_end = (0.0 - o.y) / d.y;
+        if t_end <= t_start {
+            return None;
+        }
+        let step = 0.5;
+        let mut t_prev = t_start;
+        let mut t = t_start;
+        while t <= t_end {
+            if above(t) <= 0.0 {
+                let (mut lo, mut hi) = (t_prev, t);
+                for _ in 0..12 {
+                    let mid = 0.5 * (lo + hi);
+                    if above(mid) > 0.0 { lo = mid } else { hi = mid }
+                }
+                let p = o.add(d.scale(hi));
+                return Some([p.x, p.z]);
+            }
+            t_prev = t;
+            t += step;
+        }
+        let p = o.add(d.scale(t_end));
+        Some([p.x, p.z])
     }
 }
 
@@ -144,6 +184,28 @@ mod tests {
 
         // Orbit test
         cam.orbit(0.2, 0.1);
-        assert!(cam.pitch > 0.65);
+        assert!(cam.pitch > DEFAULT_PITCH);
+    }
+
+    #[test]
+    fn terrain_raycast_matches_plane_on_flat_ground() {
+        let cam = OrbitCamera::new(160.0, 90.0);
+        let plane = cam.screen_to_ground(300.0, 350.0, 800.0, 600.0, 8.0).unwrap();
+        let terr = cam.screen_to_terrain(300.0, 350.0, 800.0, 600.0, 24.0, |_, _| 8.0).unwrap();
+        assert!((plane[0] - terr[0]).abs() < 0.05 && (plane[1] - terr[1]).abs() < 0.05, "{:?} vs {:?}", plane, terr);
+    }
+
+    #[test]
+    fn terrain_raycast_stops_on_a_hill_in_front() {
+        // A 20-unit plateau for z > 80: the ray from the screen centre must stop on it,
+        // nearer the camera than the sea-level plane hit, and on its surface.
+        let cam = OrbitCamera::new(160.0, 90.0);
+        let ground = |_: f32, z: f32| if z > 80.0 { 20.0 } else { 8.0 };
+        let plane = cam.screen_to_ground(400.0, 300.0, 800.0, 600.0, 8.0).unwrap();
+        let hit = cam.screen_to_terrain(400.0, 300.0, 800.0, 600.0, 24.0, ground).unwrap();
+        assert!(hit[1] > 80.0, "hit {:?} should be on the plateau", hit);
+        // The camera sits south (+z) looking north, so the ray meets the plateau south of
+        // where it would meet the sea-level plane.
+        assert!(hit[1] > plane[1], "plateau should be hit before the plane ({:?} vs {:?})", hit, plane);
     }
 }

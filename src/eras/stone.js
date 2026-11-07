@@ -474,6 +474,13 @@ export class StoneAge {
     ctx.drawImage(this.layer, 0, 0);
     G.world.drawWater(ctx, this.t);
     for (const m of this.meat) { ctx.fillStyle = m.cooked ? '#c0562f' : '#9e3d3d'; ctx.fillRect(m.x - 1, m.y - 1, 3, 2); }
+    // In 3D, draw3d stands people, mammoths, fires and the chicken up as sprites; painting them
+    // flat as well showed everything twice. Boats have no sprite yet, so they stay painted.
+    if (G.render3d) {
+      for (const b of this.boats) drawBoat(ctx, b.x, b.y, b);
+      this.particles.draw(ctx);
+      return;
+    }
     // y-sorted actors
     const actors = [];
     for (const m of this.mammoths) actors.push({ y: m.y, d: () => drawMammoth(ctx, m.x, m.y, m) });
@@ -494,7 +501,7 @@ export class StoneAge {
   drawAfterLight(ctx) {
     for (const b of this.bolts) drawBolt(ctx, b.pts, Math.min(1, b.life * 4));
     const a = this.G.brain.aim;
-    drawReticle(ctx, a.x * (W - 1), a.y * (H - 1), this.t, '#ffe066');
+    if (!this.G.render3d) drawReticle(ctx, a.x * (W - 1), a.y * (H - 1), this.t, '#ffe066'); // 3D: a sprite
     if (this.flash > 0) { ctx.fillStyle = `rgba(220,230,255,${this.flash * 0.9})`; ctx.fillRect(0, 0, W, H); }
   }
 

@@ -689,6 +689,16 @@ export class Engine {
         wasm.engine_set_3d_mode(this.__wbg_ptr, enabled);
     }
     /**
+     * The colour around the map in 3D (the world's deep sea, 0..255), so the view's edges read
+     * as open ocean. JS passes its palette's deep-water colour.
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     */
+    set_backdrop(r, g, b) {
+        wasm.engine_set_backdrop(this.__wbg_ptr, r, g, b);
+    }
+    /**
      * @param {number} tx
      * @param {number} tz
      */
@@ -700,6 +710,21 @@ export class Engine {
      */
     set_era(era) {
         wasm.engine_set_era(this.__wbg_ptr, era);
+    }
+    /**
+     * Use the JS world's heights (row-major W×H, 0..1, sea level 0.33) for the 3D mesh, the
+     * raycast and where billboards stand. The engine's own `Terrain` is still the old single
+     * island, so without this the relief doesn't match the map the simulation runs on.
+     * Call after `init_world`.
+     * @param {Float32Array | number[]} heights
+     */
+    set_heightmap(heights) {
+        const ptr0 = passArrayF32ToWasm0(heights, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.engine_set_heightmap(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
     }
     /**
      * @param {HTMLCanvasElement} canvas
@@ -718,6 +743,402 @@ export class Engine {
     }
 }
 if (Symbol.dispose) Engine.prototype[Symbol.dispose] = Engine.prototype.free;
+
+export class RustBlinkClassifier {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustBlinkClassifierFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustblinkclassifier_free(ptr, 0);
+    }
+    /**
+     * @returns {number}
+     */
+    accuracy() {
+        const ret = wasm.rustblinkclassifier_accuracy(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Arms a flash-cue capture window (e.g., 1.2s) right when the visual cue flashes on screen.
+     * @param {number} seconds
+     */
+    arm_flash_window(seconds) {
+        wasm.rustblinkclassifier_arm_flash_window(this.__wbg_ptr, seconds);
+    }
+    /**
+     * @returns {number}
+     */
+    baseline_samples() {
+        const ret = wasm.rustblinkclassifier_baseline_samples(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    blink_samples() {
+        const ret = wasm.rustblinkclassifier_blink_samples(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @param {Float32Array | number[]} tp9
+     * @param {Float32Array | number[]} af7
+     * @param {Float32Array | number[]} af8
+     * @param {Float32Array | number[]} tp10
+     * @param {number} motion
+     * @param {number} dt
+     * @returns {boolean}
+     */
+    ingest_frame(tp9, af7, af8, tp10, motion, dt) {
+        const val5 = +motion;
+        const val6 = +dt;
+        let ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3;
+        try {
+            ptr0 = passArrayF32ToWasm0(tp9, wasm.__wbindgen_malloc);
+            len0 = WASM_VECTOR_LEN;
+            ptr1 = passArrayF32ToWasm0(af7, wasm.__wbindgen_malloc);
+            len1 = WASM_VECTOR_LEN;
+            ptr2 = passArrayF32ToWasm0(af8, wasm.__wbindgen_malloc);
+            len2 = WASM_VECTOR_LEN;
+            ptr3 = passArrayF32ToWasm0(tp10, wasm.__wbindgen_malloc);
+            len3 = WASM_VECTOR_LEN;
+        } catch (e) {
+            if (ptr3) { wasm.__wbindgen_free(ptr3, len3 * 4, 4); }
+            if (ptr2) { wasm.__wbindgen_free(ptr2, len2 * 4, 4); }
+            if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 4, 4); }
+            if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 4, 4); }
+            throw e;
+        }
+        const ret = wasm.rustblinkclassifier_ingest_frame(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, val5, val6);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
+    is_capturing() {
+        const ret = wasm.rustblinkclassifier_is_capturing(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
+    is_trained() {
+        const ret = wasm.rustblinkclassifier_is_trained(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {number}
+     */
+    last_af7_ptp() {
+        const ret = wasm.rustblinkclassifier_last_af7_ptp(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    last_af8_ptp() {
+        const ret = wasm.rustblinkclassifier_last_af8_ptp(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    last_corr() {
+        const ret = wasm.rustblinkclassifier_last_corr(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    last_eff_amp() {
+        const ret = wasm.rustblinkclassifier_last_eff_amp(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    last_probability() {
+        const ret = wasm.rustblinkclassifier_last_probability(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    last_tp10_ptp() {
+        const ret = wasm.rustblinkclassifier_last_tp10_ptp(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    last_tp9_ptp() {
+        const ret = wasm.rustblinkclassifier_last_tp9_ptp(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    learned_af7_uv() {
+        const ret = wasm.rustblinkclassifier_learned_af7_uv(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    learned_af8_uv() {
+        const ret = wasm.rustblinkclassifier_learned_af8_uv(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    learned_threshold_uv() {
+        const ret = wasm.rustblinkclassifier_learned_threshold_uv(this.__wbg_ptr);
+        return ret;
+    }
+    constructor() {
+        const ret = wasm.rustblinkclassifier_new();
+        this.__wbg_ptr = ret;
+        RustBlinkClassifierFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @returns {boolean}
+     */
+    record_baseline_button() {
+        const ret = wasm.rustblinkclassifier_record_baseline_button(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Searches the last ~2.5s of EEG windows for the strongest blink peak if the user blinked
+     * before clicking, or arms a 2.5s capture window if they click first and then blink.
+     * @returns {boolean}
+     */
+    record_blink_button() {
+        const ret = wasm.rustblinkclassifier_record_blink_button(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    reset_model() {
+        wasm.rustblinkclassifier_reset_model(this.__wbg_ptr);
+    }
+    /**
+     * @returns {number}
+     */
+    total_detected() {
+        const ret = wasm.rustblinkclassifier_total_detected(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+}
+if (Symbol.dispose) RustBlinkClassifier.prototype[Symbol.dispose] = RustBlinkClassifier.prototype.free;
+
+export class RustImuTracker {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustImuTrackerFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustimutracker_free(ptr, 0);
+    }
+    /**
+     * Records a supervised sample pairing the user's current 3D relative orientation
+     * `(rel_yaw, rel_pitch, rel_roll)` with the target white dot screen position `(dot_x, dot_y)` in `0..1`.
+     * @param {number} dot_x
+     * @param {number} dot_y
+     */
+    add_calib_point(dot_x, dot_y) {
+        wasm.rustimutracker_add_calib_point(this.__wbg_ptr, dot_x, dot_y);
+    }
+    /**
+     * @returns {number}
+     */
+    aim_x() {
+        const ret = wasm.rustimutracker_aim_x(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    aim_y() {
+        const ret = wasm.rustimutracker_aim_y(this.__wbg_ptr);
+        return ret;
+    }
+    begin_motion_calibration() {
+        wasm.rustimutracker_begin_motion_calibration(this.__wbg_ptr);
+    }
+    /**
+     * @returns {number}
+     */
+    calib_progress() {
+        const ret = wasm.rustimutracker_calib_progress(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    calib_r2_score() {
+        const ret = wasm.rustimutracker_calib_r2_score(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    calib_sample_count() {
+        const ret = wasm.rustimutracker_calib_sample_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    cancel_motion_calibration() {
+        wasm.rustimutracker_cancel_motion_calibration(this.__wbg_ptr);
+    }
+    /**
+     * Fits a 2D Ridge Regression model in Rust mapping `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
+     * Automatically discovers axis signs, sensitivity/range, center offset, and cross-axis head tilt coupling.
+     * @returns {boolean}
+     */
+    finish_motion_calibration() {
+        const ret = wasm.rustimutracker_finish_motion_calibration(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
+    has_motion_model() {
+        const ret = wasm.rustimutracker_has_motion_model(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
+    is_tared() {
+        const ret = wasm.rustimutracker_is_tared(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {number}
+     */
+    learned_pitch_deg_for_edge() {
+        const ret = wasm.rustimutracker_learned_pitch_deg_for_edge(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    learned_pitch_sign() {
+        const ret = wasm.rustimutracker_learned_pitch_sign(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    learned_yaw_deg_for_edge() {
+        const ret = wasm.rustimutracker_learned_yaw_deg_for_edge(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    learned_yaw_sign() {
+        const ret = wasm.rustimutracker_learned_yaw_sign(this.__wbg_ptr);
+        return ret;
+    }
+    constructor() {
+        const ret = wasm.rustimutracker_new();
+        this.__wbg_ptr = ret;
+        RustImuTrackerFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @returns {number}
+     */
+    raw_pitch_deg() {
+        const ret = wasm.rustimutracker_raw_pitch_deg(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    raw_roll_deg() {
+        const ret = wasm.rustimutracker_raw_roll_deg(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    raw_yaw_deg() {
+        const ret = wasm.rustimutracker_raw_yaw_deg(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    rel_pitch_deg() {
+        const ret = wasm.rustimutracker_rel_pitch_deg(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    rel_roll_deg() {
+        const ret = wasm.rustimutracker_rel_roll_deg(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    rel_yaw_deg() {
+        const ret = wasm.rustimutracker_rel_yaw_deg(this.__wbg_ptr);
+        return ret;
+    }
+    reset_motion_model() {
+        wasm.rustimutracker_reset_motion_model(this.__wbg_ptr);
+    }
+    /**
+     * @param {number} sensitivity
+     * @param {boolean} invert_yaw
+     * @param {boolean} invert_pitch
+     * @param {number} deadzone_deg
+     */
+    set_config(sensitivity, invert_yaw, invert_pitch, deadzone_deg) {
+        wasm.rustimutracker_set_config(this.__wbg_ptr, sensitivity, invert_yaw, invert_pitch, deadzone_deg);
+    }
+    tare() {
+        wasm.rustimutracker_tare(this.__wbg_ptr);
+    }
+    /**
+     * @returns {number}
+     */
+    tilt_x() {
+        const ret = wasm.rustimutracker_tilt_x(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    tilt_y() {
+        const ret = wasm.rustimutracker_tilt_y(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {number} ax
+     * @param {number} ay
+     * @param {number} az
+     * @param {number} gx
+     * @param {number} gy
+     * @param {number} gz
+     * @param {number} bridge_yaw
+     * @param {boolean} has_bridge_yaw
+     * @param {number} dt
+     */
+    update(ax, ay, az, gx, gy, gz, bridge_yaw, has_bridge_yaw, dt) {
+        wasm.rustimutracker_update(this.__wbg_ptr, ax, ay, az, gx, gy, gz, bridge_yaw, has_bridge_yaw, dt);
+    }
+}
+if (Symbol.dispose) RustImuTracker.prototype[Symbol.dispose] = RustImuTracker.prototype.free;
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -859,6 +1280,9 @@ function __wbg_get_imports() {
         __wbg_destination_9a4d8f898e5c0a0b: function(arg0) {
             const ret = arg0.destination;
             return ret;
+        },
+        __wbg_disableVertexAttribArray_5c66375eba552ee7: function(arg0, arg1) {
+            arg0.disableVertexAttribArray(arg1 >>> 0);
         },
         __wbg_disable_2ead6c11cefd0322: function(arg0, arg1) {
             arg0.disable(arg1 >>> 0);
@@ -1201,6 +1625,12 @@ const __wbindgen_enum_OscillatorType = ["sine", "square", "sawtooth", "triangle"
 const EngineFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_engine_free(ptr, 1));
+const RustBlinkClassifierFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustblinkclassifier_free(ptr, 1));
+const RustImuTrackerFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustimutracker_free(ptr, 1));
 
 function addToExternrefTable0(obj) {
     const idx = wasm.__externref_table_alloc();
@@ -1329,6 +1759,13 @@ function handleError(f, args) {
 
 function isLikeNone(x) {
     return x === undefined || x === null;
+}
+
+function passArrayF32ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 4, 4) >>> 0;
+    getFloat32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
 }
 
 function passStringToWasm0(arg, malloc, realloc) {
