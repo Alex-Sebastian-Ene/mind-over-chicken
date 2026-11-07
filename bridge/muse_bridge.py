@@ -27,6 +27,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import random
 import shutil
 import signal
@@ -487,11 +488,21 @@ class Bridge:
             log.debug("bluez reset skipped: %s", exc)
 
     async def async_release_board(self):
+        task = asyncio.create_task(asyncio.to_thread(self.release_board))
         try:
-            await asyncio.wait_for(asyncio.to_thread(self.release_board), timeout=4.0)
+            await asyncio.wait_for(asyncio.shield(task), timeout=4.0)
         except asyncio.TimeoutError:
             log.warning("release_board timed out; forcing BlueZ disconnect")
             await asyncio.to_thread(self._reset_bluez_muse)
+            try:
+                await asyncio.wait_for(task, timeout=2.0)
+            except asyncio.TimeoutError:
+                log.warning("BrainFlow C++ mutex wedged; restarting bridge process cleanly")
+                try:
+                    os.closerange(3, 1024)
+                except Exception:
+                    pass
+                os.execv(sys.executable, [sys.executable] + sys.argv)
 
     def release_board(self):
         board, self.board = self.board, None
