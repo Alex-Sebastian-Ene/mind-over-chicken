@@ -332,6 +332,7 @@ export class EegPanel {
           <p data-wiz-sub>Smoothly follow the glowing white dot with your head as it sweeps out to each boundary, pauses at the edge, and reverses back through Center. <b>DO NOT BLINK</b>.</p>
         </div>
         <div class="calib-wiz-actions">
+          <button type="button" class="btn btn-small btn-primary" data-wiz-lock hidden>Lock Point</button>
           <button type="button" class="btn btn-small" data-wiz-skip>Skip Step</button>
           <button type="button" class="btn btn-small" data-wiz-close>Close <kbd>Esc</kbd></button>
         </div>
@@ -390,8 +391,8 @@ export class EegPanel {
     this.wiz.closeBtn?.addEventListener('click', () => this.closeWizard());
     this.wiz.skipBtn?.addEventListener('click', () => this.advanceWizardPhase());
     this.wiz.lockBtn?.addEventListener('click', () => this.lockCurrentDotManually());
-    this.wiz.canvas.addEventListener('click', () => {
-      if (this.wiz?.active && this.wiz.phase === 'motion') {
+    this.wiz.canvas?.addEventListener('click', () => {
+      if (this.wiz?.active && this.wiz.phase === 'motion' && this.wiz.lockBtn && !this.wiz.lockBtn.hidden) {
         this.lockCurrentDotManually();
       }
     });

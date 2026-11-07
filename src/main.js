@@ -381,6 +381,7 @@ function render() {
   }
   lowCtx.imageSmoothingEnabled = false;
   lowCtx.setTransform(1, 0, 0, 1, 0, 0);
+  lowCtx.clearRect(0, 0, W, H);
   // 3D only on the surface itself: once the globe zoom starts, the flat 2D map takes over (the
   // 3D camera has already tipped over to that exact frame, so the hand-over is seamless).
   G.render3d = in3dSurface();
@@ -413,6 +414,7 @@ function render() {
     try {
       if (surface && G.render3d) {
         engine.upload_canvas(low);
+        G.world?.draw3d?.(engine);
         if (scene.draw3d) {
           scene.draw3d(engine, 0.016);
         } else if (scene.lights) {
