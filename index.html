@@ -153,11 +153,29 @@
 </section>
 
 <section class="overlay fail-screen" id="failScreen" hidden aria-live="assertive">
-  <div class="card">
-    <p class="eyebrow">Collapse</p>
-    <h2 id="failReason">The tribe has perished.</h2>
-    <p class="goal">Only this era restarts. Everything you built before it stays.</p>
-    <button type="button" class="btn btn-primary" id="retryBtn">Retry this era <kbd>Enter</kbd></button>
+  <div class="card fail-card">
+    <p class="eyebrow" id="failEyebrow">Collapse</p>
+    <h2 id="failHeading">The era has ended</h2>
+    <div class="fail-body">
+      <div class="fail-cause-box">
+        <span class="fail-label">What happened</span>
+        <p class="fail-cause" id="failCause">The tribe froze in the dark.</p>
+      </div>
+      <div class="fail-advice-box">
+        <span class="fail-label">Next step</span>
+        <p class="fail-advice" id="failAdvice">Blink directly on the fire pit to strike and kindle the flame.</p>
+      </div>
+    </div>
+    <div class="fail-actions">
+      <button type="button" class="btn btn-primary" id="retryBtn">Retry era <kbd>Enter</kbd></button>
+      <button type="button" class="btn" id="assistBtn" title="Toggle easier pacing (Key A)">Assist: <span id="assistState">Off</span></button>
+      <button type="button" class="btn" id="showHowBtn" title="View controls and tips (Key ?)">Controls <kbd>?</kbd></button>
+      <button type="button" class="btn" id="quitTitleBtn" title="Return to title screen (Key Esc)">Quit to Title</button>
+    </div>
+    <div class="fail-feedback">
+      <button type="button" class="feedback-link" id="biometricFeedbackBtn">Was this your input or the game?</button>
+      <p class="feedback-ack" id="biometricFeedbackAck" hidden>Tolerance widened! Your biometric sensitivity has been softened for the next attempt.</p>
+    </div>
   </div>
 </section>
 

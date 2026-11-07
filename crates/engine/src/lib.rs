@@ -1,3 +1,4 @@
+pub mod agents;
 pub mod audio;
 pub mod biosignal;
 mod camera3d;
@@ -8,6 +9,7 @@ mod gl;
 mod gl3d;
 mod math3d;
 mod mesh3d;
+pub mod particles;
 pub mod shell;
 mod sprites;
 mod terrain;
@@ -303,9 +305,23 @@ impl Engine {
 
     fn get_terrain_height_at(&self, x: f32, z: f32) -> f32 {
         if let Some(t) = &self.terrain {
-            let px = (x.round().max(0.0) as usize).min(W - 1);
-            let pz = (z.round().max(0.0) as usize).min(H - 1);
-            t.h[pz * W + px]
+            let map_w = W as f32;
+            let map_h = H as f32;
+            let wx = x.rem_euclid(map_w);
+            let wz = z.rem_euclid(map_h);
+            let x0 = wx.floor() as usize;
+            let z0 = wz.floor() as usize;
+            let x1 = (x0 + 1) % W;
+            let z1 = (z0 + 1) % H;
+            let fx = wx - wx.floor();
+            let fz = wz - wz.floor();
+            let h00 = t.h[z0 * W + x0];
+            let h10 = t.h[z0 * W + x1];
+            let h01 = t.h[z1 * W + x0];
+            let h11 = t.h[z1 * W + x1];
+            let h0 = h00 * (1.0 - fx) + h10 * fx;
+            let h1 = h01 * (1.0 - fx) + h11 * fx;
+            h0 * (1.0 - fz) + h1 * fz
         } else {
             0.33
         }
@@ -320,9 +336,13 @@ impl Engine {
         frame: u32,
         variant: u32,
     ) {
-        let h_norm = self.get_terrain_height_at(x, z);
-        let ground_y = (h_norm * 24.0).max(7.92); // Never sink below sea level
-        let center = [x, ground_y, z];
+        let map_w = W as f32;
+        let map_h = H as f32;
+        let wx = x.rem_euclid(map_w);
+        let wz = z.rem_euclid(map_h);
+        let h_norm = self.get_terrain_height_at(wx, wz);
+        let ground_y = (h_norm * 24.0).max(7.92) + 0.15; // Slightly above ground so feet never clip into slopes
+        let center = [wx, ground_y, wz];
 
         // Soft ground contact shadow beneath entities, trees, and structures
         let shadow_variant = match sprite_id {
@@ -791,79 +811,154 @@ impl Engine {
         self.terrain
             .as_ref()
             .map(|t| t.sites.village.x)
-            .unwrap_or(150)
+            .unwrap_or(116)
     }
     pub fn get_site_village_y(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.village.y)
-            .unwrap_or(102)
+            .unwrap_or(100)
     }
 
     pub fn get_site_pad_x(&self) -> i32 {
-        self.terrain.as_ref().map(|t| t.sites.pad.x).unwrap_or(262)
+        self.terrain.as_ref().map(|t| t.sites.pad.x).unwrap_or(198)
     }
     pub fn get_site_pad_y(&self) -> i32 {
         self.terrain.as_ref().map(|t| t.sites.pad.y).unwrap_or(104)
     }
 
     pub fn get_site_cave_x(&self) -> i32 {
-        self.terrain.as_ref().map(|t| t.sites.cave.x).unwrap_or(130)
+        self.terrain.as_ref().map(|t| t.sites.cave.x).unwrap_or(96)
     }
     pub fn get_site_cave_y(&self) -> i32 {
-        self.terrain.as_ref().map(|t| t.sites.cave.y).unwrap_or(82)
+        self.terrain.as_ref().map(|t| t.sites.cave.y).unwrap_or(80)
     }
 
     pub fn get_site_cave_mouth_x(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.cave_mouth.x)
-            .unwrap_or(130)
+            .unwrap_or(96)
     }
     pub fn get_site_cave_mouth_y(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.cave_mouth.y)
-            .unwrap_or(82)
+            .unwrap_or(80)
     }
 
     pub fn get_site_factory_x(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.factory.x)
-            .unwrap_or(104)
+            .unwrap_or(70)
     }
     pub fn get_site_factory_y(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.factory.y)
-            .unwrap_or(128)
+            .unwrap_or(126)
     }
 
     pub fn get_site_exchange_x(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.exchange.x)
-            .unwrap_or(168)
+            .unwrap_or(134)
     }
     pub fn get_site_exchange_y(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.exchange.y)
-            .unwrap_or(92)
+            .unwrap_or(90)
     }
 
     pub fn get_site_hangar_x(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.hangar.x)
-            .unwrap_or(236)
+            .unwrap_or(172)
     }
     pub fn get_site_hangar_y(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.hangar.y)
             .unwrap_or(114)
+    }
+
+    pub fn get_site_fire_x(&self) -> i32 {
+        self.terrain
+            .as_ref()
+            .map(|t| t.sites.fire.x)
+            .unwrap_or(116)
+    }
+    pub fn get_site_fire_y(&self) -> i32 {
+        self.terrain
+            .as_ref()
+            .map(|t| t.sites.fire.y)
+            .unwrap_or(100)
+    }
+
+    pub fn get_terrain_field(&mut self, tx: i32, ty: i32) -> Vec<i16> {
+        if let Some(t) = &mut self.terrain {
+            t.field(tx, ty).to_vec()
+        } else {
+            vec![-1i16; 320 * 180]
+        }
+    }
+
+    pub fn get_terrain_sea_field(&mut self, tx: i32, ty: i32) -> Vec<i16> {
+        if let Some(t) = &mut self.terrain {
+            t.sea_field(tx, ty).to_vec()
+        } else {
+            vec![-1i16; 320 * 180]
+        }
+    }
+
+    pub fn is_terrain_reachable(&mut self, x: i32, y: i32) -> bool {
+        if let Some(t) = &mut self.terrain {
+            t.reachable(x, y)
+        } else {
+            false
+        }
+    }
+
+    pub fn set_terrain_biome(&mut self, biome_name: &str) {
+        let biome = match biome_name {
+            "desert" => terrain::BiomeType::Desert,
+            "ice" => terrain::BiomeType::Ice,
+            "jungle" => terrain::BiomeType::Jungle,
+            "alien" => terrain::BiomeType::Alien,
+            _ => terrain::BiomeType::Temperate,
+        };
+        if let Some(t) = &mut self.terrain {
+            t.biome = biome;
+            t.palette = terrain::BiomePalette::for_biome(biome);
+            t.bake_era(self.game.era_index as u8);
+            if let Some(r3d) = &mut self.renderer_3d {
+                r3d.upload_terrain_texture(&t.pixels, 320, 180);
+            }
+        }
+    }
+
+    pub fn get_tree_count(&self) -> usize {
+        self.terrain.as_ref().map(|t| t.trees.len()).unwrap_or(0)
+    }
+
+    pub fn get_tree_x(&self, idx: usize) -> i32 {
+        self.terrain.as_ref().and_then(|t| t.trees.get(idx)).map(|tr| tr.x).unwrap_or(0)
+    }
+
+    pub fn get_tree_y(&self, idx: usize) -> i32 {
+        self.terrain.as_ref().and_then(|t| t.trees.get(idx)).map(|tr| tr.y).unwrap_or(0)
+    }
+
+    pub fn get_tree_variant(&self, idx: usize) -> u32 {
+        self.terrain.as_ref().and_then(|t| t.trees.get(idx)).map(|tr| tr.variant).unwrap_or(0)
+    }
+
+    pub fn get_continent_count(&self) -> usize {
+        self.terrain.as_ref().map(|t| t.continents.len()).unwrap_or(0)
     }
 
     pub fn bind_dom_shell(&mut self) -> Result<(), JsValue> {

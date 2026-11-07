@@ -346,6 +346,25 @@ impl Era for StoneAge {
             }
         }
 
+        // Direct lightning strike kills person
+        for p in &mut self.people {
+            if p.alive {
+                let dp = ((aim_x - p.x).powi(2) + (aim_y - p.y).powi(2)).sqrt();
+                if dp < 9.0 {
+                    p.alive = false;
+                    events.push(EraEvent::StatAddSmitten);
+                    events.push(EraEvent::AdvisorSay {
+                        key: "smitten-person".to_string(),
+                        text: "A direct lightning strike! You smote a villager. The tribe trembles in fear.".to_string(),
+                        mood: "nervous".to_string(),
+                        priority: 3,
+                        cooldown: 3.0,
+                    });
+                    break;
+                }
+            }
+        }
+
         events
     }
 
@@ -433,5 +452,16 @@ mod tests {
         assert!(stone.is_failed().is_some());
         let reason = stone.is_failed().unwrap();
         assert!(reason.contains("starved"), "Failure must explain starvation: {}", reason);
+    }
+
+    #[test]
+    fn test_stone_age_lightning_kills_person() {
+        let mut stone = StoneAge::new();
+        assert!(stone.people[0].alive);
+        let px = stone.people[0].x;
+        let py = stone.people[0].y;
+        let events = stone.on_blink(px, py);
+        assert!(!stone.people[0].alive, "Direct lightning strike must smite/kill villager");
+        assert!(events.contains(&EraEvent::StatAddSmitten));
     }
 }
