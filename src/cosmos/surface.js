@@ -148,6 +148,7 @@ export class PlanetSurface {
     gctx.drawImage(this.built, 0, 0, VW, VH, 0, 0, W, H);
     this.globeLayer = g;
     this.structs = structs.map((s) => ({ kind: s.kind, x: s.x / 2, y: s.y / 2 }));
+    this.placedStructs = structs;
     return true;
   }
 
@@ -285,6 +286,24 @@ export class PlanetSurface {
   worldOffsets(sx) { return sx > VW - W ? [-sx, VW - sx] : [-sx]; }
   screenOf(x, y) { return { x: wrapX(x - this.sx), y: y - this.sy }; }
 
+  getVisibleHeightmap() {
+    if (!this.v?.height) return this.world?.h || null;
+    if (!this._heightSlice) this._heightSlice = new Float32Array(W * H);
+    const sx = Math.round(this.camX);
+    const sy = Math.round(this.camY);
+    const vh = this.v.height;
+    for (let y = 0; y < H; y++) {
+      const vy = wrapY(sy + y);
+      const rowOffsetV = vy * VW;
+      const rowOffsetSlice = y * W;
+      for (let x = 0; x < W; x++) {
+        const vx = wrapX(sx + x);
+        this._heightSlice[rowOffsetSlice + x] = vh[rowOffsetV + vx];
+      }
+    }
+    return this._heightSlice;
+  }
+
   // ---- scene interface ----
   draw(ctx) {
     const sx = (this.sx = Math.round(this.camX)), sy = (this.sy = Math.round(this.camY));
@@ -292,6 +311,11 @@ export class PlanetSurface {
     ctx.drawImage(this.built, sx, sy, w1, H, 0, 0, w1, H);
     if (w1 < W) ctx.drawImage(this.built, 0, sy, W - w1, H, w1, 0, W - w1, H);
     this.drawGlints(ctx, sx, sy);
+    if (globalThis.__moc_render3d) {
+      this.tribeVisible = true;
+      for (const ox of this.worldOffsets(sx)) { ctx.save(); ctx.translate(ox, -sy); this.particles.draw(ctx); ctx.restore(); }
+      return;
+    }
     for (const list of this.walkers.values()) {
       for (const a of list) {
         const q = this.screenOf(a.x, a.y);
@@ -311,6 +335,90 @@ export class PlanetSurface {
       }
     }
     for (const ox of this.worldOffsets(sx)) { ctx.save(); ctx.translate(ox, -sy); this.particles.draw(ctx); ctx.restore(); }
+  }
+
+  draw3d(engine, _dt) {
+    const sx = this.sx, sy = this.sy;
+
+    // 1. Point lights for lightning bolts, fires, and settlements
+    if (this.sim && this.tribeVisible) {
+      const sc = this.sim.scene;
+      for (const o of this.tileOffsets(sx, sy)) {
+        if (sc.bolts) {
+          for (const b of sc.bolts) {
+            const e = b.pts[b.pts.length - 1];
+            engine.add_3d_light(o.x + e.x, 12.0, o.y + e.y, 50.0, 2.2);
+          }
+        }
+        if (sc.fire?.lit) {
+          engine.add_3d_light(o.x + sc.fire.x, 10.0, o.y + sc.fire.y, 25.0 + sc.fire.heat * 30.0 + Math.sin(this.t * 13) * 1.5, 1.8);
+        }
+      }
+    }
+    for (const b of this.bolts) {
+      const e = b.pts[b.pts.length - 1];
+      const q = this.screenOf(e.x, e.y);
+      if (q.x >= 0 && q.x <= W && q.y >= 0 && q.y <= H) {
+        engine.add_3d_light(q.x, 12.0, q.y, 50.0, 2.2);
+      }
+    }
+    for (const s of this.plan) {
+      const q = this.screenOf(s.x, s.y);
+      if (q.x >= -20 && q.x <= W + 20 && q.y >= -20 && q.y <= H + 20) {
+        engine.add_3d_light(q.x, 8.0, q.y, 14.0 + s.size * 6.0, 1.3);
+      }
+    }
+
+    // 2. Upright 3D structures (SPRITE_HUT=5, SPRITE_HOUSE=6, SPRITE_TOWER=7, SPRITE_FACTORY=8, SPRITE_PAD=11)
+    if (this.placedStructs) {
+      for (const b of this.placedStructs) {
+        const q = this.screenOf(b.x, b.y);
+        if (q.x < -16 || q.x > W + 16 || q.y < -16 || q.y > H + 16) continue;
+        const spriteId = b.kind === 'hut' ? 5 : b.kind === 'house' ? 6 : b.kind === 'tower' ? 7 : b.kind === 'factory' ? 8 : b.kind === 'pad' ? 11 : 5;
+        engine.add_billboard(spriteId, q.x, q.y, 1, 0, 0);
+      }
+    }
+
+    // 3. Walkers (villagers moving between settlements)
+    for (const list of this.walkers.values()) {
+      for (const a of list) {
+        const q = this.screenOf(a.x, a.y);
+        if (q.x < -10 || q.x > W + 10 || q.y < -10 || q.y > H + 10) continue;
+        engine.add_billboard(0, q.x, q.y, a.facing || 1, a.frame || 0, 0);
+      }
+    }
+
+    // 4. Tribe inside capital (if visible on screen)
+    if (this.sim && this.tribeVisible) {
+      const sc = this.sim.scene;
+      for (const o of this.tileOffsets(sx, sy)) {
+        if (sc.fire) {
+          engine.add_billboard(4, o.x + sc.fire.x, o.y + sc.fire.y, 1, Math.floor(this.t * 6) % 3, sc.fire.lit ? 0 : 1);
+        }
+        if (sc.mammoths) {
+          for (const m of sc.mammoths) {
+            const mx = o.x + m.x, my = o.y + m.y;
+            if (mx < -20 || mx > W + 20 || my < -20 || my > H + 20) continue;
+            engine.add_billboard(1, mx, my, m.facing || 1, m.frame || 0, m.dead ? 1 : 0);
+          }
+        }
+        if (sc.people) {
+          for (const p of sc.people) {
+            if (!p.alive && (p.deadT || 0) > 12) continue;
+            const px = o.x + p.x, py = o.y + p.y;
+            if (px < -10 || px > W + 10 || py < -10 || py > H + 10) continue;
+            const pose = !p.alive ? 3 : p.state === 'dance' ? 1 : p.state === 'cower' ? 2 : 0;
+            engine.add_billboard(0, px, py, p.facing || 1, p.frame || 0, pose);
+          }
+        }
+        if (sc.chicken) {
+          const cx = o.x + sc.chicken.x, cy = o.y + sc.chicken.y;
+          if (cx >= -10 && cx <= W + 10 && cy >= -10 && cy <= H + 10) {
+            engine.add_billboard(3, cx, cy, sc.chicken.facing || 1, sc.chicken.frame || 0, 0);
+          }
+        }
+      }
+    }
   }
 
   drawGlints(ctx, sx, sy) {
