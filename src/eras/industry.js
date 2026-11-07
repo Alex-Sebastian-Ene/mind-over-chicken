@@ -375,4 +375,116 @@ export class Industry {
     if (this.tickerX < -tw) this.tickerX = W;
     ctx.fillText(text, this.tickerX, H - 2.2);
   }
+
+  // ---- camera (#33): hand casts and face mood. Extra inputs on top of the brain, never instead of it. ----
+
+  // aim is 0..1 like the brain's.
+  onCast(spell, aim) {
+    const G = this.G;
+    if (!G || this.done) return;
+    const w = G.world, ex = w.sites.exchange, picket = w.sites.picket;
+    const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
+    switch (spell) {
+      case 'fireball': {
+        // No lightning power in this era, so the fist throws a fireball. It frightens whoever it lands near.
+        G.stats.lightning++;
+        G.audio.thunder();
+        G.shake = Math.max(G.shake || 0, 0.8);
+        this.particles.burst(22, () => ({ x, y, vx: rand(-30, 30), vy: rand(-40, 5), g: 50, life: 0.7, maxLife: 0.7, size: 1, color: pick(['#fff4c2', '#ffd166', '#ff9a2e', '#e8452c']) }));
+        for (const a of this.agents) if (dist(x, y, a.x, a.y) < 16) a.fear = clamp(a.fear + 0.35);
+        if (dist(x, y, ex.x, ex.y) < 12) { this.price *= 0.95; this.headlines.push('FIREBALL HITS THE GOAT EXCHANGE; TRADERS "FINE"'); }
+        floater(this.particles, x, y - 8, 'fireball', '#ff9a2e', 7);
+        break;
+      }
+      case 'spawn': {
+        // Open palm: goats from heaven, straight into GDP.
+        this.gdp += 30;
+        const at = w.walkable(x, y) ? { x, y } : w.randomLand(ex.x, ex.y + 6, 1, 6);
+        for (let i = 0; i < 2 && this.goats.length < 24; i++) this.goats.push({ x: at.x + rand(-2, 2), y: at.y + rand(-1, 1), frame: 0, ft: 0, facing: 1, side: 1, spot: null });
+        floater(this.particles, at.x, at.y - 8, '+2 goats · +30 GDP', '#ffcf5c', 6);
+        G.audio.coin();
+        this.headlines.push('GOATS FALL FROM THE SKY; GDP UP, ROOFS DOWN');
+        break;
+      }
+      case 'rain': {
+        // Victory: good rains. Fear eases and the hay harvest adds to GDP.
+        for (const a of this.agents) a.fear = clamp(a.fear - 0.2);
+        this.gdp += 10;
+        this.castRain(x);
+        floater(this.particles, x, 24, 'good rains · +10 GDP', '#9ec9ff', 6);
+        this.headlines.push('GOOD RAINS: HAY FUTURES CALM');
+        break;
+      }
+      case 'bless': {
+        this.confidence = clamp(this.confidence + 0.15, 0.5, 1.6);
+        for (const a of this.agents) a.unrest = clamp(a.unrest - 0.1);
+        this.particles.burst(20, () => ({ x: ex.x + rand(-10, 10), y: ex.y + rand(-8, 4), vx: rand(-3, 3), vy: rand(-14, -4), life: 1.2, maxLife: 1.2, size: 1, color: pick(['#ffe066', '#fff4c2']) }));
+        floater(this.particles, ex.x, ex.y - 14, 'confidence up', '#ffe066', 6);
+        G.audio.good();
+        this.headlines.push('GOD GIVES THE ECONOMY A THUMBS UP');
+        break;
+      }
+      case 'disaster': {
+        // Thumb down: a storm at the reticle. Business confidence crashes and nearby workers panic.
+        G.audio.thunder();
+        G.shake = Math.max(G.shake || 0, 2);
+        this.confidence = Math.max(0.5, this.confidence - 0.3);
+        this.momentum -= 0.015;
+        for (const a of this.agents) if (dist(x, y, a.x, a.y) < 40) a.fear = clamp(a.fear + 0.4);
+        this.castRain(x);
+        this.particles.burst(16, () => ({ x: x + rand(-8, 8), y: y - rand(0, 30), vx: 0, vy: 0, life: 0.25, maxLife: 0.25, size: 1, color: '#ffffff' }));
+        floater(this.particles, x, y - 12, 'STORM', '#9ec9ff', 9);
+        this.headlines.push('FREAK STORM; BUSINESS CONFIDENCE CRASHES');
+        G.advisor.say('cast-storm', 'A storm, bro? Business confidence just fell off a cliff. So did a goat.', { mood: 'panic', priority: 2, cooldown: 20 });
+        break;
+      }
+      case 'peace': {
+        // I-love-you: strikes and riots end, everyone goes back to work.
+        let calmed = 0;
+        for (const a of this.agents) {
+          if (a.state === 'strike' || a.state === 'riot') { a.state = 'commute'; a.spot = null; calmed++; }
+          a.unrest = Math.min(a.unrest, 0.2);
+          a.fear = clamp(a.fear - 0.2);
+        }
+        this.generalStrike = 0;
+        floater(this.particles, picket.x, picket.y - 8, calmed ? `${calmed} back to work` : 'peace', '#9be38a', 6);
+        this.headlines.push('GOD BROKERS PEACE AT THE MILL');
+        G.advisor.say('cast-peace', 'Peace at the mill. The strikers are back at work and the signs are going in a museum.', { mood: 'happy', priority: 1, cooldown: 25 });
+        break;
+      }
+    }
+  }
+
+  castRain(cx) {
+    this.particles.burst(60, () => ({ x: cx + rand(-60, 60), y: rand(-10, H * 0.7), vx: -4, vy: rand(70, 100), life: rand(0.5, 1), maxLife: 1, size: 1, color: 'rgba(158,201,255,0.75)' }));
+  }
+
+  // Face mood. Joy calms the markets, anger adds volatility and unrest, surprise brings
+  // lightning, sadness darkens the sky.
+  onMood(mood) {
+    const G = this.G;
+    if (!G) return;
+    this.baseDarkness ??= this.darkness;
+    this.darkness = clamp(this.baseDarkness + (mood.dominant === 'sadness' ? 0.3 : 0), 0, 0.9);
+    if (this.done) return;
+    const first = mood.reason === 'change';
+    if (mood.dominant === 'joy') {
+      for (const a of this.agents) a.fear = clamp(a.fear - 0.12);
+      this.momentum *= 0.5;
+      this.confidence = clamp(this.confidence + 0.04, 0.5, 1.6);
+      if (first) this.headlines.push('GOD SMILES; GOAT INDEX STEADIES');
+    } else if (mood.dominant === 'anger') {
+      this.momentum += gauss() * 0.012;
+      for (const a of this.agents) { a.unrest = clamp(a.unrest + 0.1); a.fear = clamp(a.fear + 0.06); }
+      if (first) this.headlines.push('GOD SCOWLS; TRADERS SWEAT, WORKERS GRUMBLE');
+    } else if (mood.dominant === 'surprise') {
+      const fx = G.world.sites.factory;
+      G.audio.thunder();
+      G.shake = Math.max(G.shake || 0, 1);
+      this.particles.burst(18, () => ({ x: fx.x + rand(-6, 6), y: fx.y - 14 - rand(0, 40), vx: 0, vy: 0, life: 0.3, maxLife: 0.3, size: 1, color: '#ffffff' }));
+      if (first) this.headlines.push('LIGHTNING OVER THE MILL; NOBODY SAW IT COMING');
+    } else if (mood.dominant === 'sadness' && first) {
+      this.headlines.push('OVERCAST SKIES; ANALYSTS BLAME THE GOD\'S MOOD');
+    }
+  }
 }

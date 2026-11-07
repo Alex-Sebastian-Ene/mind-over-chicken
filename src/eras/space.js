@@ -264,6 +264,99 @@ export class SpaceAge {
       label(ctx, W / 2, 24, this.voyageT < 3.5 ? 'Leaving home.' : 'A new world.', '#f2e8d5', 12);
     }
   }
+
+  // ---- camera (#33): hand casts and face mood. Extra inputs on top of the brain, never instead of it. ----
+  // They never touch the countdown itself: that stays a focus-and-pulse challenge.
+
+  // aim is 0..1 like the brain's.
+  onCast(spell, aim) {
+    const G = this.G;
+    if (!G || this.done || this.phase === 'launch' || this.phase === 'voyage') return;
+    const pad = this.pad, crowd = G.world.sites.crowd;
+    const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
+    const watching = this.citizens.filter((c) => c.state !== 'aboard');
+    switch (spell) {
+      case 'fireball': {
+        G.stats.lightning++;
+        G.audio.thunder();
+        G.shake = Math.max(G.shake || 0, 0.8);
+        this.particles.burst(22, () => ({ x, y, vx: rand(-30, 30), vy: rand(-40, 5), g: 50, life: 0.7, maxLife: 0.7, size: 1, color: pick(['#fff4c2', '#ffd166', '#ff9a2e', '#e8452c']) }));
+        for (const c of watching) if (dist(x, y, c.x, c.y) < 20) c.courage = clamp(c.courage - 0.3);
+        floater(this.particles, x, y - 8, dist(x, y, pad.x, pad.y) < 12 ? 'engine test?' : 'fireball', '#ff9a2e', 6);
+        break;
+      }
+      case 'spawn': {
+        // Open palm: a crate of rocket parts lands on the pad.
+        const more = this.progress < 1;
+        if (more) this.progress = Math.min(1, this.progress + 0.08);
+        this.particles.burst(12, () => ({ x: pad.x + rand(-4, 4), y: pad.y - 20, vx: rand(-6, 6), vy: rand(15, 30), g: 40, life: 0.6, maxLife: 0.6, size: 1, color: pick(['#c7ccd6', '#e04a3a', '#3e8ed0', '#f2c14e']) }));
+        floater(this.particles, pad.x, pad.y - 30, more ? '+rocket parts' : 'spare parts', '#ffcf4a', 6);
+        G.audio.coin();
+        break;
+      }
+      case 'rain': {
+        for (const c of watching) c.courage = clamp(c.courage + 0.12);
+        this.castRain(x);
+        floater(this.particles, x, 24, 'cool rain', '#9ec9ff', 7);
+        break;
+      }
+      case 'bless': {
+        // Thumb up: courage. Citizens who were wavering decide to board.
+        for (const c of watching) c.courage = clamp(c.courage + 0.3);
+        this.particles.burst(20, () => ({ x: crowd.x + rand(-14, 14), y: crowd.y + rand(-8, 6), vx: rand(-3, 3), vy: rand(-14, -4), life: 1.2, maxLife: 1.2, size: 1, color: pick(['#ffe066', '#fff4c2']) }));
+        floater(this.particles, crowd.x, crowd.y - 14, 'courage!', '#ffe066', 7);
+        G.audio.good();
+        G.advisor.say('cast-bless', 'The crowd feels blessed. Three of them asked for window seats.', { mood: 'happy', priority: 1, cooldown: 25 });
+        break;
+      }
+      case 'disaster': {
+        G.audio.thunder();
+        G.shake = Math.max(G.shake || 0, 2);
+        this.castRain(x);
+        this.particles.burst(16, () => ({ x: x + rand(-8, 8), y: y - rand(0, 30), vx: 0, vy: 0, life: 0.25, maxLife: 0.25, size: 1, color: '#ffffff' }));
+        for (const c of watching) if (dist(x, y, c.x, c.y) < 40) c.courage = clamp(c.courage - 0.35);
+        if (this.phase === 'build' && dist(x, y, pad.x, pad.y) < 24 && this.progress > 0) {
+          this.progress = Math.max(0, this.progress - 0.05);
+          floater(this.particles, pad.x, pad.y - 30, 'storm damage', '#ff8a9c', 6);
+        } else floater(this.particles, x, y - 12, 'STORM', '#9ec9ff', 9);
+        G.advisor.say('cast-storm', 'A storm over the launch site? Flight Director to god: please stop.', { mood: 'panic', priority: 2, cooldown: 20 });
+        break;
+      }
+      case 'peace': {
+        for (const c of watching) { c.courage = clamp(c.courage + 0.1); if (c.state === 'flee') c.state = 'watch'; }
+        floater(this.particles, crowd.x, crowd.y - 14, 'peace', '#9be38a', 7);
+        break;
+      }
+    }
+  }
+
+  castRain(cx) {
+    this.particles.burst(60, () => ({ x: cx + rand(-60, 60), y: rand(-10, H * 0.7), vx: -4, vy: rand(70, 100), life: rand(0.5, 1), maxLife: 1, size: 1, color: 'rgba(158,201,255,0.75)' }));
+  }
+
+  // Face mood. Joy and anger push the crowd's courage up or down, surprise flashes the sky,
+  // sadness dims the launch site.
+  onMood(mood) {
+    const G = this.G;
+    if (!G) return;
+    this.baseDarkness ??= this.darkness;
+    this.darkness = clamp(this.baseDarkness + (mood.dominant === 'sadness' ? 0.3 : 0), 0, 0.9);
+    if (this.done || this.phase === 'launch' || this.phase === 'voyage') return;
+    const crowd = G.world.sites.crowd, first = mood.reason === 'change';
+    const watching = this.citizens.filter((c) => c.state !== 'aboard');
+    if (mood.dominant === 'joy') {
+      for (const c of watching) c.courage = clamp(c.courage + 0.1);
+      if (first) floater(this.particles, crowd.x, crowd.y - 14, 'the crowd cheers', '#9be38a', 6);
+    } else if (mood.dominant === 'anger') {
+      for (const c of watching) c.courage = clamp(c.courage - 0.06);
+      if (first) floater(this.particles, crowd.x, crowd.y - 14, 'uneasy murmurs', '#ff8a9c', 6);
+    } else if (mood.dominant === 'surprise') {
+      G.audio.thunder();
+      G.shake = Math.max(G.shake || 0, 1);
+      const sx = rand(30, W - 30);
+      this.particles.burst(18, () => ({ x: sx + rand(-4, 4), y: rand(0, 50), vx: 0, vy: 0, life: 0.3, maxLife: 0.3, size: 1, color: '#ffffff' }));
+    }
+  }
 }
 
 // A small alien planet texture for the finale.

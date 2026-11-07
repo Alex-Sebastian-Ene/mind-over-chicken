@@ -173,6 +173,17 @@ export class FarmingToKingdoms {
       label(ctx, W / 2, 84, 'Rich and poor split. Unrest simmers.', '#ffd166', 7);
     }
   }
+
+  // ---- camera (#33): the montage has no gameplay to change, so casts and moods show a label. ----
+  onCast(spell, aim) {
+    const text = MONTAGE_CASTS[spell];
+    if (text) floater(this.particles, aim.x * (W - 1), aim.y * (H - 1) - 6, text, '#ffd166', 6);
+  }
+
+  onMood(mood) {
+    const text = MONTAGE_MOODS[mood.dominant];
+    if (text && mood.reason === 'change') floater(this.particles, W / 2, 52, text, '#9ec9ff', 6);
+  }
 }
 
 export class InfoAge {
@@ -217,4 +228,29 @@ export class InfoAge {
     label(ctx, W / 2, 26, `${Math.floor(clamp(this.t / 6) * 300)} years later`, '#f2e8d5', 13);
     label(ctx, W / 2, 38, this.t < 3 ? 'The goats went digital.' : 'Everyone looks up.', '#9ec9ff', 7);
   }
+
+  // ---- camera (#33): this short bridge draws no particles, so the advisor reads the label out. ----
+  onCast(spell) {
+    const text = MONTAGE_CASTS[spell];
+    if (text) this.G?.advisor.say(`cast-info-${spell}`, `Even in the montage: ${text}.`, { priority: 2, cooldown: 2 });
+  }
+
+  onMood() {}
 }
+
+// camera (#33): what a cast or a mood looks like from ten thousand years away.
+const MONTAGE_CASTS = {
+  point: 'the god points at something',
+  fireball: 'a fireball, history looks away',
+  spawn: 'a bumper harvest',
+  rain: 'spring rain on the fields',
+  bless: 'a golden age',
+  disaster: 'a great flood',
+  peace: 'a long peace',
+};
+const MONTAGE_MOODS = {
+  joy: 'the god smiles on the harvest',
+  anger: 'the god frowns; the scholars sweat',
+  surprise: 'the sky flashes',
+  sadness: 'a grey century',
+};
