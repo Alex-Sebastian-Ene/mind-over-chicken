@@ -11,6 +11,9 @@ Frame:
      "blink": false,                  # deliberate blink since the previous frame
      "hr": 71.2 | null,               # heart rate from PPG, bpm
      "accel": [x, y, z] | null,       # accelerometer, g
+     "gyro": [x, y, z] | null,        # gyroscope, deg/s (null if the board has none)
+     "orientation": {"pitch": .., "roll": .., "yaw": ..} | null,
+                                      # fused head orientation, degrees (see HeadTracker)
      "motion": 0.0,                   # head movement, 0..1
      "quality": 1.0}                  # crude EEG signal quality, 0..1
 Status (on connect and whenever it changes):
@@ -67,6 +70,16 @@ HR_EVERY = 2.0            # seconds between heart-rate updates
 HR_SECONDS = 15.0         # PPG history used per estimate (BrainFlow needs fft_size >= 1024)
 ACCEL_FRAME = 0.1         # seconds of accelerometer averaged into "accel"
 ACCEL_SHAKE = 0.3         # seconds of accelerometer used for the shake term
+IMU_WINDOW = 0.5          # seconds of accel/gyro read per frame; new samples are picked by timestamp
+ACCEL_MIN_G = 0.3         # |accel| below this is a dropped sample or free fall: no gravity to fuse
+TILT_TAU = 1.0            # s, complementary filter: alpha = TILT_TAU / (TILT_TAU + dt) = 0.98 at 52 Hz
+YAW_RECENTER_TAU = 20.0   # s, yaw leaks back to 0 with this time constant, so gyro drift can't pile up
+GYRO_BIAS_INIT = 1.0      # s of still gyro averaged into the first bias estimate (yaw holds 0 until then)
+GYRO_BIAS_TAU = 10.0      # s, afterwards the bias follows the gyro slowly while the head is still
+GYRO_BIAS_REACQUIRE = 5.0 # s of steady gyro far from the bias estimate that replace the estimate
+GYRO_STILL = 4.0          # deg/s, |gyro - bias| under this counts as "head still"
+GYRO_MOTION_FLOOR = 5.0   # deg/s of head rotation that still reads as motion 0
+GYRO_MOTION_FULL = 125.0  # deg/s of head rotation that reads as motion 1 (a quick nod or turn)
 STALL_STATUS = 3.0        # seconds without new EEG before telling the browser
 STALL_RECONNECT = 12.0    # seconds without new EEG before reconnecting
 RETRY_DELAY = 3.0         # seconds between connection attempts
@@ -81,7 +94,7 @@ def clamp(x, lo=0.0, hi=1.0):
 def finite(x, ndigits=4, default=0.0):
     """JSON-safe float: the browser's JSON.parse rejects NaN/Infinity."""
     x = float(x)
-    return round(x, ndigits) if math.isfinite(x) else default
+    return round(x, ndigits) + 0.0 if math.isfinite(x) else default   # + 0.0: no "-0.0" in JSON
 
 
 def next_pow2(n):
@@ -148,6 +161,131 @@ def frontal_rows(board_id, eeg_channels):
     return rows, labels
 
 
+class HeadTracker:
+    """Head orientation from accelerometer + gyroscope: a complementary filter in plain Python
+    (no numpy or BrainFlow), so tests can drive it with synthetic samples.
+
+    Axes are the IMU's own. BrainFlow passes the Muse's through unchanged, accel in g and gyro in
+    deg/s. The filter assumes accel and gyro share one right-handed frame, as on any single-chip IMU.
+    It does not assume which axis points up.
+
+    Tilt: `up` is the unit vector a still accelerometer reads (the reaction to gravity, pointing up),
+    in the head frame. Each sample rotates it by the bias-corrected gyro (du/dt = u x w, w in rad/s)
+    and then blends it toward the measured accel direction:
+        u = normalise(alpha * u_gyro + (1 - alpha) * a / |a|),   alpha = tilt_tau / (tilt_tau + dt)
+    The gyro gives the fast response and gravity removes its drift. alpha is 0.98 at the Muse's 52 Hz.
+        pitch = atan2(u_x, hypot(u_y, u_z))   elevation of the IMU x axis above the horizontal
+        roll  = atan2(u_y, hypot(u_x, u_z))   elevation of the IMU y axis
+    These are the accel-only tilt formulas applied to the fused vector, so the zero point and signs
+    match the raw "accel" values: pitch rises with accel x, roll with accel y.
+
+    Yaw: rotation about the vertical. It integrates the gyro component along `up` (gyro z when the
+    head is level) and is positive for a turn to the right, clockwise seen from above. Gravity can't
+    see yaw, so yaw leaks back toward 0 with time constant `yaw_tau`. Bias left in the gyro then
+    gives a bounded offset (bias x yaw_tau) instead of an endless spin.
+
+    Gyro bias: a "steady window" averages the gyro and restarts whenever a sample is more than
+    `still` deg/s from its mean. The first `bias_init` seconds of steady gyro give the first
+    estimate. After that the bias follows a slow average (`bias_tau`) of samples within `still`
+    deg/s of it. If the window stays steady for `bias_reacquire` seconds at a value more than `still`
+    from the estimate, the estimate was wrong (the head was turning steadily while it was taken).
+    The window mean replaces it and yaw restarts at 0. Until the first estimate exists the gyro is
+    ignored: tilt comes from the accelerometer alone and yaw holds 0.
+    """
+
+    def __init__(self, tilt_tau=TILT_TAU, yaw_tau=YAW_RECENTER_TAU, bias_init=GYRO_BIAS_INIT,
+                 bias_tau=GYRO_BIAS_TAU, bias_reacquire=GYRO_BIAS_REACQUIRE, still=GYRO_STILL):
+        self.tilt_tau, self.yaw_tau = tilt_tau, yaw_tau
+        self.bias_init, self.bias_tau, self.bias_reacquire = bias_init, bias_tau, bias_reacquire
+        self.still = still
+        self.reset()
+
+    def reset(self):
+        self.up = None              # unit vector in the head frame; None until the first sample
+        self.yaw = 0.0              # degrees, positive = turned right
+        self.bias = None            # deg/s per axis, once estimated
+        self.rate = 0.0             # deg/s, bias-corrected rotation speed of the latest sample
+        self._reset_window()
+
+    def _reset_window(self):
+        self._win_sum, self._win_n, self._win_time = [0.0, 0.0, 0.0], 0, 0.0
+
+    def angles(self):
+        """(pitch, roll, yaw) in degrees, or None before the first usable sample."""
+        if self.up is None:
+            return None
+        ux, uy, uz = self.up
+        return (math.degrees(math.atan2(ux, math.hypot(uy, uz))),
+                math.degrees(math.atan2(uy, math.hypot(ux, uz))),
+                self.yaw)
+
+    def update(self, accel, gyro, dt):
+        """Feed one sample: accel [x, y, z] in g, gyro [x, y, z] in deg/s, dt in seconds.
+        Returns the bias-corrected rotation speed in deg/s (0 until the bias is known)."""
+        ax, ay, az = (float(v) for v in accel)
+        gx, gy, gz = (float(v) for v in gyro)
+        if dt <= 0 or not all(math.isfinite(v) for v in (ax, ay, az, gx, gy, gz)):
+            return self.rate
+        norm = math.sqrt(ax * ax + ay * ay + az * az)
+        meas = (ax / norm, ay / norm, az / norm) if norm > ACCEL_MIN_G else None
+        if self.up is None:
+            if meas is None:
+                return self.rate
+            self.up = meas
+
+        w = self._remove_bias(gx, gy, gz, dt)          # deg/s, or None while the bias is unknown
+        ux, uy, uz = self.up
+        if w is not None:
+            wx, wy, wz = (math.radians(v) for v in w)
+            # A world-fixed vector seen from a frame rotating at w changes as du/dt = u x w.
+            ux, uy, uz = (ux + (uy * wz - uz * wy) * dt,
+                          uy + (uz * wx - ux * wz) * dt,
+                          uz + (ux * wy - uy * wx) * dt)
+        if meas is not None:
+            alpha = self.tilt_tau / (self.tilt_tau + dt)
+            ux, uy, uz = (alpha * ux + (1 - alpha) * meas[0],
+                          alpha * uy + (1 - alpha) * meas[1],
+                          alpha * uz + (1 - alpha) * meas[2])
+        n = math.sqrt(ux * ux + uy * uy + uz * uz)
+        if n > 1e-9:
+            self.up = (ux / n, uy / n, uz / n)
+
+        if w is not None:
+            ux, uy, uz = self.up
+            # w . up is the turn rate about the vertical, counter-clockwise from above by the
+            # right-hand rule (a turn to the left), so negate it for "positive = right".
+            self.yaw -= (w[0] * ux + w[1] * uy + w[2] * uz) * dt
+            if math.isfinite(self.yaw_tau):
+                self.yaw *= math.exp(-dt / self.yaw_tau)
+            self.yaw = (self.yaw + 180.0) % 360.0 - 180.0
+            self.rate = math.sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2])
+        return self.rate
+
+    def _remove_bias(self, gx, gy, gz, dt):
+        g = (gx, gy, gz)
+        if self._win_n and math.dist(g, [s / self._win_n for s in self._win_sum]) > self.still:
+            self._reset_window()                                   # the gyro moved: not steady
+        self._win_sum = [s + v for s, v in zip(self._win_sum, g)]
+        self._win_n += 1
+        self._win_time += dt
+        if self.bias is None:
+            if self._win_time >= self.bias_init:
+                self.bias = [s / self._win_n for s in self._win_sum]
+                self._reset_window()
+            return None
+        if self._win_time >= self.bias_reacquire:
+            steady = [s / self._win_n for s in self._win_sum]
+            if math.dist(steady, self.bias) > self.still:
+                self.bias, self.yaw = steady, 0.0                  # the estimate was wrong
+            self._reset_window()
+        d = [gx - self.bias[0], gy - self.bias[1], gz - self.bias[2]]
+        if math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) < self.still and math.isfinite(self.bias_tau):
+            k = 1.0 - math.exp(-dt / self.bias_tau)
+            self.bias = [b + k * v for b, v in zip(self.bias, d)]
+            d = [gx - self.bias[0], gy - self.bias[1], gz - self.bias[2]]
+        return d
+
+
 class Bridge:
     def __init__(self, args):
         self.args = args
@@ -170,10 +308,18 @@ class Bridge:
             raise SystemExit(f"{self.label}: BrainFlow reports no EEG channels")
         self.frontal, frontal_labels = frontal_rows(bid, self.eeg.channels)
         self.accel = find_sensor(bid, BoardShim.get_accel_channels, [AUXILIARY, DEFAULT])
+        # The gyro is fused with the accelerometer sample by sample, so it must come from the same
+        # preset (same rate and timestamps). Muse 2/S and the synthetic board keep both in AUXILIARY.
+        # find_sensor only queries presets get_board_presets lists (see board_presets).
+        self.gyro = None
+        if self.accel is not None and len(self.accel.channels) == 3:
+            gyro = find_sensor(bid, BoardShim.get_gyro_channels, [self.accel.preset])
+            self.gyro = gyro if gyro is not None and len(gyro.channels) == 3 else None
         self.ppg = None if args.no_ppg else find_sensor(bid, BoardShim.get_ppg_channels,
                                                        [ANCILLARY, AUXILIARY, DEFAULT])
         log.info("EEG: %s, blink channels %s", self.eeg, "/".join(frontal_labels))
         log.info("Accelerometer: %s", self.accel or "not available")
+        log.info("Gyroscope: %s", self.gyro or "not available (orientation will be null)")
         log.info("PPG: %s", self.ppg or ("disabled (--no-ppg)" if args.no_ppg else "not available"))
 
         self.fake_blinks = bool(args.fake_blinks)
@@ -186,6 +332,9 @@ class Bridge:
         self.blink_armed = True
         self.prev_accel_mean = None
         self.motion = 0.0
+        self.head = HeadTracker()
+        self.imu_last_ts = None
+        self.imu_last_at = None
         self.hr_estimates = deque(maxlen=5)
         self.hr = None
         self.last_hr_at = -1e9
@@ -263,6 +412,8 @@ class Bridge:
                     extras.append("PPG")
                 if self.accel:
                     extras.append("accel")
+                if self.gyro:
+                    extras.append("gyro")
                 if self.fake_blinks:
                     extras.append(f"fake blinks every ~{self.args.fake_blink_every:g}s")
                 self.streaming_status = f"Streaming from {self.label}" + (f" ({', '.join(extras)})" if extras else "")
@@ -357,7 +508,7 @@ class Bridge:
         eeg_block = np.ascontiguousarray(np.vstack([rows[ch] for ch in eeg.channels]))
         bands = self.band_powers(eeg_block, fs)
         quality = self.signal_quality(eeg_block, now)
-        accel, motion = self.read_accel(board)
+        accel, gyro, orientation, motion = self.read_imu(board, now)
         blink = self.detect_blink([rows[ch] for ch in self.frontal], fs, now, motion)
         hr = self.read_hr(board, now)
 
@@ -367,6 +518,8 @@ class Bridge:
             "blink": bool(blink),
             "hr": hr,
             "accel": accel,
+            "gyro": gyro,
+            "orientation": orientation,
             "motion": finite(motion, 3),
             "quality": finite(quality, 3),
         }
@@ -441,28 +594,57 @@ class Bridge:
         log.debug("blink accepted ptp=%s corr=%.2f", np.round(ptp).tolist(), corr)
         return True
 
-    def read_accel(self, board):
+    def read_imu(self, board, now):
+        """Accelerometer, plus gyroscope when the board has one.
+        Returns (accel, gyro, orientation, motion); gyro and orientation are None without a gyro."""
         s = self.accel
         if s is None:
-            return None, 0.0
-        n_shake = max(2, int(round(ACCEL_SHAKE * s.fs)))
+            return None, None, None, 0.0
         try:
-            d = board.get_current_board_data(n_shake, s.preset)
+            d = board.get_current_board_data(max(2, int(round(IMU_WINDOW * s.fs))), s.preset)
         except BrainFlowError:
-            return None, 0.0
+            return None, None, None, 0.0
         if d.shape[1] == 0:
-            return None, 0.0
+            return None, None, None, 0.0
         acc = d[s.channels]                      # 3 x n, in g
         n_frame = max(1, int(round(ACCEL_FRAME * s.fs)))
+        n_shake = max(2, int(round(ACCEL_SHAKE * s.fs)))
         mean = acc[:, -n_frame:].mean(axis=1)   # latest reading, lightly averaged
         # Motion: change of the (low-passed) gravity vector since the last frame plus
         # a little within-window shake. ~0 when still, saturates on a quick nod or turn.
         jump = 0.0 if self.prev_accel_mean is None else float(np.linalg.norm(mean - self.prev_accel_mean))
         self.prev_accel_mean = mean
-        shake = float(np.linalg.norm(acc.std(axis=1))) if acc.shape[1] > 1 else 0.0
+        shake_win = acc[:, -n_shake:]
+        shake = float(np.linalg.norm(shake_win.std(axis=1))) if shake_win.shape[1] > 1 else 0.0
         raw = clamp((jump + 0.15 * shake - 0.015) / 0.12)
+
+        gyro = orientation = None
+        if self.gyro is not None:
+            gyr = d[self.gyro.channels]          # 3 x n, in deg/s
+            dt = 1.0 / s.fs
+            rates = [self.head.update(acc[:, i], gyr[:, i], dt) for i in self.new_imu_columns(d, s, now)]
+            if rates:
+                # Rotation is what the gyro sees best: a turn barely moves the gravity vector.
+                spin = sum(rates) / len(rates)
+                raw = max(raw, clamp((spin - GYRO_MOTION_FLOOR) / (GYRO_MOTION_FULL - GYRO_MOTION_FLOOR)))
+            gyro = [finite(v, 3) for v in gyr[:, -n_frame:].mean(axis=1)]
+            angles = self.head.angles()
+            if angles is not None:
+                orientation = {k: finite(v, 2) for k, v in zip(("pitch", "roll", "yaw"), angles)}
         self.motion = max(raw, self.motion * 0.7)   # fast attack, ~0.3 s decay
-        return [finite(v, 4) for v in mean], self.motion
+        return [finite(v, 4) for v in mean], gyro, orientation, self.motion
+
+    def new_imu_columns(self, d, s, now):
+        """Columns of `d` the head tracker hasn't seen yet, so each sample is integrated once.
+        Frames re-read the last IMU_WINDOW seconds; the timestamp row says which samples are new."""
+        n = d.shape[1]
+        if s.ts_channel is not None:
+            ts = d[s.ts_channel]
+            last, self.imu_last_ts = self.imu_last_ts, float(ts[-1])
+            return range(n) if last is None else [int(i) for i in np.nonzero(ts > last)[0]]
+        last, self.imu_last_at = self.imu_last_at, now     # no timestamps: go by wall-clock time
+        k = n if last is None else min(n, int(round((now - last) * s.fs)))
+        return range(n - k, n)
 
     def read_hr(self, board, now):
         s = self.ppg
@@ -530,8 +712,8 @@ class Bridge:
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(
-        description="Stream EEG band powers, blinks, heart rate and head motion from a BrainFlow "
-                    "board to the Mind over Chicken browser game over a WebSocket.")
+        description="Stream EEG band powers, blinks, heart rate, head motion and head orientation from "
+                    "a BrainFlow board to the Mind over Chicken browser game over a WebSocket.")
     p.add_argument("--board", choices=list(BOARDS), default="synthetic",
                    help="headset to read (default: synthetic, no hardware needed)")
     p.add_argument("--serial-port", help="BLED112 dongle port for *-bled boards, e.g. COM3 or /dev/ttyACM0")

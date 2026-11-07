@@ -12,7 +12,7 @@ This README is the canonical specification. If the code or an issue disagrees wi
 | --- | --- | --- |
 | **World** | One circular world containing **4 distinct civilizations**, each starting with **4 agents**. The four civilizations start in separate regions of the same world. | Canonical |
 | **Seeds** | For the current dummy run, all four civilizations use **randomly generated seeds**. The player's civilization will later be seeded from biometric calibration. | Canonical for now |
-| **Progression** | **No tech tree and no evolution system.** The eras are fixed content/levels that present the civilization's ages; they are not research or evolution branches. | Canonical |
+| **Progression** | **Twenty emergent ages** ([docs/ages.md](docs/ages.md), data in `data/ages.json`): a civilization enters an age when its own simulation meets that age's conditions and can fall back in a collapse. **No tech tree, no research screen, no player-chosen upgrades, no evolution system.** | Canonical (decided by Alex) |
 | **Stack** | Rust compiled to WebAssembly, rendered with WebGL2. The current JavaScript/Canvas build is the playable reference until the Rust port reaches parity (#17). | Canonical target |
 | **Camera** | Camera input is **required**. Face detection supplies expressions and concentration cues. Hand-gesture detection casts god powers (decided on #55); gesture-driven UI navigation is deferred. | Required |
 | **Head tracking** | Accelerometer **and gyroscope** supply head orientation and movement. | Required |
@@ -79,8 +79,8 @@ The Rust/Wasm simulation loop and world rules.
 
 * Agents are autonomous.
 * There is **no tech tree and no evolution system**.
-* Agents act on their civilization's behavioural parameters (aggressiveness versus friendliness) and basic survival needs.
-* Eras are fixed content/levels, not a technology progression.
+* Agents act on their civilization's behavioural parameters (aggressiveness versus friendliness) and basic survival needs, and take on age-specific jobs (hunting and farming through mining, trade, priesthood, soldiering, factory work and space flight) plus daily life: sleep, meals, festivals, mourning, families, migration.
+* Progression is the **twenty emergent ages** in [docs/ages.md](docs/ages.md): conditions met by the simulation, with collapses back a stage. It is not a technology progression the player chooses.
 
 ### 4.3 World actions (god powers)
 

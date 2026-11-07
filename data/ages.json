@@ -1,0 +1,799 @@
+{
+  "version": 1,
+  "doc": "docs/ages.md",
+  "metrics": {
+    "population": "living agents of the civilisation",
+    "settlements": "settlements owned",
+    "food_days": "food stock divided by daily consumption",
+    "stability": "0-1; falls with hunger, overcrowding, inequality, war losses, the player's anger and pulse",
+    "territory": "share of the planet's land the civilisation owns, 0-1",
+    "knowledge": "accumulated by scribes, scholars and the player's focus",
+    "wealth": "goats held across the civilisation",
+    "faith": "0-1 average devotion",
+    "production": "goods made per minute",
+    "links": "trade routes, roads and network links to other settlements and civilisations",
+    "contact": "met at least one other civilisation (true/false)",
+    "coastal": "owns a coastal settlement (true/false)",
+    "vassals": "civilisations or rebel provinces that pay tribute",
+    "colonies": "settlements on another continent or planet",
+    "inequality": "0-1 Gini of wealth"
+  },
+  "collapse": {
+    "rule": "A civilisation falls back one age when stability stays below 0.15 for 30 s, or its population drops below 60% of the age's entry population. The lost age's buildings go dormant, its jobs stop, and the history log records a Dark Age.",
+    "stability_below": 0.15,
+    "for_seconds": 30,
+    "population_below_entry_share": 0.6
+  },
+  "ages": [
+    {
+      "n": 1,
+      "key": "wanderers",
+      "name": "Wanderers",
+      "enter": {
+        "all": {
+          "population": 4
+        }
+      },
+      "jobs": [
+        "forage",
+        "hunt"
+      ],
+      "buildings": [
+        "campfire"
+      ],
+      "systems": [
+        "hunger",
+        "fear",
+        "fire"
+      ],
+      "crises": [
+        "famine",
+        "predators"
+      ],
+      "brain": "Blinks throw lightning to light fires; calm keeps the fire alive.",
+      "weapon": {
+        "name": "fists and clubs",
+        "power": 1,
+        "range": 1
+      }
+    },
+    {
+      "n": 2,
+      "key": "hearth_clans",
+      "name": "Hearth Clans",
+      "enter": {
+        "all": {
+          "population": 8,
+          "food_days": 1
+        }
+      },
+      "jobs": [
+        "woodcut",
+        "cook"
+      ],
+      "buildings": [
+        "hut"
+      ],
+      "systems": [
+        "shelter",
+        "families",
+        "night_and_sleep"
+      ],
+      "crises": [
+        "cold_snap"
+      ],
+      "brain": "Calm warms the hearth; a racing pulse makes the night colder.",
+      "weapon": {
+        "name": "clubs and torches",
+        "power": 1.2,
+        "range": 1
+      }
+    },
+    {
+      "n": 3,
+      "key": "toolmakers",
+      "name": "Toolmakers",
+      "enter": {
+        "all": {
+          "population": 12,
+          "food_days": 2
+        }
+      },
+      "jobs": [
+        "knap",
+        "fish"
+      ],
+      "buildings": [
+        "workshop",
+        "raft"
+      ],
+      "systems": [
+        "tools",
+        "coastal_exploration"
+      ],
+      "crises": [
+        "lost_at_sea"
+      ],
+      "brain": "Focus speeds the toolmakers.",
+      "weapon": {
+        "name": "stone spears",
+        "power": 1.6,
+        "range": 2
+      }
+    },
+    {
+      "n": 4,
+      "key": "first_farmers",
+      "name": "First Farmers",
+      "enter": {
+        "all": {
+          "population": 16,
+          "food_days": 3
+        }
+      },
+      "jobs": [
+        "farm",
+        "herd"
+      ],
+      "buildings": [
+        "field",
+        "goat_pen"
+      ],
+      "systems": [
+        "seasons",
+        "harvest",
+        "goats"
+      ],
+      "crises": [
+        "drought",
+        "locusts"
+      ],
+      "brain": "Calm brings rain; a racing pulse brings drought.",
+      "weapon": {
+        "name": "slings",
+        "power": 1.8,
+        "range": 4
+      }
+    },
+    {
+      "n": 5,
+      "key": "villages",
+      "name": "Villages",
+      "enter": {
+        "all": {
+          "population": 24,
+          "settlements": 2
+        }
+      },
+      "jobs": [
+        "build",
+        "carry",
+        "settle"
+      ],
+      "buildings": [
+        "granary",
+        "well"
+      ],
+      "systems": [
+        "storage",
+        "settlers",
+        "territory"
+      ],
+      "crises": [
+        "granary_fire",
+        "flood"
+      ],
+      "brain": "Joy (camera) brings festivals that raise stability.",
+      "weapon": {
+        "name": "spears and shields",
+        "power": 2.2,
+        "range": 2
+      }
+    },
+    {
+      "n": 6,
+      "key": "trade_routes",
+      "name": "Trade Routes",
+      "enter": {
+        "all": {
+          "settlements": 3,
+          "contact": true
+        }
+      },
+      "jobs": [
+        "trade",
+        "guard"
+      ],
+      "buildings": [
+        "market",
+        "dock"
+      ],
+      "systems": [
+        "trade_between_civs",
+        "goat_currency"
+      ],
+      "crises": [
+        "bandits"
+      ],
+      "brain": "Your pulse tips first contact toward trade (steady) or raids (racing).",
+      "weapon": {
+        "name": "caravan guards",
+        "power": 2.4,
+        "range": 2
+      }
+    },
+    {
+      "n": 7,
+      "key": "chiefdoms",
+      "name": "Chiefdoms",
+      "enter": {
+        "all": {
+          "population": 40,
+          "stability": 0.5
+        }
+      },
+      "jobs": [
+        "chief",
+        "warrior",
+        "raid"
+      ],
+      "buildings": [
+        "longhouse",
+        "palisade"
+      ],
+      "systems": [
+        "leadership",
+        "tribute",
+        "raids"
+      ],
+      "crises": [
+        "succession_split"
+      ],
+      "brain": "Anger fuels raids; calm settles succession disputes.",
+      "weapon": {
+        "name": "war bands",
+        "power": 2.8,
+        "range": 2
+      }
+    },
+    {
+      "n": 8,
+      "key": "bronze_age",
+      "name": "Bronze Age",
+      "enter": {
+        "all": {
+          "links": 2,
+          "territory": 0.05
+        }
+      },
+      "jobs": [
+        "mine",
+        "smith"
+      ],
+      "buildings": [
+        "mine",
+        "forge"
+      ],
+      "systems": [
+        "metal_tools",
+        "metal_weapons",
+        "ore_scarcity"
+      ],
+      "crises": [
+        "ore_war",
+        "ore_depletion"
+      ],
+      "brain": "Focus helps the smiths; lightning on a mine exposes ore.",
+      "weapon": {
+        "name": "bronze swords",
+        "power": 3.5,
+        "range": 1
+      }
+    },
+    {
+      "n": 9,
+      "key": "kingdoms",
+      "name": "Kingdoms",
+      "enter": {
+        "all": {
+          "population": 80,
+          "settlements": 5,
+          "knowledge": 20
+        }
+      },
+      "jobs": [
+        "scribe",
+        "tax"
+      ],
+      "buildings": [
+        "palace",
+        "road"
+      ],
+      "systems": [
+        "law",
+        "taxes",
+        "inequality",
+        "unrest"
+      ],
+      "crises": [
+        "tax_revolt"
+      ],
+      "brain": "Mental sums (focus) let the scribes write law.",
+      "weapon": {
+        "name": "archers and levies",
+        "power": 3.8,
+        "range": 6
+      }
+    },
+    {
+      "n": 10,
+      "key": "temples",
+      "name": "Temples & Faith",
+      "enter": {
+        "all": {
+          "faith": 0.5,
+          "settlements": 5
+        }
+      },
+      "jobs": [
+        "priest",
+        "pilgrim"
+      ],
+      "buildings": [
+        "temple",
+        "shrine"
+      ],
+      "systems": [
+        "religion",
+        "conversion",
+        "holy_sites"
+      ],
+      "crises": [
+        "schism"
+      ],
+      "brain": "Calm deepens faith; your blinks are read as miracles.",
+      "weapon": {
+        "name": "zealots",
+        "power": 4.0,
+        "range": 2
+      }
+    },
+    {
+      "n": 11,
+      "key": "empires",
+      "name": "Empires",
+      "enter": {
+        "any": [
+          {
+            "territory": 0.25
+          },
+          {
+            "vassals": 2
+          }
+        ]
+      },
+      "jobs": [
+        "general",
+        "engineer",
+        "soldier"
+      ],
+      "buildings": [
+        "barracks",
+        "aqueduct",
+        "fort"
+      ],
+      "systems": [
+        "conquest",
+        "vassals",
+        "road_network",
+        "overextension"
+      ],
+      "crises": [
+        "province_revolt",
+        "barbarians"
+      ],
+      "brain": "Anger drives conquest; calm drives consolidation. Friendly civs reach Empires through vassal treaties, aggressive ones through conquest.",
+      "weapon": {
+        "name": "legions in formation",
+        "power": 5.0,
+        "range": 2
+      }
+    },
+    {
+      "n": 12,
+      "key": "medieval",
+      "name": "Medieval Realms",
+      "enter": {
+        "all": {
+          "population": 150,
+          "stability": 0.4
+        }
+      },
+      "jobs": [
+        "knight",
+        "monk",
+        "miller"
+      ],
+      "buildings": [
+        "castle",
+        "monastery",
+        "mill"
+      ],
+      "systems": [
+        "lords",
+        "guilds",
+        "disease_along_trade"
+      ],
+      "crises": [
+        "plague",
+        "peasant_revolt"
+      ],
+      "brain": "Calm keeps the lords loyal; focus helps healers stop the plague.",
+      "weapon": {
+        "name": "knights and crossbows",
+        "power": 6.0,
+        "range": 7
+      }
+    },
+    {
+      "n": 13,
+      "key": "age_of_sail",
+      "name": "Age of Sail",
+      "enter": {
+        "all": {
+          "coastal": true,
+          "knowledge": 60
+        }
+      },
+      "jobs": [
+        "sailor",
+        "explorer",
+        "colonist"
+      ],
+      "buildings": [
+        "shipyard",
+        "port"
+      ],
+      "systems": [
+        "overseas_colonies",
+        "naval_war",
+        "discovery"
+      ],
+      "crises": [
+        "shipwreck_storms"
+      ],
+      "brain": "Blinks raise storms at sea.",
+      "weapon": {
+        "name": "cannon and muskets",
+        "power": 7.5,
+        "range": 10
+      }
+    },
+    {
+      "n": 14,
+      "key": "renaissance",
+      "name": "Renaissance",
+      "enter": {
+        "all": {
+          "knowledge": 100,
+          "wealth": 200
+        }
+      },
+      "jobs": [
+        "scholar",
+        "artist",
+        "banker"
+      ],
+      "buildings": [
+        "university",
+        "bank",
+        "theatre"
+      ],
+      "systems": [
+        "accelerated_knowledge",
+        "credit",
+        "culture_spread"
+      ],
+      "crises": [
+        "censorship"
+      ],
+      "brain": "Focus fuels breakthroughs; anger brings censorship.",
+      "weapon": {
+        "name": "pikes and muskets",
+        "power": 8.0,
+        "range": 9
+      }
+    },
+    {
+      "n": 15,
+      "key": "industrial",
+      "name": "Industrial Revolution",
+      "enter": {
+        "all": {
+          "production": 50,
+          "links": 6
+        }
+      },
+      "jobs": [
+        "factory",
+        "rail",
+        "miner"
+      ],
+      "buildings": [
+        "factory",
+        "railway"
+      ],
+      "systems": [
+        "goat_exchange",
+        "strikes",
+        "smog"
+      ],
+      "crises": [
+        "market_crash",
+        "general_strike"
+      ],
+      "brain": "Your pulse drives market volatility; calm brings it back.",
+      "weapon": {
+        "name": "rifles",
+        "power": 10.0,
+        "range": 14
+      }
+    },
+    {
+      "n": 16,
+      "key": "revolutions",
+      "name": "Revolutions",
+      "enter": {
+        "all": {
+          "inequality": 0.45,
+          "population": 250
+        }
+      },
+      "jobs": [
+        "agitator",
+        "reformer"
+      ],
+      "buildings": [
+        "parliament"
+      ],
+      "systems": [
+        "government_change",
+        "civil_war",
+        "splits"
+      ],
+      "crises": [
+        "civil_war"
+      ],
+      "brain": "Calm gives peaceful reform; anger gives bloody revolution.",
+      "weapon": {
+        "name": "barricades and rifles",
+        "power": 10.5,
+        "range": 14
+      }
+    },
+    {
+      "n": 17,
+      "key": "electric",
+      "name": "Electric Age",
+      "enter": {
+        "all": {
+          "production": 120,
+          "stability": 0.45
+        }
+      },
+      "jobs": [
+        "electrician",
+        "clerk"
+      ],
+      "buildings": [
+        "power_plant",
+        "street_lights"
+      ],
+      "systems": [
+        "cities",
+        "night_lights",
+        "alliances"
+      ],
+      "crises": [
+        "blackout",
+        "world_war"
+      ],
+      "brain": "Focus keeps the grid stable; a racing pulse risks blackouts.",
+      "weapon": {
+        "name": "artillery",
+        "power": 13.0,
+        "range": 24
+      }
+    },
+    {
+      "n": 18,
+      "key": "information",
+      "name": "Information Age",
+      "enter": {
+        "all": {
+          "knowledge": 300,
+          "links": 12
+        }
+      },
+      "jobs": [
+        "programmer",
+        "broadcaster"
+      ],
+      "buildings": [
+        "tower",
+        "data_centre"
+      ],
+      "systems": [
+        "networks",
+        "instant_ideas",
+        "misinformation"
+      ],
+      "crises": [
+        "panic",
+        "cyber_war"
+      ],
+      "brain": "Focus spreads truth; a racing pulse spreads panic.",
+      "weapon": {
+        "name": "drones",
+        "power": 15.0,
+        "range": 30
+      }
+    },
+    {
+      "n": 19,
+      "key": "space",
+      "name": "Space Age",
+      "enter": {
+        "all": {
+          "knowledge": 450,
+          "production": 200
+        }
+      },
+      "jobs": [
+        "engineer",
+        "astronaut"
+      ],
+      "buildings": [
+        "launch_pad",
+        "satellite"
+      ],
+      "systems": [
+        "rocket_project"
+      ],
+      "crises": [
+        "launch_failure"
+      ],
+      "brain": "The 10-second countdown: hold focus, keep your pulse low.",
+      "weapon": {
+        "name": "satellite strikes",
+        "power": 18.0,
+        "range": 60
+      }
+    },
+    {
+      "n": 20,
+      "key": "interstellar",
+      "name": "Interstellar",
+      "enter": {
+        "all": {
+          "colonies": 1,
+          "knowledge": 600
+        }
+      },
+      "jobs": [
+        "colonist",
+        "terraformer"
+      ],
+      "buildings": [
+        "starport"
+      ],
+      "systems": [
+        "galaxy_colonisation"
+      ],
+      "crises": [
+        "colony_collapse"
+      ],
+      "brain": "The galaxy layer: every planet listens to part of your mind.",
+      "weapon": {
+        "name": "orbital defences",
+        "power": 22.0,
+        "range": 120
+      }
+    }
+  ],
+  "daily_life": [
+    "sleep at night",
+    "eat at the hearth or market",
+    "festivals when joyful",
+    "mourning after deaths",
+    "families and births",
+    "friendships and rivalries across civilisations",
+    "migration when hungry or at war"
+  ],
+  "conflict": {
+    "doc": "docs/ages.md#conflict",
+    "principle": "Fights are agent against agent and emerge from the simulation. They happen between civilisations AND inside one: a civilisation alone on its planet still has clans, rebels and lords who fight.",
+    "escalation": [
+      {
+        "level": "scuffle",
+        "who": "two agents",
+        "from": "an insult, a rivalry, or competition for the same food or tile",
+        "outcome": "wounds; a grudge between their families"
+      },
+      {
+        "level": "feud",
+        "who": "two families or clans",
+        "from": "repeated scuffles or a death",
+        "outcome": "ambushes, revenge, stolen goats"
+      },
+      {
+        "level": "raid",
+        "who": "a war band against a settlement",
+        "from": "hunger, greed, aggressive traits",
+        "outcome": "stolen food, burned buildings, captives"
+      },
+      {
+        "level": "battle",
+        "who": "two armies",
+        "from": "a raid answered, or a border dispute",
+        "outcome": "a won or lost field; morale swings"
+      },
+      {
+        "level": "war",
+        "who": "two civilisations or realms",
+        "from": "several battles, or a declaration (ages 7+)",
+        "outcome": "territory and settlements change hands; truce or conquest"
+      },
+      {
+        "level": "civil_war",
+        "who": "factions inside one civilisation",
+        "from": "low stability plus inequality, faith schisms, succession disputes or revolutions",
+        "outcome": "the civilisation splits into a new one, or the rebels are crushed"
+      }
+    ],
+    "causes": [
+      "hunger",
+      "territory",
+      "ore and resources",
+      "inequality",
+      "faith and schisms",
+      "succession",
+      "revenge and grudges",
+      "the player's anger"
+    ],
+    "inside_one_civ": [
+      "clan feuds (ages 1-6)",
+      "succession splits (age 7+)",
+      "province revolts (age 11+)",
+      "peasant revolts and plague riots (age 12+)",
+      "civil wars and revolutions (age 16+)",
+      "misinformation riots (age 18+)"
+    ],
+    "battle": {
+      "morale": "Each fighter has morale. Losses nearby, being outnumbered and wounded leaders lower it; at 0 they flee, and a rout can spread through the line.",
+      "terrain": {
+        "hill": 1.3,
+        "forest": 1.2,
+        "river_crossing": 0.7,
+        "walls": 1.8,
+        "open_ground": 1.0
+      },
+      "formations": "From age 11, armies hold formations: shield wall, flanking, reserves. Earlier fights are brawls.",
+      "wounds": "Fighters are wounded before they die; healers (age 12+) and rest bring them back.",
+      "aftermath": [
+        "surrender and prisoners",
+        "ransom or forced labour",
+        "truce",
+        "vassalage",
+        "grudges that restart feuds"
+      ]
+    },
+    "player": {
+      "anger_or_pulse": "Raises aggression and pushes conflicts up the ladder.",
+      "calm": "Lowers aggression; conflicts drift down toward a truce.",
+      "peace_cast": "Forces a truce around the aim point.",
+      "lightning": "Breaks a charge and scatters fighters; the struck side loses morale.",
+      "fireball_or_disaster": "Strikes armies as well as land."
+    }
+  }
+}
