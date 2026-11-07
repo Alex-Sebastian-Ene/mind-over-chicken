@@ -520,7 +520,9 @@ function render() {
         engine.begin_frame();
         engine.upload_canvas(low);
         G.world?.draw3d?.(engine);
-        if (scene.draw3d) {
+        if (typeof engine.draw_era_3d === 'function' && !G.sandbox && G.scene?.era) {
+          engine.draw_era_3d();
+        } else if (scene.draw3d) {
           scene.draw3d(engine, 0.016);
         } else if (scene.lights) {
           for (const l of scene.lights()) {

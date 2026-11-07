@@ -1082,6 +1082,17 @@ impl Engine {
         self.dispatch_era_events(&events);
     }
 
+    pub fn draw_era_3d(&mut self) {
+        let lights = self.game.lights_3d();
+        for l in lights {
+            self.add_3d_light(l.x, l.y, l.z, l.radius, l.intensity);
+        }
+        let billboards = self.game.billboards_3d();
+        for b in billboards {
+            self.add_billboard(b.sprite_id, b.x, b.z, b.facing, b.frame, b.variant);
+        }
+    }
+
     fn dispatch_era_events(&mut self, events: &[eras::EraEvent]) {
         for ev in events {
             match ev {

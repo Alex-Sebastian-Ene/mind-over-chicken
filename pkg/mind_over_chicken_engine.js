@@ -123,6 +123,9 @@ export class Engine {
     draw_chicken(x, y, facing, frame, halo) {
         wasm.engine_draw_chicken(this.__wbg_ptr, x, y, facing, frame, halo);
     }
+    draw_era_3d() {
+        wasm.engine_draw_era_3d(this.__wbg_ptr);
+    }
     /**
      * @param {number} x
      * @param {number} y
