@@ -104,29 +104,34 @@ impl Terrain {
     pub fn generate(seed: u32, d: Dims) -> Terrain {
         let (w, h) = (d.w as f32, d.h as f32);
         let mut rng = Rng::new(seed ^ 0x51ed_270b);
-        // Noise cells keep the same size in tiles whatever the planet size.
+        // Past the default planet, continents (and the noise cells that shape them) grow with
+        // the planet, so a bigger planet has bigger lands rather than more empty ocean (Alex:
+        // bigger islands). The default planet and smaller ones are unchanged.
+        let s = (d.n() as f32 / Dims::DEFAULT.n() as f32).sqrt().max(1.0);
         let period = |cell: f32| ((w / cell).round() as usize).max(2);
-        let (c_shape, c_relief, c_moist, c_ice) = (80.0, 46.0, 107.0, 40.0);
+        let (c_shape, c_relief, c_moist, c_ice) = (80.0 * s, 46.0 * s, 107.0 * s, 40.0);
         let shape = WrapNoise::new(&mut rng, period(c_shape), 5);
         let relief = WrapNoise::new(&mut rng, period(c_relief), 4);
         let moist = WrapNoise::new(&mut rng, period(c_moist), 4);
         let icy = WrapNoise::new(&mut rng, period(c_ice), 3);
 
         // Four home continents in a row along the equator, one per civilisation.
-        let gap = (w / 4.0).min(115.0);
+        let gap = (w / 4.0).min(115.0 * s);
         let base = rng.range(0.0, w);
         let mut regions: Vec<Region> = Vec::new();
         for i in 0..HOME_REGIONS {
             let cx = (base + i as f32 * gap + rng.range(-0.08, 0.08) * gap).rem_euclid(w);
             let cy = h / 2.0 + rng.range(-0.075, 0.075) * h;
-            regions.push(Region { cx, cy, rx: gap * rng.range(0.56, 0.64), ry: rng.range(58.0, 74.0).min(h * 0.2), start: (0, 0) });
+            regions.push(Region { cx, cy, rx: gap * rng.range(0.56, 0.64), ry: (rng.range(58.0, 74.0) * s).min(h * 0.2), start: (0, 0) });
         }
         // More continents on a bigger planet, waiting to be settled.
-        let extra = ((d.n() as f32 / (640.0 * 320.0) * 2.5).round() as usize).saturating_sub(HOME_REGIONS).min(10);
+        // (A few more per area on a scaled-up planet, for its crowd of peoples.)
+        let per = 2.5 + (s - 1.0).min(1.0) * 1.5;
+        let extra = ((d.n() as f32 / (640.0 * 320.0 * s * s) * per).round() as usize).saturating_sub(HOME_REGIONS).min(12);
         let mut tries = 0;
         while regions.len() < HOME_REGIONS + extra && tries < 600 {
             tries += 1;
-            let (rx, ry) = (rng.range(60.0, 110.0), rng.range(45.0, 80.0));
+            let (rx, ry) = (rng.range(60.0, 110.0) * s, rng.range(45.0, 80.0) * s);
             let (cx, cy) = (rng.range(0.0, w), rng.range(0.24 * h, 0.76 * h));
             let clear = regions.iter().all(|r| {
                 let dx = d.dx(r.cx, cx).abs() / (r.rx + rx);
@@ -141,10 +146,10 @@ impl Terrain {
         // planet), and from each other continent to its nearest neighbour half the time.
         let mut bridges = Vec::new();
         for i in 0..HOME_REGIONS - 1 {
-            bridges.push((i, i + 1, rng.range(9.0, 13.0)));
+            bridges.push((i, i + 1, rng.range(9.0, 13.0) * s));
         }
         if gap * 4.0 >= w - 1.0 && rng.chance(0.7) {
-            bridges.push((HOME_REGIONS - 1, 0, rng.range(9.0, 13.0)));
+            bridges.push((HOME_REGIONS - 1, 0, rng.range(9.0, 13.0) * s));
         }
         for e in HOME_REGIONS..regions.len() {
             let near = (0..regions.len())
@@ -155,9 +160,18 @@ impl Terrain {
                     da.total_cmp(&db)
                 })
                 .unwrap_or(0);
-            if rng.chance(0.5) {
-                bridges.push((e, near, rng.range(8.0, 12.0)));
+            // Only across a narrow strait: a long bridge over open sea reads as a strip of land
+            // drawn with a ruler (Alex), so far-off continents stay islands.
+            let bw = rng.range(8.0, 12.0) * s;
+            if rng.chance(0.5) && coast_gap(d, &regions[e], &regions[near]) < 5.0 * bw {
+                bridges.push((e, near, bw));
             }
+        }
+        // The bridges as land: bent, wiggling isthmuses, never ruler-straight strips (Alex).
+        let mut bmap = vec![-1.0f32; d.n()];
+        let mut spine = vec![false; d.n()];
+        for &(ia, ib, bw) in &bridges {
+            stamp_bridge(d, &regions[ia], &regions[ib], bw, &mut rng, &mut bmap, &mut spine);
         }
 
         let mut kind = vec![DEEP; d.n()];
@@ -166,25 +180,22 @@ impl Terrain {
         for y in 0..d.h {
             let yf = y as f32;
             let lat = ((yf + 0.5) / h - 0.5).abs() * 2.0;
+            // Only continents within reach of this row can lift it out of the open ocean
+            // (`e` below -0.72 is deep sea whatever the noise).
+            let near: Vec<(f32, f32, f32)> =
+                regions.iter().filter(|r| (yf - r.cy).abs() < 1.75 * r.ry).map(|r| (r.cx, r.rx, (yf - r.cy) / r.ry)).collect();
             for x in 0..d.w {
                 let xf = x as f32;
                 let u = xf / w;
                 let mut e = -2.0f32;
-                for r in &regions {
-                    let dx = d.dx(r.cx, xf) / r.rx;
-                    let dy = (yf - r.cy) / r.ry;
-                    e = e.max(1.0 - (dx * dx + dy * dy).sqrt());
-                }
-                let mut b = -1.0f32;
-                for &(ia, ib, bw) in &bridges {
-                    let (ra, rb) = (&regions[ia], &regions[ib]);
-                    let (vx, vy) = (d.dx(ra.cx, rb.cx), rb.cy - ra.cy);
-                    let (px, py) = (d.dx(ra.cx, xf), yf - ra.cy);
-                    let t = ((px * vx + py * vy) / (vx * vx + vy * vy)).clamp(0.0, 1.0);
-                    let (qx, qy) = (px - t * vx, py - t * vy);
-                    b = b.max(0.5 * (1.0 - (qx * qx + qy * qy).sqrt() / bw));
+                for &(cx, rx, dy) in &near {
+                    let dx = d.dx(cx, xf) / rx;
+                    if dx.abs() < 1.75 {
+                        e = e.max(1.0 - (dx * dx + dy * dy).sqrt());
+                    }
                 }
                 let i = y * d.w + x;
+                let b = bmap[i];
                 if lat > 0.79 && lat > 0.86 + (icy.fbm(u, yf / c_ice * 2.0, 3) - 0.5) * 0.14 {
                     kind[i] = ICE;
                     continue;
@@ -193,7 +204,10 @@ impl Terrain {
                 if e < -0.72 && b < 0.02 {
                     continue;
                 }
-                let e = (e + (shape.fbm(u, yf / c_shape, 5) - 0.5) * 1.4).max(b);
+                // The coast noise roughens the bridges' edges too (softer); only a bridge's spine
+                // is sure to be land, so the continents it joins always stay joined on foot.
+                let n = (shape.fbm(u, yf / c_shape, 5) - 0.5) * 1.4;
+                let e = (e + n).max(b + n * 0.45).max(if spine[i] { 0.2 } else { -2.0 });
                 elev[i] = e;
                 kind[i] = if e < 0.02 {
                     DEEP
@@ -204,7 +218,7 @@ impl Terrain {
                 } else {
                     let r = relief.fbm(u, yf / c_relief, 4);
                     let m = moist.fbm(u, yf / c_moist, 4);
-                    if r > 0.71 {
+                    if r > 0.71 && !spine[i] {
                         MOUNTAIN
                     } else if r > 0.64 {
                         HILLS
@@ -366,6 +380,67 @@ impl Terrain {
         let j = if k == FOREST && h & 0x100 != 0 { j - 10 } else { j };
         let f = |c: i32| (c + j).clamp(0, 255) as u8;
         [f(r), f(g), f(b), 255]
+    }
+}
+
+/// Open sea between two continents' nominal coasts, along the line between their centres.
+fn coast_gap(d: Dims, a: &Region, b: &Region) -> f32 {
+    let (vx, vy) = (d.dx(a.cx, b.cx), b.cy - a.cy);
+    let len = (vx * vx + vy * vy).sqrt().max(1.0);
+    let (c, s) = (vx / len, vy / len);
+    let radius = |r: &Region| 1.0 / ((c / r.rx).powi(2) + (s / r.ry).powi(2)).sqrt();
+    len - radius(a) - radius(b)
+}
+
+/// Paint one land bridge from continent `a` to `b` into `bmap` (0.5 on the spine, 0 at the
+/// edge) and `spine` (its middle third, kept walkable). The spine bows to one side and wiggles,
+/// the width swells and narrows along it, and it flares where it leaves each continent, so
+/// it reads as a natural isthmus rather than a straight strip.
+fn stamp_bridge(d: Dims, a: &Region, b: &Region, bw: f32, rng: &mut Rng, bmap: &mut [f32], spine: &mut [bool]) {
+    use std::f32::consts::{PI, TAU};
+    let (vx, vy) = (d.dx(a.cx, b.cx), b.cy - a.cy);
+    let len = (vx * vx + vy * vy).sqrt().max(1.0);
+    let (nx, ny) = (-vy / len, vx / len);
+    // Each continent's radius along the bridge, to find where the bridge leaves it.
+    let radius = |r: &Region| {
+        let (c, s) = (vx / len, vy / len);
+        1.0 / ((c / r.rx).powi(2) + (s / r.ry).powi(2)).sqrt()
+    };
+    let (ra, rb) = (radius(a), radius(b));
+    let bend = rng.range(0.1, 0.28) * len * if rng.chance(0.5) { 1.0 } else { -1.0 };
+    let (wig, wk, wp) = (rng.range(0.03, 0.07) * len, rng.range(2.0, 3.5), rng.range(0.0, TAU));
+    let (swell, sp) = (rng.range(0.15, 0.35), rng.range(0.0, TAU));
+    let at = |t: f32| {
+        let env = (PI * t).sin();
+        let off = bend * env + wig * env * (PI * wk * t + wp).sin();
+        let shore = (t * len - ra).min((1.0 - t) * len - rb).max(0.0);
+        let width = bw * (1.0 + swell * (TAU * 1.5 * t + sp).sin()) * (1.0 + 1.4 * (-shore / (1.5 * bw)).exp());
+        (a.cx + vx * t + nx * off, a.cy + vy * t + ny * off, width)
+    };
+    let steps = ((len / 4.0).ceil() as usize).clamp(8, 400);
+    let mut p0 = at(0.0);
+    for k in 1..=steps {
+        let p1 = at(k as f32 / steps as f32);
+        let r = p0.2.max(p1.2);
+        let (sx, sy) = (p1.0 - p0.0, p1.1 - p0.1);
+        let sl = (sx * sx + sy * sy).max(1e-6);
+        let (x0, x1) = ((p0.0.min(p1.0) - r).floor() as i32, (p0.0.max(p1.0) + r).ceil() as i32);
+        let (y0, y1) = ((p0.1.min(p1.1) - r).floor() as i32, (p0.1.max(p1.1) + r).ceil() as i32);
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let (px, py) = (x as f32 - p0.0, y as f32 - p0.1);
+                let u = ((px * sx + py * sy) / sl).clamp(0.0, 1.0);
+                let (qx, qy) = (px - u * sx, py - u * sy);
+                let dist = (qx * qx + qy * qy).sqrt();
+                let width = p0.2 + (p1.2 - p0.2) * u;
+                let i = d.idx(x, y);
+                bmap[i] = bmap[i].max(0.5 * (1.0 - dist / width));
+                if dist < width * 0.3 {
+                    spine[i] = true;
+                }
+            }
+        }
+        p0 = p1;
     }
 }
 
