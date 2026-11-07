@@ -148,7 +148,9 @@ export class CivSandbox {
     G.advisor.say('civ-intro', 'Four peoples, one planet, my lord. They will grow, squabble and split. Your moods are now everyone\'s problem.', { priority: 3, cooldown: 999 });
     // calibration (#54): one run seed for the planet, the civilisations and the dummy seed.
     this.seed = (this.seedArg ?? G.calibration?.config?.seed ?? Math.random() * 2 ** 32) >>> 0;
-    createCiv(this.seed, { staged: true })
+    // ?civs=8..12 (#101): the player's four and rivals that arrive on their own (default 10 in all).
+    const civs = Math.max(4, Math.min(16, Number(new URLSearchParams(location.search).get('civs')) || 10));
+    createCiv(this.seed, { staged: true, rivals: civs - 4 })
       .then((civ) => {
         if (G.scene !== this) { civ.free(); return; }
         this.civ = civ;

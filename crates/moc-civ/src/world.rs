@@ -10,10 +10,12 @@ use crate::jobs::{Fx, CATS};
 use crate::planet::{Cam, Dims, Paths};
 use crate::terrain::{self, food_max, Terrain};
 
-pub const MAX_FACTIONS: usize = 16;
+/// Civilisation slots: up to 12 at the start (#101) and room for rebels.
+pub const MAX_FACTIONS: usize = 24;
 pub const NO_F: u8 = 255;
 pub const NO_V: u16 = u16::MAX;
 pub const NO_TILE: i32 = i32::MIN;
+/// Agent and village limits on the default planet; a bigger planet gets more (`World::cap_agents`).
 pub const MAX_AGENTS: usize = 2400;
 pub const MAX_VILLAGES: usize = 480;
 /// Civilisations and agents per civilisation at the start (#52).
@@ -796,6 +798,9 @@ pub struct World {
     pub last_steps: u32,
     /// The player's founding of civilisations one by one (#98; `Phase::Off` when all start at once).
     pub setup: crate::setup::Setup,
+    /// Agent and village limits for this planet: the defaults, more on a bigger one (#101).
+    pub cap_agents: usize,
+    pub cap_villages: usize,
     #[cfg(not(target_arch = "wasm32"))]
     pub prof: [f64; 8],
 }
@@ -805,7 +810,7 @@ pub const VSTRIDE: usize = 12;
 pub const NAME_LEN: usize = 24;
 pub const STATS_LEN: usize = 44;
 
-const PALETTE: [[u8; 3]; 16] = [
+const PALETTE: [[u8; 3]; 24] = [
     [232, 70, 62],   // red
     [66, 136, 246],  // blue
     [246, 198, 54],  // gold
@@ -822,6 +827,14 @@ const PALETTE: [[u8; 3]; 16] = [
     [255, 210, 160], // peach
     [110, 110, 120], // slate
     [140, 40, 40],   // maroon
+    [255, 120, 90],  // coral
+    [0, 150, 130],   // teal
+    [210, 170, 255], // lavender
+    [180, 140, 20],  // ochre
+    [90, 200, 255],  // sky
+    [255, 80, 200],  // magenta
+    [200, 230, 160], // sage
+    [100, 70, 160],  // indigo
 ];
 
 const SYL_A: [&str; 24] = [
@@ -908,10 +921,16 @@ impl World {
             text_buf: String::new(),
             last_steps: 0,
             setup: crate::setup::Setup::default(),
+            cap_agents: MAX_AGENTS,
+            cap_villages: MAX_VILLAGES,
             #[cfg(not(target_arch = "wasm32"))]
             prof: [0.0; 8],
             terrain,
         };
+        // More land, more people: the limits grow with the land (about 50 tiles a person).
+        let land = w.land_tiles as usize;
+        w.cap_agents = (land / 50).clamp(MAX_AGENTS, 9000);
+        w.cap_villages = (land / 250).clamp(MAX_VILLAGES, 2000);
         w.refresh_info();
         w
     }
@@ -1176,7 +1195,7 @@ impl World {
     }
 
     pub fn spawn_agent(&mut self, f: u8, home: u16, job: Job, x: i32, y: i32) -> Option<usize> {
-        if self.agents.len() >= MAX_AGENTS {
+        if self.agents.len() >= self.cap_agents {
             return None;
         }
         let life = self.rng.range(75.0, 115.0);
@@ -1284,6 +1303,10 @@ impl World {
         }
         self.time += dt;
         self.tick = self.tick.wrapping_add(1);
+        // Rival civilisations arrive on their own, at staggered times (#101).
+        if !self.setup.rivals.is_empty() {
+            self.rivals_tick();
+        }
         let phase = (self.time / DAY_SECONDS).fract();
         self.night = 0.5 - 0.5 * (phase * std::f32::consts::TAU).cos();
         self.rain_t = (self.rain_t - dt).max(0.0);

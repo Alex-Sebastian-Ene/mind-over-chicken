@@ -17,6 +17,13 @@
 //! 4. **Found** it: its first village and four people appear and it starts living. Civilisations
 //!    already founded keep running while the next is set up, so the starts are staggered.
 //!
+//! **Rivals** (#101): a staged world can also hold rival civilisations the player doesn't set
+//! up. They arrive on their own at staggered times, with their seeded traits, at sites spread
+//! over the planet's big landmasses (several to a continent), and play by the rules of
+//! `politics::decide` (or a `Policy`). Start sites come from whatever `Terrain::generate`
+//! made: its regions' starts for the player's slots, then the biggest landmasses in proportion
+//! to their area for the rivals, at least `MIN_SITE_GAP` tiles apart.
+//!
 //! Until it is founded a civilisation is not alive: it takes no part in contact, diplomacy,
 //! metrics, ages or anything else. Founding order, times and traits go in the event log
 //! (`ev::CIV_FOUNDED`: n = order, extra = the five traits, 6 bits each).
@@ -34,6 +41,13 @@ pub const SEED_SECONDS: f32 = 5.0;
 pub const MIN_START_GAP: f32 = 40.0;
 /// Civilisations the player sets up.
 pub const SLOTS: usize = 4;
+/// Start sites are at least this far apart.
+pub const MIN_SITE_GAP: f32 = 60.0;
+/// The first rival arrives after this long, the rest every `RIVAL_EVERY` (±50 %) after it.
+pub const RIVAL_FIRST: f32 = 15.0;
+pub const RIVAL_EVERY: f32 = 30.0;
+/// A rival arriving late may begin this close to someone's village.
+pub const RIVAL_GAP: f32 = 24.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -68,6 +82,8 @@ pub struct Setup {
     pub slots: Vec<u8>,
     /// (civilisation, world time) in founding order.
     pub founded: Vec<(u8, f32)>,
+    /// Rival civilisations and the world time each arrives (#101).
+    pub rivals: Vec<(u8, f32)>,
 }
 
 impl Default for Setup {
@@ -84,6 +100,7 @@ impl Default for Setup {
             traits: Traits::default(),
             slots: Vec::new(),
             founded: Vec::new(),
+            rivals: Vec::new(),
         }
     }
 }
@@ -139,23 +156,99 @@ impl World {
     /// A run whose civilisations are founded one at a time by the player (#98): the planet is
     /// generated with four civilisation slots waiting and nobody living on it yet.
     pub fn new_staged(seed: u32, d: crate::planet::Dims) -> World {
+        World::new_staged_with(seed, d, SLOTS, 0)
+    }
+
+    /// A staged run with `players` civilisations for the player to found and `rivals` that
+    /// arrive on their own (#101: about 8–12 in all).
+    pub fn new_staged_with(seed: u32, d: crate::planet::Dims, players: usize, rivals: usize) -> World {
         let mut w = World::with_terrain(seed, Terrain::generate(seed, d));
-        w.prepare_slots(SLOTS);
+        let total = (players + rivals).min(MAX_FACTIONS - 4);
+        let sites = w.start_sites(total);
+        w.prepare_slots_at(players.min(total), &sites);
+        w.prepare_rivals(&sites[players.min(total)..]);
         w
+    }
+
+    /// Start sites for `n` civilisations on whatever planet this is: the terrain's regions'
+    /// starts first, then the biggest landmasses in proportion to their area (so a big continent
+    /// holds several peoples), each site at least `MIN_SITE_GAP` from the others, on grass or
+    /// forest where it can.
+    pub fn start_sites(&self, n: usize) -> Vec<(i32, i32)> {
+        let d = self.d;
+        let t = &self.terrain;
+        let gap = |a: (i32, i32), b: (i32, i32)| d.dist(a.0 as f32, a.1 as f32, b.0 as f32, b.1 as f32);
+        let mut sites: Vec<(i32, i32)> = Vec::new();
+        for r in &t.regions {
+            if sites.len() >= n.min(SLOTS) {
+                break;
+            }
+            if t.walkable(r.start.0, r.start.1) && sites.iter().all(|&s| gap(s, r.start) >= MIN_SITE_GAP) {
+                sites.push(r.start);
+            }
+        }
+        if sites.len() >= n {
+            return sites;
+        }
+        // Good tiles on the big landmasses (sampled), then farthest-point picks: the sites
+        // spread evenly over the land, so a big continent holds several peoples.
+        let mut count = std::collections::BTreeMap::<u16, u32>::new();
+        for &l in &t.land_id {
+            if l != 0 {
+                *count.entry(l).or_insert(0) += 1;
+            }
+        }
+        let big = |l: u16| count.get(&l).map_or(false, |&a| a >= 1500);
+        let mut rng = Rng::new(self.seed ^ 0x0101_51e5);
+        let mut cands: Vec<(i32, i32)> = Vec::new();
+        for _ in 0..20_000 {
+            if cands.len() >= 4000 {
+                break;
+            }
+            let i = rng.below(d.n());
+            let (x, y) = ((i % d.w) as i32, (i / d.w) as i32);
+            if y < 12 || y > d.h as i32 - 13 || !matches!(t.kind[i], crate::terrain::GRASS | crate::terrain::FOREST) || !big(t.land_id[i]) {
+                continue;
+            }
+            cands.push((x, y));
+        }
+        while sites.len() < n {
+            let best = cands
+                .iter()
+                .map(|&c| (sites.iter().map(|&s| gap(s, c)).fold(f32::MAX, f32::min), c))
+                .filter(|&(near, _)| near >= MIN_SITE_GAP)
+                .max_by(|a, b| a.0.total_cmp(&b.0));
+            match best {
+                Some((_, c)) => sites.push(c),
+                None => break,
+            }
+        }
+        sites
     }
 
     /// Make `n` civilisations waiting to be founded: their seeds, names, colours and homelands
     /// come from the run seed, as `populate` makes them.
     pub fn prepare_slots(&mut self, n: usize) {
+        let sites: Vec<(i32, i32)> = (0..n)
+            .map(|i| {
+                let region = i % self.terrain.regions.len().max(1);
+                self.terrain.regions.get(region).map(|r| r.start).unwrap_or((80 + 160 * i as i32, self.d.h as i32 / 2))
+            })
+            .collect();
+        self.prepare_slots_at(n, &sites);
+    }
+
+    /// Player slots at these homelands.
+    pub fn prepare_slots_at(&mut self, n: usize, sites: &[(i32, i32)]) {
         let seeds = self.civ_seeds(n);
         for (i, &s) in seeds.iter().enumerate() {
-            let region = i % self.terrain.regions.len().max(1);
-            let start = self.terrain.regions.get(region).map(|r| r.start).unwrap_or((80 + 160 * i as i32, self.d.h as i32 / 2));
+            let start = sites.get(i).copied().unwrap_or((80 + 160 * i as i32, self.d.h as i32 / 2));
             let f = self.add_faction(s, SeedSource::Mind, Traits::from_seed(s), NO_F, None);
+            let region = self.terrain.regions.iter().position(|r| r.start == start).unwrap_or(255) as u8;
             let fac = &mut self.factions[f as usize];
             fac.alive = false;
             fac.pending = true;
-            fac.region = region as u8;
+            fac.region = region;
             fac.start = start;
             self.setup.slots.push(f);
         }
@@ -166,6 +259,69 @@ impl World {
             self.cam = crate::planet::Cam::centred_on(self.d, s.0 as f32, s.1 as f32);
         }
         self.refresh_info();
+    }
+
+    /// Rival civilisations waiting at these sites, arriving at staggered times.
+    pub fn prepare_rivals(&mut self, sites: &[(i32, i32)]) {
+        let mut r = Rng::new(self.seed ^ 0x7e71_0101);
+        let mut at = RIVAL_FIRST;
+        for &site in sites {
+            let s = r.next_u32();
+            let f = self.add_faction(s, SeedSource::Run, Traits::from_seed(s), NO_F, None);
+            let fac = &mut self.factions[f as usize];
+            fac.alive = false;
+            fac.pending = true;
+            fac.start = site;
+            self.setup.rivals.push((f, at));
+            at += RIVAL_EVERY * r.range(0.5, 1.5);
+        }
+        self.refresh_info();
+    }
+
+    /// Rivals whose time has come are founded (near their site if it has been taken).
+    pub(crate) fn rivals_tick(&mut self) {
+        let now = self.time;
+        for k in 0..self.setup.rivals.len() {
+            let (f, at) = self.setup.rivals[k];
+            if at > now || !self.factions[f as usize].pending {
+                continue;
+            }
+            let s = self.factions[f as usize].start;
+            let spot = self.nearest_start(s, 80);
+            match spot {
+                Some((x, y)) => {
+                    let t = self.factions[f as usize].traits;
+                    self.found_civ(f, x, y, t);
+                }
+                // Nowhere free: try again in a while.
+                None => self.setup.rivals[k].1 = now + 20.0,
+            }
+        }
+    }
+
+    /// The nearest place to `s` (within `r` tiles) where a rival may begin: free land, not
+    /// within `RIVAL_GAP` of anyone's village (rivals squeeze in closer than the player may).
+    fn nearest_start(&self, s: (i32, i32), r: i32) -> Option<(i32, i32)> {
+        let ok = |x: i32, y: i32| {
+            self.terrain.walkable(x, y)
+                && y >= 6
+                && y <= self.d.h as i32 - 7
+                && self.owner[self.d.idx(x, y)] == NO_F
+                && self.villages.iter().filter(|v| v.alive).all(|v| self.d.dist(x as f32, y as f32, v.x as f32, v.y as f32) >= RIVAL_GAP)
+        };
+        if ok(s.0, s.1) {
+            return Some(s);
+        }
+        for ring in (2..=r).step_by(2) {
+            for k in 0..(4 * ring) {
+                let a = k as f32 / (4 * ring) as f32 * std::f32::consts::TAU;
+                let (x, y) = (s.0 + (a.cos() * ring as f32) as i32, s.1 + (a.sin() * ring as f32) as i32);
+                if ok(x, y) {
+                    return Some((self.d.wrap_x(x), y));
+                }
+            }
+        }
+        None
     }
 
     fn pending(&self) -> Vec<u8> {
@@ -349,13 +505,17 @@ impl World {
         if (f as usize) >= MAX_FACTIONS || !self.factions[f as usize].pending {
             return false;
         }
-        let first = self.setup.founded.is_empty();
+        // The player's own people (★): the first of the player's slots to be founded.
+        let mine = self.setup.slots.contains(&f);
+        let first = mine && !self.setup.founded.iter().any(|(g, _)| self.setup.slots.contains(g));
         {
             let fac = &mut self.factions[f as usize];
             fac.pending = false;
             fac.alive = true;
             fac.traits = traits.clamped();
-            fac.seed_source = SeedSource::Mind;
+            if mine {
+                fac.seed_source = SeedSource::Mind;
+            }
             fac.born = self.time;
             fac.start = (x, y);
             fac.is_player = first;
@@ -377,9 +537,11 @@ impl World {
         let order = self.setup.founded.len() as i32;
         let packed = pack_traits(&self.factions[f as usize].traits);
         self.log_x(ev::CIV_FOUNDED, f, NO_F, x, y, order, packed);
-        self.setup.phase = if self.pending().is_empty() { Phase::Done } else { Phase::Choose };
-        if let Some(&next) = self.pending().first() {
-            self.setup.slot = next;
+        if mine {
+            self.setup.phase = if self.pending().is_empty() { Phase::Done } else { Phase::Choose };
+            if let Some(&next) = self.pending().first() {
+                self.setup.slot = next;
+            }
         }
         self.recount();
         self.refresh_hostility();
@@ -413,6 +575,15 @@ impl World {
             Phase::Seed => {
                 let left = (SEED_SECONDS - s.t).max(0.0).ceil() as i32;
                 let _ = writeln!(out, "Seeding the {} from your mind: {left} s. Calm makes them kind, stress and anger fierce, focus fertile, blinks wild.", name(s.slot));
+            }
+        }
+        if !s.rivals.is_empty() {
+            let arrived = s.rivals.iter().filter(|r| !self.factions[r.0 as usize].pending).count();
+            let next = s.rivals.iter().filter(|r| self.factions[r.0 as usize].pending).map(|r| r.1).fold(f32::MAX, f32::min);
+            if arrived < s.rivals.len() {
+                let _ = writeln!(out, "Rivals: {arrived} of {} have arrived; the next in {} s.", s.rivals.len(), (next - self.time).max(0.0).ceil() as i32);
+            } else {
+                let _ = writeln!(out, "Rivals: all {} have arrived.", s.rivals.len());
             }
         }
         for &f in &s.slots {

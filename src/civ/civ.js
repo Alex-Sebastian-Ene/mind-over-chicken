@@ -30,10 +30,11 @@ export function loadCivModule() {
 
 // width/height 0 = the default planet (1280×640). staged: the civilisations wait to be
 // chosen, placed and seeded by the player one at a time (#98).
-export async function createCiv(seed, { width = 0, height = 0, staged = false } = {}) {
+// rivals: civilisations that arrive on their own at staggered times (#101).
+export async function createCiv(seed, { width = 0, height = 0, staged = false, rivals = 0 } = {}) {
   const module = await loadCivModule();
   const instance = await WebAssembly.instantiate(module, {});
-  return new Civ(instance.exports, seed, width, height, staged);
+  return new Civ(instance.exports, seed, width, height, staged, rivals);
 }
 
 // The founding flow's phases (Rust `setup::Phase`).
@@ -42,10 +43,10 @@ export const SETUP = { off: 0, choose: 1, place: 2, seed: 3, done: 4 };
 const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
 
 export class Civ {
-  constructor(ex, seed, width, height, staged) {
+  constructor(ex, seed, width, height, staged, rivals) {
     this.ex = ex;
     this.seed = seed >>> 0;
-    this.w = staged ? ex.civ_new_staged(this.seed, width, height) : ex.civ_new_sized(this.seed, width, height);
+    this.w = staged ? ex.civ_new_staged_with(this.seed, width, height, 4, rivals) : ex.civ_new_sized(this.seed, width, height);
     this.pw = ex.civ_planet_w(this.w);
     this.ph = ex.civ_planet_h(this.w);
     this.slots = ex.civ_faction_slots();

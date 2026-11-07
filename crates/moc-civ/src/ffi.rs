@@ -525,3 +525,11 @@ pub extern "C" fn civ_setup_text_build(p: *mut World) -> usize {
 pub extern "C" fn civ_found(p: *mut World, f: u32, x: i32, y: i32, friendliness: f32, aggressiveness: f32, violence: f32, fertility: f32, cohesion: f32) -> i32 {
     w(p).map(|w| refreshed(w, |w| w.found_civ(f.min(255) as u8, x, y, Traits { friendliness, aggressiveness, violence, fertility, cohesion }) as i32)).unwrap_or(0)
 }
+
+/// A staged run with `players` civilisations for the player to found and `rivals` arriving on
+/// their own (#101); 0×0 for the default planet size.
+#[no_mangle]
+pub extern "C" fn civ_new_staged_with(seed: u32, w: u32, h: u32, players: u32, rivals: u32) -> *mut World {
+    let d = if w == 0 || h == 0 { crate::planet::Dims::DEFAULT } else { crate::planet::Dims::new(w as usize, h as usize) };
+    Box::into_raw(Box::new(World::new_staged_with(seed, d, players as usize, rivals as usize)))
+}

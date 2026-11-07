@@ -184,7 +184,7 @@ pub fn settle(w: &mut World, i: usize) {
         (a.faction, a.gx, a.gy, a.state)
     };
     let alive_villages = w.villages.iter().filter(|v| v.alive).count();
-    if state == State::ToSite && w.d.cheb(cx, cy, gx, gy) <= 1 && site_ok(w, f, cx, cy) && alive_villages < MAX_VILLAGES {
+    if state == State::ToSite && w.d.cheb(cx, cy, gx, gy) <= 1 && site_ok(w, f, cx, cy) && alive_villages < w.cap_villages {
         let food = w.agents[i].carry + 1.0;
         let origin = w.agents[i].home;
         let v = w.found_village(f, cx, cy, food, true);
@@ -310,7 +310,7 @@ fn update_villages(w: &mut World, dt: f32) {
         w.villages[vi].spawn_t += dt * (0.6 + 0.8 * tr.fertility) * (1.0 + 0.5 * focus);
         let (pop, food) = (w.villages[vi].pop, w.villages[vi].food);
         let reserve = pop as f32 * EAT_RATE * DAY_SECONDS * reserve_days(fac.age);
-        if w.villages[vi].spawn_t >= SPAWN_EVERY && pop < cap && food >= SPAWN_COST + 0.5 + reserve && w.agents.len() < MAX_AGENTS {
+        if w.villages[vi].spawn_t >= SPAWN_EVERY && pop < cap && food >= SPAWN_COST + 0.5 + reserve && w.agents.len() < w.cap_agents {
             w.villages[vi].spawn_t = 0.0;
             w.villages[vi].food -= SPAWN_COST;
             let at_war = w.at_war[f as usize];
@@ -332,8 +332,8 @@ fn update_villages(w: &mut World, dt: f32) {
             && jobs::has(&w.villages[vi], Building::Shipyard, fac.age)
             && food >= SETTLER_COST + 2.0
             && w.rng.chance(0.15)
-            && alive_villages < MAX_VILLAGES
-            && w.agents.len() < MAX_AGENTS
+            && alive_villages < w.cap_villages
+            && w.agents.len() < w.cap_agents
         {
             if let Some((sx, sy)) = pick_overseas(w, f, vx, vy) {
                 w.villages[vi].food -= SETTLER_COST;
@@ -349,9 +349,9 @@ fn update_villages(w: &mut World, dt: f32) {
         if w.villages[vi].settler_t <= 0.0
             && pop as f32 >= (cap as f32 * 0.45).max(3.0)
             && food >= SETTLER_COST + 1.0 + reserve
-            && alive_villages < MAX_VILLAGES
+            && alive_villages < w.cap_villages
             && fac.villages < max_villages(fac.age)
-            && w.agents.len() < MAX_AGENTS
+            && w.agents.len() < w.cap_agents
         {
             match pick_site(w, f, vx, vy, vx, vy) {
                 Some((sx, sy)) => {
