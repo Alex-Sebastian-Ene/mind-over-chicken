@@ -1,10 +1,13 @@
+pub mod audio;
 pub mod biosignal;
 mod camera3d;
+pub mod eras;
 mod font;
 mod gl;
 mod gl3d;
 mod math3d;
 mod mesh3d;
+pub mod shell;
 mod sprites;
 mod terrain;
 
@@ -32,6 +35,10 @@ pub struct Engine {
     current_era: u8,
     is_3d_mode: bool,
     time_3d: f32,
+    audio: audio::AudioSynth,
+    hud: shell::HudDriver,
+    advisor: shell::AdvisorDriver,
+    game: eras::game::GameFlow,
 }
 
 #[wasm_bindgen]
@@ -65,6 +72,10 @@ impl Engine {
         }
 
         let camera_3d = OrbitCamera::new(160.0, 90.0);
+        let audio = audio::AudioSynth::new();
+        let hud = shell::HudDriver::new();
+        let advisor = shell::AdvisorDriver::new();
+        let game = eras::game::GameFlow::new(0);
 
         Ok(Engine {
             renderer,
@@ -78,6 +89,10 @@ impl Engine {
             current_era: 0,
             is_3d_mode: true,
             time_3d: 0.0,
+            audio,
+            hud,
+            advisor,
+            game,
         })
     }
 
@@ -756,5 +771,192 @@ impl Engine {
             .as_ref()
             .map(|t| t.sites.hangar.y)
             .unwrap_or(114)
+    }
+
+    pub fn bind_dom_shell(&mut self) -> Result<(), JsValue> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let window = web_sys::window().ok_or_else(|| JsValue::from_str("No window found"))?;
+            let document = window
+                .document()
+                .ok_or_else(|| JsValue::from_str("No document found"))?;
+            self.hud.bind_dom(&document);
+            self.advisor.bind_dom(&document);
+        }
+        Ok(())
+    }
+
+    pub fn audio_unlock(&mut self) {
+        self.audio.unlock();
+    }
+
+    pub fn audio_toggle(&mut self) -> bool {
+        self.audio.toggle()
+    }
+
+    pub fn audio_play(&mut self, sound: &str) {
+        match sound {
+            "thunder" => self.audio.thunder(),
+            "ignite" => self.audio.ignite(),
+            "blip" => self.audio.blip(),
+            "good" => self.audio.good(),
+            "bad" => self.audio.bad(),
+            "pop" => self.audio.pop(),
+            "coin" => self.audio.coin(),
+            "bell" => self.audio.bell(),
+            "crash" => self.audio.crash(),
+            "tick" => self.audio.tick(),
+            "rumble" => self.audio.rumble(0.8),
+            "fanfare" => self.audio.fanfare(),
+            _ => {}
+        }
+    }
+
+    pub fn audio_heartbeat(&mut self, now: f64, bpm: f32, intensity: f32) {
+        self.audio.heartbeat(now, bpm, intensity);
+    }
+
+    pub fn game_start_era(&mut self, index: usize) {
+        self.game.start_era(index);
+        self.set_era(index as u8);
+        self.hud.set_scene(self.game.era.label(), self.game.era.powers());
+        self.advisor.set_era(self.game.era.id());
+    }
+
+    pub fn game_restart_era(&mut self) {
+        self.game.restart_current_era();
+        self.set_era(self.game.era_index as u8);
+        self.hud.set_scene(self.game.era.label(), self.game.era.powers());
+        self.advisor.set_era(self.game.era.id());
+    }
+
+    pub fn game_tick(
+        &mut self,
+        dt: f32,
+        calm: f32,
+        focus: f32,
+        panic: f32,
+        hr: f32,
+        rest_hr: f32,
+        hr_delta: f32,
+        blinks: u32,
+    ) {
+        let brain = eras::BrainInput {
+            calm,
+            focus,
+            panic,
+            hr,
+            rest_hr,
+            hr_delta,
+            blinks,
+        };
+
+        let events = self.game.tick(dt, &brain);
+        self.dispatch_era_events(&events);
+
+        self.advisor.update(dt);
+        self.hud.update_clock(self.game.stats.runtime);
+        self.hud.update_meters(calm, None, focus, None, hr, rest_hr, hr_delta, blinks);
+        self.hud.update_objectives(&self.game.era.objectives());
+    }
+
+    pub fn game_on_blink(&mut self, aim_x: f32, aim_y: f32) {
+        let events = self.game.on_blink(aim_x, aim_y);
+        self.dispatch_era_events(&events);
+    }
+
+    pub fn game_on_cast(&mut self, spell: &str, aim_x: f32, aim_y: f32) {
+        let events = self.game.on_cast(spell, aim_x, aim_y);
+        self.dispatch_era_events(&events);
+    }
+
+    fn dispatch_era_events(&mut self, events: &[eras::EraEvent]) {
+        for ev in events {
+            match ev {
+                eras::EraEvent::AdvisorSay {
+                    key,
+                    text,
+                    mood,
+                    priority,
+                    cooldown,
+                } => {
+                    self.advisor.say(key, text, mood, *priority, *cooldown);
+                }
+                eras::EraEvent::PlaySound(sound) => match sound {
+                    eras::SoundKind::Thunder => self.audio.thunder(),
+                    eras::SoundKind::Ignite => self.audio.ignite(),
+                    eras::SoundKind::Blip => self.audio.blip(),
+                    eras::SoundKind::Good => self.audio.good(),
+                    eras::SoundKind::Bad => self.audio.bad(),
+                    eras::SoundKind::Pop => self.audio.pop(),
+                    eras::SoundKind::Coin => self.audio.coin(),
+                    eras::SoundKind::Bell => self.audio.bell(),
+                    eras::SoundKind::Crash => self.audio.crash(),
+                    eras::SoundKind::Tick => self.audio.tick(),
+                    eras::SoundKind::Rumble => self.audio.rumble(0.8),
+                    eras::SoundKind::Fanfare => self.audio.fanfare(),
+                },
+                _ => {}
+            }
+        }
+    }
+
+    pub fn advisor_say(
+        &mut self,
+        key: &str,
+        text: &str,
+        mood: &str,
+        priority: u8,
+        cooldown: f32,
+    ) -> bool {
+        self.advisor.say(key, text, mood, priority, cooldown)
+    }
+
+    pub fn get_game_era_index(&self) -> usize {
+        self.game.era_index
+    }
+
+    pub fn get_game_era_id(&self) -> String {
+        self.game.era.id().to_string()
+    }
+
+    pub fn get_game_era_label(&self) -> String {
+        self.game.era.label().to_string()
+    }
+
+    pub fn is_game_finished(&self) -> bool {
+        self.game.finished
+    }
+
+    pub fn is_game_failed(&self) -> Option<String> {
+        self.game.era.is_failed()
+    }
+
+    pub fn get_game_runtime(&self) -> f32 {
+        self.game.stats.runtime
+    }
+
+    pub fn get_game_lightning_stat(&self) -> u32 {
+        self.game.stats.lightning
+    }
+
+    pub fn get_game_smitten_stat(&self) -> u32 {
+        self.game.stats.smitten
+    }
+
+    pub fn get_game_births_stat(&self) -> u32 {
+        self.game.stats.births
+    }
+
+    pub fn get_game_deaths_stat(&self) -> u32 {
+        self.game.stats.deaths
+    }
+
+    pub fn get_game_recessions_stat(&self) -> u32 {
+        self.game.stats.recessions
+    }
+
+    pub fn get_game_restarts_stat(&self) -> u32 {
+        self.game.stats.restarts
     }
 }

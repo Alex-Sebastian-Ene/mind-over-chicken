@@ -18,6 +18,8 @@ import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel } from '.
 import { initCamera } from './camera/camera.js'; // camera (#33)
 import { Calibration, readCalibrationConfig } from './brain/calibration.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
+import { SimPlanet } from './ai/planet.js';
+import { AIGod } from './ai/autopilot.js';
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
 // mind read uses the same window.
@@ -40,6 +42,7 @@ try {
   await initEngine();
   BridgeSource.setWasmClasses(RustImuTracker, RustBlinkClassifier);
   engine = new Engine('screen');
+  engine.bind_dom_shell();
 } catch (err) {
   console.error('Failed to initialize Rust WebGL engine:', err);
 }
@@ -78,7 +81,24 @@ function resize() {
 new ResizeObserver(resize).observe(screen);
 
 // ---------- game state ----------
-const audio = new Audio();
+const jsAudio = new Audio();
+const audio = {
+  unlock() { if (engine) engine.audio_unlock(); else jsAudio.unlock(); },
+  toggle() { return engine ? engine.audio_toggle() : jsAudio.toggle(); },
+  thunder() { if (engine) engine.audio_play('thunder'); else jsAudio.thunder(); },
+  ignite() { if (engine) engine.audio_play('ignite'); else jsAudio.ignite(); },
+  blip() { if (engine) engine.audio_play('blip'); else jsAudio.blip(); },
+  good() { if (engine) engine.audio_play('good'); else jsAudio.good(); },
+  bad() { if (engine) engine.audio_play('bad'); else jsAudio.bad(); },
+  pop() { if (engine) engine.audio_play('pop'); else jsAudio.pop(); },
+  coin() { if (engine) engine.audio_play('coin'); else jsAudio.coin(); },
+  bell() { if (engine) engine.audio_play('bell'); else jsAudio.bell(); },
+  crash() { if (engine) engine.audio_play('crash'); else jsAudio.crash(); },
+  tick() { if (engine) engine.audio_play('tick'); else jsAudio.tick(); },
+  rumble(dur) { if (engine) engine.audio_play('rumble'); else jsAudio.rumble(dur); },
+  fanfare() { if (engine) engine.audio_play('fanfare'); else jsAudio.fanfare(); },
+  heartbeat(now, bpm, intensity) { if (engine) engine.audio_heartbeat(now, bpm, intensity); else jsAudio.heartbeat(now, bpm, intensity); },
+};
 const advisor = new Advisor($('advisor'));
 const hud = new Hud(document);
 const cosmos = new Cosmos();
@@ -121,12 +141,37 @@ let pendingTimer = 0;
 let banner = null;      // {t}
 let lastTs = 0;
 
+// ---------- AI god (PPO) ----------
+let aiPlanet = null;
+function toggleAIGod() {
+  if (aiPlanet) {
+    aiPlanet.attachHuman(null);
+    aiPlanet = null;
+    const btn = $('aiGodBtn');
+    if (btn) {
+      btn.textContent = 'AI God: OFF';
+      btn.setAttribute('aria-pressed', 'false');
+    }
+    advisor.say('ai-off', 'AI god disengaged. You have full command.', { mood: 'happy', priority: 2, cooldown: 1 });
+  } else {
+    aiPlanet = new SimPlanet({ seed: G?.world?.seed || 42, brain: 'proxy' }).setGod(new AIGod());
+    if (G?.brain) aiPlanet.attachHuman(G.brain);
+    const btn = $('aiGodBtn');
+    if (btn) {
+      btn.textContent = 'AI God: ON';
+      btn.setAttribute('aria-pressed', 'true');
+    }
+    advisor.say('ai-on', 'AI god engaged! The PPO autopilot is steering this world. Stay calm to help it.', { mood: 'nervous', priority: 2, cooldown: 1 });
+  }
+}
+
 function newGame(source, startIndex = 0) {
   if (previewSource && previewSource !== source) previewSource.disconnect();
   previewSource = null;
   previewBrain = null;
   if (G?.source && G.source !== source) G.source.disconnect();
   const brain = new Brain(source);
+  if (aiPlanet) aiPlanet.attachHuman(brain);
   cosmos.reset();
   G = {
     world: new World(),
@@ -141,8 +186,10 @@ function newGame(source, startIndex = 0) {
   };
   brain.onBlink((aim) => {
     hud.flashBlink();
+    if (engine) engine.game_on_blink(aim.x * W, aim.y * H);
     cosmos.galaxy?.onBlink();   // storms on the blink world; a strike on the world you're zoomed into
     if (cosmos.galaxy?.attended) audio.thunder();
+    if (aiPlanet) aiPlanet.humanBlink(aim);
     if (!banner && !cosmos.active && G.scene?.onBlink) G.scene.onBlink(aim);
   });
   // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
@@ -160,6 +207,7 @@ function newGame(source, startIndex = 0) {
     const deep = G.world.palette?.[0]?.[0];
     if (deep && engine.set_backdrop) engine.set_backdrop(deep[0], deep[1], deep[2]);
     engine.set_era(startIndex);
+    engine.game_start_era(Math.min(2, Math.floor(startIndex / 2)));
   }
   startScene(startIndex);
   try { window.claude?.hot?.snapshot?.(() => ({ sceneIndex: G?.sceneIndex ?? 0, kind: G?.source?.kind })); } catch {}
@@ -172,7 +220,10 @@ function startScene(i) {
   G.sceneIndex = i;
   const scene = SCENES[i]();
   G.scene = scene;
-  if (engine) engine.set_era(i);
+  if (engine) {
+    engine.set_era(i);
+    engine.game_start_era(Math.min(2, Math.floor(i / 2)));
+  }
   advisor.setEra(scene.era);
   scene.enter(G);
   hud.setScene(scene);
@@ -187,7 +238,10 @@ function restartScene() {
   const i = G.sceneIndex;
   const scene = SCENES[i]();
   G.scene = scene;
-  if (engine) engine.set_era(i);
+  if (engine) {
+    engine.set_era(i);
+    engine.game_restart_era();
+  }
   advisor.setEra(scene.era);
   scene.enter(G);
   hud.setScene(scene);
@@ -267,7 +321,7 @@ function showEnd() {
 
 // ---------- render ----------
 function render() {
-  const scene = G?.scene;
+  const scene = aiPlanet ? aiPlanet.scene : G?.scene;
   textCtx.setTransform(1, 0, 0, 1, 0, 0);
   textCtx.clearRect(0, 0, textLayer.width, textLayer.height);
   if (!scene) {
@@ -372,6 +426,22 @@ function frame(ts) {
   lastTs = ts;
   if (G) {
     G.brain.update(dt);
+    if (engine) {
+      const b = G.brain;
+      engine.game_tick(
+        dt,
+        b.calm || 0,
+        b.focus || 0,
+        0,
+        b.hr || 0,
+        b.restHr || 70,
+        b.hrDelta(),
+        b.stats?.blinks || 0
+      );
+      if (b.hr > 0) {
+        engine.audio_heartbeat(performance.now() / 1000, b.hr, Math.max(0, b.hrDelta() / 30));
+      }
+    }
     if (banner) {
       banner.t += dt;
       if (banner.t > 6) dismissBanner();
@@ -381,8 +451,10 @@ function frame(ts) {
     } else if ($('failScreen').hidden && $('endScreen').hidden) {
       G.runTime += dt;
       G.calibration?.update(dt, G.brain, G.mood);
+      if (aiPlanet) aiPlanet.update(dt);
       G.scene.update(dt);
     } else if (!$('endScreen').hidden) {
+      if (aiPlanet) aiPlanet.update(dt);
       G.scene.update(dt);
     }
     if (pendingScene != null) {
@@ -584,6 +656,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyE') { eegPanel.toggle(); return; }
   if (e.code === 'KeyC') { eegPanel.calibrateCenter(); return; }
   if (e.code === 'KeyT') { toggle3D(); return; }
+  if (e.code === 'KeyG') { toggleAIGod(); return; }
   if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { zoomOutFromSurface(); return; }
   if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { zoomInOnSurface(); return; }
   if (G && !cosmos.active && (e.code === 'KeyA' || e.code === 'KeyD')) { cosmos.panVel = e.code === 'KeyA' ? 140 : -140; return; }
@@ -647,6 +720,7 @@ function toggle3D() {
   advisor.say('3d-toggle', on ? '3D view: right-drag to orbit, wheel to zoom.' : '2D classic view.', { mood: 'happy', priority: 2, cooldown: 1 });
 }
 $('mode3dBtn')?.addEventListener('click', toggle3D);
+$('aiGodBtn')?.addEventListener('click', toggleAIGod);
 $('soundBtn').addEventListener('click', () => {
   audio.unlock();
   const on = audio.toggle();
