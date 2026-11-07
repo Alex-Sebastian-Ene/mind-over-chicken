@@ -56,7 +56,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
   display: flex;
   align-items: center;
   gap: 10px 16px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   min-width: 0;
 }
 .brand {
@@ -82,10 +82,13 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
   padding: 0;
   display: flex;
   gap: 6px;
-  flex-wrap: wrap;
-  flex: 1 1 280px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex: 1 1 auto;
   min-width: 0;
 }
+.objectives::-webkit-scrollbar { display: none; }
 .objectives li {
   display: inline-flex;
   align-items: baseline;
@@ -95,6 +98,8 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
   border-radius: 3px;
   background: var(--panel);
   font: 13px/1.2 var(--pixel);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .obj-label { color: var(--muted); }
 .obj-value { font-variant-numeric: tabular-nums; }
@@ -499,6 +504,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 @media (max-width: 760px) {
   body { overflow: auto; }
   .app { height: auto; min-height: 100%; grid-template-rows: auto auto auto; }
+  .bar { flex-wrap: wrap; }
   .stage { container-type: inline-size; display: block; }
   .frame { width: 100%; }
   .advisor { position: static; margin-top: 8px; max-width: none; }
@@ -526,21 +532,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 .cam-btn[data-live="1"]::before { background: var(--alarm); animation: cam-glow 1.6s ease-in-out infinite; }
 @keyframes cam-glow { 50% { opacity: 0.3; } }
 
-.cam-panel {
-  position: absolute;
-  z-index: 3;
-  right: max(8px, calc((100cqw - min(100cqw, calc(100cqh * 16 / 9))) / 2 + 8px));
-  bottom: max(8px, calc((100cqh - min(100cqh, calc(100cqw * 9 / 16))) / 2 + 14px));
-  width: 262px;
-  display: grid;
-  gap: 6px;
-  padding: 8px;
-  background: rgba(20, 23, 42, 0.94);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  box-shadow: 0 12px 40px -16px rgba(0, 0, 0, 0.9);
-  font-size: 12px;
-}
+.cam-panel[hidden] { display: none !important; }
 .cam-panel[data-live="1"] { border-color: color-mix(in srgb, var(--alarm) 55%, var(--line)); }
 .cam-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .cam-live { display: inline-flex; align-items: center; gap: 6px; font: 600 12px var(--pixel); color: var(--muted); }
@@ -549,9 +541,8 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 .cam-panel[data-live="1"] .cam-live i { background: var(--alarm); animation: cam-glow 1.6s ease-in-out infinite; }
 .cam-close { padding: 2px 6px; font-size: 11px; }
 .cam-msg { margin: 0; font-size: 12px; line-height: 1.35; color: var(--bone); }
-.cam-panel[data-state="error"] .cam-msg { color: #ffb3c0; }
-.cam-body { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px; align-items: start; }
-.cam-panel:not([data-live="1"]) .cam-body { display: none; }
+.cam-panel[data-state="error"] [data-cam-msg] { color: #ffb3c0; }
+.cam-body { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px; align-items: start; }
 .cam-view {
   position: relative;
   aspect-ratio: 4 / 3;
@@ -683,8 +674,10 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 }
 @media (max-width: 420px) {
   .dbg-brain { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 /* ---------- EEG & biosensing side panel ---------- */
+.eeg-panel[hidden] { display: none !important; }
 .eeg-btn { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .eeg-btn::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
 .eeg-btn[data-live="wait"] { border-color: var(--focus); }

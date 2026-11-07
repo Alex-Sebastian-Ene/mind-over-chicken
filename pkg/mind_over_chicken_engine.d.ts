@@ -77,6 +77,7 @@ export class Engine {
     constructor(canvas_id: string);
     orbit_camera(delta_yaw: number, delta_pitch: number): void;
     pan_camera(dx: number, dz: number): void;
+    project_to_screen(wx: number, wz: number, cw: number, ch: number): Float32Array;
     render_3d(dt: number, sun_x: number, sun_y: number, sun_z: number, night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
     render_uploaded_canvas(night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
     screen_to_ground(sx: number, sy: number, cw: number, ch: number): Float32Array;
@@ -97,6 +98,36 @@ export class Engine {
     set_heightmap(heights: Float32Array | number[]): void;
     upload_canvas(canvas: HTMLCanvasElement): void;
     zoom_camera(factor: number): void;
+}
+
+export class PointerGesture {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * A main-button or touch press. `sx, sy` screen pixels; `wx, wy` world units.
+     */
+    down(id: number, sx: number, sy: number, wx: number, wy: number): void;
+    is_panning(): boolean;
+    /**
+     * Pointer moved. Returns true when this move pans the map; read the delta with
+     * `pan_dx()` / `pan_dy()` (world units since the previous move). Returns false while the
+     * press is still a possible tap, or for another pointer.
+     */
+    moved(id: number, sx: number, sy: number, wx: number, wy: number): boolean;
+    /**
+     * `threshold_px`: how far (screen pixels) a press must move before it counts as a drag.
+     */
+    constructor(threshold_px: number);
+    /**
+     * Is this pointer the press being tracked?
+     */
+    owns(id: number): boolean;
+    pan_dx(): number;
+    pan_dy(): number;
+    /**
+     * Press ended. Returns true when it was a tap (blink). A cancelled pointer never taps.
+     */
+    up(id: number, cancelled: boolean): boolean;
 }
 
 export class RustBlinkClassifier {
@@ -123,6 +154,10 @@ export class RustBlinkClassifier {
     learned_af8_uv(): number;
     learned_threshold_uv(): number;
     constructor();
+    /**
+     * Records the latest EEG window as a non-blink negative sample (used during Hold Still
+     * and Move Head Around Without Blinking calibration stages to cancel noise & hum).
+     */
     record_baseline_button(): boolean;
     /**
      * Searches the last ~2.5s of EEG windows for the strongest blink peak if the user blinked
@@ -149,8 +184,15 @@ export class RustImuTracker {
     calib_sample_count(): number;
     cancel_motion_calibration(): void;
     /**
-     * Fits a 2D Ridge Regression model in Rust mapping `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
-     * Automatically discovers axis signs, sensitivity/range, center offset, and cross-axis head tilt coupling.
+     * Hybrid Smooth-Pursuit + Boundary-Fixation + Center-Checkpoint Solver:
+     * 1. Extracts Center checkpoints (`|tx| < 0.08 && |ty| < 0.08`) to remove any gyro yaw drift
+     *    accumulated across calibration and guarantee zero-intercept symmetry on reverse.
+     * 2. Searches optimal human smooth-pursuit reaction lag `L in 0..=2` on moving segments while
+     *    weighting stationary boundary-hold anchors (`3.0x`) for exact screen edge locking.
+     * 3. Solves zero-prior 3D sensor-to-head Ridge Regression (`[yaw, pitch, roll] -> (u_x, u_y)`)
+     *    with cross-axis Gram-Schmidt decoupling so vertical nods never leak horizontally.
+     * 4. Computes independent 4-boundary reach envelopes (`scale_left, scale_right, scale_up, scale_down`)
+     *    so 89% of the user's calibrated edge posture reaches 100% of all 4 screen boundaries & corners.
      */
     finish_motion_calibration(): boolean;
     has_motion_model(): boolean;
@@ -179,6 +221,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_engine_free: (a: number, b: number) => void;
+    readonly __wbg_pointergesture_free: (a: number, b: number) => void;
     readonly __wbg_rustblinkclassifier_free: (a: number, b: number) => void;
     readonly __wbg_rustimutracker_free: (a: number, b: number) => void;
     readonly engine_add_3d_light: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
@@ -250,6 +293,7 @@ export interface InitOutput {
     readonly engine_new: (a: number, b: number) => [number, number, number];
     readonly engine_orbit_camera: (a: number, b: number, c: number) => void;
     readonly engine_pan_camera: (a: number, b: number, c: number) => void;
+    readonly engine_project_to_screen: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly engine_render_3d: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
     readonly engine_render_uploaded_canvas: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly engine_screen_to_ground: (a: number, b: number, c: number, d: number, e: number) => any;
@@ -260,6 +304,14 @@ export interface InitOutput {
     readonly engine_set_heightmap: (a: number, b: number, c: number) => [number, number];
     readonly engine_upload_canvas: (a: number, b: any) => [number, number];
     readonly engine_zoom_camera: (a: number, b: number) => void;
+    readonly pointergesture_down: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly pointergesture_is_panning: (a: number) => number;
+    readonly pointergesture_moved: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly pointergesture_new: (a: number) => number;
+    readonly pointergesture_owns: (a: number, b: number) => number;
+    readonly pointergesture_pan_dx: (a: number) => number;
+    readonly pointergesture_pan_dy: (a: number) => number;
+    readonly pointergesture_up: (a: number, b: number, c: number) => number;
     readonly rustblinkclassifier_accuracy: (a: number) => number;
     readonly rustblinkclassifier_arm_flash_window: (a: number, b: number) => void;
     readonly rustblinkclassifier_baseline_samples: (a: number) => number;

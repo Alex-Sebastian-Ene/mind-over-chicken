@@ -460,15 +460,12 @@ export class StoneAge {
       engine.add_billboard(4, c.x, c.y, 1, Math.floor(this.t * 6 + 1) % 3, 0);
     }
 
-    // Reticle
-    const a = this.G.brain.aim;
-    engine.add_billboard(13, a.x * (W - 1), a.y * (H - 1), 1, 0, 0);
   }
 
   draw(ctx) {
     const G = this.G;
     ctx.drawImage(this.layer, 0, 0);
-    G.world.drawWater(ctx, this.t);
+    if (!G.render3d) G.world.drawWater(ctx, this.t);
     for (const m of this.meat) { ctx.fillStyle = m.cooked ? '#c0562f' : '#9e3d3d'; ctx.fillRect(m.x - 1, m.y - 1, 3, 2); }
     // In 3D, draw3d stands people, mammoths, fires and the chicken up as sprites; painting them
     // flat as well showed everything twice. Boats have no sprite yet, so they stay painted.
@@ -497,7 +494,9 @@ export class StoneAge {
   drawAfterLight(ctx) {
     for (const b of this.bolts) drawBolt(ctx, b.pts, Math.min(1, b.life * 4));
     const a = this.G.brain.aim;
-    if (!this.G.render3d) drawReticle(ctx, a.x * (W - 1), a.y * (H - 1), this.t, '#ffe066'); // 3D: a sprite
+    // Painted into the map in 3D too: the map drapes over the terrain, so it lands exactly on the
+    // ground point under the cursor (the standing sprite version sat above it, or didn't show).
+    drawReticle(ctx, a.x * (W - 1), a.y * (H - 1), this.t, '#ffe066');
     if (this.flash > 0) { ctx.fillStyle = `rgba(220,230,255,${this.flash * 0.9})`; ctx.fillRect(0, 0, W, H); }
   }
 
@@ -626,6 +625,10 @@ export class StoneAge {
 }
 
 export function label(ctx, x, y, text, color, size = 6) {
+  if (ctx.__project3d) {
+    const pr = ctx.__project3d(x, y);
+    if (pr) { x = pr[0]; y = pr[1]; }
+  }
   ctx.font = `${size}px "Pixelify Sans", monospace`;
   ctx.textAlign = 'center';
   ctx.fillStyle = 'rgba(8,10,24,0.85)';

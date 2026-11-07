@@ -44,29 +44,81 @@ const MOOD_LINES = {
 };
 
 const TEMPLATE = `
-  <header class="cam-head">
-    <span class="cam-live" data-cam-live><i aria-hidden="true"></i><b data-cam-state>Camera off</b></span>
-    <button type="button" class="tool cam-close" data-cam-close title="Turn the camera off and close this panel">Close</button>
+  <header class="eeg-head">
+    <h2>Camera &amp; Hand Casts</h2>
+    <button type="button" class="tool" data-cam-close title="Close Camera sidebar (\`)">Close <kbd>\`</kbd></button>
   </header>
-  <p class="cam-msg" data-cam-msg role="status"></p>
-  <div class="cam-body">
-    <div class="cam-view">
-      <video class="cam-video" playsinline muted></video>
-      <canvas class="cam-hands" width="320" height="240" aria-hidden="true"></canvas>
+
+  <section class="eeg-sec">
+    <div class="eeg-status-row">
+      <span class="eeg-dot" data-cam-dot data-ok="0"></span>
+      <strong data-cam-state>Camera off</strong>
+      <span class="eeg-qual" data-cam-mode>Idle</span>
     </div>
-    <div class="cam-mood" aria-label="Mood read from your face">
-      <p class="cam-mood-head">Mood <b data-cam-dominant>neutral</b></p>
-      ${EMOTIONS.map((k) => `<div class="cam-mood-row" data-emotion="${k}"><span>${k}</span><span class="cam-bar"><span></span></span></div>`).join('')}
+    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam: cast spells with hand gestures and set world mood with your face. Frames never leave this device.</p>
+    <div class="eeg-url-row">
+      <button type="button" class="btn btn-primary btn-small" data-cam-start>Start Camera</button>
+      <button type="button" class="btn btn-small" data-cam-stop disabled>Stop Camera</button>
     </div>
-  </div>
-  <p class="cam-now" data-cam-now>Make a gesture, or press 1–7.</p>
-  <div class="cam-spells" role="group" aria-label="Casts, keys 1 to 7">
-    ${SPELLS.map((s) => `<button type="button" class="cam-spell" data-spell="${s.id}" aria-label="${s.name} (key ${s.key})" title="${s.name} · key ${s.key}. ${s.hint}">
-      <svg class="cam-ring" viewBox="0 0 36 36" aria-hidden="true"><circle class="cam-ring-track" cx="18" cy="18" r="16"/><circle class="cam-ring-hold" cx="18" cy="18" r="16" pathLength="100"/><circle class="cam-ring-cd" cx="18" cy="18" r="16" pathLength="100"/></svg>
-      <span class="cam-glyph" aria-hidden="true">${s.glyph}</span><kbd>${s.key}</kbd>
-    </button>`).join('')}
-  </div>
-  <p class="cam-privacy">Frames never leave this device. Nothing is uploaded.</p>`;
+  </section>
+
+  <section class="eeg-sec">
+    <div class="eeg-sec-head">
+      <h3>Live Vision &amp; Hand Landmarks</h3>
+      <span class="eeg-qual" data-cam-fps>-- fps</span>
+    </div>
+    <div class="cam-body">
+      <div class="cam-view">
+        <video class="cam-video" playsinline muted></video>
+        <canvas class="cam-hands" width="320" height="240" aria-hidden="true"></canvas>
+      </div>
+      <div class="eeg-cursor-controls">
+        <div class="eeg-imu-xyz" style="grid-template-columns:1fr">
+          <div><span>Hands Inference</span><b data-cam-rate-hands>--</b></div>
+          <div><span>Face Inference</span><b data-cam-rate-face>--</b></div>
+        </div>
+        <div class="eeg-imu-mini">
+          <span>Gesture: <b data-cam-gesture>--</b></span>
+        </div>
+        <div class="eeg-imu-mini">
+          <span>Pinch: <b data-cam-pinch>--</b></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="eeg-sec">
+    <div class="eeg-sec-head">
+      <h3>Hand Spells (Keys 1–7)</h3>
+      <span class="eeg-qual" data-cam-last>Ready</span>
+    </div>
+    <p class="eeg-msg" data-cam-now>Make a gesture, or press 1–7.</p>
+    <div class="cam-spells" role="group" aria-label="Casts, keys 1 to 7">
+      ${SPELLS.map((s) => `<button type="button" class="cam-spell" data-spell="${s.id}" aria-label="${s.name} (key ${s.key})" title="${s.name} · key ${s.key}. ${s.hint}">
+        <svg class="cam-ring" viewBox="0 0 36 36" aria-hidden="true"><circle class="cam-ring-track" cx="18" cy="18" r="16"/><circle class="cam-ring-hold" cx="18" cy="18" r="16" pathLength="100"/><circle class="cam-ring-cd" cx="18" cy="18" r="16" pathLength="100"/></svg>
+        <span class="cam-glyph" aria-hidden="true">${s.glyph}</span><kbd>${s.key}</kbd>
+      </button>`).join('')}
+    </div>
+    <div class="eeg-imu-mini">
+      <span>Hand Range: <b data-cam-range>learning…</b></span>
+    </div>
+  </section>
+
+  <section class="eeg-sec" aria-label="Mood read from your face">
+    <div class="eeg-sec-head">
+      <h3>Facial Mood &amp; Expression</h3>
+      <span class="eeg-qual">Dominant: <b data-cam-dominant>neutral</b></span>
+    </div>
+    <div class="eeg-bands">
+      ${EMOTIONS.map((k) => `
+        <div class="eeg-band-row cam-mood-row" data-emotion="${k}">
+          <span class="eeg-band-lbl" style="text-transform:capitalize">${k}</span>
+          <span class="eeg-bar cam-bar"><span></span></span>
+          <span class="eeg-band-val" data-emotion-val="${k}">0%</span>
+        </div>`).join('')}
+    </div>
+    <p class="cam-privacy">Frames never leave this device. Nothing is uploaded.</p>
+  </section>`;
 
 function cameraError(err, castsEnabled) {
   const fallback = castsEnabled ? ' Keys 1–7 still cast every spell.' : '';
@@ -101,8 +153,23 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
   const hands = $('.cam-hands');
   const handsCtx = hands.getContext('2d');
   const ui = {
-    state: $('[data-cam-state]'), msg: $('[data-cam-msg]'), now: $('[data-cam-now]'), dominant: $('[data-cam-dominant]'),
+    dot: $('[data-cam-dot]'),
+    state: $('[data-cam-state]'),
+    mode: $('[data-cam-mode]'),
+    msg: $('[data-cam-msg]'),
+    startBtn: $('[data-cam-start]'),
+    stopBtn: $('[data-cam-stop]'),
+    fps: $('[data-cam-fps]'),
+    rateHands: $('[data-cam-rate-hands]'),
+    rateFace: $('[data-cam-rate-face]'),
+    gesture: $('[data-cam-gesture]'),
+    pinch: $('[data-cam-pinch]'),
+    range: $('[data-cam-range]'),
+    last: $('[data-cam-last]'),
+    now: $('[data-cam-now]'),
+    dominant: $('[data-cam-dominant]'),
     bars: Object.fromEntries(EMOTIONS.map((k) => [k, $(`[data-emotion="${k}"] .cam-bar > span`)])),
+    vals: Object.fromEntries(EMOTIONS.map((k) => [k, $(`[data-emotion-val="${k}"]`)])),
     spells: Object.fromEntries(SPELLS.map((s) => [s.id, panel.querySelector(`[data-spell="${s.id}"]`)])),
   };
 
@@ -151,14 +218,44 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
     const live = !!stream;
     btn.dataset.state = next;
     btn.dataset.live = live ? '1' : '0';
-    btn.setAttribute('aria-pressed', String(next === 'on' || next === 'starting'));
-    btn.textContent = live ? 'Camera on' : next === 'starting' ? 'Camera…' : 'Camera';
+    btn.setAttribute('aria-pressed', String(!panel.hidden));
+    btn.innerHTML = live ? 'Camera on <kbd>`</kbd>' : next === 'starting' ? 'Camera… <kbd>`</kbd>' : 'Camera <kbd>`</kbd>';
     panel.dataset.state = next;
     panel.dataset.live = live ? '1' : '0';
+    if (ui.dot) ui.dot.dataset.ok = live ? '1' : next === 'starting' ? 'wait' : '0';
+    if (ui.startBtn) {
+      ui.startBtn.disabled = next === 'starting' || live;
+      ui.startBtn.textContent = live ? 'Camera Running' : next === 'starting' ? 'Starting…' : 'Start Camera';
+    }
+    if (ui.stopBtn) ui.stopBtn.disabled = !live && next !== 'starting';
     ui.state.textContent = live ? (next === 'on' ? 'Camera on · tracking' : 'Camera on · loading') : next === 'error' ? 'Camera unavailable' : next === 'starting' ? 'Starting camera…' : 'Camera off';
-    setMsg(msg);
+    if (msg) setMsg(msg);
+    else if (live && next === 'on') setMsg('Tracking hands and facial mood locally.');
   }
-  function setMsg(msg) { ui.msg.textContent = msg; ui.msg.hidden = !msg; }
+  function setMsg(msg) {
+    if (!ui.msg) return;
+    ui.msg.textContent = msg || 'Opt-in webcam: cast spells with hand gestures and set world mood with your face.';
+  }
+
+  function togglePanel(force) {
+    const open = force !== undefined ? force : panel.hidden;
+    panel.hidden = !open;
+    btn.setAttribute('aria-pressed', String(open));
+    if (open) {
+      const eegP = document.getElementById('eegPanel');
+      const eegB = document.getElementById('eegBtn');
+      if (eegP && !eegP.hidden) {
+        eegP.hidden = true;
+        eegB?.setAttribute('aria-pressed', 'false');
+      }
+      const modP = document.getElementById('modelPanel');
+      const modB = document.getElementById('modelBtn');
+      if (modP && !modP.hidden) {
+        modP.hidden = true;
+        modB?.setAttribute('aria-pressed', 'false');
+      }
+    }
+  }
 
   // ---------- inference engine ----------
   async function ensureEngine(onStatus) {
@@ -187,7 +284,7 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
     if (status === 'starting' || status === 'on') return;
     const id = ++run;
     fpsBefore = frames.fps(performance.now());
-    panel.hidden = false;
+    togglePanel(true);
     setStatus('starting', 'Asking for the camera…');
     if (!navigator.mediaDevices?.getUserMedia) {
       setStatus('error', window.isSecureContext === false
@@ -242,12 +339,20 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
   function stop() {
     run++;
     teardown();
-    setStatus('off');
-    panel.hidden = true;
+    setStatus('off', 'Camera stopped. Keys 1–7 still cast every spell.');
   }
 
-  btn.addEventListener('click', () => { if (status === 'on' || status === 'starting') stop(); else start(); });
-  $('[data-cam-close]').addEventListener('click', stop);
+  btn.addEventListener('click', () => {
+    if (panel.hidden) {
+      togglePanel(true);
+      if (status === 'off') start();
+    } else {
+      togglePanel(false);
+    }
+  });
+  ui.startBtn?.addEventListener('click', () => start());
+  ui.stopBtn?.addEventListener('click', () => stop());
+  $('[data-cam-close]').addEventListener('click', () => togglePanel(false));
   window.addEventListener('pagehide', () => { if (stream || status === 'starting') stop(); });
 
   // ---------- aiming ----------
@@ -421,11 +526,58 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
     return hand ? `Hand: ${g}` : 'Show a hand. Point to aim, pinch to aim precisely.';
   }
 
+  function fmtRate(r) {
+    if (!r || !r.count) return 'waiting…';
+    const parts = [`${Math.round(r.hz)} Hz`];
+    if (r.ms != null) parts.push(`${Math.round(r.ms)} ms`);
+    if (r.latency != null) parts.push(`${Math.round(r.latency)} ms lag`);
+    return parts.join(' · ');
+  }
+
   function updatePanel(now) {
-    for (const k of EMOTIONS) ui.bars[k].style.width = `${Math.round(mood[k] * 100)}%`;
+    for (const k of EMOTIONS) {
+      const pctStr = `${Math.round((mood[k] || 0) * 100)}%`;
+      if (ui.bars[k]) ui.bars[k].style.width = pctStr;
+      if (ui.vals[k]) ui.vals[k].textContent = pctStr;
+    }
     const dom = !stream ? 'camera off' : !mood.face ? 'no face' : mood.calibrating ? 'reading your face…' : mood.dominant;
     if (ui.dominant.textContent !== dom) ui.dominant.textContent = dom;
     panel.dataset.mood = stream ? mood.dominant : 'off';
+
+    const snap = engine ? engine.snapshot(now) : null;
+    if (ui.mode) {
+      if (stream && snap) {
+        const where = snap.mode === 'worker' ? `worker ×${snap.workers}` : 'main thread';
+        const dl = [...new Set([snap.gesture.delegate, snap.face.delegate].filter(Boolean))].join('/');
+        ui.mode.textContent = `${where}${dl ? ` · ${dl}` : ''}`;
+      } else {
+        ui.mode.textContent = status === 'starting' ? 'Loading…' : 'Idle';
+      }
+    }
+    if (ui.fps) ui.fps.textContent = `${Math.round(frames.fps(now))} fps`;
+    if (ui.rateHands) ui.rateHands.textContent = stream && snap ? fmtRate(snap.gesture) : '--';
+    if (ui.rateFace) ui.rateFace.textContent = stream && snap ? fmtRate(snap.face) : '--';
+
+    if (ui.gesture) {
+      ui.gesture.textContent = !stream ? 'camera off' : !hand ? 'no hand' : `${GESTURE_LABEL[gesture.name] || gesture.name} (${Math.round(gesture.score * 100)}%)${finger?.mode === 'point' ? ' · aiming' : ''}`;
+    }
+    if (ui.pinch) {
+      const armedSpell = SPELL_BY_ID[armed || 'fireball'];
+      ui.pinch.textContent = finger?.ratio == null
+        ? `casts ${armedSpell.glyph} ${armedSpell.name}`
+        : finger.pinching
+          ? `HELD (${finger.ratio.toFixed(2)}) -> ${armedSpell.glyph}`
+          : `open (${finger.ratio.toFixed(2)}) · ${armedSpell.glyph}`;
+    }
+    if (ui.range) {
+      const rg = fingers.range.snapshot();
+      ui.range.textContent = `${rg.calibrated ? 'learned' : `learning ${Math.round((rg.progress || 0) * 100)}%`} · X:${rg.x[0].toFixed(2)}–${rg.x[1].toFixed(2)} Y:${rg.y[0].toFixed(2)}–${rg.y[1].toFixed(2)}`;
+    }
+    if (ui.last) {
+      const last = history[0];
+      ui.last.textContent = last ? `${SPELL_BY_ID[last.id].glyph} ${SPELL_BY_ID[last.id].name} (${((now - last.at) / 1000).toFixed(1)}s ago)` : 'Ready';
+    }
+
     if (!castsEnabled) return;
     const text = nowText(now);
     if (ui.now.textContent !== text) ui.now.textContent = text;
@@ -567,7 +719,7 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
     get engine() { return engine; },
     get vision() { return engine?.vision || null; },
     get armed() { return armed; },
-    start, stop, cast,
+    start, stop, cast, togglePanel,
     casts, tracker, fingers, video,
     debugState,
     // Feed model results in directly, as the engine does (stubbed outputs for tests).

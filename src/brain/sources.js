@@ -260,6 +260,11 @@ export class BridgeSource {
   }
 
   connect() {
+    this._manualDisconnect = false;
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
     this.recenter();
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -280,7 +285,20 @@ export class BridgeSource {
         this.status = 'Bridge error';
         if (!settled) { settled = true; clearTimeout(timer); reject(new Error(`No bridge answered at ${this.url}`)); }
       };
-      ws.onclose = () => { this.connected = false; this.streaming = false; this.status = 'Bridge disconnected'; };
+      ws.onclose = () => {
+        this.connected = false;
+        this.streaming = false;
+        this.status = this._manualDisconnect ? 'Bridge disconnected' : 'Bridge disconnected — reconnecting…';
+        if (!this._manualDisconnect) {
+          if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
+          this._reconnectTimer = setTimeout(() => {
+            this._reconnectTimer = null;
+            if (!this._manualDisconnect && !this.connected) {
+              this.connect().catch(() => {});
+            }
+          }, 2000);
+        }
+      };
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
@@ -297,7 +315,14 @@ export class BridgeSource {
     });
   }
 
-  disconnect() { try { this.ws?.close(); } catch {} }
+  disconnect() {
+    this._manualDisconnect = true;
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+    try { this.ws?.close(); } catch {}
+  }
 
   normalise(msg) {
     this.ensureWasm();
@@ -374,9 +399,9 @@ export class BridgeSource {
       };
     }
 
-    const blink = (blinkModel && blinkModel.trained)
+    const blink = blinkModel
       ? (rustBlinkFired || this.manualBlinkPending)
-      : (!!msg.blink || rustBlinkFired || this.manualBlinkPending);
+      : (!!msg.blink || this.manualBlinkPending);
     this.manualBlinkPending = false;
 
     const neutralProgress = this.rustImu

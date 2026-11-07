@@ -9,6 +9,7 @@ pub struct IndustryEra {
     pub value: f32,
     pub momentum: f32,
     pub gdp: f32,
+    pub gdp_reached: bool,
     pub confidence: f32,
     pub recessions: u32,
     pub crash_cooldown: f32,
@@ -33,6 +34,7 @@ impl IndustryEra {
             value: 100.0,
             momentum: 0.0,
             gdp: 50.0,
+            gdp_reached: false,
             confidence: 1.0,
             recessions: 0,
             crash_cooldown: 0.0,
@@ -63,37 +65,44 @@ impl Era for IndustryEra {
     }
 
     fn objectives(&self) -> Vec<Objective> {
+        let gdp_done = self.gdp >= GDP_TARGET || self.gdp_reached;
+        let display_gdp = if gdp_done {
+            GDP_TARGET as i32
+        } else {
+            self.gdp.round() as i32
+        };
+        let ipo_seconds = (IPO_HOLD_SECONDS - self.ipo_progress).max(0.0).ceil() as i32;
         vec![
             Objective {
                 label: "GDP".to_string(),
-                value: format!("{}/{} goats", self.gdp.round() as i32, GDP_TARGET as i32),
-                done: self.gdp >= GDP_TARGET,
+                value: format!("{}/{}", display_gdp, GDP_TARGET as i32),
+                done: gdp_done,
                 bad: false,
                 plain: false,
             },
             Objective {
-                label: "Goat Price".to_string(),
-                value: format!("{:.1}", self.price),
-                done: false,
-                bad: self.price < 50.0,
-                plain: true,
-            },
-            Objective {
-                label: "IPO".to_string(),
+                label: "Goat IPO".to_string(),
                 value: if self.ipo_done {
-                    "Listed!".to_string()
-                } else if self.gdp >= GDP_TARGET {
-                    format!("{:.1}s", (IPO_HOLD_SECONDS - self.ipo_progress).max(0.0))
+                    "priced".to_string()
+                } else if gdp_done {
+                    format!("{}/{}s", (IPO_HOLD_SECONDS as i32) - ipo_seconds, IPO_HOLD_SECONDS as i32)
                 } else {
-                    "Need GDP".to_string()
+                    "soon".to_string()
                 },
                 done: self.ipo_done,
                 bad: false,
                 plain: false,
             },
             Objective {
-                label: "Recessions".to_string(),
-                value: format!("{}", self.recessions),
+                label: "Goat index".to_string(),
+                value: format!("{:.1}", self.price),
+                done: false,
+                bad: self.price < 50.0,
+                plain: true,
+            },
+            Objective {
+                label: "Striking".to_string(),
+                value: format!("{}", if self.general_strike > 0.0 { 1 } else { 0 }),
                 done: false,
                 bad: self.recessions >= 3,
                 plain: true,
@@ -130,6 +139,9 @@ impl Era for IndustryEra {
             self.gdp += productivity * dt;
         } else {
             self.general_strike -= dt;
+        }
+        if self.gdp >= GDP_TARGET {
+            self.gdp_reached = true;
         }
 
         // Emergent crash condition: high stress + rapid price plunge

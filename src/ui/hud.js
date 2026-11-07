@@ -60,14 +60,27 @@ export class Hud {
       const key = JSON.stringify(obj);
       if (key !== this.lastObj) {
         this.lastObj = key;
-        this.objectives.replaceChildren(...obj.map((o) => {
-          const li = document.createElement('li');
-          li.className = o.done ? 'is-done' : o.bad ? 'is-bad' : o.plain ? 'is-plain' : '';
-          const l = document.createElement('span'); l.className = 'obj-label'; l.textContent = o.label;
-          const v = document.createElement('span'); v.className = 'obj-value'; v.textContent = o.value;
-          li.append(l, v);
-          return li;
-        }));
+        const items = this.objectives.children;
+        if (items.length !== obj.length) {
+          this.objectives.replaceChildren(...obj.map((o) => {
+            const li = document.createElement('li');
+            li.className = o.done ? 'is-done' : o.bad ? 'is-bad' : o.plain ? 'is-plain' : '';
+            const l = document.createElement('span'); l.className = 'obj-label'; l.textContent = o.label;
+            const v = document.createElement('span'); v.className = 'obj-value'; v.textContent = o.value;
+            li.append(l, v);
+            return li;
+          }));
+        } else {
+          obj.forEach((o, i) => {
+            const li = items[i];
+            const cls = o.done ? 'is-done' : o.bad ? 'is-bad' : o.plain ? 'is-plain' : '';
+            if (li.className !== cls) li.className = cls;
+            const l = li.querySelector('.obj-label');
+            if (l && l.textContent !== o.label) l.textContent = o.label;
+            const v = li.querySelector('.obj-value');
+            if (v && v.textContent !== o.value) v.textContent = o.value;
+          });
+        }
       }
     }
     const t = Math.floor(G.runTime);

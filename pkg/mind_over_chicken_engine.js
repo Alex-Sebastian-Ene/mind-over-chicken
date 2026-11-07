@@ -635,6 +635,17 @@ export class Engine {
         wasm.engine_pan_camera(this.__wbg_ptr, dx, dz);
     }
     /**
+     * @param {number} wx
+     * @param {number} wz
+     * @param {number} cw
+     * @param {number} ch
+     * @returns {Float32Array}
+     */
+    project_to_screen(wx, wz, cw, ch) {
+        const ret = wasm.engine_project_to_screen(this.__wbg_ptr, wx, wz, cw, ch);
+        return ret;
+    }
+    /**
      * @param {number} dt
      * @param {number} sun_x
      * @param {number} sun_y
@@ -734,6 +745,96 @@ export class Engine {
     }
 }
 if (Symbol.dispose) Engine.prototype[Symbol.dispose] = Engine.prototype.free;
+
+export class PointerGesture {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        PointerGestureFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_pointergesture_free(ptr, 0);
+    }
+    /**
+     * A main-button or touch press. `sx, sy` screen pixels; `wx, wy` world units.
+     * @param {number} id
+     * @param {number} sx
+     * @param {number} sy
+     * @param {number} wx
+     * @param {number} wy
+     */
+    down(id, sx, sy, wx, wy) {
+        wasm.pointergesture_down(this.__wbg_ptr, id, sx, sy, wx, wy);
+    }
+    /**
+     * @returns {boolean}
+     */
+    is_panning() {
+        const ret = wasm.pointergesture_is_panning(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Pointer moved. Returns true when this move pans the map; read the delta with
+     * `pan_dx()` / `pan_dy()` (world units since the previous move). Returns false while the
+     * press is still a possible tap, or for another pointer.
+     * @param {number} id
+     * @param {number} sx
+     * @param {number} sy
+     * @param {number} wx
+     * @param {number} wy
+     * @returns {boolean}
+     */
+    moved(id, sx, sy, wx, wy) {
+        const ret = wasm.pointergesture_moved(this.__wbg_ptr, id, sx, sy, wx, wy);
+        return ret !== 0;
+    }
+    /**
+     * `threshold_px`: how far (screen pixels) a press must move before it counts as a drag.
+     * @param {number} threshold_px
+     */
+    constructor(threshold_px) {
+        const ret = wasm.pointergesture_new(threshold_px);
+        this.__wbg_ptr = ret;
+        PointerGestureFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * Is this pointer the press being tracked?
+     * @param {number} id
+     * @returns {boolean}
+     */
+    owns(id) {
+        const ret = wasm.pointergesture_owns(this.__wbg_ptr, id);
+        return ret !== 0;
+    }
+    /**
+     * @returns {number}
+     */
+    pan_dx() {
+        const ret = wasm.pointergesture_pan_dx(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    pan_dy() {
+        const ret = wasm.pointergesture_pan_dy(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Press ended. Returns true when it was a tap (blink). A cancelled pointer never taps.
+     * @param {number} id
+     * @param {boolean} cancelled
+     * @returns {boolean}
+     */
+    up(id, cancelled) {
+        const ret = wasm.pointergesture_up(this.__wbg_ptr, id, cancelled);
+        return ret !== 0;
+    }
+}
+if (Symbol.dispose) PointerGesture.prototype[Symbol.dispose] = PointerGesture.prototype.free;
 
 export class RustBlinkClassifier {
     __destroy_into_raw() {
@@ -897,6 +998,8 @@ export class RustBlinkClassifier {
         return this;
     }
     /**
+     * Records the latest EEG window as a non-blink negative sample (used during Hold Still
+     * and Move Head Around Without Blinking calibration stages to cancel noise & hum).
      * @returns {boolean}
      */
     record_baseline_button() {
@@ -987,8 +1090,15 @@ export class RustImuTracker {
         wasm.rustimutracker_cancel_motion_calibration(this.__wbg_ptr);
     }
     /**
-     * Fits a 2D Ridge Regression model in Rust mapping `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
-     * Automatically discovers axis signs, sensitivity/range, center offset, and cross-axis head tilt coupling.
+     * Hybrid Smooth-Pursuit + Boundary-Fixation + Center-Checkpoint Solver:
+     * 1. Extracts Center checkpoints (`|tx| < 0.08 && |ty| < 0.08`) to remove any gyro yaw drift
+     *    accumulated across calibration and guarantee zero-intercept symmetry on reverse.
+     * 2. Searches optimal human smooth-pursuit reaction lag `L in 0..=2` on moving segments while
+     *    weighting stationary boundary-hold anchors (`3.0x`) for exact screen edge locking.
+     * 3. Solves zero-prior 3D sensor-to-head Ridge Regression (`[yaw, pitch, roll] -> (u_x, u_y)`)
+     *    with cross-axis Gram-Schmidt decoupling so vertical nods never leak horizontally.
+     * 4. Computes independent 4-boundary reach envelopes (`scale_left, scale_right, scale_up, scale_down`)
+     *    so 89% of the user's calibrated edge posture reaches 100% of all 4 screen boundaries & corners.
      * @returns {boolean}
      */
     finish_motion_calibration() {
@@ -1189,6 +1299,10 @@ function __wbg_get_imports() {
         },
         __wbg_bufferData_aaab2a06f5c64e23: function(arg0, arg1, arg2, arg3, arg4) {
             arg0.bufferData(arg1 >>> 0, getArrayU8FromWasm0(arg2, arg3), arg4 >>> 0);
+        },
+        __wbg_children_5767547ca7e1c276: function(arg0) {
+            const ret = arg0.children;
+            return ret;
         },
         __wbg_classList_97e966c261669b85: function(arg0) {
             const ret = arg0.classList;
@@ -1415,6 +1529,14 @@ function __wbg_get_imports() {
             const ret = result;
             return ret;
         },
+        __wbg_item_66d2ef77cbc53343: function(arg0, arg1) {
+            const ret = arg0.item(arg1 >>> 0);
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        },
+        __wbg_length_9f82f041dce0ac51: function(arg0) {
+            const ret = arg0.length;
+            return ret;
+        },
         __wbg_linkProgram_dee7cda98bacb12f: function(arg0, arg1) {
             arg0.linkProgram(arg1);
         },
@@ -1616,6 +1738,9 @@ const __wbindgen_enum_OscillatorType = ["sine", "square", "sawtooth", "triangle"
 const EngineFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_engine_free(ptr, 1));
+const PointerGestureFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_pointergesture_free(ptr, 1));
 const RustBlinkClassifierFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_rustblinkclassifier_free(ptr, 1));

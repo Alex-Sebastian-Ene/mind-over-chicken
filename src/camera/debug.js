@@ -74,6 +74,11 @@ export function initDebug({ getG, camera }) {
   const set = (node, text) => { if (node.textContent !== text) node.textContent = text; };
 
   function toggle(next = !open) {
+    if (camera?.togglePanel) {
+      camera.togglePanel(next);
+      open = !document.getElementById('camPanel')?.hidden;
+      return;
+    }
     open = next;
     panel.hidden = !open;
     btn.setAttribute('aria-pressed', String(open));

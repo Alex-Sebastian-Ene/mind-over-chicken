@@ -5,24 +5,38 @@
 //! settle new villages, claim land, starve, age and die. Civilisations that meet trade or
 //! raid; when tension boils over they go to war, and warriors fight in pixel skirmishes and
 //! capture villages. Unrest from crowding, hunger, distance from the capital and war losses
-//! (plus the player's anger and racing pulse) splits villages off as new civilisations, which
+//! (plus the player's anger and stress) splits villages off as new civilisations, which
 //! usually fight their parent.
 //!
-//! The player is a god, not a general: calm, focus, pulse and anger tilt every civilisation
+//! The player is a god, not a general: calm, focus, stress and anger tilt every civilisation
 //! each step, and lightning and casts act on the world. One civilisation's traits can be set
 //! from a calibration payload (#54) or from the player's first ten seconds of brain data.
 //!
 //! Everything is deterministic for a run seed and a sequence of steps and inputs.
 //!
+//! **The ages and conflict (#69).** Civilisations climb a ladder of twenty ages
+//! ([`ages`], from `data/ages.json` through the generated [`ages_table`]): they are reached by
+//! meeting each age's conditions on the simulation's own metrics, not researched, and lost
+//! again in a Dark Age. Each age brings jobs and buildings ([`jobs`]), daily life ([`life`])
+//! and its crises; fights run up and down an escalation ladder, between civilisations and
+//! inside one ([`conflict`]).
+//!
 //! The browser loads this crate as a plain `extern "C"` WebAssembly module ([`ffi`]); build
 //! it with `crates/moc-civ/build-wasm.sh` (no wasm-bindgen needed).
 
+pub mod ages;
+pub mod ages_table;
 pub mod agents;
+pub mod conflict;
 pub mod ffi;
+pub mod jobs;
+pub mod life;
+pub mod news;
 pub mod planet;
 pub mod politics;
 pub mod powers;
 pub mod render;
+pub mod setup;
 pub mod terrain;
 pub mod world;
 
