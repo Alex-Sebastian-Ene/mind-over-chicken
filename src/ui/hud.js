@@ -23,6 +23,12 @@ function paintIcon(canvas, icon) {
 
 const POWER_UNLOCK = { blink: 'stone', calm: 'stone', focus: 'kingdoms', stress: 'industry' };
 
+let rustEngine = null;
+
+export function setRustHudEngine(eng) {
+  rustEngine = eng;
+}
+
 export class Hud {
   constructor(doc) {
     this.eraChip = doc.getElementById('eraChip');
@@ -52,6 +58,14 @@ export class Hud {
   flashBlink() { this.blinkFlash = 0.3; this.powers.blink.classList.add('is-firing'); }
 
   update(dt, G) {
+    if (rustEngine) {
+      if (this.blinkFlash > 0) {
+        this.blinkFlash -= dt;
+        if (this.blinkFlash <= 0) this.powers.blink.classList.remove('is-firing');
+      }
+      if (this.modelPanel && !this.modelPanel.hidden) this.updateModel(G.brain?.model);
+      return;
+    }
     const b = G.brain;
     const scene = G.scene;
     // Objectives (rebuild only when the text changes)

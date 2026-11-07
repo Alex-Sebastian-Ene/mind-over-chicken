@@ -443,6 +443,9 @@ export function initCamera({
       } else {
         scene.onCast?.(id, aim);
       }
+      if (G.engine?.game_on_cast) {
+        G.engine.game_on_cast(id, aim.x * 320, aim.y * 180);
+      }
     } catch (err) { console.error('[camera] cast failed:', err); }
     G.stats.casts = (G.stats.casts || 0) + 1;
     if (SPELL_BY_ID[id].aimed) armed = id;

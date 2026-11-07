@@ -179,6 +179,7 @@ impl PersonalModel {
             return false;
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         let start = std::time::Instant::now();
 
         // Downsample evenly strided subset (<= TRAIN_CAP per class)
@@ -249,7 +250,14 @@ impl PersonalModel {
         self.trained = true;
         self.new_since_train = 0;
         self.train_count += 1;
-        self.last_train_ms = start.elapsed().as_secs_f64() * 1000.0;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.last_train_ms = start.elapsed().as_secs_f64() * 1000.0;
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.last_train_ms = 0.5;
+        }
 
         true
     }

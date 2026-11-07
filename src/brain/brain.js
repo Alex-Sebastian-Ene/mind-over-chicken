@@ -161,12 +161,17 @@ export class Brain {
     }
 
     if (this.wasm) {
-      this.wasm.update(dt);
-      this.calm = this.wasm.calm();
-      this.focus = this.wasm.focus();
-      this.stress = this.wasm.stress();
-      this.anger = this.wasm.anger();
-      this.stats.blinks = this.wasm.blinks();
+      try {
+        this.wasm.update(dt);
+        this.calm = this.wasm.calm();
+        this.focus = this.wasm.focus();
+        this.stress = this.wasm.stress();
+        this.anger = this.wasm.anger();
+        this.stats.blinks = this.wasm.blinks();
+      } catch (err) {
+        console.warn('RustBrain update failed, falling back to JS brain simulation:', err);
+        this.wasm = null;
+      }
     }
   }
 
@@ -174,12 +179,17 @@ export class Brain {
     this.stats.framesSeen++;
     if (this.wasm && frame.bands) {
       const b = frame.bands;
-      this.wasm.ingest(
-        b.delta || 0, b.theta || 0, b.alpha || 0, b.beta || 0, b.gamma || 0,
-        !!frame.blink, frame.hr || 0,
-        frame.tilt ? frame.tilt[0] : 0, frame.tilt ? frame.tilt[1] : 0,
-        frame.motion || 0, frame.quality || 1
-      );
+      try {
+        this.wasm.ingest(
+          b.delta || 0, b.theta || 0, b.alpha || 0, b.beta || 0, b.gamma || 0,
+          !!frame.blink, frame.hr || 0,
+          frame.tilt ? frame.tilt[0] : 0, frame.tilt ? frame.tilt[1] : 0,
+          frame.motion || 0, frame.quality || 1
+        );
+      } catch (err) {
+        console.warn('RustBrain ingest failed, disabling wasm brain:', err);
+        this.wasm = null;
+      }
     }
     this.quality = frame.quality;
     if (frame.bands) this.bands = { ...frame.bands };

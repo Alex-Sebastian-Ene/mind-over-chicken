@@ -2,17 +2,33 @@
 
 import { W, H, clamp } from './sim/util.js';
 import { World, setRustWorldGen } from './world/terrain.js';
-import { SimSource, BridgeSource } from './brain/sources.js';
+import { SimSource, BridgeSource, setRustSimSource } from './brain/sources.js';
 import { Brain, setRustBrain } from './brain/brain.js';
-import { Advisor } from './ui/advisor.js';
-import { Hud } from './ui/hud.js';
+import { Advisor, setRustAdvisorEngine } from './ui/advisor.js';
+import { Hud, setRustHudEngine } from './ui/hud.js';
 import { EegPanel } from './ui/eeg-panel.js';
 import { Audio } from './audio.js';
 import { StoneAge } from './eras/stone.js';
 import { FarmingToKingdoms, InfoAge } from './eras/timeskip.js';
 import { Industry } from './eras/industry.js';
 import { SpaceAge } from './eras/space.js';
-import initEngine, { Engine, RustImuTracker, RustBlinkClassifier, PointerGesture, RustWorldGen, RustCastController, RustFingerController, RustEmotionTracker, RustGalaxy, RustAiPolicy, RustBrain, RustSimSource, RustCalibration } from '../pkg/mind_over_chicken_engine.js';
+import initEngine, {
+  Engine,
+  RustImuTracker,
+  RustBlinkClassifier,
+  PointerGesture,
+  RustWorldGen,
+  RustCastController,
+  RustFingerController,
+  RustEmotionTracker,
+  RustGalaxy,
+  RustAiPolicy,
+  RustBrain,
+  RustSimSource,
+  RustCalibration,
+  rust_villager_look,
+  rust_animate_agent,
+} from '../pkg/mind_over_chicken_engine.js';
 import { Cosmos } from './cosmos/cosmos.js';
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel, setRustGalaxy } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
@@ -20,8 +36,9 @@ import { setRustCastController } from './camera/casts.js';
 import { setRustFingerController } from './camera/fingers.js';
 import { setRustEmotionTracker } from './camera/emotion.js';
 import { setRustAiPolicy } from './ai/policy.js';
+import { setRustAgentHelpers } from './sim/agents.js';
 import { initDebug } from './camera/debug.js'; // camera debug (#67)
-import { Calibration, readCalibrationConfig } from './brain/calibration.js'; // calibration (#54)
+import { Calibration, readCalibrationConfig, setRustCalibration } from './brain/calibration.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
 import { CivSandbox } from './civ/sandbox.js'; // civ (#50)
 import { worldMeta, renderWorldDetail } from './cosmos/panel.js'; // planets (#68)
@@ -92,9 +109,19 @@ try {
   setRustGalaxy(RustGalaxy);
   setRustAiPolicy(RustAiPolicy);
   setRustBrain(RustBrain);
+  setRustSimSource(RustSimSource);
+  setRustCalibration(RustCalibration);
+  setRustAgentHelpers(rust_villager_look, rust_animate_agent);
   gesture = new PointerGesture(6);
   BridgeSource.setWasmClasses(RustImuTracker, RustBlinkClassifier);
   engine = new Engine('screen');
+  try {
+    engine.bind_dom_shell();
+    setRustAdvisorEngine(engine);
+    setRustHudEngine(engine);
+  } catch (err) {
+    console.warn('Rust DOM shell binding failed:', err);
+  }
 } catch (err) {
   console.error('Failed to initialize Rust WebGL engine:', err);
 }
@@ -232,7 +259,7 @@ function newGame(source, startIndex = 0) {
   cosmos.reset();
   G = {
     world: new World(),
-    brain, source, advisor, hud, audio,
+    brain, source, advisor, hud, audio, engine,
     calibration: new Calibration(calibConfig), // calibration (#54)
     scene: null, sceneIndex: startIndex, runTime: 0, shake: 0,
     stats: { lightning: 0, smitten: 0, births: 0, deaths: 0, recessions: 0, restarts: 0 },
@@ -562,6 +589,15 @@ function frame(ts) {
     if (engine) {
       const b = G.brain;
       engine.game_tick(dt, b.calm || 0, b.focus || 0, b.stress ?? 0, b.stats?.blinks || 0);
+      if (engine.is_game_era_complete?.() && !pendingScene && !G.finished) {
+        G.complete(1.5);
+      }
+      if (engine.is_game_era_failed?.() && $('failScreen').hidden && !G.finished) {
+        const failReason = engine.is_game_era_failed();
+        if (failReason) {
+          showFail(failReason);
+        }
+      }
     }
     if (banner) {
       banner.t += dt;

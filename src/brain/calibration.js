@@ -43,8 +43,20 @@ function safeStorage() {
   try { return globalThis.localStorage ?? null; } catch { return null; }
 }
 
+let RustCalibrationClass = null;
+
+export function setRustCalibration(cls) {
+  RustCalibrationClass = cls;
+}
+
 // Random setup for the dummy run: reproducible from the run seed.
 export function randomSeedTraits(seed) {
+  if (RustCalibrationClass) {
+    try {
+      const arr = RustCalibrationClass.random_traits(seed >>> 0);
+      return { friendliness: arr[0], aggressiveness: arr[1], violence: arr[2] };
+    } catch {}
+  }
   const r = mulberry32(seed >>> 0);
   return { friendliness: round(r()), aggressiveness: round(r()), violence: round(r() * 0.8) };
 }
@@ -55,6 +67,19 @@ export function randomSeedTraits(seed) {
 //   blinkRate             deliberate blinks per 10 s
 //   joy, anger            0..1 from the face emotion manager (0 without a camera)
 export function traitsFromFeatures(f) {
+  if (RustCalibrationClass) {
+    try {
+      const arr = RustCalibrationClass.traits_from_sensors(
+        f.calm ?? 0,
+        f.focus ?? 0,
+        f.stress ?? 0,
+        f.blinkRate ?? 0,
+        f.joy ?? 0,
+        f.anger ?? 0
+      );
+      return { friendliness: arr[0], aggressiveness: arr[1], violence: arr[2] };
+    } catch {}
+  }
   const stress = clamp(f.stress ?? 0);
   const blinks = clamp((f.blinkRate ?? 0) / 6, 0, 1);
   const calm = clamp(f.calm ?? 0), focus = clamp(f.focus ?? 0);
