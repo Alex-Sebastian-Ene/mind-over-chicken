@@ -4,5 +4,7 @@ members = [
     "crates/moc-planet",
     "crates/moc-ai",
     "crates/moc-bridge",
+    "crates/moc-cosmos",
+    "crates/moc-brain",
 ]
 resolver = "2"

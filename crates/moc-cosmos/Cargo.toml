@@ -1,0 +1,17 @@
+[package]
+name = "moc-cosmos"
+description = "Cosmos, galaxy simulation, and 4 brain-seeded worlds for Mind over Chicken"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Alex-Sebastian-Ene/mind-over-chicken"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = { version = "0.2", optional = true }
+
+[features]
+default = []
+wasm = ["wasm-bindgen"]

@@ -1,14 +1,41 @@
-// Hand-placed pixel sprites rendered to a 320x180 RGBA buffer.
+// Hand-placed pixel sprites rendered to a 320x180 RGBA buffer or 256x256 sprite atlas.
 
 pub const W: usize = 320;
 pub const H: usize = 180;
+pub const ATLAS_SIZE: usize = 256;
+pub const CELL_SIZE: usize = 32;
+
+pub const SPRITE_VILLAGER: u32 = 0;
+pub const SPRITE_MAMMOTH: u32 = 1;
+pub const SPRITE_GOAT: u32 = 2;
+pub const SPRITE_CHICKEN: u32 = 3;
+pub const SPRITE_FIRE: u32 = 4;
+pub const SPRITE_HUT: u32 = 5;
+pub const SPRITE_HOUSE: u32 = 6;
+pub const SPRITE_TOWER: u32 = 7;
+pub const SPRITE_FACTORY: u32 = 8;
+pub const SPRITE_EXCHANGE: u32 = 9;
+pub const SPRITE_HANGAR: u32 = 10;
+pub const SPRITE_PAD: u32 = 11;
+pub const SPRITE_ROCKET: u32 = 12;
+pub const SPRITE_RETICLE: u32 = 13;
+
+#[derive(Clone, Copy, Debug)]
+pub struct AtlasEntry {
+    pub u0: f32,
+    pub v0: f32,
+    pub u1: f32,
+    pub v1: f32,
+    pub world_w: f32,
+    pub world_h: f32,
+}
 
 #[inline]
-pub fn put_pixel(buf: &mut [u8], x: i32, y: i32, r: u8, g: u8, b: u8, a: u8) {
-    if x < 0 || y < 0 || x >= W as i32 || y >= H as i32 {
+pub fn put_pixel_buf(buf: &mut [u8], stride: usize, max_h: usize, x: i32, y: i32, r: u8, g: u8, b: u8, a: u8) {
+    if x < 0 || y < 0 || x >= stride as i32 || y >= max_h as i32 {
         return;
     }
-    let idx = ((y as usize) * W + (x as usize)) * 4;
+    let idx = ((y as usize) * stride + (x as usize)) * 4;
     if a == 255 {
         buf[idx] = r;
         buf[idx + 1] = g;
@@ -25,12 +52,22 @@ pub fn put_pixel(buf: &mut [u8], x: i32, y: i32, r: u8, g: u8, b: u8, a: u8) {
 }
 
 #[inline]
-pub fn fill_rect(buf: &mut [u8], x: i32, y: i32, w: i32, h: i32, r: u8, g: u8, b: u8, a: u8) {
+pub fn fill_rect_buf(buf: &mut [u8], stride: usize, max_h: usize, x: i32, y: i32, w: i32, h: i32, r: u8, g: u8, b: u8, a: u8) {
     for cy in y..(y + h) {
         for cx in x..(x + w) {
-            put_pixel(buf, cx, cy, r, g, b, a);
+            put_pixel_buf(buf, stride, max_h, cx, cy, r, g, b, a);
         }
     }
+}
+
+#[inline]
+pub fn put_pixel(buf: &mut [u8], x: i32, y: i32, r: u8, g: u8, b: u8, a: u8) {
+    put_pixel_buf(buf, W, H, x, y, r, g, b, a);
+}
+
+#[inline]
+pub fn fill_rect(buf: &mut [u8], x: i32, y: i32, w: i32, h: i32, r: u8, g: u8, b: u8, a: u8) {
+    fill_rect_buf(buf, W, H, x, y, w, h, r, g, b, a);
 }
 
 // Structures
@@ -264,5 +301,238 @@ pub fn draw_rocket(buf: &mut [u8], x: i32, y: i32, progress: f32, t: f32, flame:
             };
             fill_rect(buf, x - w / 2, y - 1 + i, w, 1, col.0, col.1, col.2, 255);
         }
+    }
+}
+
+pub fn get_sprite_atlas_entry(sprite_id: u32, facing: i32, frame: u32, variant: u32) -> AtlasEntry {
+    let (col, row, world_w, world_h) = match sprite_id {
+        SPRITE_VILLAGER => {
+            let pose = variant; // 0: walk, 1: pray, 2: panic, 3: dead
+            let f = (frame % 2) as usize;
+            let c = match pose {
+                0 => f,
+                1 => 2 + f,
+                2 => 4 + f,
+                _ => 6,
+            };
+            (c, 0, 8.0, 10.0)
+        }
+        SPRITE_CHICKEN => {
+            let halo = variant == 1;
+            if halo {
+                (0, 1, 6.0, 6.0)
+            } else {
+                (7, 0, 6.0, 6.0)
+            }
+        }
+        SPRITE_MAMMOTH => {
+            let dead = variant == 1;
+            let f = (frame % 2) as usize;
+            if dead {
+                (5, 1, 16.0, 14.0)
+            } else if facing > 0 {
+                (1 + f, 1, 16.0, 14.0)
+            } else {
+                (3 + f, 1, 16.0, 14.0)
+            }
+        }
+        SPRITE_GOAT => {
+            if facing > 0 {
+                (6, 1, 8.0, 6.0)
+            } else {
+                (7, 1, 8.0, 6.0)
+            }
+        }
+        SPRITE_FIRE => {
+            let f = (frame % 3) as usize;
+            (f, 2, 10.0, 10.0)
+        }
+        SPRITE_RETICLE => (3, 2, 8.0, 8.0),
+        SPRITE_HUT => (4, 2, 14.0, 12.0),
+        SPRITE_HOUSE => (5, 2, 16.0, 16.0),
+        SPRITE_TOWER => (6, 2, 14.0, 28.0),
+        SPRITE_FACTORY => (7, 2, 24.0, 18.0),
+        SPRITE_EXCHANGE => (0, 3, 20.0, 16.0),
+        SPRITE_HANGAR => (1, 3, 20.0, 14.0),
+        SPRITE_PAD => (2, 3, 18.0, 8.0),
+        SPRITE_ROCKET => (3, 3, 16.0, 30.0),
+        _ => (0, 0, 8.0, 8.0),
+    };
+
+    let u0 = (col * CELL_SIZE) as f32 / ATLAS_SIZE as f32;
+    let v0 = (row * CELL_SIZE) as f32 / ATLAS_SIZE as f32;
+    let u1 = ((col + 1) * CELL_SIZE) as f32 / ATLAS_SIZE as f32;
+    let v1 = ((row + 1) * CELL_SIZE) as f32 / ATLAS_SIZE as f32;
+
+    AtlasEntry {
+        u0,
+        v0,
+        u1,
+        v1,
+        world_w,
+        world_h,
+    }
+}
+
+pub fn create_sprite_atlas() -> Vec<u8> {
+    let mut atlas = vec![0u8; ATLAS_SIZE * ATLAS_SIZE * 4];
+    let mut temp = vec![0u8; W * H * 4];
+
+    let cx = 160i32;
+    let cy = 90i32;
+
+    let copy_cell = |atlas_buf: &mut [u8], temp_buf: &[u8], col: usize, row: usize, top_offset: i32| {
+        for y in 0..CELL_SIZE {
+            for x in 0..CELL_SIZE {
+                let sx = cx - 16 + x as i32;
+                let sy = cy - top_offset + y as i32;
+                if sx >= 0 && sx < W as i32 && sy >= 0 && sy < H as i32 {
+                    let s_idx = ((sy as usize) * W + (sx as usize)) * 4;
+                    let dx = col * CELL_SIZE + x;
+                    let dy = row * CELL_SIZE + y;
+                    let d_idx = (dy * ATLAS_SIZE + dx) * 4;
+                    atlas_buf[d_idx..d_idx + 4].copy_from_slice(&temp_buf[s_idx..s_idx + 4]);
+                }
+            }
+        }
+    };
+
+    // Row 0: Villagers & Chicken
+    temp.fill(0);
+    draw_person(&mut temp, cx, cy, 0, 0, (0x4a, 0x90, 0xe2), (0xe0, 0xb4, 0x8a), (0x3b, 0x2a, 0x1e));
+    copy_cell(&mut atlas, &temp, 0, 0, 28);
+
+    temp.fill(0);
+    draw_person(&mut temp, cx, cy, 1, 0, (0x4a, 0x90, 0xe2), (0xe0, 0xb4, 0x8a), (0x3b, 0x2a, 0x1e));
+    copy_cell(&mut atlas, &temp, 1, 0, 28);
+
+    temp.fill(0);
+    draw_person(&mut temp, cx, cy, 0, 1, (0xe0, 0x60, 0x50), (0xe0, 0xb4, 0x8a), (0x3b, 0x2a, 0x1e));
+    copy_cell(&mut atlas, &temp, 2, 0, 28);
+
+    temp.fill(0);
+    draw_person(&mut temp, cx, cy, 1, 1, (0xe0, 0x60, 0x50), (0xe0, 0xb4, 0x8a), (0x3b, 0x2a, 0x1e));
+    copy_cell(&mut atlas, &temp, 3, 0, 28);
+
+    temp.fill(0);
+    draw_person(&mut temp, cx, cy, 0, 2, (0x50, 0xb0, 0x50), (0xe0, 0xb4, 0x8a), (0x3b, 0x2a, 0x1e));
+    copy_cell(&mut atlas, &temp, 4, 0, 28);
+
+    temp.fill(0);
+    draw_person(&mut temp, cx, cy, 1, 2, (0x50, 0xb0, 0x50), (0xe0, 0xb4, 0x8a), (0x3b, 0x2a, 0x1e));
+    copy_cell(&mut atlas, &temp, 5, 0, 28);
+
+    temp.fill(0);
+    draw_person(&mut temp, cx, cy, 0, 3, (0x80, 0x80, 0x80), (0xe0, 0xb4, 0x8a), (0x3b, 0x2a, 0x1e));
+    copy_cell(&mut atlas, &temp, 6, 0, 28);
+
+    temp.fill(0);
+    draw_chicken(&mut temp, cx, cy, 1, 0, false);
+    copy_cell(&mut atlas, &temp, 7, 0, 28);
+
+    // Row 1: Chicken halo, Mammoths, Goats
+    temp.fill(0);
+    draw_chicken(&mut temp, cx, cy, 1, 0, true);
+    copy_cell(&mut atlas, &temp, 0, 1, 28);
+
+    temp.fill(0);
+    draw_mammoth(&mut temp, cx, cy, 1, 0, false);
+    copy_cell(&mut atlas, &temp, 1, 1, 28);
+
+    temp.fill(0);
+    draw_mammoth(&mut temp, cx, cy, 1, 1, false);
+    copy_cell(&mut atlas, &temp, 2, 1, 28);
+
+    temp.fill(0);
+    draw_mammoth(&mut temp, cx, cy, -1, 0, false);
+    copy_cell(&mut atlas, &temp, 3, 1, 28);
+
+    temp.fill(0);
+    draw_mammoth(&mut temp, cx, cy, -1, 1, false);
+    copy_cell(&mut atlas, &temp, 4, 1, 28);
+
+    temp.fill(0);
+    draw_mammoth(&mut temp, cx, cy, 1, 0, true);
+    copy_cell(&mut atlas, &temp, 5, 1, 28);
+
+    temp.fill(0);
+    draw_goat(&mut temp, cx, cy, 1);
+    copy_cell(&mut atlas, &temp, 6, 1, 28);
+
+    temp.fill(0);
+    draw_goat(&mut temp, cx, cy, -1);
+    copy_cell(&mut atlas, &temp, 7, 1, 28);
+
+    // Row 2: Fire, Reticle, Hut, House, Tower, Factory
+    temp.fill(0);
+    draw_fire(&mut temp, cx, cy, 1.0, 0.0);
+    copy_cell(&mut atlas, &temp, 0, 2, 28);
+
+    temp.fill(0);
+    draw_fire(&mut temp, cx, cy, 1.0, 0.8);
+    copy_cell(&mut atlas, &temp, 1, 2, 28);
+
+    temp.fill(0);
+    draw_fire(&mut temp, cx, cy, 1.0, 1.6);
+    copy_cell(&mut atlas, &temp, 2, 2, 28);
+
+    temp.fill(0);
+    fill_rect(&mut temp, cx - 4, cy, 2, 1, 255, 224, 102, 255);
+    fill_rect(&mut temp, cx + 3, cy, 2, 1, 255, 224, 102, 255);
+    fill_rect(&mut temp, cx, cy - 4, 1, 2, 255, 224, 102, 255);
+    fill_rect(&mut temp, cx, cy + 3, 1, 2, 255, 224, 102, 255);
+    put_pixel(&mut temp, cx, cy, 255, 224, 102, 255);
+    copy_cell(&mut atlas, &temp, 3, 2, 16);
+
+    temp.fill(0);
+    draw_hut(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 4, 2, 28);
+
+    temp.fill(0);
+    draw_house(&mut temp, cx, cy, (0xb0, 0x40, 0x30));
+    copy_cell(&mut atlas, &temp, 5, 2, 28);
+
+    temp.fill(0);
+    draw_tower(&mut temp, cx, cy, 24);
+    copy_cell(&mut atlas, &temp, 6, 2, 30);
+
+    temp.fill(0);
+    draw_factory(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 7, 2, 28);
+
+    // Row 3: Exchange, Hangar, Pad, Rocket
+    temp.fill(0);
+    draw_exchange(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 0, 3, 28);
+
+    temp.fill(0);
+    draw_hangar(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 1, 3, 28);
+
+    temp.fill(0);
+    draw_pad(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 2, 3, 28);
+
+    temp.fill(0);
+    draw_rocket(&mut temp, cx, cy, 1.0, 0.0, 1.0);
+    copy_cell(&mut atlas, &temp, 3, 3, 30);
+
+    atlas
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_sprite_atlas() {
+        let atlas = create_sprite_atlas();
+        assert_eq!(atlas.len(), ATLAS_SIZE * ATLAS_SIZE * 4);
+        let has_non_zero = atlas.iter().any(|&b| b > 0);
+        assert!(has_non_zero);
+
+        let entry = get_sprite_atlas_entry(SPRITE_VILLAGER, 1, 0, 0);
+        assert!(entry.u1 > entry.u0);
+        assert!(entry.v1 > entry.v0);
     }
 }
