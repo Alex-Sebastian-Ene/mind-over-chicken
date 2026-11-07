@@ -338,6 +338,10 @@ export class CivSandbox {
     this.mood = mood;
   }
 
+  // A drag from main.js (world units, both axes): the content follows the pointer, so the camera
+  // moves the other way. This planet is far bigger than the view, so north–south matters here.
+  panBy(dx, dy) { this.civ?.pan(-dx, -dy); }
+
   // ---------- drawing ----------
   draw(ctx) {
     // The surface strip pans east–west in main.js (drag, wheel); this planet has its own

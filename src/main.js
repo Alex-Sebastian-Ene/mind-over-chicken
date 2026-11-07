@@ -41,6 +41,17 @@ const lowCtx = low.getContext('2d');
 let K = 3;
 let engine = null;
 let gesture = null; // Rust (input.rs): with the main button or a finger, a tap blinks and a drag pans
+// Pan the map by a drag (world units), both axes, wherever you are: a scene with its own camera
+// (the civ sandbox's big planet) takes it directly; otherwise the planet pans east–west (and
+// north–south on vast worlds), and in 3D the camera also moves north–south over the map.
+function panMap(dx, dy) {
+  if (G?.scene?.panBy) { G.scene.panBy(dx, dy); return; }
+  cosmos.pan(dx, dy);
+  if (dy && in3dSurface()) {
+    engine.set_camera_target(engine.get_camera_target_x(), clamp(engine.get_camera_target_z() - dy, 0, H - 1));
+  }
+  cam3dBase = null;
+}
 
 try {
   await initEngine();
@@ -582,17 +593,15 @@ screen.addEventListener('pointermove', (e) => {
   if (gesture?.owns(e.pointerId)) {
     const q = worldFromEvent(e);
     if (gesture.moved(e.pointerId, e.clientX, e.clientY, q.x, q.y)) {
-      cosmos.pan(gesture.pan_dx(), gesture.pan_dy()); // left/right (north–south on vast worlds); 3D follows
-      cam3dBase = null;
+      panMap(gesture.pan_dx(), gesture.pan_dy());
       return;
     }
   }
   if (panDrag && panDrag.id === e.pointerId) {
     // East–west, plus north–south on the vast worlds (planets #68). In 3D the camera follows the pan.
     const q = worldFromEvent(e);
-    cosmos.pan(q.x - panDrag.x, q.y - (panDrag.y ?? q.y));
+    panMap(q.x - panDrag.x, q.y - (panDrag.y ?? q.y));
     panDrag.x = q.x; panDrag.y = q.y;
-    cam3dBase = null;
     return;
   }
   const s = sim(); if (!s) return;
