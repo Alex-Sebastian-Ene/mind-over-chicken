@@ -8,7 +8,7 @@
 
 import { W, H, Particles, clamp, dist, rand, chance, floater, pick, mulberry32 } from '../sim/util.js';
 import { walk, animate, villagerLook } from '../sim/agents.js';
-import { drawPerson, drawChicken, drawRocket, drawGantry } from '../render/sprites.js';
+import { drawPerson, drawChicken, drawRocket, drawGantry, drawReticle } from '../render/sprites.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
 
@@ -324,6 +324,8 @@ export class SpaceAge {
     if (this.phase === 'voyage') {
       label(ctx, W / 2, 24, this.voyageT < 3.5 ? 'Leaving home.' : 'A new world.', '#f2e8d5', 12);
     }
+    const aim = G.brain?.aim;
+    if (aim) drawReticle(ctx, aim.x * (W - 1), aim.y * (H - 1), this.t, '#ffe066');
   }
 
   // ---- camera (#33): hand casts and face mood. Extra inputs on top of the brain, never instead of it. ----

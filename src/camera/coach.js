@@ -117,6 +117,7 @@ export const COACH_MOVES = [
     glyph: '🖐️',
     instruction: 'Hold an open palm (or press 2) to calm fear, broker peace and bless the land.',
     contexts: ['surface', 'civ'],
+    coachHidden: true,
     sample(phase) {
       const k = clamp(phase / 0.35);
       return [{ hand: buildGhostHand('open', 'open', k, { cx: 0.5, cy: 0.78, size: 0.27 }), state: { held: phase > 0.25 } }];
@@ -137,32 +138,30 @@ export const COACH_MOVES = [
 ];
 
 export const COACH_MOVE_BY_ID = Object.fromEntries(COACH_MOVES.map((m) => [m.id, m]));
+export const COACH_CARDS = COACH_MOVES.filter((m) => !m.coachHidden);
 
 const TEMPLATE = `
   <div class="coach-bar">
     <button type="button" class="tool coach-toggle" data-coach-toggle aria-expanded="true" title="Toggle Hand Coach panel (H)">
       <span class="coach-dot" data-coach-dot data-ok="0"></span>
       <span>Hand Coach <kbd>H</kbd></span>
-      <span class="coach-live-tag" data-coach-live>Head cursor · 3 core moves</span>
+      <span class="coach-live-tag" data-coach-live>Head cursor · ${COACH_CARDS.length} moves</span>
     </button>
-    <div class="coach-tabs" role="tablist" aria-label="Core hand moves">
-      ${COACH_MOVES.map((m, i) => `
-        <button type="button" class="coach-tab${i === 0 ? ' is-active' : ''}" role="tab" data-coach-move="${m.id}" aria-selected="${i === 0 ? 'true' : 'false'}">
-          <span>${m.glyph}</span> <span>${m.title}</span> <kbd>${m.key}</kbd>
-        </button>`).join('')}
-    </div>
+    <div class="coach-meter" title="Gesture hold / pinch strength"><span data-coach-meter></span></div>
     <span class="coach-feedback" data-coach-feedback aria-live="polite">Ready</span>
   </div>
   <div class="coach-body" data-coach-body>
-    <div class="coach-stage">
-      <canvas class="coach-canvas" width="220" height="110" role="img" aria-label="Animated ghost hand demonstration"></canvas>
-      <div class="coach-ring-wrap" title="Gesture hold / pinch strength">
-        <div class="coach-meter"><span data-coach-meter></span></div>
-      </div>
-    </div>
-    <div class="coach-info">
-      <p class="coach-instr" data-coach-instr>${COACH_MOVES[0].instruction}</p>
-      <p class="coach-sub" data-coach-sub>Head aim moves the reticle. Hands perform actions (Pinch=1, Palm=2, Fist=3) — or use keyboard/mouse with camera off.</p>
+    <div class="coach-grid" role="list" aria-label="Hand moves">
+      ${COACH_CARDS.map((m) => `
+        <article class="coach-card" role="listitem" data-coach-move="${m.id}">
+          <div class="coach-card-head">
+            <span class="coach-card-glyph" aria-hidden="true">${m.glyph}</span>
+            <span class="coach-card-title">${m.title}</span>
+            <kbd>${m.key}</kbd>
+          </div>
+          <canvas class="coach-canvas" width="220" height="110" data-coach-canvas="${m.id}" role="img" aria-label="Animated demonstration of ${m.title}"></canvas>
+          <p class="coach-instr">${m.instruction}</p>
+        </article>`).join('')}
     </div>
   </div>
 `;
@@ -174,15 +173,15 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
   const q = (sel) => panel.querySelector(sel);
   const toggleBtn = q('[data-coach-toggle]');
   const body = q('[data-coach-body]');
-  const canvas = q('.coach-canvas');
-  const ctx = canvas.getContext('2d');
-  const instrEl = q('[data-coach-instr]');
-  const subEl = q('[data-coach-sub]');
   const liveEl = q('[data-coach-live]');
   const dotEl = q('[data-coach-dot]');
   const feedbackEl = q('[data-coach-feedback]');
   const meterEl = q('[data-coach-meter]');
-  const tabs = Array.from(panel.querySelectorAll('[data-coach-move]'));
+  const cardEls = new Map(COACH_CARDS.map((m) => [m.id, panel.querySelector(`[data-coach-move="${m.id}"]`)]));
+  const canvases = new Map(COACH_CARDS.map((m) => {
+    const canvas = panel.querySelector(`[data-coach-canvas="${m.id}"]`);
+    return [m.id, { canvas, ctx: canvas.getContext('2d') }];
+  }));
 
   // Default open on the first run; remember collapse preference afterwards.
   let seenBefore = false;
@@ -190,8 +189,7 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
   let open = !seenBefore;
   try { localStorage.setItem('moc.coachSeen', '1'); } catch {}
 
-  let activeMoveId = COACH_MOVES[0].id;
-  let userPinnedMove = false;
+  let activeMoveId = COACH_CARDS[0].id;
   let flashState = null; // { text, kind: 'ok' | 'bad', until }
 
   function setOpen(next = !open) {
@@ -202,31 +200,14 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
   }
   setOpen(open);
 
-  function selectMove(id, pinned = false) {
-    if (!COACH_MOVE_BY_ID[id]) return;
+  function selectMove(id) {
+    if (!COACH_MOVE_BY_ID[id] || !cardEls.has(id)) return;
     activeMoveId = id;
-    if (pinned) userPinnedMove = true;
-    const move = COACH_MOVE_BY_ID[id];
-    instrEl.textContent = move.instruction;
-    for (const tab of tabs) {
-      const sel = tab.dataset.coachMove === id;
-      tab.classList.toggle('is-active', sel);
-      tab.setAttribute('aria-selected', String(sel));
-    }
+    for (const [cardId, el] of cardEls) el.classList.toggle('is-live', cardId === id);
   }
+  selectMove(activeMoveId);
 
   toggleBtn.addEventListener('click', () => setOpen(!open));
-  for (const tab of tabs) {
-    tab.addEventListener('click', () => {
-      const id = tab.dataset.coachMove;
-      selectMove(id, true);
-      if (!open) setOpen(true);
-      if (onCastMove) {
-        if (id === 'palm_calm') onCastMove('palm');
-        else if (id === 'fist_strike') onCastMove('fist');
-      }
-    });
-  }
 
   window.addEventListener('keydown', (e) => {
     if (e.code !== COACH_KEY || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -246,22 +227,38 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
       (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   }
 
+  function drawMove(move, ctx, w, h, now) {
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#0b0c16';
+    ctx.fillRect(0, 0, w, h);
+
+    const phase = isReducedMotion() ? 0.45 : ((now / 2200) % 1);
+    const ghosts = move.sample(phase);
+
+    ctx.save();
+    ctx.globalAlpha = 0.88;
+    for (const g of ghosts) drawHand(ctx, g.hand, w, h, g.state);
+    ctx.restore();
+
+    ctx.fillStyle = 'rgba(255, 207, 74, 0.85)';
+    ctx.font = '11px "Pixelify Sans", monospace';
+    ctx.textAlign = 'center';
+    if (move.id === 'two_hand_zoom') {
+      ctx.fillText('←  PINCH & SPREAD  →', w / 2, 16);
+    } else if (move.id === 'wave_orbit') {
+      ctx.fillText('←  WAVE TO ORBIT  →', w / 2, 16);
+    } else if (move.id === 'pinch_grab') {
+      ctx.fillText('PINCH · MOVE HEAD · DROP', w / 2, 16);
+    }
+  }
+
   function update(now = performance.now(), state = {}) {
     const context = getContext() || 'surface';
-    for (const tab of tabs) {
-      const m = COACH_MOVE_BY_ID[tab.dataset.coachMove];
-      const avail = !m || m.contexts.includes(context);
-      tab.hidden = !avail;
-    }
 
-    // Auto-select context-appropriate move unless the player clicked a tab
-    if (!userPinnedMove) {
-      if (state.bothPinched) selectMove('two_hand_zoom');
-      else if (state.grabActive) selectMove('pinch_grab');
-      else if (context === 'galaxy' || context === 'globe') selectMove('wave_orbit');
-      else if (state.heldMove === 'palm') selectMove('palm_calm');
-      else if (state.heldMove === 'fist') selectMove('fist_strike');
-    }
+    if (state.bothPinched) selectMove('two_hand_zoom');
+    else if (state.grabActive) selectMove('pinch_grab');
+    else if (context === 'galaxy' || context === 'globe') selectMove('wave_orbit');
+    else if (state.heldMove === 'fist') selectMove('fist_strike');
 
     const handCount = (state.leftVisible ? 1 : 0) + (state.rightVisible ? 1 : 0);
     dotEl.dataset.ok = state.live ? (handCount > 0 ? '1' : 'wait') : '0';
@@ -287,34 +284,9 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
 
     if (!open) return;
 
-    const w = canvas.width, h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = '#0b0c16';
-    ctx.fillRect(0, 0, w, h);
-
-    const move = COACH_MOVE_BY_ID[activeMoveId] || COACH_MOVES[0];
-    const phase = isReducedMotion() ? 0.45 : ((now / 2200) % 1);
-    const ghosts = move.sample(phase);
-
-    ctx.save();
-    ctx.globalAlpha = 0.88;
-    for (const g of ghosts) {
-      drawHand(ctx, g.hand, w, h, g.state);
-    }
-    ctx.restore();
-
-    // Direction arrows for zoom or wave moves
-    ctx.fillStyle = 'rgba(255, 207, 74, 0.85)';
-    ctx.font = '11px "Pixelify Sans", monospace';
-    ctx.textAlign = 'center';
-    if (move.id === 'two_hand_zoom') {
-      ctx.fillText('←  PINCH & SPREAD  →', w / 2, 16);
-    } else if (move.id === 'wave_orbit') {
-      ctx.fillText('←  WAVE TO ORBIT  →', w / 2, 16);
-    } else if (move.id === 'pinch_grab') {
-      ctx.fillText('PINCH · MOVE HEAD · DROP', w / 2, 16);
-    } else {
-      ctx.fillText(`${move.glyph} ${move.title.toUpperCase()} (KEY ${move.key})`, w / 2, 16);
+    for (const move of COACH_CARDS) {
+      const { canvas, ctx } = canvases.get(move.id);
+      drawMove(move, ctx, canvas.width, canvas.height, now);
     }
   }
 

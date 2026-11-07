@@ -2,17 +2,33 @@
 
 import { W, H, clamp } from './sim/util.js';
 import { World, setRustWorldGen } from './world/terrain.js';
-import { SimSource, BridgeSource } from './brain/sources.js';
+import { SimSource, BridgeSource, setRustSimSource } from './brain/sources.js';
 import { Brain, setRustBrain } from './brain/brain.js';
-import { Advisor } from './ui/advisor.js';
-import { Hud } from './ui/hud.js';
+import { Advisor, setRustAdvisorEngine } from './ui/advisor.js';
+import { Hud, setRustHudEngine } from './ui/hud.js';
 import { EegPanel } from './ui/eeg-panel.js';
 import { Audio } from './audio.js';
 import { StoneAge } from './eras/stone.js';
 import { FarmingToKingdoms, InfoAge } from './eras/timeskip.js';
 import { Industry } from './eras/industry.js';
 import { SpaceAge } from './eras/space.js';
-import initEngine, { Engine, RustImuTracker, RustBlinkClassifier, PointerGesture, RustWorldGen, RustCastController, RustFingerController, RustEmotionTracker, RustGalaxy, RustAiPolicy, RustBrain, RustSimSource, RustCalibration } from '../pkg/mind_over_chicken_engine.js';
+import initEngine, {
+  Engine,
+  RustImuTracker,
+  RustBlinkClassifier,
+  PointerGesture,
+  RustWorldGen,
+  RustCastController,
+  RustFingerController,
+  RustEmotionTracker,
+  RustGalaxy,
+  RustAiPolicy,
+  RustBrain,
+  RustSimSource,
+  RustCalibration,
+  rust_villager_look,
+  rust_animate_agent,
+} from '../pkg/mind_over_chicken_engine.js';
 import { Cosmos } from './cosmos/cosmos.js';
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel, setRustGalaxy } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
@@ -20,8 +36,9 @@ import { setRustCastController } from './camera/casts.js';
 import { setRustFingerController } from './camera/fingers.js';
 import { setRustEmotionTracker } from './camera/emotion.js';
 import { setRustAiPolicy } from './ai/policy.js';
+import { setRustAgentHelpers } from './sim/agents.js';
 import { initDebug } from './camera/debug.js'; // camera debug (#67)
-import { Calibration, readCalibrationConfig } from './brain/calibration.js'; // calibration (#54)
+import { Calibration, readCalibrationConfig, setRustCalibration } from './brain/calibration.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
 import { CivSandbox } from './civ/sandbox.js'; // civ (#50)
 import { worldMeta, renderWorldDetail } from './cosmos/panel.js'; // planets (#68)
@@ -94,9 +111,19 @@ try {
   setRustGalaxy(RustGalaxy);
   setRustAiPolicy(RustAiPolicy);
   setRustBrain(RustBrain);
+  setRustSimSource(RustSimSource);
+  setRustCalibration(RustCalibration);
+  setRustAgentHelpers(rust_villager_look, rust_animate_agent);
   gesture = new PointerGesture(6);
   BridgeSource.setWasmClasses(RustImuTracker, RustBlinkClassifier);
   engine = new Engine('screen');
+  try {
+    engine.bind_dom_shell();
+    setRustAdvisorEngine(engine);
+    setRustHudEngine(engine);
+  } catch (err) {
+    console.warn('Rust DOM shell binding failed:', err);
+  }
   loading.done('engine');
 } catch (err) {
   console.error('Failed to initialize Rust WebGL engine:', err);
@@ -236,7 +263,7 @@ function newGame(source, startIndex = 0) {
   cosmos.reset();
   G = {
     world: new World(),
-    brain, source, advisor, hud, audio,
+    brain, source, advisor, hud, audio, engine,
     calibration: new Calibration(calibConfig), // calibration (#54)
     scene: null, sceneIndex: startIndex, runTime: 0, shake: 0,
     stats: { lightning: 0, smitten: 0, births: 0, deaths: 0, recessions: 0, restarts: 0 },
@@ -490,6 +517,7 @@ function render() {
   if (engine) {
     try {
       if (surface && G.render3d) {
+        engine.begin_frame();
         engine.upload_canvas(low);
         G.world?.draw3d?.(engine);
         if (scene.draw3d) {
@@ -566,6 +594,15 @@ function frame(ts) {
     if (engine) {
       const b = G.brain;
       engine.game_tick(dt, b.calm || 0, b.focus || 0, b.stress ?? 0, b.stats?.blinks || 0);
+      if (engine.is_game_era_complete?.() && !pendingScene && !G.finished) {
+        G.complete(1.5);
+      }
+      if (engine.is_game_era_failed?.() && $('failScreen').hidden && !G.finished) {
+        const failReason = engine.is_game_era_failed();
+        if (failReason) {
+          showFail(failReason);
+        }
+      }
     }
     if (banner) {
       banner.t += dt;
@@ -611,6 +648,11 @@ setInterval(() => { if (performance.now() - lastFrameAt > 45) frame(); }, 33);
 // ---------- input ----------
 function sim() { return G?.source?.kind === 'sim' ? G.source : null; }
 
+function isEegLive() {
+  const src = G?.source;
+  return !!(src && src.kind === 'bridge' && src.connected && src.streaming && src.lastFrameAt > 0 && (performance.now() - src.lastFrameAt < 3000));
+}
+
 function aimFromEvent(e) {
   const r = screen.getBoundingClientRect();
   return { x: clamp((e.clientX - r.left) / r.width), y: clamp((e.clientY - r.top) / r.height) };
@@ -619,7 +661,8 @@ function aimFromEvent(e) {
 function worldFromEvent(e) { const a = aimFromEvent(e); return { x: a.x * W, y: a.y * H }; }
 // Aim on the surface: in 3D mode, raycast from screen to terrain; in 2D, screen → map position.
 function surfaceAim(e) {
-  if (engine && engine.is_3d_mode() && !cosmos.active) {
+  if (cosmos.active) return aimFromEvent(e);
+  if (engine && engine.is_3d_mode()) {
     const r = screen.getBoundingClientRect();
     const sx = e.clientX - r.left;
     const sy = e.clientY - r.top;
@@ -631,6 +674,17 @@ function surfaceAim(e) {
   const a = aimFromEvent(e);
   return { x: cosmos.mapX(a.x * W) / W, y: a.y };
 }
+
+function followCursorAim(e) {
+  if (!G?.brain || isEegLive()) return;
+  const a = surfaceAim(e);
+  G.brain.aim.x = a.x;
+  G.brain.aim.y = a.y;
+  const s = sim();
+  if (s) s.setAim(a.x, a.y);
+  G.scene?.setAim?.(a.x, a.y);
+}
+window.addEventListener('pointermove', followCursorAim, { passive: true });
 let panDrag = null;
 let orbitDrag = null;
 // ---------- 3D camera <-> globe hand-off ----------
@@ -686,6 +740,7 @@ function stepCam3dTween() {
 }
 
 screen.addEventListener('pointermove', (e) => {
+  followCursorAim(e);
   if (G && cosmos.active) { const p = worldFromEvent(e); cosmos.pointerMove(e.pointerId, p.x, p.y, G); return; }
   if (orbitDrag && orbitDrag.id === e.pointerId) {
     const dx = e.clientX - orbitDrag.x;
@@ -717,6 +772,21 @@ screen.addEventListener('pointermove', (e) => {
   s.setAim(a.x, a.y);
   G.brain.aim.x = a.x; G.brain.aim.y = a.y;
 });
+function triggerAimClick(e) {
+  if (!G) return;
+  const a = surfaceAim(e);
+  G.brain.aim.x = a.x;
+  G.brain.aim.y = a.y;
+  const s = sim();
+  if (s) {
+    s.setAim(a.x, a.y);
+    s.blink();
+  } else if (!isEegLive()) {
+    G.brain.stats.blinks++;
+    G.brain.blinkListeners.forEach((fn) => fn(G.brain.aim));
+  }
+}
+
 screen.addEventListener('pointerdown', (e) => {
   audio.unlock();
   if (banner) { dismissBanner(); return; }
@@ -749,29 +819,23 @@ screen.addEventListener('pointerdown', (e) => {
     panDrag = { id: e.pointerId, x: q.x, y: q.y };
     return;
   }
-  const s = sim();
   if (gesture && G && e.button === 0) {
     try { screen.setPointerCapture?.(e.pointerId); } catch {}
     const q0 = worldFromEvent(e);
     gesture.down(e.pointerId, e.clientX, e.clientY, q0.x, q0.y);
     grab3d = in3dSurface() ? groundAt(e) : null;
-    if (s) { const a = surfaceAim(e); s.setAim(a.x, a.y); G.brain.aim.x = a.x; G.brain.aim.y = a.y; }
+    const a = surfaceAim(e);
+    G.brain.aim.x = a.x; G.brain.aim.y = a.y;
+    const s = sim();
+    if (s) s.setAim(a.x, a.y);
     return; // the blink happens on release, if Rust says it was a tap
   }
-  if (!s) return;
-  const a = surfaceAim(e);
-  s.setAim(a.x, a.y);
-  G.brain.aim.x = a.x; G.brain.aim.y = a.y;
-  s.blink();
+  triggerAimClick(e);
 });
 const endPointer = (e) => {
   if (gesture?.owns(e.pointerId)) {
-    const s = sim();
-    if (gesture.up(e.pointerId, e.type === 'pointercancel') && s && G) {
-      const a = surfaceAim(e);
-      s.setAim(a.x, a.y);
-      G.brain.aim.x = a.x; G.brain.aim.y = a.y;
-      s.blink();
+    if (gesture.up(e.pointerId, e.type === 'pointercancel') && G) {
+      triggerAimClick(e);
     }
     return;
   }
@@ -1075,16 +1139,55 @@ window.__moc.camera = initCamera({
   // camera debug (#67): the fingertip aims on the panned surface like the mouse does.
   mapX: (x) => cosmos.mapX(x * W) / W,
   screenX: (x) => ((((x * W + cosmos.panX) % W) + W) % W) / W,
-  onZoomDelta: (delta) => {
-    // Two-hand continuous pinch zoom (#119)
-    try {
-      cosmos.onWheel?.({ deltaY: -delta * 120, preventDefault() {} });
-    } catch {}
+  onZoomDelta: (delta, factor) => {
+    // Two-hand continuous pinch zoom: delta > 0 is zoom in (hands spread), delta < 0 is zoom out (hands together)
+    if (!G) return;
+    if (in3dSurface()) {
+      cam3dTween = null;
+      if (delta < 0 && engine.get_camera_distance() >= CAM3D.topDown - 0.5) {
+        cosmos.zoomOut(G);
+        return;
+      }
+      const step = 1 - Math.max(-0.25, Math.min(0.25, delta * 2.5));
+      zoom3dBy(step);
+      return;
+    }
+    // Cosmos zoom (surface <-> globe <-> galaxy): wheel negative zooms in, positive zooms out
+    cosmos.wheel(-delta * 750, G);
+  },
+  onGrabMove: ({ dx, dy, active, started, released, aim }) => {
+    // One-hand pinch grab & move the globe or world view
+    if (!G) return;
+    if (cosmos.active || cosmos.z > 0.4) {
+      if (active) {
+        // In normalized hand space (-1..1). Moving hand right rotates globe right.
+        const spin = -dx * 3.5;
+        cosmos.rot += spin;
+        cosmos.spinVel = spin / 0.033;
+      }
+      return;
+    }
+    if (in3dSurface()) {
+      if (active && (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001)) {
+        engine.orbit_camera(-dx * 3.5, dy * 3.5);
+        cam3dBase = null;
+      }
+      return;
+    }
+    if (active && (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001)) {
+      panMap(-dx * W * 1.5, -dy * H * 1.5);
+    }
   },
   onWave: (dir) => {
-    // Open-hand wave orbits camera (#121)
-    if (cosmos.mode === 'planet' || cosmos.mode === 'vast') {
-      cosmos.panX += dir * 40;
+    // Open-hand wave orbits camera or spins globe (#121)
+    if (cosmos.active || cosmos.z > 0.4) {
+      cosmos.rot += dir * 0.7;
+      cosmos.spinVel = dir * 15;
+    } else if (in3dSurface()) {
+      engine.orbit_camera(dir * 0.25, 0);
+      cam3dBase = null;
+    } else {
+      panMap(dir * 45, 0);
     }
   },
 });

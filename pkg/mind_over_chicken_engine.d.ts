@@ -89,6 +89,8 @@ export class Engine {
     init_3d(): void;
     init_world(seed: number): void;
     is_3d_mode(): boolean;
+    is_game_era_complete(): boolean;
+    is_game_era_failed(): string | undefined;
     is_game_failed(): string | undefined;
     is_game_finished(): boolean;
     is_terrain_reachable(x: number, y: number): boolean;
@@ -366,6 +368,10 @@ export class RustWorldGen {
     types(): Uint8Array;
 }
 
+export function rust_animate_agent(clock: number, dt: number, rate: number): Float32Array;
+
+export function rust_villager_look(era: string, seed: number): Array<any>;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -457,6 +463,8 @@ export interface InitOutput {
     readonly engine_init_3d: (a: number) => [number, number];
     readonly engine_init_world: (a: number, b: number) => void;
     readonly engine_is_3d_mode: (a: number) => number;
+    readonly engine_is_game_era_complete: (a: number) => number;
+    readonly engine_is_game_era_failed: (a: number) => [number, number];
     readonly engine_is_game_failed: (a: number) => [number, number];
     readonly engine_is_game_finished: (a: number) => number;
     readonly engine_is_terrain_reachable: (a: number, b: number, c: number) => number;
@@ -484,6 +492,8 @@ export interface InitOutput {
     readonly pointergesture_pan_dx: (a: number) => number;
     readonly pointergesture_pan_dy: (a: number) => number;
     readonly pointergesture_up: (a: number, b: number, c: number) => number;
+    readonly rust_animate_agent: (a: number, b: number, c: number) => any;
+    readonly rust_villager_look: (a: number, b: number, c: number) => any;
     readonly rustaipolicy_act: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly rustaipolicy_new: () => number;
     readonly rustaipolicy_probs: (a: number, b: number, c: number) => any;
