@@ -4,7 +4,7 @@
 //   - the recognised gesture and its confidence, hold progress, the pinch, the learned hand range and cooldowns;
 //   - live emotion bars and the dominant mood;
 //   - inference rate (Hz), model time and end-to-end latency (ms) for hands and face, and where they run;
-//   - the brain signals: calm, focus, pulse against resting pulse, blinks; and the game's frame rate.
+//   - the brain signals: calm, focus, stress (EEG agitation or face anger), blinks; and the game's frame rate.
 // Without a camera it still shows key casts, cooldowns, brain values and the frame rate.
 
 import { SPELL_BY_ID, GESTURE_LABEL } from './spells.js';
@@ -46,7 +46,7 @@ const TEMPLATE = `
     <dl class="dbg-brain">
       <div><dt>Calm</dt><dd data-dbg="calm">–</dd></div>
       <div><dt>Focus</dt><dd data-dbg="focus">–</dd></div>
-      <div><dt>Pulse</dt><dd data-dbg="pulse">–</dd></div>
+      <div><dt>Stress</dt><dd data-dbg="stress">–</dd></div>
       <div><dt>Blinks</dt><dd data-dbg="blinks">–</dd></div>
     </dl>
     <p class="dbg-src" data-dbg="source">no game running</p>
@@ -61,7 +61,7 @@ export function initDebug({ getG, camera }) {
   if (!btn || !panel) return null;
   panel.innerHTML = TEMPLATE;
   const q = (k) => panel.querySelector(`[data-dbg="${k}"]`);
-  const el = Object.fromEntries(['mode', 'note', 'hands', 'face', 'game', 'gesture', 'hold', 'holdText', 'pinch', 'range', 'cds', 'last', 'mood', 'calm', 'focus', 'pulse', 'blinks', 'source'].map((k) => [k, q(k)]));
+  const el = Object.fromEntries(['mode', 'note', 'hands', 'face', 'game', 'gesture', 'hold', 'holdText', 'pinch', 'range', 'cds', 'last', 'mood', 'calm', 'focus', 'stress', 'blinks', 'source'].map((k) => [k, q(k)]));
   const emo = Object.fromEntries(EMOTIONS.map((k) => {
     const row = panel.querySelector(`.dbg-emo[data-emotion="${k}"]`);
     return [k, { bar: row.querySelector('.dbg-meter > span'), num: row.querySelector('b') }];
@@ -217,12 +217,11 @@ export function initDebug({ getG, camera }) {
     if (b) {
       set(el.calm, pct(b.calm));
       set(el.focus, pct(b.focus));
-      const d = b.hrDelta?.() ?? 0;
-      set(el.pulse, b.hr == null ? '–' : `${Math.round(b.hr)} bpm · ${d >= 0 ? '+' : ''}${Math.round(d)} vs ${Math.round(b.restHr ?? b.hr)}`);
+      set(el.stress, b.stress == null ? '–' : `${pct(b.stress)}${b.anger > 0 && b.anger >= b.stress - 1e-6 ? ' · face anger' : ''}`);
       set(el.blinks, String(b.stats?.blinks ?? 0));
       set(el.source, `${G.source?.kind === 'sim' ? 'emulated headset' : 'headset bridge'} · signal ${pct(b.quality)}`);
     } else {
-      for (const k of ['calm', 'focus', 'pulse', 'blinks']) set(el[k], '–');
+      for (const k of ['calm', 'focus', 'stress', 'blinks']) set(el[k], '–');
       set(el.source, 'no game running: start one for brain signals');
     }
   }

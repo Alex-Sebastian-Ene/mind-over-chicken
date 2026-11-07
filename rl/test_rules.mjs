@@ -31,7 +31,7 @@ test('AI calm goes to the planet\'s own brain, never to the human headset', () =
 });
 
 test('the human\'s calm counts on top of the AI\'s', () => {
-  const human = { calm: 0.97, focus: 0, aim: { x: 0.5, y: 0.5 }, hrDelta: () => 0 };
+  const human = { calm: 0.97, focus: 0, aim: { x: 0.5, y: 0.5 }, anger: 0 };
   const planet = new SimPlanet({ seed: 4, brain: 'proxy' }).attachHuman(human);
   assert.ok(planet.G.brain.calm >= 0.97);
   human.calm = 0;
@@ -40,7 +40,7 @@ test('the human\'s calm counts on top of the AI\'s', () => {
 });
 
 test('AI lightning never refuses the human\'s next blink', () => {
-  const human = { calm: 0, focus: 0, aim: { x: 0.5, y: 0.5 }, hrDelta: () => 0 };
+  const human = { calm: 0, focus: 0, aim: { x: 0.5, y: 0.5 }, anger: 0 };
   const planet = new SimPlanet({ seed: 5, brain: 'proxy' }).attachHuman(human);
   planet.advance(1);
   const s = planet.scene;

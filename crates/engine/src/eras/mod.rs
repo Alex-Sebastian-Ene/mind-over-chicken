@@ -45,16 +45,18 @@ pub enum EraEvent {
     StatAddRecession,
 }
 
+/// What the eras read from the player each tick. `stress` is the JS brain's `brain.stress`:
+/// EEG agitation or face anger, 0..1, about 0.15 at rest (src/brain/brain.js).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BrainInput {
     pub calm: f32,
     pub focus: f32,
-    pub panic: f32,
-    pub hr: f32,
-    pub rest_hr: f32,
-    pub hr_delta: f32,
+    pub stress: f32,
     pub blinks: u32,
 }
+
+/// Above this the god counts as stressed (`STRESSED` in src/brain/brain.js).
+pub const STRESS_LIMIT: f32 = 0.5;
 
 pub trait Era {
     fn id(&self) -> &str;

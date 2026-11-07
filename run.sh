@@ -70,7 +70,7 @@ Extra flags go to bridge/muse_bridge.py, e.g. tuning the blink threshold:
 
   ./run.sh muse2 -v --blink-threshold 250
   ./run.sh muse2 --serial-number Muse-1A2B --timeout 20
-  ./run.sh synthetic --no-ppg
+  ./run.sh synthetic --fake-blink-every 2
 
 PORT=8001 ./run.sh muse2   serves the game on another port.
 EOF

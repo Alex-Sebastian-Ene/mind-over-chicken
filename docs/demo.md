@@ -16,7 +16,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 - [ ] **Hotkeys Reference Card**:
   - `Space`: Hold Calm (high alpha)
   - `F`: Hold Focus (beta / mental effort)
-  - `Shift`: Spike Pulse / Panic
+  - `Shift`: Spike Stress (drops calm)
   - `B`: Deliberate Blink (lightning bolt)
   - `T` or `3`: Toggle 3D Heightmap Terrain vs 2D Classic
   - `Z` / `X`: Zoom Out (Galaxy) / Zoom In (Surface)
@@ -43,12 +43,12 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 
 #### Spoken Script
 > *"Judges, god games have always given you a mouse to rule the world. Mind over Chicken gives the world your mind.*  
-> *I am wearing an EEG headset. There are no invisible difficulty sliders: this entire civilization is compiled to Rust and WebAssembly, and its physics, markets, and survival are driven directly by my real-time brainwaves, heart rate, and facial expressions."*
+> *I am wearing an EEG headset. There are no invisible difficulty sliders: this entire civilization is compiled to Rust and WebAssembly, and its physics, markets, and survival are driven directly by my real-time brainwaves, head movement, and facial expressions."*
 
 #### Operator Actions
 - **0:00**: Title screen visible. Click **"Emulated headset"** (or **"Headset bridge"** if Muse is streaming).
 - **0:05**: The island loads in **3D WebGL mode** (orbiting pixel-art heightmap terrain with dynamic sunlight).
-- **0:12**: Show the top HUD power meters (`Calm`, `Focus`, `Heart Rate`, `Blinks`). Point out that the 10-second calibration window is active, recording baseline alpha/beta rhythms.
+- **0:12**: Show the top HUD power meters (`Calm`, `Focus`, `Stress`, `Blinks`). Point out that the 10-second calibration window is active, recording baseline alpha/beta rhythms.
 
 ---
 
@@ -74,12 +74,12 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 #### Spoken Script
 > *"Fast forward to the Industrial Era. We traded sticks for the Goat Exchange stock ticker.*  
 > *Here, market prices don't follow fixed scripts; they model chartist momentum versus fundamental value. And the market is hyper-sensitive to divine anxiety.*  
-> *Watch what happens when my heart rate spikes—[PULSE SPIKE]—the ticker goes red, panic spreads, and we trigger an emergent market crash! The workers go on strike.*  
+> *Watch what happens when my stress spikes—[STRESS SPIKE]—the ticker goes red, panic spreads, and we trigger an emergent market crash! The workers go on strike.*  
 > *To fix it, the game tests my emotional regulation: I breathe, calm down, and hold composure through the IPO window until green bars return and industry flourishes."*
 
 #### Operator Actions
 - **1:05**: Era switches to Industry. The Goat Exchange chart appears in retro amber pixels.
-- **1:15**: Hold `Shift` (or tense up) to spike pulse +35 bpm over resting baseline.
+- **1:15**: Hold `Shift` (or tense up, or scowl at the camera) to spike stress: calm drops to 0 and the `Stress` meter fills.
 - **1:22**: Market drops sharply; recession alert triggers, siren sound plays, red crash banner appears.
 - **1:30**: Release `Shift`, hold `Space` (`Calm` meter > 80%). The market stabilizes, confidence rebounds, and the IPO completes.
 
@@ -91,12 +91,12 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 > *"Now we zoom out.*  
 > *Pressing Z pulls our camera from the 3D surface into an orbital WebGL globe shader... and further out into the Galaxy.*  
 > *Look at these three planets orbiting our star. They weren't procedurally randomized: they were biologically seeded from the first ten seconds of my thoughts!*  
-> *Stillwater was born from my calm. Lumen from my focus. Thrum from my pulse. Flicker from my blinks.*  
+> *Stillwater was born from my calm. Lumen from my focus. Thrum from my stress. Flicker from my blinks.*  
 > *And right now, our on-device PPO reinforcement learning AI god—trained with neural networks in PyTorch and running in browser WebAssembly—is steering their autonomous trade and orbital colony ships in real time."*
 
 #### Operator Actions
 - **1:45**: Press `Z` twice (or scroll wheel back). Smooth transition from 3D surface → rotating pixel-art globe → galaxy star field with elliptical orbits.
-- **1:58**: Click on **Stillwater** or **Thrum** in the planet list. Point out the live telemetry: *"Growth +1.2%/s from calm; Market volatility steered by pulse"*.
+- **1:58**: Click on **Stillwater** or **Thrum** in the planet list. Point out the live telemetry: *"Growth +1.2%/s from calm; Market volatility steered by stress"*.
 - **2:10**: Press `G` to demonstrate the PPO AI God autopilot steering simulated worlds.
 
 ---
@@ -135,7 +135,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 
 | Incident | Immediate Operator Action | Backup Pitch Line |
 |---|---|---|
-| **Bluetooth drops on Muse 2** | Click **"Emulated headset"** on the title screen (or reload with `?source=sim`). Use `Space` for calm, `F` for focus, `Shift` for panic, `B` for blink. | *"Our bridge supports hot-failover to an emulated biometric source so the simulation never stutters."* |
+| **Bluetooth drops on Muse 2** | Click **"Emulated headset"** on the title screen (or reload with `?source=sim`). Use `Space` for calm, `F` for focus, `Shift` for stress, `B` for blink. | *"Our bridge supports hot-failover to an emulated biometric source so the simulation never stutters."* |
 | **Webcam lighting is too dark for gestures** | Use numeric keys `1` through `7` to cast the exact same spells directly from the keyboard. | *"Every camera gesture maps 1:1 to direct keyboard spells for accessibility and zero-light environments."* |
 | **Fire pit doesn't light on first blink** | Press `B` firmly; the reticle auto-aims toward the fire pit when within 14 pixels. | *"The tribe demands divine conviction—another lightning strike does the trick."* |
 | **Speaker runs ahead of time (finishes early)** | Press `T` to toggle 3D camera mode and right-drag to orbit around the terrain, or click a planet in the galaxy view. | *"Notice how the 3D raycaster projects screen coordinates directly onto the dynamic heightfield."* |
@@ -153,4 +153,4 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
    - No. 100% of feature extraction, blocked cross-validation, and softmax regression training execute locally inside the browser WebAssembly runtime. No user brain data or camera frames ever leave the device.
 
 3. **How does audio synthesis work without files?**
-   - Sound effects and dynamic heartbeat pulses are synthesized procedurally in Rust via WebAudio oscillators, bandpass noise filters, and exponential gain curves. Zero audio downloads.
+   - Sound effects are synthesized procedurally in Rust via WebAudio oscillators, bandpass noise filters, and exponential gain curves. Zero audio downloads.

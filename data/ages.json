@@ -5,7 +5,7 @@
     "population": "living agents of the civilisation",
     "settlements": "settlements owned",
     "food_days": "food stock divided by daily consumption",
-    "stability": "0-1; falls with hunger, overcrowding, inequality, war losses, the player's anger and pulse",
+    "stability": "0-1; falls with hunger, overcrowding, inequality, war losses, the player's anger and stress",
     "territory": "share of the planet's land the civilisation owns, 0-1",
     "knowledge": "accumulated by scribes, scholars and the player's focus",
     "wealth": "goats held across the civilisation",
@@ -82,7 +82,7 @@
       "crises": [
         "cold_snap"
       ],
-      "brain": "Calm warms the hearth; a racing pulse makes the night colder.",
+      "brain": "Calm warms the hearth; stress makes the night colder.",
       "weapon": {
         "name": "clubs and torches",
         "power": 1.2,
@@ -148,7 +148,7 @@
         "drought",
         "locusts"
       ],
-      "brain": "Calm brings rain; a racing pulse brings drought.",
+      "brain": "Calm brings rain; stress brings drought.",
       "weapon": {
         "name": "slings",
         "power": 1.8,
@@ -215,7 +215,7 @@
       "crises": [
         "bandits"
       ],
-      "brain": "Your pulse tips first contact toward trade (steady) or raids (racing).",
+      "brain": "Your stress tips first contact toward trade (calm) or raids (stressed).",
       "weapon": {
         "name": "caravan guards",
         "power": 2.4,
@@ -532,7 +532,7 @@
         "market_crash",
         "general_strike"
       ],
-      "brain": "Your pulse drives market volatility; calm brings it back.",
+      "brain": "Your stress drives market volatility; calm brings it back.",
       "weapon": {
         "name": "rifles",
         "power": 10.0,
@@ -598,7 +598,7 @@
         "blackout",
         "world_war"
       ],
-      "brain": "Focus keeps the grid stable; a racing pulse risks blackouts.",
+      "brain": "Focus keeps the grid stable; anger risks blackouts.",
       "weapon": {
         "name": "artillery",
         "power": 13.0,
@@ -632,7 +632,7 @@
         "panic",
         "cyber_war"
       ],
-      "brain": "Focus spreads truth; a racing pulse spreads panic.",
+      "brain": "Focus spreads truth; anger spreads panic.",
       "weapon": {
         "name": "drones",
         "power": 15.0,
@@ -663,7 +663,7 @@
       "crises": [
         "launch_failure"
       ],
-      "brain": "The 10-second countdown: hold focus, keep your pulse low.",
+      "brain": "The 10-second countdown: hold focus. Before it, stress makes engineers drop parts.",
       "weapon": {
         "name": "satellite strikes",
         "power": 18.0,
@@ -789,7 +789,7 @@
       ]
     },
     "player": {
-      "anger_or_pulse": "Raises aggression and pushes conflicts up the ladder.",
+      "anger_or_stress": "Raises aggression and pushes conflicts up the ladder.",
       "calm": "Lowers aggression; conflicts drift down toward a truce.",
       "peace_cast": "Forces a truce around the aim point.",
       "lightning": "Breaks a charge and scatters fighters; the struck side loses morale.",

@@ -11,7 +11,6 @@ export const engine_add_billboard: (a: number, b: number, c: number, d: number, 
 export const engine_add_custom_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
 export const engine_add_light: (a: number, b: number, c: number, d: number, e: number) => void;
 export const engine_advisor_say: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
-export const engine_audio_heartbeat: (a: number, b: number, c: number, d: number) => void;
 export const engine_audio_play: (a: number, b: number, c: number) => void;
 export const engine_audio_toggle: (a: number) => number;
 export const engine_audio_unlock: (a: number) => void;
@@ -36,7 +35,7 @@ export const engine_game_on_blink: (a: number, b: number, c: number) => void;
 export const engine_game_on_cast: (a: number, b: number, c: number, d: number, e: number) => void;
 export const engine_game_restart_era: (a: number) => void;
 export const engine_game_start_era: (a: number, b: number) => void;
-export const engine_game_tick: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+export const engine_game_tick: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
 export const engine_generate_civ_terrain: (a: number, b: number, c: number) => [number, number];
 export const engine_generate_terrain: (a: number, b: number) => [number, number];
 export const engine_get_camera_distance: (a: number) => number;
