@@ -212,14 +212,18 @@ pub fn new_world(seed: u32, n: usize, d: Dims) -> World {
     w
 }
 
-/// Run the world `secs` seconds of sim time (steps of 0.1 s).
+/// Run the world `secs` seconds of sim time (steps of at most 0.1 s), however much one
+/// `World::advance` call is allowed to run.
 pub fn run(w: &mut World, secs: f32) {
-    let mut left = secs;
-    while left > 1e-4 {
-        let chunk = left.min(2.0);
+    let end = w.time + secs;
+    while end - w.time > 1e-3 {
+        let chunk = (end - w.time).min(2.0);
         w.speed = chunk / 0.1;
+        let before = w.time;
         w.advance(0.1);
-        left -= chunk;
+        if w.time <= before {
+            break;
+        }
     }
     w.speed = 1.0;
 }

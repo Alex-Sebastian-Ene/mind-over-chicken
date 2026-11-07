@@ -126,7 +126,8 @@ fn duel() -> (World, std::rc::Rc<std::cell::RefCell<Council>>) {
         r.met = true;
         r.tension = 0.0;
     }
-    gym::run(&mut w, 1.0);
+    // Two seconds: at least one politics tick finds the nearest village pair.
+    gym::run(&mut w, 2.0);
     (w, c)
 }
 
