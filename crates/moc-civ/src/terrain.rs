@@ -3,6 +3,9 @@
 //! elsewhere wait to be settled (some joined by bridges, some islands). Polar ice at the top
 //! and bottom; everything wraps east–west.
 //!
+//! Rivers run from the high middle of each continent down to the coast: walkable fords that
+//! slow walkers and weaken an attack across them (`terrain_mul::RIVER_CROSSING`, #69).
+//!
 //! World generation lives behind one function, [`Terrain::generate`], so another world shape
 //! (for example a disc, see #52) can be swapped in without touching the simulation.
 
@@ -45,15 +48,19 @@ pub fn speed_mul(kind: u8) -> f32 {
 }
 
 /// How much harder a defender standing on this terrain is to hurt (combat divides damage by
-/// it), as in `data/ages.json` conflict.battle.terrain. River crossings (0.7) and walls (1.8)
-/// join in with the ages (#69).
+/// it): `data/ages.json` conflict.battle.terrain. Walls and river crossings are applied in
+/// combat (`agents::combat`), since they depend on villages and on where the attacker stands.
 pub fn defence(kind: u8) -> f32 {
+    use crate::ages_table::terrain_mul as m;
     match kind {
-        HILLS => 1.3,
-        FOREST => 1.2,
-        _ => 1.0,
+        HILLS => m::HILL,
+        FOREST => m::FOREST,
+        _ => m::OPEN_GROUND,
     }
 }
+
+/// Walking speed through a river ford.
+pub const RIVER_SPEED: f32 = 0.6;
 
 pub fn flammable(kind: u8) -> bool {
     kind == GRASS || kind == FOREST
@@ -76,6 +83,8 @@ pub struct Terrain {
     pub walk: Vec<bool>,
     /// Connected landmass of each walkable tile (0 = not walkable). Same id = reachable on foot.
     pub land_id: Vec<u16>,
+    /// River fords (walkable land tiles a river runs through).
+    pub river: Vec<bool>,
     /// The planet painted once, w×h RGBA (burnt tiles are repainted as they burn and regrow).
     pub rgba: Vec<u8>,
     pub regions: Vec<Region>,
@@ -152,6 +161,8 @@ impl Terrain {
         }
 
         let mut kind = vec![DEEP; d.n()];
+        // Height of each tile (continent shape plus noise), kept for the rivers.
+        let mut elev = vec![-2.0f32; d.n()];
         for y in 0..d.h {
             let yf = y as f32;
             let lat = ((yf + 0.5) / h - 0.5).abs() * 2.0;
@@ -183,6 +194,7 @@ impl Terrain {
                     continue;
                 }
                 let e = (e + (shape.fbm(u, yf / c_shape, 5) - 0.5) * 1.4).max(b);
+                elev[i] = e;
                 kind[i] = if e < 0.02 {
                     DEEP
                 } else if e < 0.08 {
@@ -206,7 +218,8 @@ impl Terrain {
                 };
             }
         }
-        Self::finish(d, kind, regions, seed)
+        let river = trace_rivers(d, &kind, &elev, &regions, &mut rng);
+        Self::finish(d, kind, river, regions, seed)
     }
 
     /// A planet of one kind everywhere (ice at the poles), for tests: four regions round the
@@ -220,18 +233,29 @@ impl Terrain {
             kind[x] = ICE;
             kind[(d.h - 1) * d.w + x] = ICE;
         }
-        Self::finish(d, kind, regions, 1)
+        Self::finish(d, kind, vec![false; d.n()], regions, 1)
     }
 
     /// Build a terrain from a kind grid (walkability, landmasses, colours, starts).
     pub fn from_kinds(d: Dims, kind: Vec<u8>, regions: Vec<Region>) -> Terrain {
-        Self::finish(d, kind, regions, 1)
+        Self::finish(d, kind, vec![false; d.n()], regions, 1)
     }
 
-    fn finish(d: Dims, kind: Vec<u8>, mut regions: Vec<Region>, seed: u32) -> Terrain {
+    /// Mark a river ford (tests).
+    pub fn set_river(&mut self, x: i32, y: i32, on: bool) {
+        if self.d.in_y(y) {
+            let i = self.d.idx(x, y);
+            self.river[i] = on && self.walk[i];
+            let c = self.base_colour(x, y);
+            self.rgba[i * 4..i * 4 + 4].copy_from_slice(&c);
+        }
+    }
+
+    fn finish(d: Dims, kind: Vec<u8>, river: Vec<bool>, mut regions: Vec<Region>, seed: u32) -> Terrain {
         let walk: Vec<bool> = kind.iter().map(|&k| matches!(k, SAND | GRASS | FOREST | HILLS)).collect();
         let land_id = label_landmasses(d, &walk);
-        let mut t = Terrain { d, kind, walk, land_id, rgba: vec![0; d.n() * 4], regions: Vec::new(), seed };
+        let river = river.iter().zip(&walk).map(|(&r, &w)| r && w).collect();
+        let mut t = Terrain { d, kind, walk, land_id, river, rgba: vec![0; d.n() * 4], regions: Vec::new(), seed };
         for r in regions.iter_mut() {
             r.start = t.find_start(r.cx, r.cy);
         }
@@ -257,6 +281,16 @@ impl Terrain {
             return ICE;
         }
         self.kind[self.d.idx(x, y)]
+    }
+
+    #[inline]
+    pub fn river_at(&self, x: i32, y: i32) -> bool {
+        self.d.in_y(y) && self.river[self.d.idx(x, y)]
+    }
+
+    /// Is there open water within `r` tiles?
+    pub fn near_water(&self, x: i32, y: i32, r: i32) -> bool {
+        (-r..=r).any(|oy| (-r..=r).any(|ox| matches!(self.kind_at(x + ox, y + oy), WATER | DEEP)))
     }
 
     #[inline]
@@ -302,14 +336,16 @@ impl Terrain {
                 }
             }
         }
-        (self.d.wrap_x(cx), cy.clamp(0, self.d.h as i32 - 1))
+        (self.d.wrap_x(cx), self.d.wrap_y(cy))
     }
 
     /// The painted colour of a tile (used again when burnt land grows back).
     pub fn base_colour(&self, x: i32, y: i32) -> [u8; 4] {
         let k = self.kind_at(x, y);
         let near_land = || (-1..=1).any(|oy| (-1..=1).any(|ox| self.walkable(x + ox, y + oy)));
+        let river = self.river_at(x, y);
         let (r, g, b) = match k {
+            _ if river => (70, 132, 196),
             DEEP => (24, 52, 98),
             WATER => {
                 if near_land() {
@@ -333,7 +369,69 @@ impl Terrain {
     }
 }
 
-/// Connected components of walkable land (8-neighbour, wrapping east–west).
+/// Rivers: from high ground in the middle of a continent, downhill (by `elev`) to the sea.
+/// A river that finds no lower ground carves on through a few rises, then ends in a marsh.
+fn trace_rivers(d: Dims, kind: &[u8], elev: &[f32], regions: &[Region], rng: &mut Rng) -> Vec<bool> {
+    let mut river = vec![false; d.n()];
+    let want = (regions.len() * 3).min(40);
+    let mut made = 0;
+    for _ in 0..want * 12 {
+        if made >= want {
+            break;
+        }
+        let r = regions[rng.below(regions.len())];
+        let (x, y) = ((r.cx + rng.range(-0.5, 0.5) * r.rx) as i32, (r.cy + rng.range(-0.5, 0.5) * r.ry) as i32);
+        if !d.in_y(y) {
+            continue;
+        }
+        let s = d.idx(x, y);
+        if !matches!(kind[s], GRASS | FOREST | HILLS) || elev[s] < 0.4 || river[s] {
+            continue;
+        }
+        let (mut cx, mut cy) = (d.wrap_x(x), y);
+        let mut path = vec![s];
+        let mut carve = 0;
+        let mut ok = false;
+        for _ in 0..260 {
+            let here = elev[d.idx(cx, cy)];
+            let mut best: Option<(f32, i32, i32)> = None;
+            for (ox, oy) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] {
+                let (nx, ny) = (d.wrap_x(cx + ox), d.wrap_y(cy + oy));
+                let j = d.idx(nx, ny);
+                if matches!(kind[j], MOUNTAIN | ICE) || path.contains(&j) {
+                    continue;
+                }
+                let e = elev[j] + if ox != 0 && oy != 0 { 0.004 } else { 0.0 };
+                if best.map_or(true, |b| e < b.0) {
+                    best = Some((e, nx, ny));
+                }
+            }
+            let Some((e, nx, ny)) = best else { break };
+            if e >= here {
+                carve += 1;
+                if carve > 4 {
+                    break;
+                }
+            }
+            let j = d.idx(nx, ny);
+            (cx, cy) = (nx, ny);
+            if matches!(kind[j], WATER | DEEP) {
+                ok = true;
+                break;
+            }
+            path.push(j);
+        }
+        if path.len() >= 12 && (ok || path.len() >= 30) {
+            for &i in &path {
+                river[i] = true;
+            }
+            made += 1;
+        }
+    }
+    river
+}
+
+/// Connected components of walkable land (8-neighbour, wrapping both ways).
 fn label_landmasses(d: Dims, walk: &[bool]) -> Vec<u16> {
     let mut id = vec![0u16; d.n()];
     let mut next = 1u16;
@@ -348,9 +446,6 @@ fn label_landmasses(d: Dims, walk: &[bool]) -> Vec<u16> {
             let (x, y) = ((i % d.w) as i32, (i / d.w) as i32);
             for oy in -1..=1 {
                 let ny = y + oy;
-                if !d.in_y(ny) {
-                    continue;
-                }
                 for ox in -1..=1 {
                     let j = d.idx(x + ox, ny);
                     if walk[j] && id[j] == 0 {

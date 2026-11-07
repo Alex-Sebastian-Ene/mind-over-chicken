@@ -28,7 +28,9 @@ import json
 import logging
 import math
 import random
+import shutil
 import signal
+import subprocess
 import sys
 import time
 from collections import deque
@@ -266,9 +268,7 @@ class HeadTracker:
             # right-hand rule (a turn to the left), so negate it for "positive = right".
             self.rate = math.sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2])
             yaw_rate = -(w[0] * ux + w[1] * uy + w[2] * uz)
-            # Zero Angular Velocity Update (ZUPT): when the head is stationary (< 1.5 deg/s),
-            # do not integrate micro-tremor or residual bias into yaw.
-            if self.rate >= 1.5 or not math.isfinite(self.bias_tau):
+            if self.rate >= 0.25 or not math.isfinite(self.bias_tau):
                 self.yaw += yaw_rate * dt
             if math.isfinite(self.yaw_tau):
                 self.yaw *= math.exp(-dt / self.yaw_tau)
@@ -294,8 +294,7 @@ class HeadTracker:
             self._reset_window()
         d = [gx - self.bias[0], gy - self.bias[1], gz - self.bias[2]]
         if math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) < self.still and math.isfinite(self.bias_tau):
-            tau = 2.0 if math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) < 2.0 else self.bias_tau
-            k = 1.0 - math.exp(-dt / tau)
+            k = 1.0 - math.exp(-dt / self.bias_tau)
             self.bias = [b + k * v for b, v in zip(self.bias, d)]
             d = [gx - self.bias[0], gy - self.bias[1], gz - self.bias[2]]
         return d
@@ -451,10 +450,48 @@ class Bridge:
                 self.set_status(self.streaming_status)
                 return
             except (BrainFlowError, asyncio.TimeoutError) as e:
-                log.warning("connect failed: %s", e)
-                self.release_board()
+                reason = str(e) or type(e).__name__
+                log.warning("connect failed: %s", reason)
+                if isinstance(e, asyncio.TimeoutError):
+                    await asyncio.to_thread(self._reset_bluez_muse)
+                await self.async_release_board()
+                await asyncio.to_thread(self._reset_bluez_muse)
                 self.set_status(f"Waiting for headset: {self.label} not found, retrying")
                 await asyncio.sleep(RETRY_DELAY)
+
+    def _reset_bluez_muse(self):
+        """Force BlueZ to drop any half-open GATT session to a Muse headset so SimpleBLE
+        doesn't deadlock inside prepare_session() or release_session()."""
+        if sys.platform != "linux" or self.board_id == BoardIds.SYNTHETIC_BOARD.value:
+            return
+        if not shutil.which("bluetoothctl"):
+            return
+        try:
+            macs = []
+            if getattr(self.args, "mac_address", None):
+                macs.append(self.args.mac_address)
+            out = subprocess.run(
+                ["bluetoothctl", "devices"],
+                capture_output=True, text=True, timeout=2.5, check=False
+            ).stdout
+            for line in out.splitlines():
+                parts = line.strip().split(None, 2)
+                if len(parts) >= 3 and "Muse" in parts[2] and parts[1] not in macs:
+                    macs.append(parts[1])
+            for mac in macs:
+                subprocess.run(
+                    ["bluetoothctl", "disconnect", mac],
+                    capture_output=True, text=True, timeout=2.5, check=False
+                )
+        except Exception as exc:
+            log.debug("bluez reset skipped: %s", exc)
+
+    async def async_release_board(self):
+        try:
+            await asyncio.wait_for(asyncio.to_thread(self.release_board), timeout=4.0)
+        except asyncio.TimeoutError:
+            log.warning("release_board timed out; forcing BlueZ disconnect")
+            await asyncio.to_thread(self._reset_bluez_muse)
 
     def release_board(self):
         board, self.board = self.board, None
@@ -475,7 +512,8 @@ class Bridge:
         while True:
             await self.connect_board()
             await self.stream_loop()       # returns when data stalls
-            self.release_board()
+            await self.async_release_board()
+            await asyncio.to_thread(self._reset_bluez_muse)
             await asyncio.sleep(2.5)       # let BlueZ finish GATT teardown before rescanning
 
     async def stream_loop(self):
