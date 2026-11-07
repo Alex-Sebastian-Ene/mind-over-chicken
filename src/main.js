@@ -231,7 +231,18 @@ let lastTs = 0;
 
 // ---------- AI god (PPO) ----------
 let aiPlanet = null;
+function resetAIGod() {
+  if (!aiPlanet) return;
+  aiPlanet.attachHuman(null);
+  aiPlanet = null;
+  const btn = $('aiGodBtn');
+  if (btn) {
+    btn.textContent = 'AI God: OFF';
+    btn.setAttribute('aria-pressed', 'false');
+  }
+}
 function toggleAIGod() {
+  if (!G || !$('titleScreen').hidden) return;
   if (aiPlanet) {
     aiPlanet.attachHuman(null);
     aiPlanet = null;
@@ -258,6 +269,7 @@ function newGame(source, startIndex = 0) {
   previewSource = null;
   previewBrain = null;
   if (G?.source && G.source !== source) G.source.disconnect();
+  resetAIGod();
   const brain = new Brain(source);
   if (aiPlanet) aiPlanet.attachHuman(brain);
   cosmos.reset();
@@ -352,15 +364,29 @@ function showBanner(scene, i) {
     li.append(b, document.createTextNode(` ${v}`));
     return li;
   }));
+  const go = $('bannerGo');
+  if (go) go.innerHTML = 'Begin <kbd>Enter</kbd>';
   el.hidden = false;
   banner = { t: 0, manual: (i === 0) };
   G.brain.setCue(null);
 }
 
+function showControlsFromFail() {
+  if (!G?.scene?.intro) return;
+  $('failScreen').hidden = true;
+  showBanner(G.scene, G.sceneIndex);
+  banner.manual = true;
+  banner.fromFail = true;
+  const go = $('bannerGo');
+  if (go) go.innerHTML = 'Back <kbd>Esc</kbd>';
+}
+
 function dismissBanner() {
   if (!banner) return;
+  const fromFail = banner.fromFail;
   banner = null;
   $('banner').hidden = true;
+  if (fromFail) { $('failScreen').hidden = false; return; }
   // Re-arm the scene's calibration cue after the pause.
   if (G.scene.id === 'stone' || G.scene.id === 'industry') G.brain.setCue(G.scene.hold?.active || G.scene.ipo?.state === 'active' ? 'calm' : 'rest');
 }
@@ -431,8 +457,16 @@ function quitToTitle() {
   failTimer = null;
   $('failScreen').hidden = true;
   $('banner').hidden = true;
+  $('endScreen').hidden = true;
   banner = null;
-  G.scene = null;
+  pendingScene = null;
+  resetAIGod();
+  const keep = G?.source?.kind === 'bridge' && G.source.connected ? G.source : null;
+  if (G?.source && G.source !== keep) G.source.disconnect();
+  G = null;
+  hudScene = null;
+  fade = 0;
+  setGameSource(keep);
   $('titleScreen').hidden = false;
 }
 
@@ -616,10 +650,10 @@ function frame(ts) {
       G.runTime += dt;
       G.calibration?.update(dt, G.brain, G.mood);
       if (aiPlanet) aiPlanet.update(dt);
-      G.scene.update(dt);
+      G.scene?.update(dt);
     } else if (!$('endScreen').hidden) {
       if (aiPlanet) aiPlanet.update(dt);
-      G.scene.update(dt);
+      G.scene?.update(dt);
     }
     if (pendingScene != null) {
       pendingTimer -= dt;
@@ -876,8 +910,7 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyA') { e.preventDefault(); toggleAssistMode(); return; }
     if (e.key === '?' || e.code === 'KeyH') {
       e.preventDefault();
-      $('failScreen').hidden = true;
-      if (G?.scene?.intro) showBanner(G.scene, G.sceneIndex);
+      showControlsFromFail();
       return;
     }
     if (e.code === 'Escape' || e.code === 'KeyQ') {
@@ -886,8 +919,16 @@ window.addEventListener('keydown', (e) => {
       return;
     }
   }
-  if (e.code === 'KeyM') { toggleModel(); return; }
   if (e.code === 'Escape' && eegPanel?.wiz?.active) { eegPanel?.closeWizard(); return; }
+  if (eegPanel?.wiz?.active) return;
+  if (banner?.fromFail) {
+    if (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Backspace') { e.preventDefault(); dismissBanner(); }
+    return;
+  }
+  const overlay = !G || !$('titleScreen').hidden || !$('failScreen').hidden || !$('endScreen').hidden;
+  if (overlay) return;
+  if (banner && e.code !== 'Enter') return;
+  if (e.code === 'KeyM') { toggleModel(); return; }
   if (e.code === 'KeyE') { eegPanel?.toggle(); return; }
   if (e.code === 'KeyC') { eegPanel?.calibrateCenter(); return; }
   if (e.code === 'KeyT') { toggle3D(); return; }
@@ -971,10 +1012,7 @@ $('soundBtn').addEventListener('click', () => {
 $('bannerGo').addEventListener('click', dismissBanner);
 $('retryBtn').addEventListener('click', retryEra);
 $('assistBtn')?.addEventListener('click', toggleAssistMode);
-$('showHowBtn')?.addEventListener('click', () => {
-  $('failScreen').hidden = true;
-  if (G?.scene?.intro) showBanner(G.scene, G.sceneIndex);
-});
+$('showHowBtn')?.addEventListener('click', showControlsFromFail);
 $('quitTitleBtn')?.addEventListener('click', quitToTitle);
 $('biometricFeedbackBtn')?.addEventListener('click', () => {
   $('biometricFeedbackAck').hidden = false;
@@ -1133,7 +1171,7 @@ $('playBridge').addEventListener('click', async () => {
 // Debug handle for the console (and for automated playtests).
 window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos, get engine() { return engine; } };
 
-// camera (#33, #116–#123): opt-in webcam. Hands perform actions (pinch-grab, 2-hand zoom, palm, fist, wave)
+// camera (#33, #116–#123): opt-in webcam. Hands perform actions (pinch-grab, 2-hand zoom, palm, fist)
 // with coach visual demonstration. Face sets mood.
 window.__moc.camera = initCamera({
   getG: () => cosmos.castG(G), // planets (#68): casts and mood reach the world you're on
@@ -1178,18 +1216,6 @@ window.__moc.camera = initCamera({
     }
     if (active && (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001)) {
       panMap(-dx * W * 1.5, -dy * H * 1.5);
-    }
-  },
-  onWave: (dir) => {
-    // Open-hand wave orbits camera or spins globe (#121)
-    if (cosmos.active || cosmos.z > 0.4) {
-      cosmos.rot += dir * 0.7;
-      cosmos.spinVel = dir * 15;
-    } else if (in3dSurface()) {
-      engine.orbit_camera(dir * 0.25, 0);
-      cam3dBase = null;
-    } else {
-      panMap(dir * 45, 0);
     }
   },
 });

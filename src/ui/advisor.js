@@ -35,7 +35,11 @@ export class Advisor {
     this.nameEl.textContent = NAMES[era] || NAMES.stone;
     this.queue = [];
     this.current = null;
+    this.cooldowns.clear();
     this.textEl.textContent = '';
+    if (rustEngine && typeof rustEngine.advisor_set_era === 'function') {
+      try { rustEngine.advisor_set_era(era); } catch {}
+    }
   }
 
   // key: dedupe/cooldown id. priority: higher interrupts lower.
