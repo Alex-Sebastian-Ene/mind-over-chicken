@@ -67,3 +67,27 @@ export function wanderTarget(world, cx, cy, rMin, rMax) {
 }
 
 export function jitter(n = 1) { return rand(-n, n); }
+
+// Sail across water toward a dock, following the sea distance field. True on arrival.
+export function sail(b, tx, ty, speed, dt, world) {
+  const d = Math.hypot(tx - b.x, ty - b.y);
+  if (d < 1.5) return true;
+  const step = Math.min(d, speed * dt);
+  const f = world.seaField(tx, ty);
+  const W = 320;
+  const cx = Math.round(b.x), cy = Math.round(b.y);
+  const here = f[cy * W + cx];
+  let mx = tx - b.x, my = ty - b.y;
+  if (here > 0) {
+    let best = here, bx = cx, by = cy;
+    for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
+      const v = f[(cy + oy) * W + (cx + ox)];
+      if (v >= 0 && v < best) { best = v; bx = cx + ox; by = cy + oy; }
+    }
+    mx = bx - b.x; my = by - b.y;
+  }
+  const md = Math.hypot(mx, my) || 1;
+  b.x += (mx / md) * step; b.y += (my / md) * step;
+  b.facing = mx >= 0 ? 1 : -1;
+  return false;
+}

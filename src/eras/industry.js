@@ -7,8 +7,8 @@
 // Brain challenge: the Goat IPO, 8 s of steady pulse.
 
 import { W, H, Particles, clamp, dist, rand, chance, gauss, floater, pick } from '../sim/util.js';
-import { walk, animate, villagerLook } from '../sim/agents.js';
-import { drawPerson, drawGoat, drawChicken } from '../render/sprites.js';
+import { walk, animate, villagerLook, sail } from '../sim/agents.js';
+import { drawPerson, drawGoat, drawChicken, drawBoat } from '../render/sprites.js';
 import { label } from './stone.js';
 
 const N = 38;
@@ -64,10 +64,15 @@ export class Industry {
         workSpot: w.randomLand(fx.x, fx.y + 1, 0, 6), tradeSpot: w.randomLand(exs.x, exs.y + 2, 0, 6), picketSpot: w.randomLand(pk.x, pk.y, 0, 9),
         cash: rich ? rand(300, 500) : rand(20, 80), goats: rich ? 8 : 1,
         greed: rand(0.1, 0.9), fear: rand(0.05, 0.2), unrest: rand(0, 0.2),
-        state: 'commute', timer: rand(0, 3), frame: 0, ft: rand(0, 5), facing: 1, side: chance(0.5) ? 1 : -1, spot: null, lastWorth: 0,
+        state: i % 5 < 3 ? 'work' : 'commute', timer: rand(0, 5), frame: 0, ft: rand(0, 5), facing: 1, side: chance(0.5) ? 1 : -1, spot: null, lastWorth: 0,
         hat: rich ? '#1c1410' : null,
       });
     }
+    // Agents that start at work begin inside the factory.
+    for (const a of this.agents) if (a.state === 'work') { a.x = a.workSpot.x; a.y = a.workSpot.y; }
+    // Trade ships run goats to the other continents and bring back export earnings.
+    this.ships = w.continents.slice(1).map((c, i) => ({ kind: 'ship', x: c.homeHarbor.dock.x, y: c.homeHarbor.dock.y, dest: c, leg: 'out', facing: 1, wait: 1 + i * 3, cargo: '#efe8dc', sail: i ? '#e8c46a' : '#f2ead8' }));
+    this.exports = 0;
     this.goats = [];
     const ex = w.sites.exchange;
     for (let i = 0; i < 8; i++) { const p = w.randomLand(ex.x, ex.y + 6, 1, 6); this.goats.push({ ...p, frame: 0, ft: 0, facing: 1, side: 1, spot: null }); }
@@ -86,7 +91,7 @@ export class Industry {
     const herd = 1 + 1.6 * ar;
     let demand = 0;
     for (const a of this.agents) {
-      if (a.state === 'strike' || a.state === 'riot') continue;
+      if (a.state === 'riot') continue; // strikers still buy and sell goats
       const fundamental = 0.5 * Math.log(this.value / this.price);
       const chart = herd * this.momentum * 22;
       const r = (1 - a.greed) * fundamental + a.greed * chart - a.fear * 0.03 + gauss() * 0.01;
@@ -104,7 +109,9 @@ export class Industry {
         : ['RUMOUR: GOATS ARE JUST LARGE CHICKENS', 'GOAT FLU REPORTED IN NEXT VALLEY', 'MAN SELLS ALL GOATS, WILL NOT SAY WHY']));
     }
     const sigma = 0.003 + 0.016 * ar;
-    const dlnP = 0.05 * (demand / N) + sigma * gauss();
+    // When traders are frightened, buyers vanish and quotes get marked down.
+    const avgFear = this.agents.reduce((sum, a) => sum + a.fear, 0) / N;
+    const dlnP = 0.05 * (demand / N) - 0.009 * (avgFear - 0.25) + sigma * gauss();
     this.price = Math.max(2, this.price * Math.exp(dlnP));
     this.momentum = this.momentum * 0.75 + dlnP * 0.25;
     this.history.push(this.price);
@@ -113,7 +120,7 @@ export class Industry {
     this.peak = Math.max(...recent);
 
     this.crashCooldown -= TICK;
-    if (this.price < this.peak * 0.72 && this.crashCooldown <= 0 && this.t > 4) {
+    if (this.price < this.peak * 0.8 && this.crashCooldown <= 0 && this.t > 4) {
       this.crashCooldown = 9;
       this.recessions++;
       G.stats.recessions++;
@@ -158,7 +165,8 @@ export class Industry {
       let nf = 0, nn = 0;
       for (const b of this.agents) { if (b !== a && Math.abs(b.x - a.x) < 16 && Math.abs(b.y - a.y) < 16) { nf += b.fear; nn++; } }
       if (nn) a.fear += dt * 0.5 * (nf / nn - a.fear);
-      a.fear += dt * (0.25 * Math.max(0, -this.momentum * 60) - 0.05 - 0.15 * brain.calm);
+      // The god's racing pulse frightens traders directly; the goats can smell fear.
+      a.fear += dt * (0.25 * Math.min(1, Math.max(0, -this.momentum * 60)) + 0.3 * Math.max(0, ar - 0.3) - 0.06 - 0.4 * brain.calm * (ar < 0.3 ? 1 : 0.3));
       a.fear = clamp(a.fear);
       // Greed follows paper gains.
       const myWorth = a.cash + a.goats * this.price;
@@ -168,7 +176,7 @@ export class Industry {
       let near = 0;
       for (const s of strikers) if (s !== a && dist(s.x, s.y, a.x, a.y) < 18) near++;
       const poor = a.cash < 60 ? 1 : 0.3;
-      a.unrest += dt * (0.05 * wageCut * poor + 0.035 * this.gini * poor + 0.03 * a.fear + 0.02 * Math.min(near, 6) - 0.045 - 0.05 * brain.calm);
+      a.unrest += dt * (0.05 * wageCut * poor + 0.035 * this.gini * poor + 0.07 * a.fear + 0.02 * Math.min(near, 6) - 0.035 - 0.05 * brain.calm);
       a.unrest = clamp(a.unrest);
 
       if ((a.state === 'strike' || a.state === 'riot') && a.unrest < 0.32) { a.state = 'commute'; a.spot = null; }
@@ -196,6 +204,26 @@ export class Industry {
 
     // Factory smoke
     if (Math.random() < dt * (2 + working * 0.3)) this.particles.add({ x: fx.x - 4 + (chance(0.5) ? 8 : 0), y: fx.y - 13, vx: rand(2, 6), vy: rand(-7, -4), grow: 0.5, life: 3, maxLife: 3, size: 1, color: 'rgba(90,85,85,0.7)' });
+
+    // Trade ships. They stay in harbour while the market panics.
+    const panic = this.agents.reduce((s, a) => s + a.fear, 0) / N > 0.55;
+    for (const sh of this.ships) {
+      if (sh.wait > 0) { sh.wait -= dt; sh.moving = false; continue; }
+      if (panic) { sh.moving = false; continue; }
+      sh.moving = true;
+      const out = sh.leg === 'out';
+      const to = out ? sh.dest.harbor.dock : sh.dest.homeHarbor.dock;
+      if (sail(sh, to.x, to.y, 15, dt, w)) {
+        sh.leg = out ? 'back' : 'out'; sh.wait = 1.2;
+        if (out) sh.cargo = '#c9a35a';
+        else {
+          const earned = Math.round(14 * this.confidence);
+          this.gdp += earned; this.exports += earned; sh.cargo = '#efe8dc';
+          G.audio.coin();
+          floater(this.particles, sh.x, sh.y - 8, `+${earned} exports`, '#ffcf5c', 6);
+        }
+      }
+    }
 
     // Goats and the chicken
     for (const g of this.goats) { animate(g, dt, 3); if (!g.spot || walk(g, g.spot.x, g.spot.y, 3, dt, w)) g.spot = w.randomLand(ex.x, ex.y + 6, 1, 7); }
@@ -238,8 +266,8 @@ export class Industry {
 
     // Win / lose
     if (this.done) return;
-    if (striking + rioting >= N * 0.7) this.generalStrike += dt; else this.generalStrike = Math.max(0, this.generalStrike - dt);
-    if (this.generalStrike > 6) { this.done = true; G.fail('General strike. The economy has stopped. The goats have unionised.'); return; }
+    if (striking + rioting >= N * 0.8) this.generalStrike += dt; else this.generalStrike = Math.max(0, this.generalStrike - dt);
+    if (this.generalStrike > 8) { this.done = true; G.fail('General strike. The economy has stopped. The goats have unionised.'); return; }
     if (this.price < 12) { this.done = true; G.fail('The Great Goat Depression. A goat is now worth less than its hat.'); return; }
     if (this.gdp >= GDP_TARGET && ipo.state === 'done') {
       this.done = true;
@@ -257,7 +285,7 @@ export class Industry {
         if (walk(a, a.workSpot.x, a.workSpot.y, 14, dt, w)) { a.state = 'work'; a.timer = rand(4, 7); }
         break;
       case 'work':
-        if (a.timer <= 0) a.state = 'trade-go';
+        if (a.timer <= 0) { if (chance(0.3 + 0.4 * a.greed)) a.state = 'trade-go'; else a.timer = rand(3, 6); }
         break;
       case 'trade-go':
         if (walk(a, a.tradeSpot.x, a.tradeSpot.y, 14, dt, w)) { a.state = 'trade'; a.timer = rand(1.2, 2.5); }
@@ -292,6 +320,7 @@ export class Industry {
     this.G.world.drawWater(ctx, this.t);
     const actors = [];
     for (const g of this.goats) actors.push({ y: g.y, d: () => drawGoat(ctx, g.x, g.y, g) });
+    for (const sh of this.ships) actors.push({ y: sh.y, d: () => drawBoat(ctx, sh.x, sh.y, sh) });
     for (const a of this.agents) {
       if (a.state === 'work') continue; // inside the factory
       const pose = a.state === 'strike' ? 'sign' : a.state === 'riot' ? 'panic' : a.state === 'trade' ? 'cheer' : 'walk';

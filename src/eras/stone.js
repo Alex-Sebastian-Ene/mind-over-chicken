@@ -4,8 +4,8 @@
 // Calibration: calm cues are labelled `calm`, the rest of play is labelled `rest`.
 
 import { W, H, Particles, clamp, dist, rand, chance, floater, pick } from '../sim/util.js';
-import { walk, animate, villagerLook } from '../sim/agents.js';
-import { drawPerson, drawMammoth, drawFire, makeBolt, drawBolt, drawReticle, drawChicken } from '../render/sprites.js';
+import { walk, animate, villagerLook, sail } from '../sim/agents.js';
+import { drawPerson, drawMammoth, drawFire, makeBolt, drawBolt, drawReticle, drawChicken, drawBoat } from '../render/sprites.js';
 
 const POP_START = 10;
 const POP_TARGET = 15;
@@ -44,6 +44,9 @@ export class StoneAge {
     this.meat = [];
     this.done = false;
     this.strikes = 0;
+    this.boats = [];
+    this.colonies = {};
+    this.expTimer = 0;
     this.people = [];
     for (let i = 0; i < POP_START; i++) this.people.push(this.makePerson(w.randomLand(w.sites.cave.x, w.sites.cave.y, 2, 14), NAMES[i]));
     this.mammoths = [];
@@ -193,9 +196,9 @@ export class StoneAge {
       if (!p.alive) continue;
       animate(p, dt, 6);
       const dFire = dist(p.x, p.y, f.x, f.y);
-      p.hunger = clamp(p.hunger + dt * 0.017);
+      p.hunger = clamp(p.hunger + dt * (p.colony ? -0.01 : 0.017));
       p.faith = clamp(p.faith - dt * 0.008);
-      if (f.lit && dFire < 24) p.fear = clamp(p.fear - dt * 0.22);
+      if ((f.lit && dFire < 24) || p.colony) p.fear = clamp(p.fear - dt * 0.22);
       else p.fear = clamp(p.fear + dt * 0.03 * (1 - 0.5 * p.faith));
       if (p.hunger >= 1) {
         p.starve += dt;
@@ -207,6 +210,7 @@ export class StoneAge {
         }
       } else p.starve = 0;
 
+      if (p.colony || p.state === 'embark' || p.state === 'aboard') { this.actTraveller(p, dt); continue; }
       p.decide -= dt;
       if (p.decide <= 0) { this.decide(p); p.decide = rand(0.6, 1.2); }
       this.act(p, dt, camp);
@@ -228,6 +232,40 @@ export class StoneAge {
         G.audio.pop();
         floater(this.particles, baby.x, baby.y - 7, '+1 baby', '#9be38a', 7);
         G.advisor.say('baby', pick(['A baby! We are naming it after you. We are naming all of them after you.', 'Another baby. The tribe credits your excellent lightning.', 'A new hunter is born. Mostly she cries.']), { mood: 'happy', priority: 1, cooldown: 14 });
+      }
+    }
+
+    // ---- Expeditions: a well-fed tribe sends settlers across the sea ----
+    this.expTimer += dt;
+    const open = w.continents.slice(1).filter((c) => !this.colonies[c.id] && !this.boats.some((b) => b.dest === c));
+    if (this.expTimer > 4 && f.lit && this.food >= 2 && this.living().length >= 12 && open.length && !this.done) {
+      this.expTimer = 0;
+      const crew = this.living().filter((p) => ['idle', 'warm', 'dance'].includes(p.state) && !p.colony).slice(0, 3);
+      if (crew.length === 3) {
+        const c = open[0];
+        const boat = { kind: 'raft', x: c.homeHarbor.dock.x, y: c.homeHarbor.dock.y, facing: 1, dest: c, crew, state: 'boarding', t: 0 };
+        crew.forEach((p) => { p.state = 'embark'; p.boat = boat; });
+        this.boats.push(boat);
+        this.food -= 1;
+        G.advisor.say('raft', `${crew[0].name}, ${crew[1].name} and ${crew[2].name} built a raft and are leaving for the far shore. They say it is not personal.`, { priority: 2, cooldown: 15 });
+      }
+    }
+    for (const b of this.boats) {
+      b.t += dt;
+      if (b.state === 'boarding') {
+        if (b.crew.every((p) => !p.alive || p.state === 'aboard') || b.t > 20) b.state = 'sailing';
+      } else if (b.state === 'sailing') {
+        b.moving = true;
+        if (sail(b, b.dest.harbor.dock.x, b.dest.harbor.dock.y, 9, dt, w)) {
+          b.state = 'landed'; b.moving = false;
+          const c = b.dest;
+          this.colonies[c.id] = { x: c.village.x, y: c.village.y };
+          for (const p of b.crew) if (p.alive) { p.x = c.harbor.land.x; p.y = c.harbor.land.y; p.state = 'settle'; p.colony = c; p.boat = null; p.hunger = Math.min(p.hunger, 0.3); }
+          G.stats.colonies = (G.stats.colonies || 0) + 1;
+          G.audio.good();
+          floater(this.particles, c.village.x, c.village.y - 10, 'New colony', '#9be38a', 8);
+          G.advisor.say('colony', `They made it across! Your people now live on ${1 + Object.keys(this.colonies).length} continents. The fish over there are apparently enormous.`, { mood: 'happy', priority: 3, cooldown: 5 });
+        }
       }
     }
 
@@ -296,6 +334,18 @@ export class StoneAge {
     p.state = 'idle';
   }
 
+  actTraveller(p, dt) {
+    const w = this.G.world;
+    if (p.state === 'embark') {
+      const c = p.boat.dest;
+      if (walk(p, c.homeHarbor.land.x, c.homeHarbor.land.y, 12, dt, w)) p.state = 'aboard';
+    } else if (p.state === 'settle') {
+      const c = p.colony;
+      if (!p.spot || walk(p, p.spot.x, p.spot.y, 6, dt, w)) p.spot = w.randomLand(c.village.x, c.village.y, 2, 9);
+      if (Math.random() < dt * 0.15) p.state2 = p.state2 === 'dance' ? null : 'dance';
+    }
+  }
+
   huntersOn(m) { return this.people.filter((p) => p.alive && p.target === m).length; }
 
   act(p, dt, camp) {
@@ -359,6 +409,7 @@ export class StoneAge {
       { label: 'Tribe', value: `${alive}/${POP_TARGET}`, done: alive >= POP_TARGET, bad: alive <= 5 },
       { label: 'Calm holds', value: `${this.hold.successes}/${CALM_TARGET}`, done: this.hold.successes >= CALM_TARGET },
       { label: 'Food', value: `${Math.floor(this.food)}`, done: false, plain: true },
+      { label: 'Continents', value: `${1 + Object.keys(this.colonies).length}/${this.G.world.continents.length}`, plain: true },
     ];
   }
 
@@ -366,6 +417,7 @@ export class StoneAge {
     const L = [];
     if (this.fire.lit) L.push({ x: this.fire.x, y: this.fire.y - 2, r: 16 + this.fire.heat * 30 + Math.sin(this.t * 13) * 1.5 });
     for (const b of this.bolts) { const e = b.pts[b.pts.length - 1]; L.push({ x: e.x, y: e.y, r: 45 }); }
+    for (const c of Object.values(this.colonies)) L.push({ x: c.x, y: c.y - 2, r: 20 + Math.sin(this.t * 11) * 1.5 });
     return L;
   }
 
@@ -377,9 +429,12 @@ export class StoneAge {
     // y-sorted actors
     const actors = [];
     for (const m of this.mammoths) actors.push({ y: m.y, d: () => drawMammoth(ctx, m.x, m.y, m) });
+    for (const b of this.boats) actors.push({ y: b.y, d: () => drawBoat(ctx, b.x, b.y, b) });
+    for (const c of Object.values(this.colonies)) actors.push({ y: c.y, d: () => drawFire(ctx, c.x, c.y, 0.7, this.t + 3) });
     for (const p of this.people) {
       if (!p.alive && (p.deadT = (p.deadT || 0) + 1 / 60) > 12) continue;
-      const pose = !p.alive ? 'dead' : p.state === 'dance' ? 'dance' : p.state === 'cower' ? 'panic' : p.halo && p.state === 'warm' ? 'pray' : 'walk';
+      if (p.state === 'aboard') continue;
+      const pose = !p.alive ? 'dead' : p.state === 'dance' || p.state2 === 'dance' ? 'dance' : p.state === 'cower' ? 'panic' : p.halo && p.state === 'warm' ? 'pray' : 'walk';
       actors.push({ y: p.y, d: () => drawPerson(ctx, p.x, p.y, { ...p, pose, hat: p.halo ? '#ffe066' : null }) });
     }
     actors.push({ y: this.chicken.y, d: () => drawChicken(ctx, this.chicken.x, this.chicken.y, this.chicken) });

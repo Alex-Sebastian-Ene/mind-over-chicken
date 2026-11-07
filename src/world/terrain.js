@@ -1,12 +1,13 @@
-// One procedurally generated island that the civilisation lives on for the whole game.
-// Each era repaints the same land: wild in the Stone Age, farmed and built up later.
+// One procedurally generated world that the civilisation lives on for the whole game: a home
+// continent and two smaller ones across the sea. Each era repaints the same land: wild in the
+// Stone Age, farmed and built up later, with settlements spreading to the other continents.
 
 import { W, H, clamp, lerp, mulberry32, dist } from '../sim/util.js';
 import { drawHouse, drawHut, drawFactory, drawExchange, drawTower, drawHangar, drawPad } from '../render/sprites.js';
 
 export const T = { DEEP: 0, SHALLOW: 1, SAND: 2, GRASS: 3, FOREST: 4, HILL: 5, MOUNTAIN: 6, SNOW: 7, FARM: 8, ROAD: 9, PAVED: 10 };
 
-const PALETTE = {
+const TEMPERATE = {
   [T.DEEP]: [[22, 44, 92], [25, 49, 99]],
   [T.SHALLOW]: [[40, 86, 146], [45, 94, 155]],
   [T.SAND]: [[214, 196, 136], [205, 186, 126]],
@@ -18,6 +19,34 @@ const PALETTE = {
   [T.FARM]: [[196, 170, 74], [120, 158, 60]],
   [T.ROAD]: [[150, 128, 98], [142, 121, 92]],
   [T.PAVED]: [[146, 146, 152], [136, 136, 144]],
+  trees: ['#2c5a2a', '#6aa84f', '#4f8d3e'],
+  foam: [120, 170, 205],
+};
+// Other planets reuse the same land rules with a different palette.
+export const BIOMES = {
+  temperate: TEMPERATE,
+  desert: { ...TEMPERATE,
+    [T.DEEP]: [[24, 70, 96], [27, 76, 102]], [T.SHALLOW]: [[44, 122, 138], [50, 130, 144]],
+    [T.SAND]: [[232, 206, 140], [224, 198, 132]], [T.GRASS]: [[210, 172, 102], [200, 162, 94], [218, 180, 110]],
+    [T.FOREST]: [[120, 150, 70], [104, 136, 60], [136, 160, 80]], [T.HILL]: [[184, 120, 72], [172, 110, 66]],
+    [T.MOUNTAIN]: [[140, 78, 52], [126, 70, 46], [152, 88, 60]], [T.SNOW]: [[240, 222, 190], [230, 212, 180]],
+    trees: ['#5e6f2c', '#9fbf4f', '#7d9a3a'], foam: [140, 200, 200] },
+  ice: { ...TEMPERATE,
+    [T.DEEP]: [[16, 30, 64], [18, 34, 70]], [T.SHALLOW]: [[52, 90, 130], [58, 98, 140]],
+    [T.SAND]: [[176, 186, 196], [168, 178, 188]], [T.GRASS]: [[214, 228, 236], [204, 220, 230], [222, 234, 240]],
+    [T.FOREST]: [[40, 84, 86], [48, 96, 98], [34, 74, 78]], [T.HILL]: [[170, 190, 206], [160, 180, 198]],
+    [T.MOUNTAIN]: [[110, 124, 146], [98, 112, 134], [122, 136, 158]], [T.SNOW]: [[248, 250, 255], [236, 242, 250]],
+    trees: ['#1f4a4c', '#5f9a96', '#3c7472'], foam: [190, 215, 235] },
+  jungle: { ...TEMPERATE,
+    [T.DEEP]: [[16, 70, 90], [18, 76, 96]], [T.SHALLOW]: [[34, 140, 150], [40, 150, 158]],
+    [T.GRASS]: [[52, 140, 60], [46, 130, 54], [58, 150, 66]], [T.FOREST]: [[24, 84, 36], [30, 96, 42], [20, 72, 30]],
+    [T.HILL]: [[78, 124, 58], [70, 114, 52]], trees: ['#174d22', '#4fa64a', '#2f7f36'], foam: [130, 210, 210] },
+  alien: { ...TEMPERATE,
+    [T.DEEP]: [[18, 60, 56], [20, 66, 60]], [T.SHALLOW]: [[36, 120, 104], [42, 130, 112]],
+    [T.SAND]: [[210, 190, 226], [200, 180, 218]], [T.GRASS]: [[140, 92, 176], [128, 84, 164], [152, 102, 188]],
+    [T.FOREST]: [[90, 44, 120], [104, 52, 136], [78, 38, 106]], [T.HILL]: [[110, 120, 170], [100, 110, 160]],
+    [T.MOUNTAIN]: [[70, 58, 96], [62, 52, 88], [80, 66, 108]], [T.SNOW]: [[214, 255, 236], [200, 246, 226]],
+    [T.FARM]: [[230, 140, 210], [150, 100, 190]], trees: ['#3e1d5c', '#d07ad8', '#9a52b8'], foam: [150, 230, 200] },
 };
 
 function makeNoise(rng) {
@@ -37,8 +66,10 @@ function makeNoise(rng) {
 }
 
 export class World {
-  constructor(seed = (Math.random() * 1e9) | 0) {
+  constructor(seed = (Math.random() * 1e9) | 0, opts = {}) {
     this.seed = seed;
+    this.biome = opts.biome && BIOMES[opts.biome] ? opts.biome : 'temperate';
+    this.palette = BIOMES[this.biome];
     this.h = new Float32Array(W * H);
     this.type = new Uint8Array(W * H);
     this.baseType = null;
@@ -50,23 +81,38 @@ export class World {
     const rng = mulberry32(this.seed);
     const noise = makeNoise(rng);
     const moist = makeNoise(mulberry32(this.seed ^ 0x9e3779b9));
-    const cx = 160, cy = 92;
+    // The home continent fills the left two thirds; two smaller continents sit across the sea.
+    const conts = [
+      { id: 'home', cx: 124, cy: 96, rx: 98, ry: 66 },
+      { id: 'north', cx: 268 + rng() * 10, cy: 48 + rng() * 8, rx: 40 + rng() * 6, ry: 30 + rng() * 4 },
+      { id: 'south', cx: 266 + rng() * 10, cy: 138 + rng() * 6, rx: 38 + rng() * 6, ry: 26 + rng() * 4 },
+    ];
+    this.continents = conts;
+    const cx = conts[0].cx, cy = conts[0].cy;
     this.sites = {
-      village: { x: 150, y: 102 },
-      pad: { x: 262, y: 104 },
+      village: { x: 116, y: 100 },
+      pad: { x: 198, y: 104 },
     };
     const v = this.sites.village, p = this.sites.pad;
-    const ridgeA = { x: cx - 62 + rng() * 10, y: cy - 34 + rng() * 8 };
-    const ridgeB = { x: cx + 34 + rng() * 14, y: cy - 46 + rng() * 6 };
+    const ridgeA = { x: cx - 48 + rng() * 10, y: cy - 30 + rng() * 8 };
+    const ridgeB = { x: cx + 36 + rng() * 10, y: cy - 38 + rng() * 6 };
     this.sites.ridge = ridgeA;
+    this.owner = new Uint8Array(W * H);
 
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
-        const rx = (x - cx) / 138, ry = (y - cy) / 80;
-        const r2 = rx * rx + ry * ry;
-        let h = (1 - r2) * 0.56 + (noise(x / 26, y / 26) - 0.5) * 0.56 + 0.12;
-        h += 0.3 * Math.exp(-((x - ridgeA.x) ** 2 + (y - ridgeA.y) ** 2) / (2 * 17 * 17));
-        h += 0.2 * Math.exp(-((x - ridgeB.x) ** 2 + (y - ridgeB.y) ** 2) / (2 * 12 * 12));
+        let best = -9, second = -9, owner = 0;
+        conts.forEach((c, i) => {
+          const rx = (x - c.cx) / c.rx, ry = (y - c.cy) / c.ry;
+          const b = 1 - (rx * rx + ry * ry);
+          if (b > best) { second = best; best = b; owner = i; } else if (b > second) second = b;
+        });
+        this.owner[y * W + x] = owner;
+        let h = best * 0.56 + (noise(x / 24, y / 24) - 0.5) * 0.56 + 0.12;
+        // Keep a strait of open water between neighbouring continents.
+        if (best - second < 0.22 && second > -1.2) h = Math.min(h, 0.2 + (best - second) * 0.4);
+        h += 0.3 * Math.exp(-((x - ridgeA.x) ** 2 + (y - ridgeA.y) ** 2) / (2 * 16 * 16));
+        h += 0.2 * Math.exp(-((x - ridgeB.x) ** 2 + (y - ridgeB.y) ** 2) / (2 * 11 * 11));
         // Flatten a meadow for the village and a coastal plain for the launch pad.
         const dv = dist(x, y, v.x, v.y);
         if (dv < 30) h = lerp(0.5, h, clamp((dv - 18) / 12));
@@ -77,6 +123,11 @@ export class World {
         const lx = v.x + (p.x - v.x) * t, ly = v.y + (p.y - v.y) * t + Math.sin(t * 9 + this.seed) * 5;
         const dl = dist(x, y, lx, ly);
         if (dl < 4) h = clamp(h, 0.42, 0.66);
+        // Small settlement meadows on the other continents.
+        for (let i = 1; i < conts.length; i++) {
+          const dc = dist(x, y, conts[i].cx, conts[i].cy);
+          if (dc < 12) h = lerp(0.48, h, clamp((dc - 6) / 6));
+        }
         this.h[y * W + x] = h;
 
         let ty;
@@ -111,6 +162,36 @@ export class World {
     this.sites.picket = this.nearestWalkable(this.sites.factory.x + 2, this.sites.factory.y + 9);
     this.sites.hangar = this.nearestWalkable(p.x - 26, p.y + 10);
     this.sites.crowd = this.nearestWalkable(p.x - 30, p.y - 10);
+
+    // Other continents: a village spot and a harbour on the coast facing home.
+    for (const c of this.continents) {
+      c.village = c.id === 'home' ? { ...v } : this.nearestWalkable(c.cx, c.cy);
+    }
+    const home = this.continents[0];
+    for (const c of this.continents.slice(1)) {
+      c.harbor = this.coastToward(c.village, home.village, (x, y) => this.owner[y * W + x] !== 0);
+      c.homeHarbor = this.coastToward(home.village, c.village, (x, y) => this.owner[y * W + x] === 0);
+    }
+  }
+
+  // Walk from `from` toward `to`: the last walkable pixel before the sea is the quay,
+  // the first water pixel is the dock where boats tie up.
+  coastToward(from, to, pred) {
+    const n = Math.ceil(dist(from.x, from.y, to.x, to.y));
+    let last = { ...from };
+    for (let i = 0; i <= n; i++) {
+      const x = Math.round(lerp(from.x, to.x, i / n)), y = Math.round(lerp(from.y, to.y, i / n));
+      if (this.isWater(x, y)) return { land: last, dock: { x, y } };
+      if (this.walkable(x, y) && (!pred || pred(x, y))) last = { x, y };
+    }
+    return { land: last, dock: this.nearestWater(last.x, last.y) };
+  }
+
+  nearestWater(x, y, maxR = 30) {
+    for (let r = 1; r <= maxR; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) === r && this.isWater(x + dx, y + dy)) return { x: x + dx, y: y + dy };
+    }
+    return { x, y };
   }
 
   get(x, y) {
@@ -178,6 +259,21 @@ export class World {
         this.structures.push({ kind: 'hut', x: Math.round(v.x + Math.cos(a) * (12 + (i % 2) * 6)), y: Math.round(v.y + Math.sin(a) * (8 + (i % 2) * 4)) });
       }
     }
+    // Settlements spread to the other continents from the farming age on.
+    if (era !== 'stone') {
+      for (const c of this.continents.slice(1)) {
+        const n = era === 'farming' ? 5 : 8;
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2;
+          const x = Math.round(c.village.x + Math.cos(a) * 7), y = Math.round(c.village.y + Math.sin(a) * 5);
+          if (!this.walkable(x, y)) continue;
+          if (era === 'farming') this.structures.push({ kind: 'hut', x, y });
+          else if (era === 'space' && i % 3 === 0) this.structures.push({ kind: 'tower', x, y, h: 7 + (i % 4) });
+          else this.structures.push({ kind: 'house', x, y, roof: era === 'space' ? '#5a6b8c' : '#8e3b2a' });
+        }
+        if (era !== 'farming') road(c.village, c.harbor.land, 1);
+      }
+    }
     if (era === 'industry' || era === 'space') {
       farms(era === 'industry' ? 22 : 12, 34, 90);
       road(v, s.factory, 2); road(v, s.exchange, 1); road(v, s.pad, 1);
@@ -220,8 +316,8 @@ export class World {
       const t = this.type[i];
       const x = i % W, y = (i / W) | 0;
       let col;
-      if (t === T.FARM) col = PALETTE[T.FARM][(y >> 1) % 2];
-      else { const pal = PALETTE[t]; col = pal[Math.floor(rng() * pal.length)]; }
+      if (t === T.FARM) col = this.palette[T.FARM][(y >> 1) % 2];
+      else { const pal = this.palette[t]; col = pal[Math.floor(rng() * pal.length)]; }
       let [r, g, b] = col;
       // Gentle relief shading from the heightmap so hills read as hills.
       if (t >= T.SAND && t !== T.ROAD && t !== T.PAVED && t !== T.FARM) {
@@ -231,7 +327,7 @@ export class World {
         r *= shade; g *= shade; b *= shade;
       }
       // Foam where shallow water meets sand.
-      if (t === T.SHALLOW && (this.typeAt(x + 1, y) === T.SAND || this.typeAt(x - 1, y) === T.SAND || this.typeAt(x, y + 1) === T.SAND || this.typeAt(x, y - 1) === T.SAND)) { r = 120; g = 170; b = 205; }
+      if (t === T.SHALLOW && (this.typeAt(x + 1, y) === T.SAND || this.typeAt(x - 1, y) === T.SAND || this.typeAt(x, y + 1) === T.SAND || this.typeAt(x, y - 1) === T.SAND)) { [r, g, b] = this.palette.foam; }
       img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = 255;
     }
     ctx.putImageData(img, 0, 0);
@@ -239,8 +335,9 @@ export class World {
     const trng = mulberry32(this.seed + 5);
     for (let y = 1; y < H; y += 2) for (let x = (y >> 1) % 2; x < W; x += 2) {
       if (this.type[y * W + x] !== T.FOREST || trng() > 0.7) continue;
-      ctx.fillStyle = '#2c5a2a'; ctx.fillRect(x, y, 1, 1);
-      ctx.fillStyle = trng() > 0.5 ? '#6aa84f' : '#4f8d3e'; ctx.fillRect(x, y - 1, 1, 1);
+      const tc = this.palette.trees;
+      ctx.fillStyle = tc[0]; ctx.fillRect(x, y, 1, 1);
+      ctx.fillStyle = trng() > 0.5 ? tc[1] : tc[2]; ctx.fillRect(x, y - 1, 1, 1);
     }
     // Cave mouth.
     if (era === 'stone' || era === 'farming') {
@@ -293,6 +390,34 @@ export class World {
     }
     this.fields.set(key, f);
     if (this.fields.size > 64) this.fields.delete(this.fields.keys().next().value);
+    return f;
+  }
+
+  // Same idea over water, for boats.
+  seaField(tx, ty) {
+    const qx = Math.round(tx), qy = Math.round(ty);
+    const key = -(qy * W + qx) - 1;
+    this.fields ||= new Map();
+    let f = this.fields.get(key);
+    if (f) return f;
+    f = new Int16Array(W * H).fill(-1);
+    const queue = new Int32Array(W * H);
+    let head = 0, tail = 0;
+    const s0 = qy * W + qx;
+    f[s0] = 0; queue[tail++] = s0;
+    while (head < tail) {
+      const i = queue[head++];
+      const x = i % W, y = (i / W) | 0, d = f[i] + 1;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const j = ny * W + nx;
+        if (f[j] !== -1 || this.type[j] > T.SHALLOW) continue;
+        f[j] = d; queue[tail++] = j;
+      }
+    }
+    this.fields.set(key, f);
     return f;
   }
 
