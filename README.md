@@ -1,43 +1,69 @@
-# Mind over Chicken
+# Project README
 
-A pixel god game you play with your brain. Guide one civilisation from the fire pit to a rocket launch using calm, focus, blinks, head tilt and heart rate.
+## 1. Overview
+A high-performance, web-based 2D pixel-art god-game sandbox inspired by *WorldBox*. Built with Rust and WebAssembly (Wasm), the game places the player in the role of a "god" overseeing a circular world containing 4 civilizations. The player shapes civilization traits and intervenes in the simulation using real-time biometric and camera inputs.
 
-| Era | Your brain | What emerges |
-|---|---|---|
-| **Stone Age** | Blink throws lightning (light the fire, cook a mammoth). Calm keeps the fire alive. | Villagers hunt only when the fire gives them courage, starve, have babies |
-| *Farming → Kingdoms* (time-skip) | The scholars pose three sums: those seconds silently label **focus** data | Goat trading, then writing, law and taxes |
-| **Industry** | Heart rate above resting drives market volatility and herding | Goat bubbles, crashes, strikes and riots from trader agents |
-| **Space Age** | Focus speeds the engineers and holds the 10-second countdown; calm keeps citizens brave enough to board | Liftoff to a new world |
+---
 
-**The trick for technical judges:** there is no calibration screen. While you relax, look around and do sums, the game records cue-labelled windows and retrains a per-player softmax classifier every 2.5 s (blocked cross-validation). The personal model blends in as its accuracy earns trust, and thresholds rise as it improves. Press **M** in game to see it.
+## 2. Inputs (Hardware & Data Intake)
+Raw physical and biometric data streams captured from the player:
 
-## Run it
+* **Muse 2 EEG Headset**
+  * **Brainwaves:** Captures Gamma, Delta, and other wave frequencies to measure concentration and mental states.
+  * **Accelerometer & Gyroscope:** Captures head orientation and movement.
+* **External Camera**
+  * **Face Detection:** Captures facial expressions (e.g., smiling) and concentration cues.
+  * **Hand Gesture Detection:** Captures hand movements and positions in real time.
+* **Fallback Input**
+  * **Mouse:** Basic cursor input reserved for local development and testing.
 
-It's static files, no build step:
+---
 
-```bash
-python -m http.server 8123
-```
+## 3. Processing (Signal Translation & Control Mapping)
+Translates raw sensor data into actionable game parameters and commands:
 
-Then open http://localhost:8123.
+* **Stage 1 Calibration (Seed Generation)**
+  * Samples 10 seconds of sensor input before the game begins.
+  * Converts biometric and facial readings into a foundational behavioral seed (defining friendliness, aggressiveness, and violence levels) for the player's civilization.
+* **Ambient World Modulation**
+  * Continuously maps live EEG wave activity (e.g., Gamma levels) and facial expressions into global world variables such as general temperament, chaos levels, and weather states.
+* **Active Command & UI Control**
+  * Maps hand gestures to spell selection, activation, and spatial targeting on the screen.
+  * Combines head tracking (accelerometer/gyroscope), facial focus, and hand gestures to navigate the UI.
 
-**Emulated headset (default):** a placeholder that sends exactly the signals the Muse will. Use <kbd>Space</kbd> for calm, <kbd>F</kbd> for focus and <kbd>Shift</kbd> for a racing pulse. <kbd>B</kbd> or a click blinks, and the mouse stands in for head tilt. On a phone, hold the power tiles and tap the map.
+---
 
-**Real headset:** see [bridge/README.md](bridge/README.md). In short, `pip install -r bridge/requirements.txt`, then `python bridge/muse_bridge.py --board muse2`, and choose *Connect a real headset* in the game.
+## 4. Internals (Core Simulation Engine)
+The underlying Rust/Wasm simulation loop and world rules:
 
-## Code map
+* **World Structure**
+  * Circular map housing 4 distinct civilizations (starting with 4 initial agents).
+  * 1 civilization is initialized via the player's 10-second calibration seed; the other 3 are initialized with randomized seeds.
+* **Agent Behavior & AI**
+  * Autonomous agents operate without a tech tree or evolution system.
+  * Agents act based on their civilization's behavioral parameters (aggressiveness vs. friendliness) and basic survival needs.
+* **World Actions (God Powers)**
+  * **Spawn Resources:** Drops resources at a gesture-targeted location.
+  * **Send Fireball:** Launches a destructive fireball at a gesture-targeted location.
+  * **Natural Disasters:** Triggers global or localized environmental events.
 
-- `src/brain/`: signal sources (emulated headset, WebSocket bridge), feature extraction, the personal model
-- `src/world/terrain.js`: procedural island, repainted per era, plus BFS pathfinding fields
-- `src/eras/`: one file per era, plus the time-skip cutscenes
-- `src/render/sprites.js`: all pixel art, drawn in code
-- `src/ui/`: HUD, power tiles, Oog the advisor
-- `bridge/`: Python BrainFlow → WebSocket bridge
+---
 
-## Tests
+## 5. Presentation (Rendering & UI)
+Visual output running in the browser:
 
-```bash
-python -m unittest discover tests
-```
+* **Visual Style:** 2D pixel-art aesthetic (similar to *WorldBox*).
+* **UI Layer:** Hands-free interface controlled via gestures, head movement, and concentration.
 
-Team status board: issue #10.
+---
+
+## 6. TODOs & Open Mechanics
+Features and rules to be defined and implemented in future iterations:
+
+* [ ] **Basic Needs:** Define specific agent survival needs (e.g., hunger, rest, reproduction).
+* [ ] **Resource System:** Define resource types (e.g., food, materials) and natural vs. player-triggered spawning rules.
+* [ ] **Inter-Civilization Interactions:** Define specific contact mechanics between civilizations (likely combat/attacking, plus any non-hostile interactions).
+* [ ] **Population Growth & Death:** Define how new agents spawn and what happens when a civilization is wiped out.
+* [ ] **Terrain & Weather Mechanics:** Define circular world terrain features and whether weather has mechanical effects on agents.
+* [ ] **Sensor-to-Trait Mapping:** Finalize exact mathematical formulas linking EEG/camera inputs to civilization seeds and spells.
+* [ ] **UI Layout:** Design the on-screen HUD and gesture navigation flow.
