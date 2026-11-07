@@ -131,6 +131,15 @@ try {
   console.error('Failed to initialize Rust WebGL engine:', err);
   loading.fail('engine', 'no WebGL here: using the 2D fallback');
 }
+
+export async function startRustApp() {
+  await initEngine();
+  const app = new RustApp('screen');
+  initCameraAdapter(app);
+  app.start();
+  window.__moc = { app };
+  return app;
+}
 // Without WebGL, fall back to a plain 2D upscale so the game still shows.
 const fallback2d = engine ? null : screen.getContext('2d');
 
