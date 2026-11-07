@@ -14,6 +14,7 @@ import { SpaceAge } from './eras/space.js';
 import initEngine, { Engine } from '../pkg/mind_over_chicken_engine.js';
 import { Cosmos } from './cosmos/cosmos.js';
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel } from './cosmos/galaxy.js';
+import { initCamera } from './camera/camera.js'; // camera (#33)
 
 const SCENES = [() => new StoneAge(), () => new FarmingToKingdoms(), () => new Industry(), () => new InfoAge(), () => new SpaceAge()];
 const $ = (id) => document.getElementById(id);
@@ -569,6 +570,13 @@ $('playBridge').addEventListener('click', async () => {
 
 // Debug handle for the console (and for automated playtests).
 window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos };
+
+// camera (#33): opt-in webcam. Hand gestures cast spells (keys 1-7 without a webcam), the face sets
+// the world's mood. It adds to the brain and keyboard inputs and never replaces them.
+window.__moc.camera = initCamera({
+  getG: () => G,
+  canCast: () => !!G?.scene && !banner && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,
+});
 
 // ---------- boot ----------
 function start(data = {}) {

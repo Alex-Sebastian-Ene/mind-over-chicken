@@ -468,6 +468,110 @@ export class StoneAge {
     }
     this.particles.drawText(ctx);
   }
+
+  // ---- camera (#33): hand casts and face mood. Extra inputs on top of the brain, never instead of it. ----
+
+  // aim is 0..1 like the brain's. The fist (fireball) normally arrives through onBlink.
+  onCast(spell, aim) {
+    const G = this.G;
+    if (!G || this.done) return;
+    const w = G.world, f = this.fire;
+    const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
+    switch (spell) {
+      case 'fireball': this.onBlink(aim); break;
+      case 'spawn': {
+        // Open palm: a cooked haunch drops where you aim and the tribe carries it to the fire.
+        // Aim at the sea and it lands in the larder instead.
+        if (w.walkable(x, y) && w.reachable(x, y)) {
+          this.meat.push({ x, y, amount: 3, cooked: true, claimed: 0 });
+          floater(this.particles, x, y - 8, 'meat from the sky', '#ff9a2e', 6);
+        } else {
+          this.food += 2;
+          floater(this.particles, f.x, f.y - 10, '+2 food', '#ffcf5c', 7);
+        }
+        this.particles.burst(10, () => ({ x: x + rand(-3, 3), y: y - 18, vx: rand(-6, 6), vy: rand(15, 30), g: 40, life: 0.6, maxLife: 0.6, size: 1, color: pick(['#c0562f', '#ffcf5c', '#f2e8d5']) }));
+        G.audio.coin();
+        G.advisor.say('cast-spawn', 'Meat. From the sky. The tribe has stopped asking questions.', { mood: 'happy', priority: 1, cooldown: 25 });
+        break;
+      }
+      case 'rain': {
+        // Victory: a soft rain. Fear eases and the berry bushes swell.
+        for (const p of this.living()) p.fear = clamp(p.fear - 0.35);
+        this.food += 1;
+        this.castRain(x);
+        floater(this.particles, x, 24, 'gentle rain', '#9ec9ff', 7);
+        G.advisor.say('cast-rain', 'A gentle rain. The tribe relaxes, the berries swell. The fire is fine, I checked.', { mood: 'happy', priority: 1, cooldown: 25 });
+        break;
+      }
+      case 'bless': {
+        for (const p of this.living()) { p.faith = clamp(p.faith + 0.3); p.fear = clamp(p.fear - 0.1); }
+        this.particles.burst(24, () => ({ x: x + rand(-20, 20), y: y + rand(-12, 12), vx: rand(-3, 3), vy: rand(-14, -4), life: 1.2, maxLife: 1.2, size: 1, color: pick(['#ffe066', '#fff4c2']) }));
+        floater(this.particles, x, y - 10, 'blessed', '#ffe066', 7);
+        G.audio.good();
+        G.advisor.say('cast-bless', 'The tribe feels blessed. Several of them are now insufferable about it.', { mood: 'happy', priority: 1, cooldown: 25 });
+        break;
+      }
+      case 'disaster': {
+        // Thumb down: a storm at the reticle. People nearby panic and run. Nobody is hurt.
+        this.flash = 0.5;
+        G.shake = Math.max(G.shake || 0, 1.2);
+        G.audio.thunder();
+        for (let i = 0; i < 3; i++) this.bolts.push({ pts: makeBolt(clamp(x + rand(-16, 16), 2, W - 3), clamp(y + rand(-8, 8), 4, H - 3)), life: 0.35 + i * 0.12 });
+        this.castRain(x);
+        for (const p of this.living()) {
+          const d = dist(x, y, p.x, p.y);
+          if (d > 45) continue;
+          p.fear = clamp(p.fear + 0.45);
+          if (d < 28 && !p.colony && ['idle', 'warm', 'dance', 'huddle', 'hunt'].includes(p.state)) { p.state = 'flee'; p.target = null; }
+        }
+        if (f.lit && dist(x, y, f.x, f.y) < 20) f.heat = Math.max(0.05, f.heat - 0.25);
+        floater(this.particles, x, y - 12, 'STORM', '#9ec9ff', 9);
+        G.advisor.say('cast-storm', 'A storm, my lord? On purpose? The tribe is hiding behind the chicken.', { mood: 'panic', priority: 2, cooldown: 20 });
+        break;
+      }
+      case 'peace': {
+        for (const p of this.living()) {
+          p.fear = clamp(p.fear - 0.25);
+          if (!p.colony && (p.state === 'flee' || p.state === 'cower')) p.state = 'idle';
+        }
+        floater(this.particles, f.x, f.y - 14, 'peace', '#9be38a', 7);
+        G.advisor.say('cast-peace', 'Peace descends. Grug has apologised to the mammoth.', { mood: 'happy', priority: 1, cooldown: 25 });
+        break;
+      }
+    }
+  }
+
+  castRain(cx) {
+    this.particles.burst(60, () => ({ x: cx + rand(-60, 60), y: rand(-10, H * 0.7), vx: -4, vy: rand(70, 100), life: rand(0.5, 1), maxLife: 1, size: 1, color: 'rgba(158,201,255,0.75)' }));
+  }
+
+  // Face mood. Joy: the tribe dances and believes. Anger: it gets restless. Surprise: the sky
+  // flashes. Sadness: the night gets darker. Sent on every change of dominant mood (including
+  // back to neutral) and again every few seconds while a mood stays strong.
+  onMood(mood) {
+    const G = this.G;
+    if (!G) return;
+    this.baseDarkness ??= this.darkness;
+    this.darkness = clamp(this.baseDarkness + (mood.dominant === 'sadness' ? 0.25 : 0), 0, 0.9);
+    const home = this.living().filter((p) => !p.colony && p.state !== 'embark' && p.state !== 'aboard');
+    if (mood.dominant !== 'joy') for (const p of home) if (p.moodDance) { p.moodDance = false; p.state2 = null; }
+    if (this.done) return;
+    if (mood.dominant === 'joy') {
+      for (const p of home) {
+        p.faith = clamp(p.faith + 0.12);
+        p.fear = clamp(p.fear - 0.15);
+        if (['idle', 'warm', 'huddle', 'dance', 'cower'].includes(p.state)) { p.state2 = 'dance'; p.moodDance = true; }
+      }
+    } else if (mood.dominant === 'anger') {
+      for (const p of home) { p.fear = clamp(p.fear + 0.1); p.faith = clamp(p.faith - 0.05); }
+      if (mood.reason === 'change') floater(this.particles, this.fire.x, this.fire.y - 16, 'grumbling', '#ff8a9c', 6);
+    } else if (mood.dominant === 'surprise') {
+      this.flash = Math.max(this.flash, 0.3);
+      this.bolts.push({ pts: makeBolt(rand(20, W - 20), rand(30, H - 20)), life: 0.3 });
+      G.audio.thunder();
+      for (const p of home) p.fear = clamp(p.fear + 0.05);
+    }
+  }
 }
 
 export function label(ctx, x, y, text, color, size = 6) {

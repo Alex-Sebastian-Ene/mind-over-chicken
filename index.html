@@ -20,6 +20,7 @@
     <div class="bar-tools">
       <span class="source" id="sourceStatus" data-ok="0">No headset</span>
       <span class="clock" id="clock" aria-label="Run time">0:00</span>
+      <!-- camera (#33) --><button type="button" class="tool cam-btn" id="camBtn" aria-pressed="false" aria-controls="camPanel" title="Cast spells with hand gestures and set the mood with your face. Opt-in; frames never leave this device.">Camera</button>
       <button type="button" class="tool" id="modelBtn" aria-pressed="false" title="Show the model of your brain (M)">Model <kbd>M</kbd></button>
       <button type="button" class="tool" id="soundBtn" aria-pressed="true">Sound on</button>
     </div>
@@ -64,6 +65,9 @@
         <p class="advisor-text" data-advisor-text></p>
       </div>
     </aside>
+
+    <!-- camera (#33): webcam preview, casts and mood. Filled by src/camera/camera.js. -->
+    <aside class="cam-panel" id="camPanel" hidden aria-label="Camera casts and mood"></aside>
   </main>
 
   <nav class="powers" aria-label="God powers">
