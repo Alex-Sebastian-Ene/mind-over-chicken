@@ -12,6 +12,8 @@ import { FarmingToKingdoms, InfoAge } from './eras/timeskip.js';
 import { Industry } from './eras/industry.js';
 import { SpaceAge } from './eras/space.js';
 import initEngine, { Engine } from '../pkg/mind_over_chicken_engine.js';
+import { Cosmos } from './cosmos/cosmos.js';
+import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel } from './cosmos/galaxy.js';
 
 const SCENES = [() => new StoneAge(), () => new FarmingToKingdoms(), () => new Industry(), () => new InfoAge(), () => new SpaceAge()];
 const $ = (id) => document.getElementById(id);
@@ -47,6 +49,10 @@ new ResizeObserver(resize).observe(screen);
 const audio = new Audio();
 const advisor = new Advisor($('advisor'));
 const hud = new Hud(document);
+const cosmos = new Cosmos();
+// What the HUD shows while you look at the galaxy.
+const galaxyHudScene = { label: 'Galaxy', powers: ['calm', 'focus', 'heart'], objectives: () => cosmos.galaxy?.objectives() || [] };
+let hudScene = null;
 let G = null;
 let fade = 0;           // 0..1 black overlay for transitions
 let pendingScene = null;
@@ -57,6 +63,7 @@ let lastTs = 0;
 function newGame(source, startIndex = 0) {
   if (G?.source && G.source !== source) G.source.disconnect();
   const brain = new Brain(source);
+  cosmos.reset();
   G = {
     world: new World(),
     brain, source, advisor, hud, audio,
@@ -67,7 +74,14 @@ function newGame(source, startIndex = 0) {
     fail(reason) { showFail(reason); },
     finish(extra) { G.finished = true; G.extra = extra; setTimeout(showEnd, 2200); },
   };
-  brain.onBlink((aim) => { hud.flashBlink(); if (!banner && G.scene?.onBlink) G.scene.onBlink(aim); });
+  brain.onBlink((aim) => {
+    hud.flashBlink();
+    cosmos.galaxy?.onBlink();   // storms on the blink world; a strike on the world you're zoomed into
+    if (cosmos.galaxy?.attended) audio.thunder();
+    if (!banner && !cosmos.active && G.scene?.onBlink) G.scene.onBlink(aim);
+  });
+  // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
+  cosmos.ensureGalaxy(G);
   brain.onTrained = () => {};
   $('endScreen').hidden = true;
   $('failScreen').hidden = true;
@@ -195,21 +209,31 @@ function render() {
   lowCtx.setTransform(1, 0, 0, 1, 0, 0);
   scene.draw(lowCtx);
   scene.drawAfterLight?.(lowCtx);
+  cosmos.applyPan(low);   // the surface is a planet: it wraps east–west
+  const cosmic = cosmos.render(low, lowCtx, G);
 
-  const dark = scene.darkness || 0;
-  const flash = scene.flash || 0;
+  // Zooming out fades the surface's night lighting and labels; the globe and galaxy
+  // carry their own shading, so the night shader must not dim space.
+  const z = cosmos.z || 0;
+  const surface = !cosmic || z < 0.3;
+  const k = cosmic ? Math.max(0, 1 - z / 0.3) : 1;
+  const dark = (scene.darkness || 0) * k;
+  const flash = (scene.flash || 0) * k;
   const shakeAmount = G.shake ? (G.shake * 0.008) : 0;
   const sx = shakeAmount ? (Math.random() - 0.5) * shakeAmount : 0;
   const sy = shakeAmount ? (Math.random() - 0.5) * shakeAmount : 0;
+  // The surface is panned east–west after it is drawn, so lights (and labels) follow the
+  // pan, with a second copy across the date line.
+  const offsets = cosmos.overlayOffsets();
 
   if (engine) {
     try {
       // begin_frame clears last frame's lights; without it they pile up every frame (#38).
       engine.begin_frame();
       engine.upload_canvas(low);
-      if (scene.lights) {
+      if (surface && scene.lights) {
         for (const l of scene.lights()) {
-          engine.add_light(l.x, l.y, l.r, 1.0);
+          for (const off of offsets) engine.add_light(l.x + off, l.y, l.r, 1.0);
         }
       }
       engine.render_uploaded_canvas(dark, flash, fade, sx, sy, screen.width, screen.height);
@@ -223,10 +247,19 @@ function render() {
     if (fade > 0) { fallback2d.fillStyle = `rgba(5, 6, 15, ${fade})`; fallback2d.fillRect(0, 0, screen.width, screen.height); }
   }
 
-  // Overlay (labels, calm ring, goat chart, countdown) at full resolution, after lighting.
-  textCtx.globalAlpha = 1 - Math.min(1, fade);
+  // Overlay (labels, calm ring, goat chart, countdown, galaxy labels) at full resolution,
+  // after lighting.
+  const visible = 1 - Math.min(1, fade);
+  if (surface) {
+    textCtx.globalAlpha = visible * k;
+    for (const off of offsets) {
+      textCtx.setTransform(K, 0, 0, K, off * K, 0);
+      scene.drawOverlay?.(textCtx);
+    }
+  }
   textCtx.setTransform(K, 0, 0, K, 0, 0);
-  scene.drawOverlay?.(textCtx);
+  textCtx.globalAlpha = visible;
+  if (cosmic) cosmos.overlay(textCtx, G);
   textCtx.globalAlpha = 1;
 }
 
@@ -244,6 +277,8 @@ function frame(ts) {
     if (banner) {
       banner.t += dt;
       if (banner.t > 6) dismissBanner();
+    } else if (G.sandbox) {
+      G.runTime += dt;   // the hand-played game stays paused in the sandbox
     } else if ($('failScreen').hidden && $('endScreen').hidden) {
       G.runTime += dt;
       G.scene.update(dt);
@@ -258,8 +293,13 @@ function frame(ts) {
       }
     } else fade = Math.max(0, fade - dt * 1.6);
     G.shake = Math.max(0, (G.shake || 0) - dt * 2);
+    cosmos.update(dt, G);
     advisor.update(dt);
-    hud.update(dt, G);
+    const showGalaxyHud = cosmos.galaxy && (G.sandbox || cosmos.inGalaxy);
+    const wanted = showGalaxyHud ? galaxyHudScene : G.scene;
+    if (wanted !== hudScene) { hudScene = wanted; hud.setScene(wanted); }
+    hud.update(dt, showGalaxyHud ? Object.assign(Object.create(G), { scene: galaxyHudScene }) : G);
+    updateCosmosUi(dt);
   }
   render();
 }
@@ -274,26 +314,67 @@ function aimFromEvent(e) {
   return { x: clamp((e.clientX - r.left) / r.width), y: clamp((e.clientY - r.top) / r.height) };
 }
 
+function worldFromEvent(e) { const a = aimFromEvent(e); return { x: a.x * W, y: a.y * H }; }
+// Aim on the (panned, wrapping) surface: screen position → map position.
+function surfaceAim(e) { const a = aimFromEvent(e); return { x: cosmos.mapX(a.x * W) / W, y: a.y }; }
+let panDrag = null;
+
 screen.addEventListener('pointermove', (e) => {
+  if (G && cosmos.active) { const p = worldFromEvent(e); cosmos.pointerMove(e.pointerId, p.x, p.y, G); return; }
+  if (panDrag && panDrag.id === e.pointerId) { const x = worldFromEvent(e).x; cosmos.pan(x - panDrag.x); panDrag.x = x; return; }
   const s = sim(); if (!s) return;
-  const a = aimFromEvent(e);
+  const a = surfaceAim(e);
   s.setAim(a.x, a.y);
   G.brain.aim.x = a.x; G.brain.aim.y = a.y;
 });
 screen.addEventListener('pointerdown', (e) => {
   audio.unlock();
   if (banner) { dismissBanner(); return; }
+  if (G && cosmos.active) {
+    const p = worldFromEvent(e);
+    screen.setPointerCapture?.(e.pointerId);
+    cosmos.pointerDown(e.pointerId, p.x, p.y);
+    return;
+  }
+  // Right or middle drag pans the planet's surface; left click stays the blink.
+  if (G && (e.button === 1 || e.button === 2)) {
+    e.preventDefault();
+    screen.setPointerCapture?.(e.pointerId);
+    panDrag = { id: e.pointerId, x: worldFromEvent(e).x };
+    return;
+  }
   const s = sim(); if (!s) return;
-  const a = aimFromEvent(e);
+  const a = surfaceAim(e);
   s.setAim(a.x, a.y);
   G.brain.aim.x = a.x; G.brain.aim.y = a.y;
   s.blink();
 });
+const endPointer = (e) => {
+  if (panDrag && panDrag.id === e.pointerId) { panDrag = null; return; }
+  if (!G || !cosmos.pointers.has(e.pointerId)) return;
+  const p = worldFromEvent(e);
+  const picked = cosmos.pointerUp(e.pointerId, p.x, p.y, G);
+  if (picked) audio.blip();
+};
+screen.addEventListener('pointerup', endPointer);
+screen.addEventListener('pointercancel', endPointer);
+screen.addEventListener('wheel', (e) => {
+  if (!G) return;
+  e.preventDefault();
+  // Horizontal scroll (or Shift+scroll) pans the surface; vertical scroll zooms.
+  const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey;
+  if (horizontal && !cosmos.active) { cosmos.pan(-(e.shiftKey ? e.deltaY : e.deltaX) * 0.15); return; }
+  cosmos.wheel(e.deltaY, G);
+}, { passive: false });
+screen.addEventListener('contextmenu', (e) => e.preventDefault());
 
 const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'panic' };
 window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input')) return;
   if (e.code === 'KeyM') { toggleModel(); return; }
+  if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { cosmos.zoomOut(G); return; }
+  if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { cosmos.zoomIn(G); return; }
+  if (G && !cosmos.active && (e.code === 'KeyA' || e.code === 'KeyD')) { cosmos.panVel = e.code === 'KeyA' ? 140 : -140; return; }
   if (e.code === 'Enter') {
     if (banner) dismissBanner();
     else if (!$('failScreen').hidden) retryEra();
@@ -355,6 +436,105 @@ $('retryBtn').addEventListener('click', retryEra);
 $('againBtn').addEventListener('click', () => { $('endScreen').hidden = true; newGame(new SimSource()); });
 $('endModelBtn').addEventListener('click', toggleModel);
 
+// ---------- zoom + galaxy UI ----------
+let revealed = 0;
+cosmos.onEvent = (p, text, kind) => {
+  if (kind === 'born' && p.mindSlot) {
+    revealed++;
+    audio.good();
+    if (revealed === 1) advisor.say('mindworlds', `My lord, your thoughts are making worlds. ${p.name} was born from your ${CHANNELS[p.channel].label.toLowerCase()}. Zoom out with Z to see them.`, { mood: 'happy', priority: 2, cooldown: 999 });
+    if (revealed === 3) advisor.say('mindworlds3', 'Three worlds now, each listening to a different part of your mind. Steer them from here.', { mood: 'nervous', priority: 1, cooldown: 999 });
+  } else if (kind === 'event' && cosmos.inGalaxy) {
+    advisor.say(`gal-${text}`, `${p.name}: ${text}. That was you, my lord.`, { mood: /crash|famine|dark|poor/.test(text) ? 'panic' : 'happy', priority: 1, cooldown: 12 });
+  }
+};
+
+let uiTimer = 0;
+let lastListKey = '';
+function updateCosmosUi(dt) {
+  uiTimer -= dt;
+  if (uiTimer > 0 || !G) return;
+  uiTimer = 0.2;
+  $('zoomLabel').textContent = cosmos.levelLabel();
+  $('zoomIn').disabled = cosmos.target <= cosmos.minLevel();
+  $('zoomOut').disabled = cosmos.target >= 2;
+  const gal = cosmos.galaxy;
+  const show = !!gal && (cosmos.target >= 1 || cosmos.z > 0.5 || G.sandbox);
+  $('galaxyPanel').hidden = !show;
+  if (!show) return;
+  $('makePlanet').disabled = gal.full;
+  const rows = gal.planets.map((p) => {
+    const mirrored = p.home && !p.autonomous;
+    const era = p.pop > 0 ? ERA_LABEL[ERA_NAMES[p.eraIndex]] : 'Barren';
+    const owner = gal.attended === p ? `${ownerLabel(p)} · you're here` : ownerLabel(p);
+    return { p, era: p.forming ? 'Forming' : era, pop: `${mirrored ? `${p.pop} people` : fmtPop(p.pop)} · ${owner}`, prog: mirrored ? (p.eraIndex + 1) / 4 : p.pop > 0 ? p.progress : 0 };
+  });
+  const key = rows.map((r) => `${r.p.name}|${r.era}|${r.pop}|${Math.round(r.prog * 20)}|${gal.attended === r.p}|${cosmos.target}|${r.p.effect}|${r.p.channel}`).join(';');
+  if (key !== lastListKey) {
+    lastListKey = key;
+    $('planetList').replaceChildren(...rows.map(({ p, era, pop, prog }, i) => {
+      const li = document.createElement('li');
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'planet-row'; b.dataset.index = String(i);
+      if (gal.attended === p) b.setAttribute('aria-current', 'true');
+      const dot = document.createElement('span'); dot.className = 'planet-dot'; dot.style.background = planetDot(p);
+      const name = document.createElement('span'); name.className = 'planet-name'; name.textContent = p.name;
+      const meta = document.createElement('span'); meta.className = 'planet-meta'; meta.textContent = `${era} · ${pop}`;
+      const bar = document.createElement('span'); bar.className = 'planet-bar'; bar.style.setProperty('--p', `${Math.round(prog * 100)}%`);
+      const ch = CHANNELS[p.channel];
+      const chip = document.createElement('span'); chip.className = 'planet-chip';
+      if (ch && !p.home && p.channel !== 'mixed') { chip.textContent = ch.label; chip.style.color = ch.color; chip.style.borderColor = ch.color; }
+      const fx = document.createElement('span'); fx.className = 'planet-effect'; fx.textContent = p.forming && p.mindSlot && !gal.mindReady ? 'Shaped by your first 10 seconds' : p.effect || '';
+      b.append(dot, name, chip, meta, fx, bar);
+      li.append(b);
+      return li;
+    }));
+  }
+  const m = gal.mind;
+  $('mindLine').textContent = m.done
+    ? `Read from your first 10 s: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, ${m.blinks} blinks.`
+    : `Reading your mind: ${Math.max(0, Math.ceil(10 - m.t))} s of play left.`;
+  $('galaxyLog').replaceChildren(...gal.log.slice(0, 4).map((l) => { const li = document.createElement('li'); li.textContent = l.text; return li; }));
+}
+
+$('zoomIn').addEventListener('click', () => { if (G) { audio.unlock(); cosmos.zoomIn(G); } });
+$('zoomOut').addEventListener('click', () => { if (G) { audio.unlock(); cosmos.zoomOut(G); } });
+$('makePlanet').addEventListener('click', () => {
+  if (!G) return;
+  audio.unlock();
+  const gal = cosmos.ensureGalaxy(G);
+  const p = gal.makePlanet();
+  if (!p) return;
+  audio.good();
+  lastListKey = '';
+  advisor.say('newplanet', `A new planet! I have named it ${p.name}. ${p.pop > 0 ? 'Someone already lives there. They seem nice.' : 'Nobody lives there yet. Send a ship.'}`, { mood: 'happy', priority: 2, cooldown: 6 });
+});
+$('planetList').addEventListener('click', (e) => {
+  const b = e.target.closest('.planet-row');
+  if (!b || !G || !cosmos.galaxy) return;
+  const p = cosmos.galaxy.planets[Number(b.dataset.index)];
+  if (p && p.forming) { cosmos.say('Still forming. Give it a second.'); return; }
+  if (p) { cosmos.focusPlanet(p, G); audio.blip(); lastListKey = ''; }
+});
+
+function openGalaxy({ fromEnding = false } = {}) {
+  const gal = cosmos.ensureGalaxy(G);
+  if (fromEnding && !gal.planets.some((p) => p.name === 'New Coop')) {
+    const pax = G.extra?.passengers ?? 8;
+    gal.makePlanet({ name: 'New Coop', biome: 'alien', inhabited: true, eraIndex: 1, pop: pax + 1, size: 11 });
+    gal.makePlanet({ inhabited: false });
+  }
+  cosmos.focus = null;
+  if (cosmos.z < 1) cosmos.z = 1;
+  cosmos.target = 2;
+}
+$('galaxyBtn').addEventListener('click', () => {
+  $('endScreen').hidden = true;
+  audio.unlock();
+  openGalaxy({ fromEnding: true });
+  advisor.say('galaxy', 'Behold, my lord: the galaxy. Make planets. Keep your pulse down near them.', { mood: 'happy', priority: 3, cooldown: 999 });
+});
+
 // ---------- title screen ----------
 function begin(source) {
   audio.unlock();
@@ -362,6 +542,17 @@ function begin(source) {
   newGame(source);
 }
 $('playSim').addEventListener('click', () => begin(new SimSource()));
+$('playSandbox').addEventListener('click', () => {
+  begin(new SimSource());
+  dismissBanner();
+  G.sandbox = true;
+  cosmos.sandbox = true;
+  cosmos.galaxy = null;
+  cosmos.ensureGalaxy(G, { autonomousHome: true });
+  cosmos.z = 1; cosmos.target = 2;
+  advisor.setEra('space');
+  advisor.say('sandbox', 'Galaxy sandbox, my lord. Three worlds are forming from your thoughts. Make more planets and let them run.', { mood: 'happy', priority: 3, cooldown: 999 });
+});
 $('playBridge').addEventListener('click', async () => {
   const url = $('bridgeUrl').value.trim() || 'ws://localhost:8765';
   const status = $('bridgeStatus');
@@ -377,7 +568,7 @@ $('playBridge').addEventListener('click', async () => {
 });
 
 // Debug handle for the console (and for automated playtests).
-window.__moc = { get G() { return G; }, startScene: (i) => startScene(i) };
+window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos };
 
 // ---------- boot ----------
 function start(data = {}) {
