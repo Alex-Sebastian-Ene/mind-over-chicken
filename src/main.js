@@ -571,8 +571,8 @@ $('playBridge').addEventListener('click', async () => {
 // Debug handle for the console (and for automated playtests).
 window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos };
 
-// camera (#33): opt-in webcam. The face sets the world's mood. Hand-gesture casts are
-// gated off by CAMERA_CASTS_ENABLED until the deferred gesture-UI/god-power milestone.
+// camera (#33): opt-in webcam. Hand gestures cast spells (keys 1-7 without a webcam), the face sets
+// the world's mood. It adds to the brain and keyboard inputs and never replaces them.
 window.__moc.camera = initCamera({
   getG: () => G,
   canCast: () => !!G?.scene && !banner && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,

@@ -2,10 +2,10 @@
 // `gesture` is the Gesture Recognizer's category name, `key` the keyboard fallback (1–7),
 // `cooldown` is per spell, in milliseconds.
 //
-// Deferred milestone (README §1/§3.3/§4.3): gesture UI and god powers are not in the
-// current scope. Keep the implementation, but do not load the hand model or wire casts
-// until this flag is flipped.
-export const CAMERA_CASTS_ENABLED = false;
+// Hand-gesture casts (god powers) are in scope: decided by Alex on #55 (README §1/§4.3).
+// Gesture-driven UI navigation is still deferred. Set this to false to hide the hand model
+// and the casts again; face mood keeps working either way.
+export const CAMERA_CASTS_ENABLED = true;
 
 export const SPELLS = [
   { id: 'point', key: 1, gesture: 'Pointing_Up', glyph: '☝️', name: 'Aim', cooldown: 0,

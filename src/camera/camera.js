@@ -1,6 +1,6 @@
 // camera (#33): opt-in webcam input.
 //   Hands: MediaPipe Gesture Recognizer → seven casts (spells.js). Pointing up aims.
-//          Deferred milestone: gated off by CAMERA_CASTS_ENABLED until gesture UI is in scope.
+//          Enabled by CAMERA_CASTS_ENABLED (in scope per #55); gesture UI navigation is deferred.
 //   Face:  MediaPipe Face Landmarker blendshapes → smoothed mood → G.mood and scene.onMood().
 //
 // PRIVACY: the camera starts only when the player clicks "Camera". Frames go from the <video>
