@@ -69,7 +69,11 @@ export class SpaceAge {
   focusOk() { return this.G.brain.focus >= this.focusThr(); }
   focusThr() { return this.G.brain.threshold('focus', 0.5); }
   hrLimit() { return 12 - 4 * this.G.brain.model.trust('focus'); }
-  hrOk() { return this.G.brain.hrDelta() <= this.hrLimit(); }
+  hrOk() {
+    const b = this.G.brain;
+    if (b.hr && b.hr > 0) return b.hrDelta() <= this.hrLimit();
+    return b.calm >= 0.35 && (b.panic || 0) <= 0.35;
+  }
 
   update(dt) {
     const G = this.G, w = G.world, brain = G.brain;
@@ -86,13 +90,18 @@ export class SpaceAge {
         if (e.state === 'load') { if (walk(e, hangar.x + e.side * 2, hangar.y + 1, speed, dt, w) && e.timer <= 0) { e.state = 'deliver'; e.carry = pick(['#c7ccd6', '#e04a3a', '#3e8ed0', '#f2c14e']); } }
         else if (e.state === 'deliver') {
           if (walk(e, pad.x - 5 * e.side, pad.y + 1, speed, dt, w)) {
-            const stressed = brain.hrDelta() > this.hrLimit() + 3;
+            const stressed = (brain.hr && brain.hr > 0)
+              ? brain.hrDelta() > this.hrLimit() + 3
+              : ((brain.panic || 0) > 0.4 || (1 - brain.calm) > 0.65);
             if (stressed && chance(0.3)) {
               this.drops++;
               this.progress = Math.max(0, this.progress - 0.01);
               this.particles.burst(8, () => ({ x: e.x, y: e.y - 2, vx: rand(-12, 12), vy: rand(-16, -4), g: 30, life: 0.8, maxLife: 0.8, size: 1, color: pick(['#999', '#ccc', '#ff9a2e']) }));
               floater(this.particles, e.x, e.y - 8, 'dropped it', '#ff8a9c', 5);
-              G.advisor.say('drop', pick(['Someone dropped the fuel valve. I will not say who. It was because of your pulse.', 'Another wrench in the ocean. The engineers can feel your heartbeat, my lord.']), { mood: 'panic', priority: 2, cooldown: 10 });
+              const dropReason = (brain.hr && brain.hr > 0)
+                ? pick(['Someone dropped the fuel valve. I will not say who. It was because of your pulse.', 'Another wrench in the ocean. The engineers can feel your heartbeat, my lord.'])
+                : pick(['Someone dropped the fuel valve. Too much agitation in the air!', 'Another wrench in the ocean. Maintain calm, my lord!']);
+              G.advisor.say('drop', dropReason, { mood: 'panic', priority: 2, cooldown: 10 });
             } else if (this.progress < 1) {
               this.progress = Math.min(1, this.progress + 0.03);
               G.audio.tick();
@@ -103,18 +112,21 @@ export class SpaceAge {
       }
       if (this.progress >= 1 && !this.builtSaid) { this.builtSaid = true; G.audio.good(); G.advisor.say('built', 'The rocket is finished. It is very tall and very pointy. Now we need passengers.', { mood: 'happy', priority: 3 }); }
 
-      // Boarding: calm makes citizens brave, a racing pulse sends them running.
+      // Boarding: calm makes citizens brave, tension/racing pulse sends them running.
       const boarding = this.progress >= 0.5;
       if (boarding && !this.boardSaid) { this.boardSaid = true; G.advisor.say('board', 'Citizens are boarding. Calm keeps them brave. The sacred chicken has seat 1A, obviously.', { mood: 'happy', priority: 2 }); this.chicken.state = 'board'; }
       this.boardTimer += dt;
       for (const c of this.citizens) {
         animate(c, dt, 6);
-        c.courage = clamp(c.courage + dt * (0.12 * brain.calm - 0.1 * clamp(brain.hrDelta() / 15) - 0.02));
+        const stressTerm = (brain.hr && brain.hr > 0)
+          ? 0.1 * clamp(brain.hrDelta() / 15)
+          : 0.1 * clamp((brain.panic || 0) + (1 - brain.calm) * 0.5);
+        c.courage = clamp(c.courage + dt * (0.12 * brain.calm - stressTerm - 0.02));
         if (c.state === 'watch') {
           if (!c.spot || walk(c, c.spot.x, c.spot.y, 5, dt, w)) c.spot = w.randomLand(w.sites.crowd.x, w.sites.crowd.y, 1, 14);
           if (boarding && c.courage > 0.55 && this.boardTimer > 0.5) { c.state = 'board'; this.boardTimer = 0; }
         } else if (c.state === 'board') {
-          if (c.courage < 0.25 && brain.hrDelta() > this.hrLimit()) { c.state = 'flee'; floater(this.particles, c.x, c.y - 7, 'nope', '#f2e8d5', 5); }
+          if (c.courage < 0.25 && !this.hrOk()) { c.state = 'flee'; floater(this.particles, c.x, c.y - 7, 'nope', '#f2e8d5', 5); }
           else if (walk(c, pad.x, pad.y, 9, dt, w)) { c.state = 'aboard'; this.passengers++; G.audio.pop(); }
         } else if (c.state === 'flee') {
           if (walk(c, w.sites.crowd.x, w.sites.crowd.y, 14, dt, w)) c.state = 'watch';
@@ -129,7 +141,7 @@ export class SpaceAge {
         this.count = COUNT_FROM; this.holdT = 0;
         brain.setCue('focus');
         G.audio.bell();
-        G.advisor.say('count', 'Final countdown. Hold focus and keep your heart slow. Ten seconds. The whole species is watching. No pressure.', { mood: 'nervous', priority: 4, cooldown: 0 });
+        G.advisor.say('count', 'Final countdown. Hold focus and stay calm. Ten seconds. The whole species is watching. No pressure.', { mood: 'nervous', priority: 4, cooldown: 0 });
       }
     }
 
@@ -142,7 +154,10 @@ export class SpaceAge {
         if (Math.ceil(this.count) !== before) G.audio.tick();
       } else {
         this.holdT += dt;
-        G.advisor.say('hold', this.focusOk() ? 'HOLD! Your pulse, my lord! Breathe!' : 'HOLD! Hold the count! Focus, my lord!', { mood: 'panic', priority: 3, cooldown: 4 });
+        const holdMsg = (brain.hr && brain.hr > 0)
+          ? (this.focusOk() ? 'HOLD! Your pulse, my lord! Breathe!' : 'HOLD! Hold the count! Focus, my lord!')
+          : (this.focusOk() ? 'HOLD! Mind tension, my lord! Breathe!' : 'HOLD! Hold the count! Focus, my lord!');
+        G.advisor.say('hold', holdMsg, { mood: 'panic', priority: 3, cooldown: 4 });
         if (this.holdT > SCRUB_AFTER) {
           this.scrubs++;
           this.count = COUNT_FROM; this.holdT = 0;
@@ -251,9 +266,14 @@ export class SpaceAge {
       const ok = this.focusOk() && this.hrOk();
       label(ctx, W / 2, 46, ok ? `T−${n}` : 'HOLD', ok ? '#f2e8d5' : '#ff5a72', 30);
       const fpct = Math.round(brain.focus * 100), fthr = Math.round(this.focusThr() * 100);
-      const hrNow = Math.round(brain.hr || 0), hrMax = Math.round((brain.restHr || 70) + this.hrLimit());
       label(ctx, W / 2 - 48, 60, `focus ${fpct}% (need ${fthr}%)`, this.focusOk() ? '#ffcf4a' : '#ff8a9c', 6);
-      label(ctx, W / 2 + 48, 60, `pulse ${hrNow} (max ${hrMax})`, this.hrOk() ? '#7ee08a' : '#ff8a9c', 6);
+      if (brain.hr && brain.hr > 0) {
+        const hrNow = Math.round(brain.hr || 0), hrMax = Math.round((brain.restHr || 70) + this.hrLimit());
+        label(ctx, W / 2 + 48, 60, `pulse ${hrNow} (max ${hrMax})`, this.hrOk() ? '#7ee08a' : '#ff8a9c', 6);
+      } else {
+        const cpct = Math.round(brain.calm * 100);
+        label(ctx, W / 2 + 48, 60, `calm ${cpct}% (need 35%)`, this.hrOk() ? '#7ee08a' : '#ff8a9c', 6);
+      }
       if (this.holdT > 0) {
         ctx.fillStyle = 'rgba(14,15,26,0.8)'; ctx.fillRect(W / 2 - 30, 66, 60, 2);
         ctx.fillStyle = '#ff5a72'; ctx.fillRect(W / 2 - 30, 66, 60 * clamp(this.holdT / SCRUB_AFTER), 2);
