@@ -108,6 +108,16 @@ pub unsafe extern "C" fn moc_brain_get_hr_delta(ptr: *const Brain) -> f32 {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn moc_brain_get_stress(ptr: *const Brain) -> f32 {
+    ptr.as_ref().map(|b| b.stress).unwrap_or(0.0)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn moc_brain_get_agitation(ptr: *const Brain) -> f32 {
+    ptr.as_ref().map(|b| b.agitation).unwrap_or(0.0)
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn moc_brain_get_model_accuracy(ptr: *const Brain) -> f32 {
     ptr.as_ref().map(|b| b.model.accuracy).unwrap_or(0.0)
 }
@@ -187,7 +197,7 @@ pub extern "C" fn moc_calibration_traits_random(
 pub extern "C" fn moc_calibration_traits_from_sensors(
     calm: f32,
     focus: f32,
-    hr_delta: f32,
+    stress: f32,
     blink_rate: f32,
     joy: f32,
     anger: f32,
@@ -199,7 +209,7 @@ pub extern "C" fn moc_calibration_traits_from_sensors(
     let features = SensorFeatures {
         calm,
         focus,
-        hr_delta,
+        stress,
         blink_rate,
         joy,
         anger,
