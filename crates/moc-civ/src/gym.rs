@@ -326,6 +326,8 @@ impl Gym {
         self.worlds += 1;
         let mut c = Council::new(seed);
         c.spare_player = false;
+        // The league samples its policies: more varied opponents than their greedy play.
+        c.greedy = false;
         for b in &self.league {
             let _ = c.load_net(b);
         }

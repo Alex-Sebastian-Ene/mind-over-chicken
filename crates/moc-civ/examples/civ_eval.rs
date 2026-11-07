@@ -15,7 +15,8 @@
 //! - `commander`: all on the final councils, half with the trained commander, half scripted.
 //! A civilisation "beats" another in its world when its score (alive × 10 + age + ln(1+pop)
 //! + 0.2 × villages) is higher at the end. Writes one JSON file. `--scenarios duel,four,eight,
-//! twelve_big` and `--conds rules,ppo,…` pick what to run.
+//! twelve_big` and `--conds rules,ppo,…` pick what to run; the councils play greedily (as in the
+//! game) unless `--sample`.
 
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -104,10 +105,11 @@ fn score(c: &CivOut) -> f32 {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_world(seed: u32, sc: &Scenario, cond: &str, nets: &[Vec<u8>], cmd: &[u8]) -> WorldOut {
+fn run_world(seed: u32, sc: &Scenario, cond: &str, nets: &[Vec<u8>], cmd: &[u8], greedy: bool) -> WorldOut {
     let mut w = new_world(seed, sc.n_civs, Dims::new(sc.w, sc.h));
     let mut c = Council::new(seed);
     c.spare_player = false;
+    c.greedy = greedy;
     for b in nets {
         c.load_net(b).expect("council weights");
     }
@@ -494,6 +496,7 @@ fn main() {
     let out_p = arg("--out").unwrap_or_else(|| "rl/civ_war/eval_results.json".into());
     let only = arg("--scenarios").unwrap_or_else(|| "duel,four,eight".into());
     let secs: f32 = arg("--secs").and_then(|s| s.parse().ok()).unwrap_or(900.0);
+    let greedy = !args.iter().any(|a| a == "--sample");
     let council_b = std::fs::read(&council_p).expect("council weights");
     let cmd_b = std::fs::read(&cmd_p).unwrap_or_default();
     let mut nets = vec![council_b.clone()];
@@ -535,7 +538,7 @@ fn main() {
             std::thread::spawn(move || loop {
                 let job = jobs.lock().unwrap().pop();
                 let Some((i, (sc, cond, seed))) = job else { break };
-                let w = run_world(seed, &sc, cond, &nets, &cmd_b);
+                let w = run_world(seed, &sc, cond, &nets, &cmd_b, greedy);
                 results.lock().unwrap().push((i, sc.name, cond, w));
             })
         })
@@ -585,7 +588,7 @@ fn main() {
         "issue": 100,
         "seeds": format!("{}..{} (training uses 0..500000)", EVAL_SEED_BASE, EVAL_SEED_BASE + seeds),
         "council": council_p, "commander": if cmd_b.is_empty() { "scripted".to_string() } else { cmd_p }, "old": old_p,
-        "warmup_seconds_under_rules": 300, "wall_seconds": t0.elapsed().as_secs_f64().round(),
+        "warmup_seconds_under_rules": 300, "greedy": greedy, "wall_seconds": t0.elapsed().as_secs_f64().round(),
         "score": "alive*10 + age + ln(1+pop) + 0.2*villages at the end; a 'win' is a higher score than the other civ in the same world",
         "scenarios": scen,
     });

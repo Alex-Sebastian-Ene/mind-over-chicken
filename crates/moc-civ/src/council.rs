@@ -304,7 +304,8 @@ pub struct Council {
     /// Brains for civilisations born later (rebels, new arrivals).
     pub new_brain: Brain,
     pub new_cmd: CmdBrain,
-    /// Pick the most likely option (true) or sample the policy (deterministic RNG).
+    /// Pick the most likely legal option (true, the default: it plays better than sampling in
+    /// the evaluation) or sample the policy with a deterministic RNG (the training league).
     pub greedy: bool,
     /// Leave the player's own civilisation to the rules.
     pub spare_player: bool,
@@ -330,7 +331,7 @@ impl Council {
             cmd_nets: Vec::new(),
             new_brain: Brain::Rules,
             new_cmd: CmdBrain::Rules,
-            greedy: false,
+            greedy: true,
             spare_player: true,
             minds: [Mind::new(Brain::Rules, CmdBrain::Rules, -1.0, 0.0); MAX_FACTIONS],
             allied: [false; MAX_FACTIONS * MAX_FACTIONS],
