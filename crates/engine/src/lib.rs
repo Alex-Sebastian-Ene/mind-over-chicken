@@ -856,7 +856,7 @@ impl Engine {
 
         self.advisor.update(dt);
         self.hud.update_clock(self.game.stats.runtime);
-        self.hud.update_meters(calm, None, focus, None, hr, rest_hr, hr_delta, blinks);
+        self.hud.update_meters(calm, None, focus, None, hr, rest_hr, hr_delta, blinks, panic);
         self.hud.update_objectives(&self.game.era.objectives());
     }
 

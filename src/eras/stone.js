@@ -277,7 +277,11 @@ export class StoneAge {
     walk(c, c.tx, c.ty, 6, dt, w);
 
     // ---- Live reactions ----
-    if (brain.hrDelta() > 18) G.advisor.say('hr', 'Your pulse is thundering, my lord. Even the mammoths are nervous.', { mood: 'panic', priority: 1, cooldown: 25 });
+    if (brain.hr && brain.hrDelta() > 18) {
+      G.advisor.say('hr', 'Your pulse is thundering, my lord. Even the mammoths are nervous.', { mood: 'panic', priority: 1, cooldown: 25 });
+    } else if ((brain.panic || 0) > 0.7) {
+      G.advisor.say('hr', 'Your tension is high, my lord. Even the mammoths are nervous.', { mood: 'panic', priority: 1, cooldown: 25 });
+    }
 
     // ---- Win / lose ----
     const alive = this.living().length;
