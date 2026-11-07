@@ -32,7 +32,7 @@ export class SimSource {
       alphaGain: rand(0.55, 1.25),   // how strongly calm shows up as alpha
       betaGain: rand(0.55, 1.2),     // how strongly focus shows up as beta
       thetaFocus: rand(-0.4, 0.5),   // some people's theta rises with focus, some fall
-      gammaArousal: rand(0.5, 1.0),  // how much muscle tension (gamma) agitation adds
+      gammaArousal: rand(0.6, 1.0),  // how much muscle tension (gamma) agitation adds
     };
     // Latent mental state, smoothed so it behaves like a person rather than a switch.
     this.latent = { calm: 0.15, focus: 0.1, arousal: 0.1 };
@@ -78,7 +78,7 @@ export class SimSource {
     // agitation index tells the two apart.
     let alpha = (0.17 + 0.32 * f.alphaGain * L.calm - 0.07 * L.focus - 0.08 * L.arousal) * n();
     let beta = (0.15 + 0.26 * f.betaGain * L.focus + 0.12 * L.arousal - 0.05 * L.calm) * n();
-    let gamma = (0.05 + 0.2 * f.gammaArousal * L.arousal + 0.02 * L.focus) * n();
+    let gamma = (0.05 + 0.3 * f.gammaArousal * L.arousal + 0.02 * L.focus) * n();
     const blink = this.pendingBlink;
     if (blink) delta *= 3.2; // blinks smear huge low-frequency power across frontal channels
     alpha = Math.max(alpha, 0.02); beta = Math.max(beta, 0.02); theta = Math.max(theta, 0.02);
