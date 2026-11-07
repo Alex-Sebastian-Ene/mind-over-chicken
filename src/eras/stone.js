@@ -472,7 +472,7 @@ export class StoneAge {
   draw(ctx) {
     const G = this.G;
     ctx.drawImage(this.layer, 0, 0);
-    G.world.drawWater(ctx, this.t);
+    if (!G.render3d) G.world.drawWater(ctx, this.t);
     for (const m of this.meat) { ctx.fillStyle = m.cooked ? '#c0562f' : '#9e3d3d'; ctx.fillRect(m.x - 1, m.y - 1, 3, 2); }
     // In 3D, draw3d stands people, mammoths, fires and the chicken up as sprites; painting them
     // flat as well showed everything twice. Boats have no sprite yet, so they stay painted.
@@ -630,6 +630,10 @@ export class StoneAge {
 }
 
 export function label(ctx, x, y, text, color, size = 6) {
+  if (ctx.__project3d) {
+    const pr = ctx.__project3d(x, y);
+    if (pr) { x = pr[0]; y = pr[1]; }
+  }
   ctx.font = `${size}px "Pixelify Sans", monospace`;
   ctx.textAlign = 'center';
   ctx.fillStyle = 'rgba(8,10,24,0.85)';

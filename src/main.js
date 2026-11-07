@@ -407,10 +407,20 @@ function render() {
   const visible = 1 - Math.min(1, fade);
   if (surface) {
     textCtx.globalAlpha = visible * k;
+    if (G.render3d && engine && typeof engine.project_to_screen === 'function') {
+      textCtx.__project3d = (wx, wz) => {
+        const p = engine.project_to_screen(wx, wz, textLayer.width, textLayer.height);
+        if (p[0] < -9000) return null;
+        return [p[0] / K, p[1] / K];
+      };
+    } else {
+      textCtx.__project3d = null;
+    }
     for (const off of offsets) {
       textCtx.setTransform(K, 0, 0, K, off * K, 0);
       scene.drawOverlay?.(textCtx);
     }
+    textCtx.__project3d = null;
   }
   textCtx.setTransform(K, 0, 0, K, 0, 0);
   textCtx.globalAlpha = visible;
