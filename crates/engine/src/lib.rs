@@ -205,6 +205,21 @@ impl Engine {
         result
     }
 
+    // Project 3D terrain world coordinates [wx, wz] to screen pixels [sx, sy]
+    pub fn project_to_screen(&self, wx: f32, wz: f32, cw: f32, ch: f32) -> js_sys::Float32Array {
+        let result = js_sys::Float32Array::new_with_length(2);
+        let h_norm = self.get_terrain_height_at(wx.rem_euclid(W as f32), wz);
+        let wy = (h_norm * 24.0).max(7.92);
+        if let Some([sx, sy]) = self.camera_3d.world_to_screen(wx, wy, wz, cw, ch) {
+            result.set_index(0, sx);
+            result.set_index(1, sy);
+        } else {
+            result.set_index(0, -9999.0);
+            result.set_index(1, -9999.0);
+        }
+        result
+    }
+
     // 3D Lighting & Billboards
     pub fn add_3d_light(&mut self, x: f32, y: f32, z: f32, radius: f32, intensity: f32) {
         self.lights_3d.push(Light3D {

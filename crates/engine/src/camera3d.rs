@@ -99,6 +99,31 @@ impl OrbitCamera {
         Some([o.x + d.x * t, o.z + d.z * t])
     }
 
+    /// Project a 3D world point [x, y, z] to screen coordinates (0..screen_w, 0..screen_h).
+    /// Used for placing 2D UI overlays, speech bubbles, and reticles exactly over their 3D positions.
+    pub fn world_to_screen(
+        &self,
+        world_x: f32,
+        world_y: f32,
+        world_z: f32,
+        screen_w: f32,
+        screen_h: f32,
+    ) -> Option<[f32; 2]> {
+        if screen_w <= 0.0 || screen_h <= 0.0 {
+            return None;
+        }
+        let (_view, _proj, view_proj) = self.compute_matrices(screen_w / screen_h);
+        let clip = view_proj.transform_vec4([world_x, world_y, world_z, 1.0]);
+        if clip[3] <= 0.01 {
+            return None; // Behind camera
+        }
+        let ndc_x = clip[0] / clip[3];
+        let ndc_y = clip[1] / clip[3];
+        let sx = (ndc_x * 0.5 + 0.5) * screen_w;
+        let sy = (1.0 - (ndc_y * 0.5 + 0.5)) * screen_h;
+        Some([sx, sy])
+    }
+
     /// The world ray under a screen point: (origin on the near plane, unit direction).
     pub fn screen_ray(&self, screen_x: f32, screen_y: f32, screen_w: f32, screen_h: f32) -> Option<(Vec3, Vec3)> {
         if screen_w <= 0.0 || screen_h <= 0.0 {
@@ -207,5 +232,14 @@ mod tests {
         // The camera sits south (+z) looking north, so the ray meets the plateau south of
         // where it would meet the sea-level plane.
         assert!(hit[1] > plane[1], "plateau should be hit before the plane ({:?} vs {:?})", hit, plane);
+    }
+
+    #[test]
+    fn test_world_to_screen_roundtrip() {
+        let cam = OrbitCamera::new(160.0, 90.0);
+        let screen = cam.world_to_screen(160.0, 0.0, 90.0, 800.0, 600.0).unwrap();
+        // Camera target should project to the screen center (400, 300)
+        assert!((screen[0] - 400.0).abs() < 1.0, "screen_x was {}", screen[0]);
+        assert!((screen[1] - 300.0).abs() < 1.0, "screen_y was {}", screen[1]);
     }
 }
