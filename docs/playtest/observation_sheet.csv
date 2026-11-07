@@ -1,0 +1,7 @@
+participant,session,build_sha,input,type,task,outcome,seconds,severity,issue_code,note
+P00,1,c62e099,emulated,setup,,,95,,,"example row: setup time in seconds"
+P00,1,c62e099,emulated,first_action,T1,,40,,,"example: first meaningful action"
+P00,1,c62e099,emulated,task,T1,H,150,,,"example: lit the fire after the hint"
+P00,1,c62e099,emulated,issue,T1,,,3,fire-target-unclear,"example: didn't know where to aim"
+P00,1,c62e099,emulated,confusion,T2,,,,,"example: 'why are they running away?'"
+P00,1,c62e099,emulated,task,T5,S,,,,"example: chose to replay"
