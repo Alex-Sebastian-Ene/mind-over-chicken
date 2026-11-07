@@ -123,7 +123,7 @@ fn ages_are_entered_when_their_conditions_hold() {
     m.vassals = 0;
     m.territory = 0.3;
     assert!(m.can_enter(11), "aggressive road: conquest");
-    // Not a tech tree: nothing to pick, only the civilisation's own state.
+    // Nothing is picked or researched: only the civilisation's own state counts.
     assert_eq!(entry_population(10), 80.0, "Temples inherit Kingdoms' population");
 }
 
