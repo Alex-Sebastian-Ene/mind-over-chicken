@@ -304,6 +304,27 @@ impl Engine {
         map.rgba
     }
 
+    /// Close in, the orbit centre rides on the ground and the eye stays above the land under
+    /// it, so zooming right in (`MIN_DISTANCE`) never puts the camera inside a hill. Far out
+    /// (distance 120 and up) the centre stays at height 0, as before.
+    fn settle_camera_on_ground(&mut self, dt: f32) {
+        const SEA_Y: f32 = 7.92;
+        let ground = |e: &Self, x: f32, z: f32| (e.get_terrain_height_at(x, z) * 24.0).max(SEA_Y);
+        let (tx, tz, dist) = (self.camera_3d.target.x, self.camera_3d.target.z, self.camera_3d.distance);
+        let near = ((120.0 - dist) / 80.0).clamp(0.0, 1.0);
+        let want = ground(self, tx, tz) * near;
+        let k = (dt * 8.0).clamp(0.0, 1.0);
+        let mut y = self.camera_3d.target.y + (want - self.camera_3d.target.y) * k;
+        let mut probe = self.camera_3d.clone();
+        probe.target.y = y;
+        let eye = probe.eye_position();
+        let lift = ground(self, eye.x, eye.z) + 3.0 - eye.y;
+        if lift > 0.0 {
+            y += lift;
+        }
+        self.camera_3d.target.y = y;
+    }
+
     fn get_terrain_height_at(&self, x: f32, z: f32) -> f32 {
         if let Some(t) = &self.terrain {
             let map_w = W as f32;
@@ -515,6 +536,7 @@ impl Engine {
         // Torus wrap camera target along both axes (#111)
         self.camera_3d.target.x = self.camera_3d.target.x.rem_euclid(W as f32);
         self.camera_3d.target.z = self.camera_3d.target.z.rem_euclid(H as f32);
+        self.settle_camera_on_ground(dt);
 
         let sun_dir = Vec3::new(sun_x, sun_y, sun_z).normalize();
 
