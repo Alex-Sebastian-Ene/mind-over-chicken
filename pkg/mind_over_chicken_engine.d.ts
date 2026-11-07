@@ -16,6 +16,9 @@ export class Engine {
     draw_rect(x: number, y: number, w: number, h: number, r: number, g: number, b: number, a: number): void;
     draw_reticle(x: number, y: number, t: number): void;
     draw_rocket(x: number, y: number, progress: number, t: number, flame: number): void;
+    draw_text(x: number, y: number, text: string, r: number, g: number, b: number, a: number): void;
+    draw_text_badge(cx: number, y: number, text: string, text_r: number, text_g: number, text_b: number, bg_r: number, bg_g: number, bg_b: number, bg_a: number): void;
+    draw_text_centered(cx: number, y: number, text: string, r: number, g: number, b: number, a: number): void;
     end_frame(night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
     get_site_cave_mouth_x(): number;
     get_site_cave_mouth_y(): number;
@@ -57,6 +60,9 @@ export interface InitOutput {
     readonly engine_draw_rect: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly engine_draw_reticle: (a: number, b: number, c: number, d: number) => void;
     readonly engine_draw_rocket: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly engine_draw_text: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+    readonly engine_draw_text_badge: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
+    readonly engine_draw_text_centered: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly engine_end_frame: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly engine_get_site_cave_mouth_x: (a: number) => number;
     readonly engine_get_site_cave_mouth_y: (a: number) => number;

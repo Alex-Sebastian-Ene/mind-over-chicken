@@ -1,3 +1,4 @@
+mod font;
 mod gl;
 mod sprites;
 mod terrain;
@@ -160,6 +161,37 @@ impl Engine {
 
     pub fn draw_rect(&mut self, x: i32, y: i32, w: i32, h: i32, r: u8, g: u8, b: u8, a: u8) {
         sprites::fill_rect(&mut self.frame_pixels, x, y, w, h, r, g, b, a);
+    }
+
+    pub fn draw_text(&mut self, x: i32, y: i32, text: &str, r: u8, g: u8, b: u8, a: u8) {
+        font::draw_text(&mut self.frame_pixels, x, y, text, r, g, b, a);
+    }
+
+    pub fn draw_text_centered(&mut self, cx: i32, y: i32, text: &str, r: u8, g: u8, b: u8, a: u8) {
+        font::draw_text_centered(&mut self.frame_pixels, cx, y, text, r, g, b, a);
+    }
+
+    pub fn draw_text_badge(
+        &mut self,
+        cx: i32,
+        y: i32,
+        text: &str,
+        text_r: u8,
+        text_g: u8,
+        text_b: u8,
+        bg_r: u8,
+        bg_g: u8,
+        bg_b: u8,
+        bg_a: u8,
+    ) {
+        font::draw_text_badge(
+            &mut self.frame_pixels,
+            cx,
+            y,
+            text,
+            (text_r, text_g, text_b),
+            (bg_r, bg_g, bg_b, bg_a),
+        );
     }
 
     pub fn draw_pixel(&mut self, x: i32, y: i32, r: u8, g: u8, b: u8, a: u8) {

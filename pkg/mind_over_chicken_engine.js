@@ -124,6 +124,72 @@ export class Engine {
         wasm.engine_draw_rocket(this.__wbg_ptr, x, y, progress, t, flame);
     }
     /**
+     * @param {number} x
+     * @param {number} y
+     * @param {string} text
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     * @param {number} a
+     */
+    draw_text(x, y, text, r, g, b, a) {
+        const val2 = +x;
+        const val3 = +y;
+        const val4 = +r;
+        const val5 = +g;
+        const val6 = +b;
+        const val7 = +a;
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.engine_draw_text(this.__wbg_ptr, val2, val3, ptr0, len0, val4, val5, val6, val7);
+    }
+    /**
+     * @param {number} cx
+     * @param {number} y
+     * @param {string} text
+     * @param {number} text_r
+     * @param {number} text_g
+     * @param {number} text_b
+     * @param {number} bg_r
+     * @param {number} bg_g
+     * @param {number} bg_b
+     * @param {number} bg_a
+     */
+    draw_text_badge(cx, y, text, text_r, text_g, text_b, bg_r, bg_g, bg_b, bg_a) {
+        const val2 = +cx;
+        const val3 = +y;
+        const val4 = +text_r;
+        const val5 = +text_g;
+        const val6 = +text_b;
+        const val7 = +bg_r;
+        const val8 = +bg_g;
+        const val9 = +bg_b;
+        const val10 = +bg_a;
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.engine_draw_text_badge(this.__wbg_ptr, val2, val3, ptr0, len0, val4, val5, val6, val7, val8, val9, val10);
+    }
+    /**
+     * @param {number} cx
+     * @param {number} y
+     * @param {string} text
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     * @param {number} a
+     */
+    draw_text_centered(cx, y, text, r, g, b, a) {
+        const val2 = +cx;
+        const val3 = +y;
+        const val4 = +r;
+        const val5 = +g;
+        const val6 = +b;
+        const val7 = +a;
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.engine_draw_text_centered(this.__wbg_ptr, val2, val3, ptr0, len0, val4, val5, val6, val7);
+    }
+    /**
      * @param {number} night
      * @param {number} flash
      * @param {number} fade

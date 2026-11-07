@@ -53,12 +53,13 @@ void main() {
     vec4 texColor = texture2D(u_texture, v_texCoord);
     vec2 worldCoord = vec2(v_texCoord.x * 320.0, v_texCoord.y * 180.0);
 
-    // Night ambient darkness
-    vec3 nightAmbient = vec3(0.09, 0.13, 0.28);
-    vec3 ambient = mix(vec3(1.0), nightAmbient, u_night);
+    // Deep blue night ambient tint
+    vec3 nightTint = vec3(0.06, 0.09, 0.24);
 
-    // Dynamic light accumulation
-    vec3 lightGlow = vec3(0.0);
+    // Darkness mask: 0 = full daylight, u_night = night
+    float darkMask = u_night;
+    vec3 warmGlow = vec3(0.0);
+
     for (int i = 0; i < 16; i++) {
         if (i >= u_light_count) {
             break;
@@ -66,17 +67,26 @@ void main() {
         vec4 l = u_lights[i];
         float d = distance(worldCoord, l.xy);
         if (d < l.z) {
-            float falloff = (1.0 - (d / l.z)) * l.w;
-            lightGlow += vec3(1.0, 0.65, 0.3) * falloff;
+            float normD = d / l.z;
+            // Radial light hole cutting through the night darkness
+            float hole = 1.0 - smoothstep(0.0, 1.0, normD);
+            darkMask *= (1.0 - hole * clamp(l.w, 0.0, 1.0));
+
+            // Warm additive fire glow on top of fires/lights
+            float glowR = l.z * 0.65;
+            if (d < glowR) {
+                float glowFalloff = (1.0 - d / glowR);
+                warmGlow += vec3(1.0, 0.55, 0.20) * (glowFalloff * 0.30 * l.w);
+            }
         }
     }
 
-    // Light restores daylight in radius and adds warm fire tint
-    vec3 finalRgb = texColor.rgb * (ambient + lightGlow * u_night) + (lightGlow * 0.30);
-    finalRgb += vec3(u_flash * 0.9);
-    finalRgb = mix(finalRgb, vec3(0.02, 0.02, 0.06), u_fade);
+    vec3 litColor = mix(texColor.rgb, texColor.rgb * nightTint, darkMask);
+    litColor += warmGlow;
+    litColor += vec3(u_flash * 0.9);
+    litColor = mix(litColor, vec3(0.02, 0.02, 0.06), u_fade);
 
-    gl_FragColor = vec4(clamp(finalRgb, 0.0, 1.0), texColor.a);
+    gl_FragColor = vec4(clamp(litColor, 0.0, 1.0), texColor.a);
 }
 "#;
 
@@ -226,9 +236,21 @@ impl WebGlRenderer {
         canvas_w: i32,
         canvas_h: i32,
     ) {
+        // Clear whole canvas with dark letterbox background
         self.gl.viewport(0, 0, canvas_w, canvas_h);
         self.gl.clear_color(0.02, 0.02, 0.06, 1.0);
         self.gl.clear(WebGlRenderingContext::COLOR_BUFFER_BIT);
+
+        // Integer upscale letterbox calculation (preserves 320x180 aspect ratio)
+        let scale_x = canvas_w / 320;
+        let scale_y = canvas_h / 180;
+        let scale = scale_x.min(scale_y).max(1);
+        let vp_w = 320 * scale;
+        let vp_h = 180 * scale;
+        let vp_x = (canvas_w - vp_w) / 2;
+        let vp_y = (canvas_h - vp_h) / 2;
+
+        self.gl.viewport(vp_x, vp_y, vp_w, vp_h);
 
         self.gl.use_program(Some(&self.program));
         self.gl.uniform1f(Some(&self.u_night), night);

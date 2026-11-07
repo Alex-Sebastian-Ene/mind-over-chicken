@@ -14,6 +14,9 @@ export const engine_draw_pixel: (a: number, b: number, c: number, d: number, e: 
 export const engine_draw_rect: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
 export const engine_draw_reticle: (a: number, b: number, c: number, d: number) => void;
 export const engine_draw_rocket: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+export const engine_draw_text: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+export const engine_draw_text_badge: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
+export const engine_draw_text_centered: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
 export const engine_end_frame: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
 export const engine_get_site_cave_mouth_x: (a: number) => number;
 export const engine_get_site_cave_mouth_y: (a: number) => number;
