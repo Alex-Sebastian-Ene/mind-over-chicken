@@ -1,13 +1,14 @@
 // Generates a World off the main thread (~150 ms each) so new planets never stall the game.
 // With `vast`, it also builds and paints the planet's vaster surface around it (#68, ~250 ms).
 import { World } from '../world/terrain.js';
+import { W, H } from '../sim/util.js';
 import { buildVast, paintVast } from './vast.js';
 
 self.onmessage = (e) => {
   const { id, seed, biome, vast } = e.data;
   try {
-    const w = new World(seed, { biome });
-    const msg = { id, seed: w.seed, biome: w.biome, h: w.h, type: w.type, baseType: w.baseType, owner: w.owner, sites: w.sites, continents: w.continents };
+    const w = new World(seed, { biome, width: W, height: H });   // a 320×180 core (vast.js)
+    const msg = { id, seed: w.seed, biome: w.biome, width: w.width, height: w.height, h: w.h, type: w.type, baseType: w.baseType, owner: w.owner, sites: w.sites, continents: w.continents };
     const transfer = [w.h.buffer, w.type.buffer, w.baseType.buffer, w.owner.buffer];
     if (vast) {
       const v = buildVast(w, seed);

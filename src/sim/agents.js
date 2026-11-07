@@ -1,6 +1,10 @@
 // Shared agent plumbing: movement that respects the island, animation clocks, villager looks.
 
-import { pick, rand } from './util.js';
+import { pick, rand, W as VIEW_W, H as VIEW_H, wrap, wrapDelta } from './util.js';
+
+// The map is a torus (#111) of the world's own size (640×360 at home, #129): steer the short
+// way round and keep positions inside the map.
+const sizeOf = (world) => [world?.width || VIEW_W, world?.height || VIEW_H];
 
 // Warm, bright hides and dyes so people stand out clearly on grass and dirt.
 const SHIRTS = ['#c0703a', '#d68c45', '#b5523a', '#d9a85b', '#a8613a'];
@@ -30,21 +34,24 @@ export function walk(a, tx, ty, speed, dt, world) {
     ty = safe.y;
   }
 
-  const dx = tx - a.x, dy = ty - a.y;
+  const [MW, MH] = sizeOf(world);
+  a.x = wrap(a.x, MW); a.y = wrap(a.y, MH);
+  const dx = wrapDelta(tx, a.x, MW), dy = wrapDelta(ty, a.y, MH);
+  tx = a.x + dx; ty = a.y + dy;
   const d = Math.hypot(dx, dy);
   if (d < 1.2) return true;
   // Target sits on rock or water and we're pressed up against it: close enough.
   if (d < 6 && (a.stuck || 0) > 0.8) { a.stuck = 0; return true; }
   const step = Math.min(d, speed * dt);
   if (d > 7 && world && world.field) {
-    const f = world.field(tx, ty);
-    const W = 320;
+    const f = world.field(wrap(tx, MW), wrap(ty, MH));
     const cx = Math.round(a.x), cy = Math.round(a.y);
-    const here = f[cy * W + cx];
+    const at = (x, y) => f[wrap(y, MH) * MW + wrap(x, MW)];
+    const here = at(cx, cy);
     if (here > 0) {
       let best = here, bx = cx, by = cy;
       for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
-        const v = f[(cy + oy) * W + (cx + ox)];
+        const v = at(cx + ox, cy + oy);
         if (v >= 0 && v < best) { best = v; bx = cx + ox; by = cy + oy; }
       }
       if (bx !== cx || by !== cy) {
@@ -52,7 +59,7 @@ export function walk(a, tx, ty, speed, dt, world) {
         const nx = a.x + (mx / md) * step, ny = a.y + (my / md) * step;
         // Strictly prevent taking a step into water
         if (world.walkable(nx, ny) && (!world.isWater || !world.isWater(nx, ny))) {
-          a.x = nx; a.y = ny;
+          a.x = wrap(nx, MW); a.y = wrap(ny, MH);
           a.facing = mx >= 0 ? 1 : -1;
           a.stuck = 0;
           return false;
@@ -66,7 +73,7 @@ export function walk(a, tx, ty, speed, dt, world) {
     const ang = base + off * (a.side || 1);
     const nx = a.x + Math.cos(ang) * step, ny = a.y + Math.sin(ang) * step;
     if (world.walkable(nx, ny) && (!world.isWater || !world.isWater(nx, ny))) {
-      a.x = nx; a.y = ny;
+      a.x = wrap(nx, MW); a.y = wrap(ny, MH);
       a.facing = Math.cos(ang) >= 0 ? 1 : -1;
       return false;
     }
@@ -89,24 +96,26 @@ export function jitter(n = 1) { return rand(-n, n); }
 
 // Sail across water toward a dock, following the sea distance field. True on arrival.
 export function sail(b, tx, ty, speed, dt, world) {
-  const d = Math.hypot(tx - b.x, ty - b.y);
+  const [MW, MH] = sizeOf(world);
+  b.x = wrap(b.x, MW); b.y = wrap(b.y, MH);
+  let mx = wrapDelta(tx, b.x, MW), my = wrapDelta(ty, b.y, MH);
+  const d = Math.hypot(mx, my);
   if (d < 1.5) return true;
   const step = Math.min(d, speed * dt);
   const f = world.seaField(tx, ty);
-  const W = 320;
   const cx = Math.round(b.x), cy = Math.round(b.y);
-  const here = f[cy * W + cx];
-  let mx = tx - b.x, my = ty - b.y;
+  const at = (x, y) => f[wrap(y, MH) * MW + wrap(x, MW)];
+  const here = at(cx, cy);
   if (here > 0) {
     let best = here, bx = cx, by = cy;
     for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
-      const v = f[(cy + oy) * W + (cx + ox)];
+      const v = at(cx + ox, cy + oy);
       if (v >= 0 && v < best) { best = v; bx = cx + ox; by = cy + oy; }
     }
     mx = bx - b.x; my = by - b.y;
   }
   const md = Math.hypot(mx, my) || 1;
-  b.x += (mx / md) * step; b.y += (my / md) * step;
+  b.x = wrap(b.x + (mx / md) * step, MW); b.y = wrap(b.y + (my / md) * step, MH);
   b.facing = mx >= 0 ? 1 : -1;
   return false;
 }

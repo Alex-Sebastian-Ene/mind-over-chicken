@@ -41,11 +41,13 @@ export class Cosmos extends ZoomState {
     this.wheelAt = 0;
     this.lastRun = null;
     this.onEvent = null;
-    // East–west pan of the flat surface (world px). The map is a planet, so it wraps.
-    this.panX = 0;
-    this.panVel = 0;
-    this.panVelY = 0;      // north–south pan (other worlds' surfaces only)
-    this.panned = Object.assign(document.createElement('canvas'), { width: W, height: H });
+    // The home world is bigger than the screen (#129): a Rust ViewCamera (main.js hands it
+    // over with setViewCamera) is the 320×180 window onto it, panning and wrapping both ways.
+    this.view = null;
+    this.panVel = 0;       // east–west pan speed (A/D)
+    this.panVelY = 0;      // north–south pan speed (W/S)
+    // A scene with its own camera (the civ sandbox) takes the pan instead: return true if handled.
+    this.panSink = null;
     this.homeHuds = new WeakMap();
     this.castProxies = new WeakMap();
   }
@@ -57,7 +59,31 @@ export class Cosmos extends ZoomState {
   get surfaceInView() { return this.aiSurfaceInView ? this.world()?.surface || null : null; }
 
   reset() {
-    this.galaxy = null; this.z = 0; this.target = 0; this.focus = null; this.hover = null; this.sandbox = false; this.drag = null; this.lastRun = null; this.panX = 0; this.panVel = 0; this.panVelY = 0;
+    this.galaxy = null; this.z = 0; this.target = 0; this.focus = null; this.hover = null; this.sandbox = false; this.drag = null; this.lastRun = null; this.panVel = 0; this.panVelY = 0;
+  }
+
+  // ---- the home world's camera (#129) ----
+  setViewCamera(cam) { this.view = cam; }
+  // A new home world: size the camera to it and look at the village.
+  attachWorld(world) {
+    if (!this.view || !world) return;
+    this.view.set_world(world.width || W, world.height || H);
+    const v = world.sites?.village;
+    if (v) this.view.set_center(v.x, v.y);
+  }
+  get worldW() { return this.view ? this.view.world_w() : W; }
+  get worldH() { return this.view ? this.view.world_h() : H; }
+  // Screen (view px) → home world px.
+  toWorld(sx, sy) {
+    if (!this.view || this.surfaceInView) return { x: sx, y: sy };
+    return { x: this.view.to_world_x(sx), y: this.view.to_world_y(sy) };
+  }
+  // The world point in the middle of the screen (scenes put screen-wide effects around it).
+  viewCenter() { return this.view ? { x: this.view.center_x(), y: this.view.center_y() } : { x: W / 2, y: H / 2 }; }
+  // Home world px → screen (view px) of the copy nearest the middle of the screen.
+  toScreen(wx, wy) {
+    if (!this.view || this.surfaceInView) return { x: wx, y: wy };
+    return { x: this.view.to_screen_x(wx), y: this.view.to_screen_y(wy) };
   }
 
   ensureGalaxy(G, { autonomousHome = false } = {}) {
@@ -89,39 +115,39 @@ export class Cosmos extends ZoomState {
   centerColumn() {
     const s = this.surfaceKind() === 'ai' ? this.world()?.surface : null;
     if (s) return s.centerColumn();
-    return (((W / 2 - this.panX) % W) + W) % W;
+    return this.view ? (this.view.center_x() / this.worldW) * W : W / 2;
   }
 
   // ---- planetary pan of the flat surface ----
-  // Home: east–west only (the campaign map is 320 wide). Other worlds: their vast surface pans
-  // both ways (east–west wraps, north–south stops at the poles).
+  // Home: the camera pans both ways over the bigger world and wraps (a torus, #111, #129).
+  // Other worlds: their vast surface pans itself.
   pan(dx, dy = 0) {
+    if (this.panSink?.(dx, dy)) return;
     const s = this.surfaceInView;
     if (s) { s.pan(dx, dy); return; }
-    this.panX = (((this.panX + dx) % W) + W) % W;
+    this.view?.pan(dx, dy);
   }
-  // Screen x (world px, 0..W) → map x, undoing the pan. Other worlds' surfaces take screen aims.
+  // Screen x (view px) → map x. Other worlds' surfaces take screen aims.
   mapX(screenX) {
-    if (this.surfaceInView) return screenX;
-    return (((screenX - this.panX) % W) + W) % W;
+    if (this.surfaceInView || !this.view) return screenX;
+    return this.view.to_world_x(screenX);
   }
-  // Shift the finished surface frame by the pan, wrapping east–west.
-  applyPan(low) {
-    if (this.surfaceInView) return;   // already drawn at its own pan
-    const off = Math.round(this.panX);
-    if (!off) return;
-    const pctx = this.panned.getContext('2d');
-    pctx.clearRect(0, 0, W, H);
-    pctx.drawImage(low, 0, 0);
+  // Paint the camera's window of a world-sized canvas into the low-res view canvas, cut at the
+  // seams so the map wraps both ways.
+  blitView(worldCanvas, low) {
     const lctx = low.getContext('2d');
-    lctx.clearRect(0, 0, W, H);
-    lctx.drawImage(this.panned, off, 0);
-    lctx.drawImage(this.panned, off - W, 0);
+    lctx.imageSmoothingEnabled = false;
+    if (!this.view) { lctx.drawImage(worldCanvas, 0, 0); return; }
+    const r = this.view.blits();
+    for (let i = 0; i < r.length; i += 6) lctx.drawImage(worldCanvas, r[i], r[i + 1], r[i + 2], r[i + 3], r[i + 4], r[i + 5], r[i + 2], r[i + 3]);
   }
-  // X offsets (world px) at which to repeat crisp overlays so they wrap with the map.
-  overlayOffsets() {
-    if (this.surfaceInView) return [0];
-    const o = Math.round(this.panX); return o ? [o, o - W] : [0];
+  // [ox, oy] translations (world px → view px) at which to repeat world-space overlays and lights
+  // so they wrap with the map: one per copy of the world reaching the screen (+margin).
+  overlayOffsets(margin = 24) {
+    if (this.surfaceInView || !this.view) return [[0, 0]];
+    const c = this.view.copies(margin), out = [];
+    for (let i = 0; i < c.length; i += 2) out.push([c[i], c[i + 1]]);
+    return out;
   }
 
   // What the surface level shows and takes input: the home campaign's scene, or another world's surface.

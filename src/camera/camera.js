@@ -136,6 +136,7 @@ export function initCamera({
   castsEnabled = CAMERA_CASTS_ENABLED,
   mapX = (x) => x,
   screenX = (x) => x,
+  screenY = (y) => y,   // the home world is bigger than the screen (#129): aims map back through the camera
   onZoomDelta = null,
   onWave = null,
   getContext = () => 'surface',
@@ -369,7 +370,7 @@ export function initCamera({
   $('[data-cam-close]').addEventListener('click', () => togglePanel(false));
   window.addEventListener('pagehide', () => { if (stream || status === 'starting') stop(); });
 
-  const reticleOnScreen = (G) => ({ x: clamp(screenX(G.brain.aim.x)), y: G.brain.aim.y });
+  const reticleOnScreen = (G) => ({ x: clamp(screenX(G.brain.aim.x)), y: clamp(screenY(G.brain.aim.y)) });
 
   // ---------- living-entity grab (#120) ----------
   function tryGrabStart(G, now) {
@@ -769,7 +770,7 @@ export function initCamera({
     }
     for (const p of pings) {
       const k = (now - p.at) / PING_MS;
-      const x = screenX(p.x) * cw, y = p.y * ch;
+      const x = screenX(p.x) * cw, y = screenY(p.y) * ch;
       fxCtx.globalAlpha = 1 - k;
       fxCtx.lineWidth = u;
       fxCtx.strokeStyle = '#ffcf4a';

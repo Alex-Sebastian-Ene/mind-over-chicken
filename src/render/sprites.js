@@ -248,11 +248,14 @@ export function drawGantry(ctx, x, y, h = 24) {
 
 // Jagged lightning bolt from the sky to a target; returns the polyline.
 export function makeBolt(tx, ty) {
-  const pts = [{ x: tx + (Math.random() - 0.5) * 30, y: -4 }];
+  // From the sky: the top of a 180-px screen, or at most a screen's height above the target on a
+  // bigger world (#129), so the bolt is the same length wherever it strikes.
+  const y0 = ty > 176 ? ty - 180 : -4;
+  const pts = [{ x: tx + (Math.random() - 0.5) * 30, y: y0 }];
   const steps = 9;
   for (let i = 1; i < steps; i++) {
     const t = i / steps;
-    pts.push({ x: pts[0].x + (tx - pts[0].x) * t + (Math.random() - 0.5) * 9, y: ty * t });
+    pts.push({ x: pts[0].x + (tx - pts[0].x) * t + (Math.random() - 0.5) * 9, y: y0 + (ty - y0) * t });
   }
   pts.push({ x: tx, y: ty });
   return pts;

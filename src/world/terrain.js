@@ -1,8 +1,9 @@
 // One procedurally generated world that the civilisation lives on for the whole game: a home
-// continent and two smaller ones across the sea. Each era repaints the same land: wild in the
+// continent and others across the sea (six on the 640×360 home world, #129; the map is a
+// torus, #111). Each era repaints the same land: wild in the
 // Stone Age, farmed and built up later, with settlements spreading to the other continents.
 
-import { W, H, clamp, lerp, mulberry32, dist } from '../sim/util.js';
+import { W, H, HOME_W, HOME_H, clamp, lerp, mulberry32, dist, wrap, wrapDelta } from '../sim/util.js';
 import { drawHouse, drawHut, drawFactory, drawExchange, drawTower, drawHangar, drawPad } from '../render/sprites.js';
 
 export const T = { DEEP: 0, SHALLOW: 1, SAND: 2, GRASS: 3, FOREST: 4, HILL: 5, MOUNTAIN: 6, SNOW: 7, FARM: 8, ROAD: 9, PAVED: 10 };
@@ -65,120 +66,244 @@ function makeNoise(rng) {
   };
 }
 
+// Value noise that tiles a w × h torus (#111): the lattice has a whole number of cells across
+// each axis at every octave, so the map has no seam either way. Sampled in map pixels.
+function makeTorusNoise(rng, w, h, cell) {
+  const nx = Math.max(1, Math.round(w / cell)), ny = Math.max(1, Math.round(h / cell));
+  const octaves = [];
+  for (let o = 0, f = 1; o < 6; o++, f *= 2) {
+    const gx = nx * f, gy = ny * f;
+    octaves.push({ gx, gy, sx: gx / w, sy: gy / h, grid: new Float32Array(gx * gy).map(() => rng()) });
+  }
+  const sm = (t) => t * t * (3 - 2 * t);
+  return (x, y, oct = 4) => {
+    let s = 0, a = 0.5, norm = 0;
+    for (let i = 0; i < oct; i++) {
+      const { gx, gy, sx, sy, grid } = octaves[i];
+      const fx = x * sx, fy = y * sy;
+      const xi = Math.floor(fx), yi = Math.floor(fy);
+      const xf = sm(fx - xi), yf = sm(fy - yi);
+      const x0 = ((xi % gx) + gx) % gx, y0 = ((yi % gy) + gy) % gy;
+      const x1 = (x0 + 1) % gx, y1 = (y0 + 1) % gy;
+      const v = lerp(lerp(grid[y0 * gx + x0], grid[y0 * gx + x1], xf), lerp(grid[y1 * gx + x0], grid[y1 * gx + x1], xf), yf);
+      s += a * v; norm += a; a *= 0.5;
+    }
+    return s / norm;
+  };
+}
+
 let RustWorldGenClass = null;
 
+// The Rust generator (#109) takes over the home world once it builds this World's size: it
+// must answer width()/height() equal to the requested size (640×360 for the campaign, #129).
 export function setRustWorldGen(cls) {
   RustWorldGenClass = cls;
 }
 
+const VIEW_SIZE = (w, h) => w === W && h === H;
+
 export class World {
+  // opts.width/height: the map's size in pixels. The campaign's home world is HOME_W×HOME_H
+  // (640×360, #129) seen through a 320×180 camera; galaxy planets keep a 320×180 core
+  // (their vast surfaces are built around it, cosmos/vast.js).
   constructor(seed = (Math.random() * 1e9) | 0, opts = {}) {
     this.seed = seed;
     this.biome = opts.biome && BIOMES[opts.biome] ? opts.biome : 'temperate';
     this.palette = BIOMES[this.biome];
-    this.h = new Float32Array(W * H);
-    this.type = new Uint8Array(W * H);
+    this.width = opts.width || HOME_W;
+    this.height = opts.height || HOME_H;
+    this.h = new Float32Array(this.width * this.height);   // heights 0..1 (sea level 0.33)
+    this.type = new Uint8Array(this.width * this.height);
     this.baseType = null;
     this.layers = {};
     this.generate();
   }
 
-  generate() {
-    if (RustWorldGenClass && (!this.biome || this.biome === 'temperate')) {
-      try {
-        const rustGen = new RustWorldGenClass(this.seed >>> 0);
-        this.h = rustGen.heights();
-        this.type = rustGen.types();
-        this.baseType = this.type.slice();
-        this.sites = JSON.parse(rustGen.sites_json());
-        this.continents = JSON.parse(rustGen.continents_json());
-        this.owner = new Uint8Array(W * H);
-        for (let y = 0; y < H; y++) {
-          for (let x = 0; x < W; x++) {
-            let best = -9, owner = 0;
-            this.continents.forEach((c, i) => {
-              const rx = (x - c.cx) / (c.rx || 60), ry = (y - c.cy) / (c.ry || 40);
-              const b = 1 - (rx * rx + ry * ry);
-              if (b > best) { best = b; owner = i; }
-            });
-            this.owner[y * W + x] = owner;
-          }
-        }
-        for (const [k, pt] of Object.entries(this.sites)) {
-          if (pt && typeof pt.x === 'number' && typeof pt.y === 'number') {
-            if (!this.walkable(pt.x, pt.y) && k !== 'harbour' && k !== 'caveMouth') {
-              this.sites[k] = this.nearestWalkable(pt.x, pt.y);
-            }
-          }
-        }
-        this.initHarbors();
-        return;
-      } catch (err) {
-        console.warn('RustWorldGen failed, falling back to JS terrain generator:', err);
-      }
-    }
+  // Index of map pixel (x, y), wrapping both ways: the world is a torus (#111).
+  idx(x, y) {
+    const w = this.width, h = this.height;
+    x = Math.round(x) % w; if (x < 0) x += w;
+    y = Math.round(y) % h; if (y < 0) y += h;
+    return y * w + x;
+  }
+  wrapX(x) { return wrap(x, this.width); }
+  wrapY(y) { return wrap(y, this.height); }
+  dx(a, b) { return wrapDelta(a, b, this.width); }
+  dy(a, b) { return wrapDelta(a, b, this.height); }
+  // Distance the short way round.
+  dist(ax, ay, bx, by) { return Math.hypot(this.dx(ax, bx), this.dy(ay, by)); }
+  // Aims (the brain's, the mouse's, the AI's) are 0..1 of the world: the map pixel under one,
+  // and the aim at a map pixel.
+  aimPoint(aim) { return { x: this.wrapX(Math.round(aim.x * this.width)), y: this.wrapY(Math.round(aim.y * this.height)) }; }
+  aimOf(x, y) { return { x: this.wrapX(x) / this.width, y: this.wrapY(y) / this.height }; }
 
+  generate() {
+    if (RustWorldGenClass && (!this.biome || this.biome === 'temperate') && this.fromRust()) return;
+    if (VIEW_SIZE(this.width, this.height)) this.generateClassic();
+    else this.generateTorus();
+  }
+
+  // The Rust generator, when it builds exactly this size. False (and nothing changed) otherwise.
+  fromRust() {
+    let gen = null;
+    try {
+      gen = new RustWorldGenClass(this.seed >>> 0);
+      const gw = typeof gen.width === 'function' ? gen.width() : W;
+      const gh = typeof gen.height === 'function' ? gen.height() : H;
+      if (gw !== this.width || gh !== this.height) { gen.free?.(); return false; }
+      const w = this.width, h = this.height;
+      this.h = gen.heights();
+      this.type = gen.types();
+      this.baseType = this.type.slice();
+      this.sites = JSON.parse(gen.sites_json());
+      this.continents = JSON.parse(gen.continents_json());
+      gen.free?.();
+      this.owner = new Uint8Array(w * h);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          let best = -9, owner = 0;
+          this.continents.forEach((c, i) => {
+            const rx = this.dx(x, c.cx) / (c.rx || 60), ry = this.dy(y, c.cy) / (c.ry || 40);
+            const b = 1 - (rx * rx + ry * ry);
+            if (b > best) { best = b; owner = i; }
+          });
+          this.owner[y * w + x] = owner;
+        }
+      }
+      for (const [k, pt] of Object.entries(this.sites)) {
+        if (pt && typeof pt.x === 'number' && typeof pt.y === 'number' && !this.walkable(pt.x, pt.y) && k !== 'harbour' && k !== 'caveMouth') {
+          this.sites[k] = this.nearestWalkable(pt.x, pt.y);
+        }
+      }
+      this.initHarbors();
+      return true;
+    } catch (err) {
+      console.warn('RustWorldGen failed, falling back to the JS terrain generator:', err);
+      gen?.free?.();
+      return false;
+    }
+  }
+
+  // The original 320×180 map: a home continent on the left two thirds, two smaller ones across
+  // the sea. Kept pixel for pixel for galaxy planets (vast.js embeds it).
+  generateClassic() {
     const rng = mulberry32(this.seed);
     const noise = makeNoise(rng);
     const moist = makeNoise(mulberry32(this.seed ^ 0x9e3779b9));
-    // The home continent fills the left two thirds; two smaller continents sit across the sea.
     const conts = [
       { id: 'home', cx: 124, cy: 96, rx: 98, ry: 66 },
       { id: 'north', cx: 268 + rng() * 10, cy: 48 + rng() * 8, rx: 40 + rng() * 6, ry: 30 + rng() * 4 },
       { id: 'south', cx: 266 + rng() * 10, cy: 138 + rng() * 6, rx: 38 + rng() * 6, ry: 26 + rng() * 4 },
     ];
+    this.shapeLand({
+      conts, rng, noise, moist,
+      nscale: 1 / 24, mscale: 1 / 18, lift: 0, torus: false,
+    });
+  }
+
+  // A bigger torus (#129, 640×360): the home continent, the same size as on the classic map so
+  // the village fits the 320×180 camera, and five more continents, one per cell of a 3×2 grid
+  // with open sea along every cell border (so no landmass straddles the map's seams).
+  generateTorus() {
+    const w = this.width, h = this.height;
+    const rng = mulberry32(this.seed);
+    const cols = 3, rows = 2, cw = w / cols, ch = h / rows;
+    const homeCell = { c: Math.floor(rng() * cols), r: Math.floor(rng() * rows) };
+    const conts = [];
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const ccx = (c + 0.5) * cw, ccy = (r + 0.5) * ch;
+      if (c === homeCell.c && r === homeCell.r) {
+        conts.unshift({ id: 'home', cx: Math.round(ccx + (rng() - 0.5) * 6), cy: Math.round(ccy + (rng() - 0.5) * 6), rx: 98, ry: 66 });
+        continue;
+      }
+      const jx = (rng() - 0.5) * 14, jy = (rng() - 0.5) * 12;
+      const rx = Math.min(cw / 2 - 12 - Math.abs(jx), cw * (0.36 + rng() * 0.08));
+      const ry = Math.min(ch / 2 - 12 - Math.abs(jy), ch * (0.33 + rng() * 0.08));
+      conts.push({ id: `land${conts.length + 1}`, cx: Math.round(ccx + jx), cy: Math.round(ccy + jy), rx: Math.round(rx), ry: Math.round(ry) });
+    }
+    // Nearest first: the order a growing tribe sends its rafts.
+    const home = conts.find((c) => c.id === 'home');
+    const others = conts.filter((c) => c !== home).sort((a, b) => this.dist(a.cx, a.cy, home.cx, home.cy) - this.dist(b.cx, b.cy, home.cx, home.cy));
+    others.forEach((c, i) => { c.id = `land${i + 1}`; });
+    this.shapeLand({
+      conts: [home, ...others], rng,
+      noise: makeTorusNoise(rng, w, h, 24), moist: makeTorusNoise(mulberry32(this.seed ^ 0x9e3779b9), w, h, 18),
+      nscale: 1, mscale: 1, lift: 0.045, torus: true,
+    });
+  }
+
+  // Heights, land types, sites and harbours from continent ellipses plus noise. The village and
+  // launch pad sit at fixed offsets inside the home continent (meadow, coastal plain, corridor).
+  shapeLand({ conts, rng, noise, moist, nscale, mscale, lift, torus }) {
+    const w = this.width, h = this.height, hw = w / 2, hh2 = h / 2;
+    // Signed offsets the short way round on a torus (inputs are within one period).
+    const ddx = torus ? (d) => (d > hw ? d - w : d < -hw ? d + w : d) : (d) => d;
+    const ddy = torus ? (d) => (d > hh2 ? d - h : d < -hh2 ? d + h : d) : (d) => d;
     this.continents = conts;
-    const cx = conts[0].cx, cy = conts[0].cy;
+    const home = conts[0], cx = home.cx, cy = home.cy;
+    // Offsets from the classic map, where home is centred at (124, 96).
     this.sites = {
-      village: { x: 116, y: 100 },
-      pad: { x: 198, y: 104 },
+      village: { x: cx - 8, y: cy + 4 },
+      pad: { x: cx + 74, y: cy + 8 },
     };
     const v = this.sites.village, p = this.sites.pad;
     const ridgeA = { x: cx - 48 + rng() * 10, y: cy - 30 + rng() * 8 };
     const ridgeB = { x: cx + 36 + rng() * 10, y: cy - 38 + rng() * 6 };
     this.sites.ridge = ridgeA;
-    this.owner = new Uint8Array(W * H);
+    this.owner = new Uint8Array(w * h);
+    const owners = this.owner, heights = this.h, types = this.type;
+    const pvx = p.x - v.x, pvy = p.y - v.y, pv2 = pvx * pvx + pvy * pvy;
+    const nc = conts.length;
+    const ccx = conts.map((c) => c.cx), ccy = conts.map((c) => c.cy), irx = conts.map((c) => 1 / c.rx), iry = conts.map((c) => 1 / c.ry);
+    const RA = 2 * 16 * 16, RB = 2 * 11 * 11;
 
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
         let best = -9, second = -9, owner = 0;
-        conts.forEach((c, i) => {
-          const rx = (x - c.cx) / c.rx, ry = (y - c.cy) / c.ry;
+        for (let i = 0; i < nc; i++) {
+          const rx = ddx(x - ccx[i]) * irx[i], ry = ddy(y - ccy[i]) * iry[i];
           const b = 1 - (rx * rx + ry * ry);
           if (b > best) { second = best; best = b; owner = i; } else if (b > second) second = b;
-        });
-        this.owner[y * W + x] = owner;
-        let h = best * 0.56 + (noise(x / 24, y / 24) - 0.5) * 0.56 + 0.12;
-        // Keep a strait of open water between neighbouring continents.
-        if (best - second < 0.22 && second > -1.2) h = Math.min(h, 0.2 + (best - second) * 0.4);
-        h += 0.3 * Math.exp(-((x - ridgeA.x) ** 2 + (y - ridgeA.y) ** 2) / (2 * 16 * 16));
-        h += 0.2 * Math.exp(-((x - ridgeB.x) ** 2 + (y - ridgeB.y) ** 2) / (2 * 11 * 11));
-        // Flatten a meadow for the village and a coastal plain for the launch pad.
-        const dv = dist(x, y, v.x, v.y);
-        if (dv < 30) h = lerp(0.5, h, clamp((dv - 18) / 12));
-        const dp = dist(x, y, p.x, p.y);
-        if (dp < 18) h = lerp(0.47, h, clamp((dp - 10) / 8));
-        // A walkable corridor from village to pad.
-        const t = clamp(((x - v.x) * (p.x - v.x) + (y - v.y) * (p.y - v.y)) / ((p.x - v.x) ** 2 + (p.y - v.y) ** 2));
-        const lx = v.x + (p.x - v.x) * t, ly = v.y + (p.y - v.y) * t + Math.sin(t * 9 + this.seed) * 5;
-        const dl = dist(x, y, lx, ly);
-        if (dl < 4) h = clamp(h, 0.42, 0.66);
-        // Small settlement meadows on the other continents.
-        for (let i = 1; i < conts.length; i++) {
-          const dc = dist(x, y, conts[i].cx, conts[i].cy);
-          if (dc < 12) h = lerp(0.48, h, clamp((dc - 6) / 6));
         }
-        this.h[y * W + x] = h;
+        const k = y * w + x;
+        owners[k] = owner;
+        let hh = best * 0.56 + (noise(x * nscale, y * nscale) - 0.5) * 0.56 + 0.12 + lift;
+        // Keep a strait of open water between neighbouring continents.
+        if (best - second < 0.22 && second > -1.2) hh = Math.min(hh, 0.2 + (best - second) * 0.4);
+        const ax = ddx(x - ridgeA.x), ay = ddy(y - ridgeA.y), a2 = ax * ax + ay * ay;
+        if (a2 < 9 * RA) hh += 0.3 * Math.exp(-a2 / RA);
+        const bx = ddx(x - ridgeB.x), by = ddy(y - ridgeB.y), b2 = bx * bx + by * by;
+        if (b2 < 9 * RB) hh += 0.2 * Math.exp(-b2 / RB);
+        // Flatten a meadow for the village and a coastal plain for the launch pad.
+        const qx = ddx(x - v.x), qy = ddy(y - v.y);
+        const dv = Math.sqrt(qx * qx + qy * qy);
+        if (dv < 30) hh = lerp(0.5, hh, clamp((dv - 18) / 12));
+        const px = ddx(x - p.x), py = ddy(y - p.y);
+        const dp = Math.sqrt(px * px + py * py);
+        if (dp < 18) hh = lerp(0.47, hh, clamp((dp - 10) / 8));
+        // A walkable corridor from village to pad.
+        const t = clamp((qx * pvx + qy * pvy) / pv2);
+        const lx = pvx * t, ly = pvy * t + Math.sin(t * 9 + this.seed) * 5;
+        const ex = qx - lx, ey = qy - ly, dl = Math.sqrt(ex * ex + ey * ey);
+        if (dl < 4) hh = clamp(hh, 0.42, 0.66);
+        // Small settlement meadows on the other continents.
+        for (let i = 1; i < nc; i++) {
+          const mx = ddx(x - ccx[i]), my = ddy(y - ccy[i]);
+          if (mx > 12 || mx < -12 || my > 12 || my < -12) continue;
+          const dc = Math.sqrt(mx * mx + my * my);
+          if (dc < 12) hh = lerp(0.48, hh, clamp((dc - 6) / 6));
+        }
+        heights[k] = hh;
 
         let ty;
-        if (h < 0.24) ty = T.DEEP;
-        else if (h < 0.33) ty = T.SHALLOW;
-        else if (h < 0.37) ty = T.SAND;
-        else if (h < 0.66) ty = moist(x / 18, y / 18) > 0.56 && dv > 26 && dp > 16 && dl > 4 ? T.FOREST : T.GRASS;
-        else if (h < 0.76) ty = T.HILL;
-        else if (h < 0.9) ty = T.MOUNTAIN;
+        if (hh < 0.24) ty = T.DEEP;
+        else if (hh < 0.33) ty = T.SHALLOW;
+        else if (hh < 0.37) ty = T.SAND;
+        else if (hh < 0.66) ty = moist(x * mscale, y * mscale) > 0.56 && dv > 26 && dp > 16 && dl > 4 ? T.FOREST : T.GRASS;
+        else if (hh < 0.76) ty = T.HILL;
+        else if (hh < 0.9) ty = T.MOUNTAIN;
         else ty = T.SNOW;
-        this.type[y * W + x] = ty;
+        types[k] = ty;
       }
     }
     this.baseType = this.type.slice();
@@ -215,42 +340,39 @@ export class World {
     const home = this.continents[0];
     if (home) {
       for (const c of this.continents.slice(1)) {
-        c.harbor = this.coastToward(c.village, home.village, (x, y) => this.owner[y * W + x] !== 0);
-        c.homeHarbor = this.coastToward(home.village, c.village, (x, y) => this.owner[y * W + x] === 0);
+        c.harbor = this.coastToward(c.village, home.village, (i) => this.owner[i] !== 0);
+        c.homeHarbor = this.coastToward(home.village, c.village, (i) => this.owner[i] === 0);
       }
     }
   }
 
-  // Walk from `from` toward `to`: the last walkable pixel before the sea is the quay,
-  // the first water pixel is the dock where boats tie up.
+  // Walk from `from` toward `to` (the short way round): the last walkable pixel before the sea
+  // is the quay, the first water pixel is the dock where boats tie up.
   coastToward(from, to, pred) {
-    const n = Math.ceil(dist(from.x, from.y, to.x, to.y));
+    const ex = from.x + this.dx(to.x, from.x), ey = from.y + this.dy(to.y, from.y);
+    const n = Math.max(1, Math.ceil(Math.hypot(ex - from.x, ey - from.y)));
     let last = { ...from };
     for (let i = 0; i <= n; i++) {
-      const x = Math.round(lerp(from.x, to.x, i / n)), y = Math.round(lerp(from.y, to.y, i / n));
+      const x = this.wrapX(Math.round(lerp(from.x, ex, i / n))), y = this.wrapY(Math.round(lerp(from.y, ey, i / n)));
       if (this.isWater(x, y)) return { land: last, dock: { x, y } };
-      if (this.walkable(x, y) && (!pred || pred(x, y))) last = { x, y };
+      if (this.walkable(x, y) && (!pred || pred(this.idx(x, y)))) last = { x, y };
     }
     return { land: last, dock: this.nearestWater(last.x, last.y) };
   }
 
   nearestWater(x, y, maxR = 30) {
     for (let r = 1; r <= maxR; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
-      if (Math.max(Math.abs(dx), Math.abs(dy)) === r && this.isWater(x + dx, y + dy)) return { x: x + dx, y: y + dy };
+      if (Math.max(Math.abs(dx), Math.abs(dy)) === r && this.isWater(x + dx, y + dy)) return { x: this.wrapX(x + dx), y: this.wrapY(y + dy) };
     }
     return { x, y };
   }
 
-  get(x, y) {
-    x = Math.round(x); y = Math.round(y);
-    if (x < 0 || y < 0 || x >= W || y >= H) return T.DEEP;
-    return this.type[y * W + x];
-  }
+  get(x, y) { return this.type[this.idx(x, y)]; }
   walkable(x, y) { const t = this.get(x, y); return t >= T.SAND && t !== T.MOUNTAIN && t !== T.SNOW; }
   isWater(x, y) { return this.get(x, y) <= T.SHALLOW; }
 
   nearestWalkable(x, y, maxR = 60) {
-    x = Math.round(x); y = Math.round(y);
+    x = this.wrapX(Math.round(x)); y = this.wrapY(Math.round(y));
     if (this.walkable(x, y)) return { x, y };
     let fallback = null;
     for (let r = 1; r <= maxR; r++) {
@@ -258,8 +380,9 @@ export class World {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
         const px = x + dx, py = y + dy;
         if (this.walkable(px, py)) {
-          if (this.get(px, py) !== T.FOREST) return { x: px, y: py };
-          fallback ??= { x: px, y: py };
+          const pt = { x: this.wrapX(px), y: this.wrapY(py) };
+          if (this.get(px, py) !== T.FOREST) return pt;
+          fallback ??= pt;
         }
       }
     }
@@ -270,7 +393,7 @@ export class World {
   randomLand(x, y, rMin, rMax, pred) {
     for (let i = 0; i < 80; i++) {
       const a = Math.random() * Math.PI * 2, r = rMin + Math.random() * (rMax - rMin);
-      const px = Math.round(x + Math.cos(a) * r), py = Math.round(y + Math.sin(a) * r);
+      const px = this.wrapX(Math.round(x + Math.cos(a) * r)), py = this.wrapY(Math.round(y + Math.sin(a) * r));
       if (this.walkable(px, py) && (!pred || pred(px, py))) return { x: px, y: py };
     }
     return this.nearestWalkable(x, y);
@@ -283,11 +406,12 @@ export class World {
     this.structures = [];
     const v = this.sites.village, s = this.sites;
     const rng = mulberry32(this.seed + 17);
-    const setT = (x, y, t) => { if (x >= 0 && y >= 0 && x < W && y < H) this.type[y * W + x] = t; };
+    const setT = (x, y, t) => { this.type[this.idx(x, y)] = t; };
     const road = (a, b, w = 1) => {
-      const n = Math.ceil(dist(a.x, a.y, b.x, b.y));
+      const ex = a.x + this.dx(b.x, a.x), ey = a.y + this.dy(b.y, a.y);
+      const n = Math.max(1, Math.ceil(Math.hypot(ex - a.x, ey - a.y)));
       for (let i = 0; i <= n; i++) {
-        const x = Math.round(lerp(a.x, b.x, i / n)), y = Math.round(lerp(a.y, b.y, i / n));
+        const x = Math.round(lerp(a.x, ex, i / n)), y = Math.round(lerp(a.y, ey, i / n));
         for (let d = 0; d < w; d++) if (this.walkable(x, y + d)) setT(x, y + d, T.ROAD);
       }
     };
@@ -318,7 +442,7 @@ export class World {
         const n = era === 'farming' ? 5 : 8;
         for (let i = 0; i < n; i++) {
           const a = (i / n) * Math.PI * 2;
-          const x = Math.round(c.village.x + Math.cos(a) * 7), y = Math.round(c.village.y + Math.sin(a) * 5);
+          const x = this.wrapX(Math.round(c.village.x + Math.cos(a) * 7)), y = this.wrapY(Math.round(c.village.y + Math.sin(a) * 5));
           if (!this.walkable(x, y)) continue;
           if (era === 'farming') this.structures.push({ kind: 'hut', x, y });
           else if (era === 'space' && i % 3 === 0) this.structures.push({ kind: 'tower', x, y, h: 7 + (i % 4) });
@@ -334,7 +458,6 @@ export class World {
       road({ x: v.x, y: v.y - 22 }, { x: v.x, y: v.y + 22 });
       for (let y = -2; y <= 2; y++) for (let x = -3; x <= 3; x++) setT(v.x + x, v.y + y, T.PAVED);
       const roofs = era === 'industry' ? ['#a4402f', '#8e3b2a', '#b5543a', '#6f4a3a'] : ['#5a6b8c', '#7f8fa8', '#a4402f', '#4d5d7a'];
-      let placed = 0;
       for (let ring = 0; ring < 3; ring++) {
         const n = 10 + ring * 6;
         for (let i = 0; i < n; i++) {
@@ -343,7 +466,6 @@ export class World {
           if (!this.walkable(x, y) || dist(x, y, s.exchange.x, s.exchange.y) < 9 || dist(x, y, s.factory.x, s.factory.y) < 12) continue;
           if (era === 'space' && ring === 0 && i % 2 === 0) this.structures.push({ kind: 'tower', x, y, h: 8 + Math.floor(rng() * 7) });
           else this.structures.push({ kind: 'house', x, y, roof: roofs[(i + ring) % roofs.length] });
-          placed++;
         }
       }
       this.structures.push({ kind: 'factory', x: s.factory.x, y: s.factory.y, smoke: era === 'industry' });
@@ -357,36 +479,38 @@ export class World {
     this.structures.sort((a, b) => a.y - b.y);
   }
 
-  // Bake terrain + static structures into pixel canvases (2D flat and 3D clean landscape).
+  // Bake terrain + static structures into pixel canvases the size of the world (2D flat and 3D
+  // clean landscape).
   paint(era) {
     this.shape(era);
     this.layers3d ||= {};
+    const w = this.width, h = this.height;
 
     // 1. Collect 3D tree coordinates for forest tiles
     this.trees = [];
     const trng = mulberry32(this.seed + 5);
-    for (let y = 1; y < H; y += 2) for (let x = (y >> 1) % 2; x < W; x += 2) {
-      if (this.type[y * W + x] !== T.FOREST || trng() > 0.7) continue;
+    for (let y = 1; y < h; y += 2) for (let x = (y >> 1) % 2; x < w; x += 2) {
+      if (this.type[y * w + x] !== T.FOREST || trng() > 0.7) continue;
       this.trees.push({ x, y, variant: trng() > 0.5 ? 1 : 0 });
     }
 
     // 2. Base landscape texture (used for 3D terrain mesh upload: no flat structure or tree decals)
     const c3d = document.createElement('canvas');
-    c3d.width = W; c3d.height = H;
+    c3d.width = w; c3d.height = h;
     const ctx3d = c3d.getContext('2d');
-    const img = ctx3d.createImageData(W, H);
+    const img = ctx3d.createImageData(w, h);
     const rng = mulberry32(this.seed + 3);
-    for (let i = 0; i < W * H; i++) {
+    for (let i = 0; i < w * h; i++) {
       const t = this.type[i];
-      const x = i % W, y = (i / W) | 0;
+      const x = i % w, y = (i / w) | 0;
       let col;
       if (t === T.FARM) col = this.palette[T.FARM][(y >> 1) % 2];
       else { const pal = this.palette[t]; col = pal[Math.floor(rng() * pal.length)]; }
       let [r, g, b] = col;
-      // Gentle relief shading from the heightmap so hills read as hills.
+      // Gentle relief shading from the heightmap so hills read as hills (neighbours wrap).
       if (t >= T.SAND && t !== T.ROAD && t !== T.PAVED && t !== T.FARM) {
-        const dx = this.h[i] - (x > 0 ? this.h[i - 1] : this.h[i]);
-        const dy = this.h[i] - (y > 0 ? this.h[i - W] : this.h[i]);
+        const dx = this.h[i] - this.h[y * w + (x > 0 ? x - 1 : w - 1)];
+        const dy = this.h[i] - this.h[(y > 0 ? y - 1 : h - 1) * w + x];
         const shade = clamp(1 + (dx + dy) * 7, 0.78, 1.2);
         r *= shade; g *= shade; b *= shade;
       }
@@ -406,14 +530,14 @@ export class World {
 
     // 3. 2D fallback / globe texture (with flat painted trees and structures)
     const c2d = document.createElement('canvas');
-    c2d.width = W; c2d.height = H;
+    c2d.width = w; c2d.height = h;
     const ctx2d = c2d.getContext('2d');
     ctx2d.drawImage(c3d, 0, 0);
 
     // Flat tree crowns for 2D mode
     const trng2 = mulberry32(this.seed + 5);
-    for (let y = 1; y < H; y += 2) for (let x = (y >> 1) % 2; x < W; x += 2) {
-      if (this.type[y * W + x] !== T.FOREST || trng2() > 0.7) continue;
+    for (let y = 1; y < h; y += 2) for (let x = (y >> 1) % 2; x < w; x += 2) {
+      if (this.type[y * w + x] !== T.FOREST || trng2() > 0.7) continue;
       const tc = this.palette.trees;
       ctx2d.fillStyle = tc[0]; ctx2d.fillRect(x, y, 1, 1);
       ctx2d.fillStyle = trng2() > 0.5 ? tc[1] : tc[2]; ctx2d.fillRect(x, y - 1, 1, 1);
@@ -433,73 +557,58 @@ export class World {
     return c2d;
   }
 
-  // Draw 3D trees and structures as upright billboards standing on the terrain
-  draw3d(engine) {
+  // Draw 3D trees and structures as upright billboards standing on the terrain. With a world
+  // bigger than the view (#129), only those near the camera target are sent: `near(x, y)`.
+  draw3d(engine, near = null) {
     if (!engine) return;
-    // 3D Trees across forest tiles
     if (this.trees) {
       for (const t of this.trees) {
+        if (near && !near(t.x, t.y)) continue;
         engine.add_billboard(14, t.x, t.y, 1, 0, t.variant || 0);
       }
     }
-    // 3D Structures
     if (this.structures) {
+      const SPRITE = { hut: 5, house: 6, tower: 7, factory: 8, exchange: 9, hangar: 10, pad: 11 };
       for (const s of this.structures) {
-        switch (s.kind) {
-          case 'hut':
-            engine.add_billboard(5, s.x, s.y, 1, 0, 0);
-            break;
-          case 'house':
-            engine.add_billboard(6, s.x, s.y, 1, 0, 0);
-            break;
-          case 'tower':
-            engine.add_billboard(7, s.x, s.y, 1, 0, 0);
-            break;
-          case 'factory':
-            engine.add_billboard(8, s.x, s.y, 1, 0, 0);
-            break;
-          case 'exchange':
-            engine.add_billboard(9, s.x, s.y, 1, 0, 0);
-            break;
-          case 'hangar':
-            engine.add_billboard(10, s.x, s.y, 1, 0, 0);
-            break;
-          case 'pad':
-            engine.add_billboard(11, s.x, s.y, 1, 0, 0);
-            break;
-        }
+        const id = SPRITE[s.kind];
+        if (id === undefined || (near && !near(s.x, s.y))) continue;
+        engine.add_billboard(id, s.x, s.y, 1, 0, 0);
       }
     }
   }
 
-  typeAt(x, y) { if (x < 0 || y < 0 || x >= W || y >= H) return T.DEEP; return this.type[y * W + x]; }
+  typeAt(x, y) { return this.type[this.idx(x, y)]; }
 
-  // Distance field (BFS over walkable pixels) toward a target, cached on a 3 px grid so
-  // moving targets like mammoths don't trigger a new search every frame.
+  // Distance field (BFS over walkable pixels, wrapping both ways) toward a target, cached on a
+  // 3 px grid so moving targets like mammoths don't trigger a new search every frame.
   field(tx, ty) {
-    const qx = Math.max(0, Math.min(W - 1, Math.round(tx / 3) * 3)), qy = Math.max(0, Math.min(H - 1, Math.round(ty / 3) * 3));
-    const key = qy * W + qx;
+    const w = this.width, h = this.height;
+    const qx = this.wrapX(Math.round(tx / 3) * 3), qy = this.wrapY(Math.round(ty / 3) * 3);
+    const key = qy * w + qx;
     this.fields ||= new Map();
     let f = this.fields.get(key);
     if (f) { this.fields.delete(key); this.fields.set(key, f); return f; }
-    f = new Int16Array(W * H).fill(-1);
+    f = new Int16Array(w * h).fill(-1);
     const start = this.walkable(qx, qy) ? { x: qx, y: qy } : this.nearestWalkable(qx, qy, 12);
-    const queue = new Int32Array(W * H);
+    const queue = new Int32Array(w * h);
     let head = 0, tail = 0;
-    const s0 = start.y * W + start.x;
+    const s0 = this.idx(start.x, start.y);
     f[s0] = 0; queue[tail++] = s0;
+    const type = this.type;
     while (head < tail) {
       const i = queue[head++];
-      const x = i % W, y = (i / W) | 0, d = f[i] + 1;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        if (!dx && !dy) continue;
-        const nx = x + dx, ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
-        const j = ny * W + nx;
-        if (f[j] !== -1) continue;
-        const t = this.type[j];
-        if (t < T.SAND || t === T.MOUNTAIN || t === T.SNOW) continue;
-        f[j] = d; queue[tail++] = j;
+      const x = i % w, y = (i / w) | 0, d = f[i] + 1;
+      for (let dy = -1; dy <= 1; dy++) {
+        let ny = y + dy; if (ny < 0) ny += h; else if (ny >= h) ny -= h;
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          let nx = x + dx; if (nx < 0) nx += w; else if (nx >= w) nx -= w;
+          const j = ny * w + nx;
+          if (f[j] !== -1) continue;
+          const t = type[j];
+          if (t < T.SAND || t === T.MOUNTAIN || t === T.SNOW) continue;
+          f[j] = d; queue[tail++] = j;
+        }
       }
     }
     this.fields.set(key, f);
@@ -509,26 +618,29 @@ export class World {
 
   // Same idea over water, for boats.
   seaField(tx, ty) {
-    const qx = Math.round(tx), qy = Math.round(ty);
-    const key = -(qy * W + qx) - 1;
+    const w = this.width, h = this.height;
+    const s0 = this.idx(tx, ty);
+    const key = -s0 - 1;
     this.fields ||= new Map();
     let f = this.fields.get(key);
     if (f) return f;
-    f = new Int16Array(W * H).fill(-1);
-    const queue = new Int32Array(W * H);
+    f = new Int16Array(w * h).fill(-1);
+    const queue = new Int32Array(w * h);
     let head = 0, tail = 0;
-    const s0 = qy * W + qx;
     f[s0] = 0; queue[tail++] = s0;
+    const type = this.type;
     while (head < tail) {
       const i = queue[head++];
-      const x = i % W, y = (i / W) | 0, d = f[i] + 1;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        if (!dx && !dy) continue;
-        const nx = x + dx, ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
-        const j = ny * W + nx;
-        if (f[j] !== -1 || this.type[j] > T.SHALLOW) continue;
-        f[j] = d; queue[tail++] = j;
+      const x = i % w, y = (i / w) | 0, d = f[i] + 1;
+      for (let dy = -1; dy <= 1; dy++) {
+        let ny = y + dy; if (ny < 0) ny += h; else if (ny >= h) ny -= h;
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          let nx = x + dx; if (nx < 0) nx += w; else if (nx >= w) nx -= w;
+          const j = ny * w + nx;
+          if (f[j] !== -1 || type[j] > T.SHALLOW) continue;
+          f[j] = d; queue[tail++] = j;
+        }
       }
     }
     this.fields.set(key, f);
@@ -538,15 +650,18 @@ export class World {
   // Can you walk from the village to (x, y)?
   reachable(x, y) {
     const v = this.sites.village;
-    return this.field(v.x, v.y)[Math.round(y) * W + Math.round(x)] >= 0;
+    return this.field(v.x, v.y)[this.idx(x, y)] >= 0;
   }
 
-  // Animated water glints, drawn every frame on top of the baked layer.
+  // Animated water glints, drawn every frame on top of the baked layer (as many per pixel of
+  // sea as on the classic map).
   drawWater(ctx, time) {
+    const w = this.width, h = this.height;
     const rng = mulberry32((Math.floor(time * 2) * 7919) ^ this.seed);
     ctx.fillStyle = 'rgba(170, 205, 240, 0.55)';
-    for (let i = 0; i < 70; i++) {
-      const x = Math.floor(rng() * W), y = Math.floor(rng() * H);
+    const n = Math.round(70 * (w * h) / (W * H));
+    for (let i = 0; i < n; i++) {
+      const x = Math.floor(rng() * w), y = Math.floor(rng() * h);
       if (this.typeAt(x, y) <= T.SHALLOW) ctx.fillRect(x, y, 2, 1);
     }
   }

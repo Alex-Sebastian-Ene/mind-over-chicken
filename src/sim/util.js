@@ -2,8 +2,20 @@
 
 // The world is drawn at a low pixel resolution and scaled up with nearest-neighbour
 // filtering, so every sprite is honest pixel art.
-export const W = 320;   // world width in pixels
-export const H = 180;   // world height in pixels
+// W×H is the VIEW: the low-res screen canvas (and the size of other planets' small Worlds).
+// The home world is bigger than the screen (#129): HOME_W×HOME_H, seen through a panning
+// camera. A World's own size is world.width × world.height (world.h is its heightmap).
+export const W = 320;   // view width in pixels
+export const H = 180;   // view height in pixels
+export const VIEW_W = W;
+export const VIEW_H = H;
+export const HOME_W = 640;   // the campaign's home world (#129)
+export const HOME_H = 360;
+
+// The map is a torus (#111): wrap a coordinate into [0, size), and the shorter signed way
+// round from b to a.
+export const wrap = (v, size) => { const r = v % size; return r < 0 ? r + size : r; };
+export const wrapDelta = (a, b, size) => { let d = (a - b) % size; if (d > size / 2) d -= size; else if (d < -size / 2) d += size; return d; };
 
 export const clamp = (v, lo = 0, hi = 1) => (v < lo ? lo : v > hi ? hi : v);
 export const lerp = (a, b, t) => a + (b - a) * t;

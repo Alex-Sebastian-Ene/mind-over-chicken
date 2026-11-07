@@ -3,6 +3,7 @@
 // workers aren't available.
 
 import { World, BIOMES } from '../world/terrain.js';
+import { W, H } from '../sim/util.js';
 import { buildVast, paintVast } from './vast.js';
 
 let worker = null;
@@ -12,7 +13,8 @@ const pending = new Map();
 
 // Same work as the worker, on this thread (slow: only when workers fail).
 function buildHere(seed, biome, vast) {
-  const w = new World(seed, { biome });
+  // Galaxy planets keep a 320×180 core World; their vast surface is built around it (vast.js).
+  const w = new World(seed, { biome, width: W, height: H });
   if (vast) {
     const v = buildVast(w, seed);
     w.vast = { w: v.w, h: v.h, tile: v.tile, type: v.type, continents: v.continents, spots: v.spots, rgba: paintVast(v, w.biome, seed) };
@@ -46,7 +48,7 @@ function getWorker() {
 function rehydrate(d) {
   const w = Object.create(World.prototype);
   Object.assign(w, {
-    seed: d.seed, biome: d.biome, palette: BIOMES[d.biome] || BIOMES.temperate,
+    seed: d.seed, biome: d.biome, palette: BIOMES[d.biome] || BIOMES.temperate, width: d.width || W, height: d.height || H,
     h: d.h, type: d.type, baseType: d.baseType, owner: d.owner,
     sites: d.sites, continents: d.continents, layers: {},
   });
