@@ -1737,6 +1737,202 @@ export class RustGalaxy {
     step(dt, calm, focus, stress, blinks_last_10s, blinks_total) {
         wasm.rustgalaxy_step(this.__wbg_ptr, dt, calm, focus, stress, blinks_last_10s, blinks_total);
     }
+    /**
+     * @returns {Float32Array}
+     */
+    war_battles() {
+        const ret = wasm.rustgalaxy_war_battles(this.__wbg_ptr);
+        var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * @returns {Float32Array}
+     */
+    war_bodies() {
+        const ret = wasm.rustgalaxy_war_bodies(this.__wbg_ptr);
+        var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * @returns {number}
+     */
+    static war_body_stride() {
+        const ret = wasm.rustgalaxy_war_body_stride();
+        return ret >>> 0;
+    }
+    /**
+     * @returns {Float32Array}
+     */
+    war_fleets() {
+        const ret = wasm.rustgalaxy_war_fleets(this.__wbg_ptr);
+        var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * HUD rows for the player's power: "label	value	bad" lines.
+     * @returns {string}
+     */
+    war_hud() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.rustgalaxy_war_hud(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @param {number} idx
+     * @param {string} name
+     */
+    war_name(idx, name) {
+        const val2 = +idx;
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.rustgalaxy_war_name(this.__wbg_ptr, val2, ptr0, len0);
+    }
+    /**
+     * News from line `from` on: [seq, tone, about the player (0/1), text, …].
+     * @param {number} from
+     * @returns {Array<any>}
+     */
+    war_news(from) {
+        const ret = wasm.rustgalaxy_war_news(this.__wbg_ptr, from);
+        return ret;
+    }
+    /**
+     * The player orders an attack (0 raid, 1 bombard, 2 invade): "" if it is away, else why not.
+     * @param {number} target
+     * @param {number} order
+     * @returns {string}
+     */
+    war_order(target, order) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.rustgalaxy_war_order(this.__wbg_ptr, target, order);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @param {number} idx
+     * @returns {string}
+     */
+    war_planet_meta(idx) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.rustgalaxy_war_planet_meta(this.__wbg_ptr, idx);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * The player's power (−1 none).
+     * @returns {number}
+     */
+    war_player() {
+        const ret = wasm.rustgalaxy_war_player(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {number} p
+     * @returns {string}
+     */
+    war_power_name(p) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.rustgalaxy_war_power_name(this.__wbg_ptr, p);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {Float32Array}
+     */
+    war_powers() {
+        const ret = wasm.rustgalaxy_war_powers(this.__wbg_ptr);
+        var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * The campaign's home (−1: none, as in the sandboxes).
+     * @param {number} idx
+     */
+    war_set_player_home(idx) {
+        wasm.rustgalaxy_war_set_player_home(this.__wbg_ptr, idx);
+    }
+    /**
+     * A planet several civilisations share (the civ sandbox's).
+     * @param {number} idx
+     * @param {boolean} shared
+     */
+    war_set_shared(idx, shared) {
+        wasm.rustgalaxy_war_set_shared(this.__wbg_ptr, idx, shared);
+    }
+    /**
+     * @param {number} dt
+     * @param {number} calm
+     * @param {number} focus
+     * @param {number} stress
+     */
+    war_step(dt, calm, focus, stress) {
+        wasm.rustgalaxy_war_step(this.__wbg_ptr, dt, calm, focus, stress);
+    }
+    /**
+     * Every planet of the browser's galaxy, `war_body_stride()` floats each.
+     * @param {Float32Array | number[]} data
+     */
+    war_sync(data) {
+        const ptr0 = passArrayF32ToWasm0(data, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.rustgalaxy_war_sync(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * What the war did to every planet since the last call (`moc_cosmos::host::FX_OUT` each).
+     * The planets this galaxy also simulates take it here too, so their next sync agrees.
+     * @returns {Float32Array}
+     */
+    war_take_fx() {
+        const ret = wasm.rustgalaxy_war_take_fx(this.__wbg_ptr);
+        var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * @param {number} idx
+     * @returns {string}
+     */
+    war_target_line(idx) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.rustgalaxy_war_target_line(this.__wbg_ptr, idx);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
 }
 if (Symbol.dispose) RustGalaxy.prototype[Symbol.dispose] = RustGalaxy.prototype.free;
 

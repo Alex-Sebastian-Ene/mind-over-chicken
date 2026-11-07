@@ -351,6 +351,12 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 .wd-hist li::before { content: "· "; }
 .wd-hist li.is-setback, .wd-hist li.is-conflict { color: var(--alarm); }
 .wd-hist li.is-tier, .wd-hist li.is-milestone { color: var(--good); }
+/* space war (#166): target a world, then raid, bombard or invade */
+.war-orders { display: grid; gap: 4px; padding: 6px; background: var(--panel); border: 1px solid var(--alarm); border-radius: 3px; font-size: 11px; line-height: 1.3; color: var(--muted); min-width: 0; }
+.war-orders[hidden] { display: none; }
+.war-line { margin: 0; color: var(--bone); font-variant-numeric: tabular-nums; }
+.war-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.war-btns .btn { padding: 4px 4px 3px; font-size: 12px; }
 .start-sandbox { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .start-sandbox .hint { flex: 1 1 260px; }
 

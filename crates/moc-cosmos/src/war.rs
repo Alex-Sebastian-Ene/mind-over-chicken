@@ -474,6 +474,7 @@ pub struct Launch {
 /// A battle on the view.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Battle {
+    pub id: u32,
     pub body: usize,
     pub attacker: u16,
     pub order: Order,
@@ -523,6 +524,7 @@ pub struct SpaceWar {
     pub councils: u32,
     council_acc: f32,
     next_fleet: u32,
+    next_battle: u32,
     rng: Mulberry32,
     policy: Option<Box<dyn SpacePolicy>>,
     launches: Vec<Launch>,
@@ -550,6 +552,7 @@ impl Clone for SpaceWar {
             councils: self.councils,
             council_acc: self.council_acc,
             next_fleet: self.next_fleet,
+            next_battle: self.next_battle,
             rng: self.rng.clone(),
             policy: None,
             launches: Vec::new(),
@@ -590,6 +593,7 @@ impl SpaceWar {
             councils: 0,
             council_acc: 0.0,
             next_fleet: 1,
+            next_battle: 0,
             rng: Mulberry32::new(seed ^ 0x5eed_0166),
             policy: None,
             launches: Vec::new(),
@@ -919,6 +923,9 @@ impl SpaceWar {
             let temper = self.bodies[i].stats.temper;
             let id = self.add_power(kind, name, [255, 255, 255], i, i as u32, temper, None);
             self.bodies[i].owner = Some(id);
+            // A people that was already there has its warriors already.
+            let g = self.caps(i).garrison;
+            self.bodies[i].garrison = self.bodies[i].garrison.max(g);
         }
         // Who lives, and where its capital is.
         for p in 0..self.powers.len() {
@@ -1227,12 +1234,14 @@ impl SpaceWar {
         if won {
             self.powers[d_id as usize].losses += 1;
         }
-        self.battles.push(Battle { body: to, attacker: a_id, order: m.order, won, t: 0.0 });
+        self.next_battle += 1;
+        self.battles.push(Battle { id: self.next_battle, body: to, attacker: a_id, order: m.order, won, t: 0.0 });
         if self.battles.len() > 32 {
             self.battles.remove(0);
         }
         // The news, before a capture renames anything.
-        let (an, dn) = (self.powers[a_id as usize].name.clone(), self.power_label(d_id, to));
+        let an = if self.is_player(a_id) { "You".to_string() } else { self.powers[a_id as usize].name.clone() };
+        let dn = self.power_label(d_id, to);
         let player_side = self.is_player(a_id) || self.is_player(d_id);
         let tone = if self.is_player(d_id) {
             if won { TONE_BAD } else { TONE_GOOD }
@@ -1282,18 +1291,21 @@ impl SpaceWar {
         let world = self.bodies[i].name.clone();
         let by_name = self.powers[by as usize].name.clone();
         let fallen = held.is_empty() && self.powers[from as usize].external.is_none();
+        let player = self.is_player(by);
+        let now = if player { "your colony".to_string() } else { format!("ruled by {by_name}") };
         if fallen {
             let pw = &mut self.powers[from as usize];
             pw.alive = false;
             pw.fleet = 0.0;
-            self.say(TONE_WARN, self.is_player(by), format!("{name} has fallen: {world} is now ruled by {by_name}."));
+            self.say(TONE_WARN, player, format!("{name} has fallen: {world} is now {now}."));
         } else {
             if self.powers[from as usize].home == i {
                 if let Some(&h) = held.first() {
                     self.powers[from as usize].home = h;
                 }
             }
-            self.say(TONE_WARN, self.is_player(by) || self.is_player(from), format!("{world} is now a colony of {by_name}."));
+            let now = if player { "your colony".to_string() } else { format!("a colony of {by_name}") };
+            self.say(TONE_WARN, player || self.is_player(from), format!("{world} is now {now}."));
         }
     }
 

@@ -1550,6 +1550,117 @@ impl RustGalaxy {
     pub fn is_mind_done(&self) -> bool {
         self.inner.mind.done
     }
+
+    // ---- the interplanetary war (#166): moc_cosmos::war, strides in moc_cosmos::host ----
+
+    /// Every planet of the browser's galaxy, `war_body_stride()` floats each.
+    pub fn war_sync(&mut self, data: &[f32]) {
+        self.inner.war.sync_packed(data);
+    }
+
+    pub fn war_name(&mut self, idx: usize, name: &str) {
+        self.inner.war.sync_name(idx, name);
+    }
+
+    /// The campaign's home (−1: none, as in the sandboxes).
+    pub fn war_set_player_home(&mut self, idx: i32) {
+        self.inner.war.set_player_home(if idx >= 0 { Some(idx as usize) } else { None });
+    }
+
+    /// A planet several civilisations share (the civ sandbox's).
+    pub fn war_set_shared(&mut self, idx: usize, shared: bool) {
+        self.inner.war.set_shared(idx, shared);
+    }
+
+    pub fn war_step(&mut self, dt: f32, calm: f32, focus: f32, stress: f32) {
+        self.inner.war.step(dt, moc_cosmos::war::Mind { calm, focus, stress });
+    }
+
+    /// The player orders an attack (0 raid, 1 bombard, 2 invade): "" if it is away, else why not.
+    pub fn war_order(&mut self, target: usize, order: u8) -> String {
+        let Some(p) = self.inner.war.player() else { return "You have no world in space yet.".to_string() };
+        match self.inner.war.order_index(p, target, order) {
+            Ok(_) => String::new(),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    /// The player's power (−1 none).
+    pub fn war_player(&self) -> i32 {
+        self.inner.war.player().map(|p| p as i32).unwrap_or(-1)
+    }
+
+    pub fn war_body_stride() -> usize {
+        moc_cosmos::host::BODY_IN
+    }
+
+    pub fn war_fleets(&self) -> Vec<f32> {
+        let mut v = Vec::new();
+        self.inner.war.pack_fleets(&mut v);
+        v
+    }
+
+    pub fn war_battles(&self) -> Vec<f32> {
+        let mut v = Vec::new();
+        self.inner.war.pack_battles(&mut v);
+        v
+    }
+
+    pub fn war_bodies(&self) -> Vec<f32> {
+        let mut v = Vec::new();
+        self.inner.war.pack_bodies(&mut v);
+        v
+    }
+
+    pub fn war_powers(&self) -> Vec<f32> {
+        let mut v = Vec::new();
+        self.inner.war.pack_powers(&mut v);
+        v
+    }
+
+    pub fn war_power_name(&self, p: usize) -> String {
+        self.inner.war.powers.get(p).map(|x| x.name.clone()).unwrap_or_default()
+    }
+
+    /// What the war did to every planet since the last call (`moc_cosmos::host::FX_OUT` each).
+    /// The planets this galaxy also simulates take it here too, so their next sync agrees.
+    pub fn war_take_fx(&mut self) -> Vec<f32> {
+        let mut v = Vec::new();
+        self.inner.war.take_fx_packed(&mut v);
+        for (i, c) in v.chunks_exact(moc_cosmos::host::FX_OUT).enumerate() {
+            let fx = moc_cosmos::war::BodyFx { pop_mul: c[0], progress_loss: c[1], stock_mul: c[2], captured_by: c[3] as i32, settled: c[4] > 0.5 };
+            self.inner.apply_war_fx(i, &fx);
+        }
+        v
+    }
+
+    /// News from line `from` on: [seq, tone, about the player (0/1), text, …].
+    pub fn war_news(&self, from: u32) -> js_sys::Array {
+        let arr = js_sys::Array::new();
+        for n in self.inner.war.news_since(from) {
+            arr.push(&JsValue::from_f64(n.seq as f64));
+            arr.push(&JsValue::from_f64(n.tone as f64));
+            arr.push(&JsValue::from_bool(n.player));
+            arr.push(&JsValue::from_str(&n.text));
+        }
+        arr
+    }
+
+    pub fn war_planet_meta(&self, idx: usize) -> String {
+        self.inner.war.planet_meta(idx)
+    }
+
+    pub fn war_target_line(&self, idx: usize) -> String {
+        match self.inner.war.player() {
+            Some(p) => self.inner.war.target_line(p, idx),
+            None => String::new(),
+        }
+    }
+
+    /// HUD rows for the player's power: "label	value	bad" lines.
+    pub fn war_hud(&self) -> String {
+        self.inner.war.hud_rows()
+    }
 }
 
 /// Standalone WebAssembly MLP Policy AI God (#25, #108)

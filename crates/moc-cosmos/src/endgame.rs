@@ -32,3 +32,22 @@ pub fn council(w: &mut SpaceWar, _dt: f32) {
     }
     w.leader = leader.map(|(p, _)| p as u16);
 }
+
+/// Progress toward the next tier, 0..1 (no tiers yet).
+pub fn tier_progress(_p: &crate::war::Power) -> f32 {
+    0.0
+}
+
+/// A tier's name ("" for the first).
+pub fn tier_name(_t: u8) -> &'static str {
+    ""
+}
+
+/// The endgame's HUD rows for power `p` ("label\tvalue\tbad" lines).
+pub fn hud_rows(w: &SpaceWar, p: u16) -> String {
+    match w.leader {
+        Some(l) if l == p => format!("Galaxy\tyou lead · {:.0}%\t0\n", w.powers[p as usize].dominance * 100.0),
+        Some(l) => format!("Galaxy\t{} leads · {:.0}%\t0\n", w.powers[l as usize].name, w.powers[l as usize].dominance * 100.0),
+        None => String::new(),
+    }
+}

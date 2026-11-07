@@ -8,7 +8,7 @@ use crate::planet_sim::{
     arrive_ship, blink_planet, step_planet, BrainEffects, Channel, EventKind, MindSnapshot,
     PlanetState, SimEvent, MIN_POP, POP_CAP, SETTLE_POP,
 };
-use crate::war::{Mind, Mission, SpaceWar, WorldStats};
+use crate::war::{BodyFx, Mind, Mission, SpaceWar, WorldStats};
 
 pub const MAX_PLANETS: usize = 7;
 pub const STAR_X: f32 = 132.0;
@@ -320,6 +320,26 @@ impl Galaxy {
         }
     }
 
+    /// What the war did to planet `i`: people, progress and the goat market (the hand-played
+    /// home's scene isn't the galaxy's to hurt).
+    pub fn apply_war_fx(&mut self, i: usize, w: &BodyFx) {
+        let Some(p) = self.planets.get_mut(i) else { return };
+        if w.is_empty() || (p.home && !p.autonomous) {
+            return;
+        }
+        let s = &mut p.state;
+        if w.settled && s.pop <= 0.0 {
+            s.pop = SETTLE_POP;
+            s.era_index = 0;
+            s.progress = 0.0;
+        }
+        if s.pop > 0.0 {
+            s.pop = (s.pop * w.pop_mul).max(MIN_POP);
+        }
+        s.progress = (s.progress - w.progress_loss).max(0.0);
+        s.market *= w.stock_mul.max(0.2);
+    }
+
     /// Sync the planets into the war, step it, and apply what it did.
     pub fn step_war(&mut self, dt: f32, fx: &BrainEffects) {
         for i in 0..self.planets.len() {
@@ -329,24 +349,7 @@ impl Galaxy {
         self.war.step(dt, Mind { calm: fx.calm, focus: fx.focus, stress: fx.stress });
         for i in 0..self.planets.len() {
             let w = self.war.take_fx(i);
-            if w.is_empty() {
-                continue;
-            }
-            let p = &mut self.planets[i];
-            if p.home && !p.autonomous {
-                continue; // the hand-played home's scene isn't ours to hurt
-            }
-            let s = &mut p.state;
-            if w.settled && s.pop <= 0.0 {
-                s.pop = SETTLE_POP;
-                s.era_index = 0;
-                s.progress = 0.0;
-            }
-            if s.pop > 0.0 {
-                s.pop = (s.pop * w.pop_mul).max(MIN_POP);
-            }
-            s.progress = (s.progress - w.progress_loss).max(0.0);
-            s.market *= w.stock_mul.max(0.2);
+            self.apply_war_fx(i, &w);
         }
         let news: Vec<String> = self.war.news_since(self.war_news_seen).map(|n| n.text.clone()).collect();
         self.war_news_seen = self.war.next_news;

@@ -68,7 +68,7 @@ export class Cosmos extends ZoomState {
     this.galaxy.addHome(G.world, { autonomous: autonomousHome });
     // Three more worlds take shape from the player's first ten seconds of brain data.
     this.galaxy.addMindWorlds();
-    this.galaxy.onEvent = (p, text, kind) => this.onEvent?.(p, text, kind);
+    this.galaxy.onEvent = (p, text, kind, tone) => this.onEvent?.(p, text, kind, tone);
     return this.galaxy;
   }
 
@@ -392,6 +392,7 @@ export class Cosmos extends ZoomState {
     const r = super.focusPlanet(p);
     if (r.refused) { this.say(r.refused); return; }
     this.rot = this.galaxy ? this.galaxy.time * p.spin + p.phase : this.rot;
+    if (this.galaxy?.war && !this.isCampaign(p)) this.galaxy.war.target = p;   // #166: the orders' target
   }
 
   wheel(deltaY, G) {

@@ -292,6 +292,49 @@ export class RustGalaxy {
     planet_progress(idx: number): number;
     set_attended(planet_idx: number): void;
     step(dt: number, calm: number, focus: number, stress: number, blinks_last_10s: number, blinks_total: number): void;
+    war_battles(): Float32Array;
+    war_bodies(): Float32Array;
+    static war_body_stride(): number;
+    war_fleets(): Float32Array;
+    /**
+     * HUD rows for the player's power: "label	value	bad" lines.
+     */
+    war_hud(): string;
+    war_name(idx: number, name: string): void;
+    /**
+     * News from line `from` on: [seq, tone, about the player (0/1), text, …].
+     */
+    war_news(from: number): Array<any>;
+    /**
+     * The player orders an attack (0 raid, 1 bombard, 2 invade): "" if it is away, else why not.
+     */
+    war_order(target: number, order: number): string;
+    war_planet_meta(idx: number): string;
+    /**
+     * The player's power (−1 none).
+     */
+    war_player(): number;
+    war_power_name(p: number): string;
+    war_powers(): Float32Array;
+    /**
+     * The campaign's home (−1: none, as in the sandboxes).
+     */
+    war_set_player_home(idx: number): void;
+    /**
+     * A planet several civilisations share (the civ sandbox's).
+     */
+    war_set_shared(idx: number, shared: boolean): void;
+    war_step(dt: number, calm: number, focus: number, stress: number): void;
+    /**
+     * Every planet of the browser's galaxy, `war_body_stride()` floats each.
+     */
+    war_sync(data: Float32Array | number[]): void;
+    /**
+     * What the war did to every planet since the last call (`moc_cosmos::host::FX_OUT` each).
+     * The planets this galaxy also simulates take it here too, so their next sync agrees.
+     */
+    war_take_fx(): Float32Array;
+    war_target_line(idx: number): string;
 }
 
 export class RustImuTracker {
@@ -565,6 +608,24 @@ export interface InitOutput {
     readonly rustgalaxy_planet_progress: (a: number, b: number) => number;
     readonly rustgalaxy_set_attended: (a: number, b: number) => void;
     readonly rustgalaxy_step: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly rustgalaxy_war_battles: (a: number) => [number, number];
+    readonly rustgalaxy_war_bodies: (a: number) => [number, number];
+    readonly rustgalaxy_war_body_stride: () => number;
+    readonly rustgalaxy_war_fleets: (a: number) => [number, number];
+    readonly rustgalaxy_war_hud: (a: number) => [number, number];
+    readonly rustgalaxy_war_name: (a: number, b: number, c: number, d: number) => void;
+    readonly rustgalaxy_war_news: (a: number, b: number) => any;
+    readonly rustgalaxy_war_order: (a: number, b: number, c: number) => [number, number];
+    readonly rustgalaxy_war_planet_meta: (a: number, b: number) => [number, number];
+    readonly rustgalaxy_war_player: (a: number) => number;
+    readonly rustgalaxy_war_power_name: (a: number, b: number) => [number, number];
+    readonly rustgalaxy_war_powers: (a: number) => [number, number];
+    readonly rustgalaxy_war_set_player_home: (a: number, b: number) => void;
+    readonly rustgalaxy_war_set_shared: (a: number, b: number, c: number) => void;
+    readonly rustgalaxy_war_step: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly rustgalaxy_war_sync: (a: number, b: number, c: number) => void;
+    readonly rustgalaxy_war_take_fx: (a: number) => [number, number];
+    readonly rustgalaxy_war_target_line: (a: number, b: number) => [number, number];
     readonly rustimutracker_add_calib_point: (a: number, b: number, c: number) => void;
     readonly rustimutracker_aim_x: (a: number) => number;
     readonly rustimutracker_aim_y: (a: number) => number;

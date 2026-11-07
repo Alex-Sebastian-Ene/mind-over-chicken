@@ -5,6 +5,7 @@
 
 pub mod endgame;
 pub mod galaxy;
+pub mod host;
 pub mod math;
 pub mod planet_sim;
 pub mod war;
