@@ -138,6 +138,7 @@ export function initCamera({
   screenX = (x) => x,
   onZoomDelta = null,
   onWave = null,
+  onGrabMove = null,
   getContext = () => 'surface',
   onStatusChange = null,
 } = {}) {
@@ -547,13 +548,24 @@ export function initCamera({
         onZoomDelta(multi.zoomDelta, multi.zoomFactor);
       }
 
-      // 2. One-hand pinch grab at head reticle (#120)
+      // 2. One-hand pinch grab at head reticle (#120) & Globe/World movement
       if (multi.grab.started) {
         tryGrabStart(G, now);
-      } else if (multi.grab.active && grabbed) {
-        G.scene?.onGrabMove?.({ x: G.brain.aim.x, y: G.brain.aim.y });
+        if (!grabbed && onGrabMove) {
+          onGrabMove({ dx: 0, dy: 0, started: true, active: true, aim: G.brain.aim, grab: multi.grab });
+        }
+      } else if (multi.grab.active) {
+        if (grabbed) {
+          G.scene?.onGrabMove?.({ x: G.brain.aim.x, y: G.brain.aim.y });
+        } else if (onGrabMove) {
+          onGrabMove({ dx: multi.grab.dx, dy: multi.grab.dy, started: false, active: true, aim: G.brain.aim, grab: multi.grab });
+        }
       } else if (multi.grab.released || multi.grab.cancelled) {
-        tryGrabEnd(G, now, !!multi.grab.cancelled);
+        if (grabbed) {
+          tryGrabEnd(G, now, !!multi.grab.cancelled);
+        } else if (onGrabMove) {
+          onGrabMove({ dx: 0, dy: 0, released: true, cancelled: !!multi.grab.cancelled, active: false, aim: G.brain.aim, grab: multi.grab });
+        }
       }
 
       // 3. Open-hand wave orbit (#121)

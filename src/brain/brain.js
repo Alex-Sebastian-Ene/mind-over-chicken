@@ -223,8 +223,13 @@ export class Brain {
       }
     }
     if (frame.tilt) {
-      this.aim.x = smooth(this.aim.x, clamp(0.5 + frame.tilt.x * 0.5), 10, 0.1);
-      this.aim.y = smooth(this.aim.y, clamp(0.5 + frame.tilt.y * 0.5), 10, 0.1);
+      if (frame.isSim) {
+        this.aim.x = clamp(0.5 + frame.tilt.x * 0.5);
+        this.aim.y = clamp(0.5 + frame.tilt.y * 0.5);
+      } else {
+        this.aim.x = smooth(this.aim.x, clamp(0.5 + frame.tilt.x * 0.5), 10, 0.1);
+        this.aim.y = smooth(this.aim.y, clamp(0.5 + frame.tilt.y * 0.5), 10, 0.1);
+      }
     }
     this.motion = frame.motion;
 

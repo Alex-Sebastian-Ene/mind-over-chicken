@@ -13,6 +13,7 @@ import { Galaxy, ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, drawPlanetBolt } from '
 import { label } from '../eras/stone.js';
 import { ZoomState } from './zoom.js';
 import { tierName } from './planet-sim.js';
+import { drawReticle } from '../render/sprites.js';
 
 const CENTER = { x: W / 2, y: H / 2 };
 const BIG_R = 74;
@@ -272,6 +273,9 @@ export class Cosmos extends ZoomState {
     }
     if (this.galaxy && z > 1.2) this.galaxy.drawOverlay(ctx, { alpha: smoothstep(1.3, 1.9, z), hover: this.hover });
     if (this.toast) { ctx.globalAlpha = Math.min(1, this.toast.t); label(ctx, CENTER.x, 30, this.toast.text, '#ffd166', 6); ctx.globalAlpha = 1; }
+    if (G?.brain?.aim) {
+      drawReticle(ctx, G.brain.aim.x * (W - 1), G.brain.aim.y * (H - 1), this.time, '#ffe066');
+    }
   }
 
   // ---- input (coordinates in world pixels) ----
