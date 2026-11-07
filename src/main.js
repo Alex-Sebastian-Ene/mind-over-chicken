@@ -27,6 +27,7 @@ import { CivSandbox } from './civ/sandbox.js'; // civ (#50)
 import { worldMeta, renderWorldDetail } from './cosmos/panel.js'; // planets (#68)
 import { SimPlanet } from './ai/planet.js';
 import { AIGod } from './ai/autopilot.js';
+import { loading } from './ui/loading.js'; // loading screen
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
 // mind read uses the same window.
@@ -84,6 +85,7 @@ function panMap(dx, dy) {
 }
 
 try {
+  loading.start('engine', 'Starting the game engine', { blocking: true }); // loading screen
   await initEngine();
   setRustWorldGen(RustWorldGen);
   setRustCastController(RustCastController);
@@ -95,8 +97,10 @@ try {
   gesture = new PointerGesture(6);
   BridgeSource.setWasmClasses(RustImuTracker, RustBlinkClassifier);
   engine = new Engine('screen');
+  loading.done('engine');
 } catch (err) {
   console.error('Failed to initialize Rust WebGL engine:', err);
+  loading.fail('engine', 'no WebGL here: using the 2D fallback');
 }
 // Without WebGL, fall back to a plain 2D upscale so the game still shows.
 const fallback2d = engine ? null : screen.getContext('2d');
