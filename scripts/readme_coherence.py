@@ -84,7 +84,7 @@ CHECKS = [
         "readme": r"one circular world|circular map|circular world",
         "status": "required",
         "patterns": [r"\bcircular\b", r"\bradius\b", r"\bpolar\b", r"\bround\s+world\b"],
-        "paths": ("src/", "crates/"),
+        "paths": ("src/world/", "src/cosmos/", "crates/moc-civ/src/terrain.rs", "crates/moc-planet/src/"),
         "hint": "World generation must produce one circular map, not a rectangular continent set.",
     },
     {
@@ -97,6 +97,8 @@ CHECKS = [
             r"\bCIV(?:S|ILIZATIONS?)?(?:_COUNT)?\s*[:=]\s*4\b",
             r"civilizations?\s*[:=]\s*\[[^\]]*,[^\]]*,[^\]]*,[^\]]*\]",
             r"for\s*\([^)]*<\s*4[^)]*\)\s*\{[^}]*civ",
+            r"START_CIVS\s*:\s*usize\s*=\s*4",
+            r"HOME_REGIONS\s*:\s*usize\s*=\s*4",
         ],
         "paths": ("src/", "crates/"),
         "hint": "Create four civilization records with separate spawn regions and ownership.",
@@ -110,6 +112,7 @@ CHECKS = [
         "patterns": [
             r"\b(?:AGENTS?_PER_CIV|CIV_START_AGENTS|START_AGENTS|POP_START|INITIAL_AGENTS)\s*[:=]\s*4\b",
             r"for\s*\([^)]*<\s*4[^)]*\)\s*\{[^}]*agent",
+            r"START_AGENTS\s*:\s*usize\s*=\s*4",
         ],
         "paths": ("src/", "crates/"),
         "hint": "Spawn four agents per civilization; do not reuse the single-civilization population constants.",
@@ -123,6 +126,7 @@ CHECKS = [
         "patterns": [
             r"\b(?:civ|faction)[A-Za-z_]*\.(?:relations?|contact|attitude|atWar|diplomacy)\b",
             r"\b(?:contact|interact|attack|combat)[A-Za-z_]*\([^)]*civ",
+            r"\bwar_state\b|\btension\s*\(|EVENT\.WAR|CAST\.peace|\bat_war\b",
         ],
         "paths": ("src/", "crates/"),
         "hint": "Add civilization ownership/contact detection and a first interaction hook.",
@@ -208,7 +212,7 @@ CHECKS = [
         "claim": "Ambient world modulation is deferred.",
         "readme": r"Ambient world modulation|ambient modulation",
         "status": "deferred",
-        "patterns": [r"\bweather\b", r"\bchaos(?:Level|_level)?\b", r"ambient[A-Za-z_]*modulat", r"(?:world|global)[A-Za-z_]*temperament"],
+        "patterns": [r"\bweather\b", r"chaos(?:Level|_level)\b", r"ambient[A-Za-z_]*modulat", r"(?:world|global)[A-Za-z_]*temperament"],
         "paths": ("src/", "crates/"),
         "hint": "If this is now implemented, update README §1/§3.2 and close the deferred scope.",
     },

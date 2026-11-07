@@ -207,6 +207,7 @@ export class Industry {
     // GDP
     this.gdpRate = working * 0.62 * this.confidence * clamp(0.65 + 0.35 * this.price / this.value, 0.4, 1.3) - rioting * 0.6;
     this.gdp = Math.max(0, this.gdp + this.gdpRate * dt);
+    if (this.gdp >= GDP_TARGET) this.gdpReached = true;
 
     // Factory smoke
     if (Math.random() < dt * (2 + working * 0.3)) this.particles.add({ x: fx.x - 4 + (chance(0.5) ? 8 : 0), y: fx.y - 13, vx: rand(2, 6), vy: rand(-7, -4), grow: 0.5, life: 3, maxLife: 3, size: 1, color: 'rgba(90,85,85,0.7)' });
@@ -313,20 +314,75 @@ export class Industry {
   }
 
   objectives() {
+    const gdpDone = this.gdp >= GDP_TARGET || !!this.gdpReached;
+    const gdpVal = gdpDone ? `${GDP_TARGET}/${GDP_TARGET}` : `${Math.floor(this.gdp)}/${GDP_TARGET}`;
     const st = this.ipo.state;
+    const ipoProgress = Math.min(IPO_SECONDS, Math.ceil(this.ipo.progress));
     return [
-      { label: 'GDP', value: `${Math.floor(this.gdp)}/${GDP_TARGET}`, done: this.gdp >= GDP_TARGET },
-      { label: 'Goat IPO', value: st === 'done' ? 'priced' : st === 'active' ? `${this.ipo.progress.toFixed(1)}/${IPO_SECONDS}s` : 'soon', done: st === 'done' },
+      { label: 'GDP', value: gdpVal, done: gdpDone },
+      { label: 'Goat IPO', value: st === 'done' ? 'priced' : st === 'active' ? `${ipoProgress}/${IPO_SECONDS}s` : 'soon', done: st === 'done' },
       { label: 'Goat index', value: this.price.toFixed(1), plain: true, bad: this.price < this.peak * 0.8 },
       { label: 'Striking', value: `${this.agents.filter((a) => a.state === 'strike' || a.state === 'riot').length}`, plain: true },
     ];
   }
 
-  lights() { return []; }
+  lights() {
+    const L = [];
+    const w = this.G?.world;
+    if (w?.sites) {
+      const fx = w.sites.factory, ex = w.sites.exchange;
+      if (fx) L.push({ x: fx.x, y: fx.y, r: 24 + Math.sin(this.t * 5) * 2.0 });
+      if (ex) L.push({ x: ex.x, y: ex.y, r: 20 });
+    }
+    return L;
+  }
+
+  draw3d(engine, _dt) {
+    const w = this.G?.world;
+    if (!w) return;
+    const fx = w.sites.factory, ex = w.sites.exchange;
+
+    // 3D Point Lights (smokestack furnace and market lanterns)
+    if (fx) {
+      engine.add_3d_light(fx.x, 8.0, fx.y, 30.0 + Math.sin(this.t * 5.0) * 2.0, 1.4);
+    }
+    if (ex) {
+      engine.add_3d_light(ex.x, 8.0, ex.y, 22.0, 1.2);
+    }
+
+    // Billboards
+    // Goats (SPRITE_GOAT = 2)
+    for (const g of this.goats) {
+      engine.add_billboard(2, g.x, g.y, g.facing || 1, g.frame || 0, 0);
+    }
+
+    // Agents: workers, traders, strikers (SPRITE_VILLAGER = 0)
+    for (const a of this.agents) {
+      if (a.state === 'work') continue; // inside factory
+      const pose = a.state === 'strike' ? 1 : a.state === 'riot' ? 2 : 0;
+      engine.add_billboard(0, a.x, a.y, a.facing || 1, a.frame || 0, pose);
+    }
+
+    // Chicken (SPRITE_CHICKEN = 3)
+    engine.add_billboard(3, this.chicken.x, this.chicken.y, this.chicken.facing || 1, this.chicken.frame || 0, 0);
+
+    // Aim reticle (SPRITE_RETICLE = 13)
+    const aim = this.G.brain?.aim;
+    if (aim) {
+      engine.add_billboard(13, aim.x * (W - 1), aim.y * (H - 1), 1, 0, 0);
+    }
+  }
 
   draw(ctx) {
+    const G = this.G;
     ctx.drawImage(this.layer, 0, 0);
-    this.G.world.drawWater(ctx, this.t);
+    if (!G.render3d) G.world.drawWater(ctx, this.t);
+    // In 3D, draw3d stands workers, traders, goats and chicken up as billboards
+    if (G.render3d) {
+      for (const sh of this.ships) drawBoat(ctx, sh.x, sh.y, sh);
+      this.particles.draw(ctx);
+      return;
+    }
     const actors = [];
     for (const g of this.goats) actors.push({ y: g.y, d: () => drawGoat(ctx, g.x, g.y, g) });
     for (const sh of this.ships) actors.push({ y: sh.y, d: () => drawBoat(ctx, sh.x, sh.y, sh) });
