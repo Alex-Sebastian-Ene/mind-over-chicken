@@ -907,6 +907,21 @@ window.__moc.camera = initCamera({
 window.__moc.debug = initDebug({ getG: () => G, camera: window.__moc.camera });
 
 // ---------- boot ----------
+async function autoConnectBridge() {
+  const active = G?.source || previewSource;
+  if (active?.kind === 'bridge' && active.connected) return;
+  const url = ($('bridgeUrl')?.value || '').trim() || 'ws://localhost:8765';
+  const src = new BridgeSource(url);
+  try {
+    await src.connect();
+    setGameSource(src);
+    const status = $('bridgeStatus');
+    if (status) status.textContent = 'Connected to Muse 2 bridge.';
+  } catch {
+    src.disconnect();
+  }
+}
+
 function start(data = {}) {
   resize();
   lastTs = performance.now();
@@ -915,6 +930,7 @@ function start(data = {}) {
     $('titleScreen').hidden = true;
     newGame(new SimSource(), data.sceneIndex);
   }
+  autoConnectBridge();
 }
 document.fonts?.load('16px "Pixelify Sans"').finally?.(() => {});
 if (window.claude?.hot?.ready) window.claude.hot.ready(start);
