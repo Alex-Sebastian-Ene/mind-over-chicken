@@ -16,7 +16,7 @@ import { SimPlanet } from '../ai/planet.js';
 import { AIGod } from '../ai/autopilot.js';
 import { drawHut, drawHouse, drawTower, drawFactory, drawPad, drawPerson, drawBolt, makeBolt, drawReticle } from '../render/sprites.js';
 import { villagerLook, animate } from '../sim/agents.js';
-import { VW, VH, wrapX, wrapDx, typeAt, walkableAt, settlementPlan } from './vast.js';
+import { VW, VH, wrapX, wrapDx, wrapY, wrapDy, typeAt, walkableAt, settlementPlan } from './vast.js';
 import { TIERS, CONFLICT, castPlanet, tribeOutcome, easeSplit, tierName } from './planet-sim.js';
 
 const ERA_KEYS = ['stone', 'farming', 'industry', 'space'];
@@ -261,18 +261,18 @@ export class PlanetSurface {
     if (Math.random() < 0.3) this.particles.add({ x, y: y - 3, vx: rand(-2, 2), vy: -6, life: 2, maxLife: 2, size: 2, color: 'rgba(90,90,100,0.6)' });
   }
 
-  // ---- camera: east–west wraps, north–south stops at the poles ----
+  // ---- camera: torus wraps both east-west and north-south (#111) ----
   pan(dx, dy = 0) {
     this.camX = wrapX(this.camX - dx);
-    this.camY = clamp(this.camY - dy, 0, VH - H);
+    this.camY = wrapY(this.camY - dy);
   }
   // Globe column (0..W) facing the viewer when the middle of this view is in front.
   centerColumn() { return (wrapX(this.camX + W / 2) / VW) * W; }
-  screenToWorld(aim) { return { x: wrapX(this.camX + aim.x * (W - 1)), y: this.camY + aim.y * (H - 1) }; }
+  screenToWorld(aim) { return { x: wrapX(this.camX + aim.x * (W - 1)), y: wrapY(this.camY + aim.y * (H - 1)) }; }
   // World point → the capital tribe's 0..1 aim, or null outside the capital region.
   toTile(wx, wy) {
-    const lx = wrapX(wx - this.v.tile.x), ly = wy - this.v.tile.y;
-    return lx <= W - 1 && ly >= 0 && ly <= H - 1 ? { x: lx / (W - 1), y: ly / (H - 1) } : null;
+    const lx = wrapX(wx - this.v.tile.x), ly = wrapY(wy - this.v.tile.y);
+    return lx <= W - 1 && ly <= H - 1 ? { x: lx / (W - 1), y: ly / (H - 1) } : null;
   }
   // Screen offsets at which the capital region shows (two across the date line).
   tileOffsets(sx, sy) {
