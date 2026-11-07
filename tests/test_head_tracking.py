@@ -248,7 +248,7 @@ class HeadTrackerTest(unittest.TestCase):
 class SyntheticBoardFrameTest(unittest.TestCase):
     """Runs the bridge's real frame code against BrainFlow's synthetic board (no WebSocket)."""
 
-    KEYS = {"t", "bands", "blink", "hr", "accel", "gyro", "orientation", "motion", "quality"}
+    KEYS = {"t", "bands", "blink", "hr", "ppg", "accel", "gyro", "orientation", "imu_calib", "motion", "quality", "eeg", "contact"}
 
     def test_frames_carry_gyro_and_orientation(self):
         from brainflow.board_shim import BoardShim, BrainFlowInputParams

@@ -6,18 +6,23 @@ import { SimSource, BridgeSource } from './brain/sources.js';
 import { Brain } from './brain/brain.js';
 import { Advisor } from './ui/advisor.js';
 import { Hud } from './ui/hud.js';
+import { EegPanel } from './ui/eeg-panel.js';
 import { Audio } from './audio.js';
 import { StoneAge } from './eras/stone.js';
 import { FarmingToKingdoms, InfoAge } from './eras/timeskip.js';
 import { Industry } from './eras/industry.js';
 import { SpaceAge } from './eras/space.js';
-import initEngine, { Engine } from '../pkg/mind_over_chicken_engine.js';
+import initEngine, { Engine, RustImuTracker, RustBlinkClassifier } from '../pkg/mind_over_chicken_engine.js';
 import { Cosmos } from './cosmos/cosmos.js';
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
+import { initDebug } from './camera/debug.js'; // camera debug (#67)
 import { Calibration, readCalibrationConfig } from './brain/calibration.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
 import { CivSandbox } from './civ/sandbox.js'; // civ (#50)
+import { worldMeta, renderWorldDetail } from './cosmos/panel.js'; // planets (#68)
+import { SimPlanet } from './ai/planet.js';
+import { AIGod } from './ai/autopilot.js';
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
 // mind read uses the same window.
@@ -38,12 +43,36 @@ let engine = null;
 
 try {
   await initEngine();
+  BridgeSource.setWasmClasses(RustImuTracker, RustBlinkClassifier);
   engine = new Engine('screen');
+  engine.bind_dom_shell();
 } catch (err) {
   console.error('Failed to initialize Rust WebGL engine:', err);
 }
 // Without WebGL, fall back to a plain 2D upscale so the game still shows.
 const fallback2d = engine ? null : screen.getContext('2d');
+
+// 3D world (#51): set_3d_mode only takes effect once the 3D renderer exists, so create it
+// here and start in 3D. If the GPU can't do it, stay in 2D and hide the toggle.
+let has3d = false;
+if (engine) {
+  try {
+    engine.init_3d();
+    engine.set_3d_mode(true);
+    has3d = engine.is_3d_mode();
+  } catch (err) {
+    console.warn('3D renderer unavailable; staying in 2D:', err);
+  }
+}
+function sync3dButton() {
+  const btn = $('mode3dBtn');
+  if (!btn) return;
+  const on = !!engine && engine.is_3d_mode();
+  btn.hidden = !has3d;
+  btn.textContent = on ? '3D: ON' : '3D: OFF';
+  btn.setAttribute('aria-pressed', String(on));
+}
+sync3dButton();
 
 function resize() {
   const rect = screen.getBoundingClientRect();
@@ -55,7 +84,24 @@ function resize() {
 new ResizeObserver(resize).observe(screen);
 
 // ---------- game state ----------
-const audio = new Audio();
+const jsAudio = new Audio();
+const audio = {
+  unlock() { if (engine) engine.audio_unlock(); else jsAudio.unlock(); },
+  toggle() { return engine ? engine.audio_toggle() : jsAudio.toggle(); },
+  thunder() { if (engine) engine.audio_play('thunder'); else jsAudio.thunder(); },
+  ignite() { if (engine) engine.audio_play('ignite'); else jsAudio.ignite(); },
+  blip() { if (engine) engine.audio_play('blip'); else jsAudio.blip(); },
+  good() { if (engine) engine.audio_play('good'); else jsAudio.good(); },
+  bad() { if (engine) engine.audio_play('bad'); else jsAudio.bad(); },
+  pop() { if (engine) engine.audio_play('pop'); else jsAudio.pop(); },
+  coin() { if (engine) engine.audio_play('coin'); else jsAudio.coin(); },
+  bell() { if (engine) engine.audio_play('bell'); else jsAudio.bell(); },
+  crash() { if (engine) engine.audio_play('crash'); else jsAudio.crash(); },
+  tick() { if (engine) engine.audio_play('tick'); else jsAudio.tick(); },
+  rumble(dur) { if (engine) engine.audio_play('rumble'); else jsAudio.rumble(dur); },
+  fanfare() { if (engine) engine.audio_play('fanfare'); else jsAudio.fanfare(); },
+  heartbeat(now, bpm, intensity) { if (engine) engine.audio_heartbeat(now, bpm, intensity); else jsAudio.heartbeat(now, bpm, intensity); },
+};
 const advisor = new Advisor($('advisor'));
 const hud = new Hud(document);
 const cosmos = new Cosmos();
@@ -63,15 +109,72 @@ const cosmos = new Cosmos();
 const galaxyHudScene = { label: 'Galaxy', powers: ['calm', 'focus', 'heart'], objectives: () => cosmos.galaxy?.objectives() || [] };
 let hudScene = null;
 let G = null;
+let previewSource = null;
+let previewBrain = null;
+
+function setGameSource(nextSource) {
+  if (G) {
+    if (G.source && G.source !== nextSource) G.source.disconnect();
+    G.source = nextSource;
+    G.brain.source = nextSource;
+    G.brain.resetTelemetry();
+  } else {
+    if (previewSource && previewSource !== nextSource) previewSource.disconnect();
+    previewSource = nextSource;
+    previewBrain = nextSource ? new Brain(nextSource) : null;
+    if (previewBrain && nextSource?.kind === 'bridge') previewBrain.resetTelemetry();
+  }
+}
+
+const eegPanel = new EegPanel(document, {
+  getSource: () => G?.source || previewSource,
+  getBrain: () => G?.brain || previewBrain,
+  onConnectBridge: async (url) => {
+    const src = new BridgeSource(url);
+    await src.connect();
+    setGameSource(src);
+  },
+  onDisconnectBridge: () => {
+    setGameSource(new SimSource());
+  },
+});
 let fade = 0;           // 0..1 black overlay for transitions
 let pendingScene = null;
 let pendingTimer = 0;
 let banner = null;      // {t}
 let lastTs = 0;
 
+// ---------- AI god (PPO) ----------
+let aiPlanet = null;
+function toggleAIGod() {
+  if (aiPlanet) {
+    aiPlanet.attachHuman(null);
+    aiPlanet = null;
+    const btn = $('aiGodBtn');
+    if (btn) {
+      btn.textContent = 'AI God: OFF';
+      btn.setAttribute('aria-pressed', 'false');
+    }
+    advisor.say('ai-off', 'AI god disengaged. You have full command.', { mood: 'happy', priority: 2, cooldown: 1 });
+  } else {
+    aiPlanet = new SimPlanet({ seed: G?.world?.seed || 42, brain: 'proxy' }).setGod(new AIGod());
+    if (G?.brain) aiPlanet.attachHuman(G.brain);
+    const btn = $('aiGodBtn');
+    if (btn) {
+      btn.textContent = 'AI God: ON';
+      btn.setAttribute('aria-pressed', 'true');
+    }
+    advisor.say('ai-on', 'AI god engaged! The PPO autopilot is steering this world. Stay calm to help it.', { mood: 'nervous', priority: 2, cooldown: 1 });
+  }
+}
+
 function newGame(source, startIndex = 0) {
+  if (previewSource && previewSource !== source) previewSource.disconnect();
+  previewSource = null;
+  previewBrain = null;
   if (G?.source && G.source !== source) G.source.disconnect();
   const brain = new Brain(source);
+  if (aiPlanet) aiPlanet.attachHuman(brain);
   cosmos.reset();
   G = {
     world: new World(),
@@ -86,9 +189,12 @@ function newGame(source, startIndex = 0) {
   };
   brain.onBlink((aim) => {
     hud.flashBlink();
+    if (engine) engine.game_on_blink(aim.x * W, aim.y * H);
     cosmos.galaxy?.onBlink();   // storms on the blink world; a strike on the world you're zoomed into
     if (cosmos.galaxy?.attended) audio.thunder();
-    if (!banner && !cosmos.active && G.scene?.onBlink) G.scene.onBlink(aim);
+    if (aiPlanet) aiPlanet.humanBlink(aim);
+    const view = cosmos.viewScene(G); // planets (#68): another world's surface when you're on it
+    if (!banner && !cosmos.active && view?.onBlink) view.onBlink(aim);
   });
   // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
   cosmos.ensureGalaxy(G);
@@ -97,7 +203,15 @@ function newGame(source, startIndex = 0) {
   $('failScreen').hidden = true;
   if (engine && G.world) {
     engine.init_world(G.world.seed);
+    // The 3D relief must be the world the simulation runs on (#71). Older pkg builds lack this.
+    if (engine.set_heightmap) {
+      try { engine.set_heightmap(G.world.h); } catch (err) { console.warn('set_heightmap failed:', err); }
+    }
+    // Around the 3D map: this world's deep sea, so the edges read as open ocean.
+    const deep = G.world.palette?.[0]?.[0];
+    if (deep && engine.set_backdrop) engine.set_backdrop(deep[0], deep[1], deep[2]);
     engine.set_era(startIndex);
+    engine.game_start_era(Math.min(2, Math.floor(startIndex / 2)));
   }
   startScene(startIndex);
   try { window.claude?.hot?.snapshot?.(() => ({ sceneIndex: G?.sceneIndex ?? 0, kind: G?.source?.kind })); } catch {}
@@ -110,7 +224,10 @@ function startScene(i) {
   G.sceneIndex = i;
   const scene = SCENES[i]();
   G.scene = scene;
-  if (engine) engine.set_era(i);
+  if (engine) {
+    engine.set_era(i);
+    engine.game_start_era(Math.min(2, Math.floor(i / 2)));
+  }
   advisor.setEra(scene.era);
   scene.enter(G);
   hud.setScene(scene);
@@ -125,7 +242,10 @@ function restartScene() {
   const i = G.sceneIndex;
   const scene = SCENES[i]();
   G.scene = scene;
-  if (engine) engine.set_era(i);
+  if (engine) {
+    engine.set_era(i);
+    engine.game_restart_era();
+  }
   advisor.setEra(scene.era);
   scene.enter(G);
   hud.setScene(scene);
@@ -205,7 +325,7 @@ function showEnd() {
 
 // ---------- render ----------
 function render() {
-  const scene = G?.scene;
+  const scene = aiPlanet ? aiPlanet.scene : (G ? cosmos.viewScene(G) : null); // AI god autopilot, else the world in view (planets #68)
   textCtx.setTransform(1, 0, 0, 1, 0, 0);
   textCtx.clearRect(0, 0, textLayer.width, textLayer.height);
   if (!scene) {
@@ -217,9 +337,18 @@ function render() {
   }
   lowCtx.imageSmoothingEnabled = false;
   lowCtx.setTransform(1, 0, 0, 1, 0, 0);
+  // 3D only on the surface itself: once the globe zoom starts, the flat 2D map takes over (the
+  // 3D camera has already tipped over to that exact frame, so the hand-over is seamless).
+  G.render3d = in3dSurface();
+  if (G.render3d) {
+    // The 3D camera follows the same east–west pan as the 2D map (A/D, Shift+scroll, drag).
+    engine.set_camera_target(cosmos.mapX(W / 2), engine.get_camera_target_z());
+    stepCam3dTween();
+  }
+  // In 3D, scenes with draw3d stand their actors up as sprites, so they skip painting them flat.
   scene.draw(lowCtx);
   scene.drawAfterLight?.(lowCtx);
-  cosmos.applyPan(low);   // the surface is a planet: it wraps east–west
+  if (!G.render3d) cosmos.applyPan(low);   // the surface is a planet: it wraps east–west (3D pans the camera instead)
   const cosmic = cosmos.render(low, lowCtx, G);
 
   // Zooming out fades the surface's night lighting and labels; the globe and galaxy
@@ -238,15 +367,32 @@ function render() {
 
   if (engine) {
     try {
-      // begin_frame clears last frame's lights; without it they pile up every frame (#38).
-      engine.begin_frame();
-      engine.upload_canvas(low);
-      if (surface && scene.lights) {
-        for (const l of scene.lights()) {
-          for (const off of offsets) engine.add_light(l.x + off, l.y, l.r, 1.0);
+      if (surface && G.render3d) {
+        engine.upload_canvas(low);
+        if (scene.draw3d) {
+          scene.draw3d(engine, 0.016);
+        } else if (scene.lights) {
+          for (const l of scene.lights()) {
+            engine.add_3d_light(l.x, 10.0, l.y, l.r, 1.2);
+          }
         }
+        // Directional sun rotates with day/night
+        const sunAngle = (G.runTime || 0) * 0.15;
+        const sunX = Math.cos(sunAngle);
+        const sunY = 0.85;
+        const sunZ = Math.sin(sunAngle);
+        engine.render_3d(0.016, sunX, sunY, sunZ, dark, flash, fade, sx, sy, screen.width, screen.height);
+      } else {
+        // begin_frame clears last frame's lights; without it they pile up every frame (#38).
+        engine.begin_frame();
+        engine.upload_canvas(low);
+        if (surface && scene.lights) {
+          for (const l of scene.lights()) {
+            for (const off of offsets) engine.add_light(l.x + off, l.y, l.r, 1.0);
+          }
+        }
+        engine.render_uploaded_canvas(dark, flash, fade, sx, sy, screen.width, screen.height);
       }
-      engine.render_uploaded_canvas(dark, flash, fade, sx, sy, screen.width, screen.height);
     } catch (e) {
       console.error('WebGL render error:', e);
     }
@@ -284,6 +430,22 @@ function frame(ts) {
   lastTs = ts;
   if (G) {
     G.brain.update(dt);
+    if (engine) {
+      const b = G.brain;
+      engine.game_tick(
+        dt,
+        b.calm || 0,
+        b.focus || 0,
+        0,
+        b.hr || 0,
+        b.restHr || 70,
+        b.hrDelta(),
+        b.stats?.blinks || 0
+      );
+      if (b.hr > 0) {
+        engine.audio_heartbeat(performance.now() / 1000, b.hr, Math.max(0, b.hrDelta() / 30));
+      }
+    }
     if (banner) {
       banner.t += dt;
       if (banner.t > 6) dismissBanner();
@@ -293,8 +455,10 @@ function frame(ts) {
     } else if ($('failScreen').hidden && $('endScreen').hidden) {
       G.runTime += dt;
       G.calibration?.update(dt, G.brain, G.mood);
+      if (aiPlanet) aiPlanet.update(dt);
       G.scene.update(dt);
     } else if (!$('endScreen').hidden) {
+      if (aiPlanet) aiPlanet.update(dt);
       G.scene.update(dt);
     }
     if (pendingScene != null) {
@@ -307,12 +471,17 @@ function frame(ts) {
     G.shake = Math.max(0, (G.shake || 0) - dt * 2);
     cosmos.update(dt, G);
     advisor.update(dt);
-    const showGalaxyHud = cosmos.galaxy && (G.sandbox || cosmos.inGalaxy);
-    const wanted = showGalaxyHud ? galaxyHudScene : G.scene;
+    // planets (#68): the HUD names the world you're on: "your world" at home, "AI god" elsewhere.
+    const wanted = cosmos.hudScene(G, galaxyHudScene);
     if (wanted !== hudScene) { hudScene = wanted; hud.setScene(wanted); }
-    hud.update(dt, showGalaxyHud ? Object.assign(Object.create(G), { scene: galaxyHudScene }) : G);
+    hud.update(dt, wanted === G.scene ? G : Object.assign(Object.create(G), { scene: wanted }));
     updateCosmosUi(dt);
+  } else if (previewBrain) {
+    previewBrain.update(dt);
+    $('sourceStatus').textContent = previewSource.status;
+    $('sourceStatus').dataset.ok = previewSource.connected ? '1' : '0';
   }
+  eegPanel.update();
   render();
 }
 function rafLoop() { frame(); requestAnimationFrame(rafLoop); }
@@ -327,13 +496,95 @@ function aimFromEvent(e) {
 }
 
 function worldFromEvent(e) { const a = aimFromEvent(e); return { x: a.x * W, y: a.y * H }; }
-// Aim on the (panned, wrapping) surface: screen position → map position.
-function surfaceAim(e) { const a = aimFromEvent(e); return { x: cosmos.mapX(a.x * W) / W, y: a.y }; }
+// Aim on the surface: in 3D mode, raycast from screen to terrain; in 2D, screen → map position.
+function surfaceAim(e) {
+  if (engine && engine.is_3d_mode() && !cosmos.active) {
+    const r = screen.getBoundingClientRect();
+    const sx = e.clientX - r.left;
+    const sy = e.clientY - r.top;
+    const hit = engine.screen_to_ground(sx, sy, r.width, r.height);
+    if (hit && hit[0] >= 0 && hit[1] >= 0) {
+      return { x: clamp(hit[0] / W), y: clamp(hit[1] / H) };
+    }
+  }
+  const a = aimFromEvent(e);
+  return { x: cosmos.mapX(a.x * W) / W, y: a.y };
+}
 let panDrag = null;
+let orbitDrag = null;
+// ---------- 3D camera <-> globe hand-off ----------
+// The globe zoom (cosmos) starts from the flat 2D map. So zooming the 3D camera out past its
+// default distance tips it, smoothly, to look straight down, north-up, at the whole map: exactly
+// the 2D frame. Only then does the globe take over. Zooming back in reverses it.
+// topDown is where the 30 degree lens frames the 180-tile-high map at sea level (y = 7.92):
+// 90 / tan(15 deg) + 7.92 = 344.
+const CAM3D = { blendFrom: 300, topDown: 344, topPitch: 1.55 };
+let cam3dBase = null;   // the player's own angle when the tip-over began
+let cam3dTween = null;  // a keyboard/button zoom-out animates the tip-over, then hands over
+// 3D is the home world's relief; other worlds' surfaces (planets #68) stay 2D until they get their own mesh.
+function in3dSurface() { return !!(engine && engine.is_3d_mode() && !cosmos.active && !((cosmos.z || 0) > 0) && (!G || !cosmos.viewScene || cosmos.viewScene(G) === G.scene) && !(G?.scene instanceof CivSandbox)); } // civ (#50) runs on its own planet: 2D
+function applyCam3dBlend() {
+  const d = engine.get_camera_distance();
+  const t = clamp((d - CAM3D.blendFrom) / (CAM3D.topDown - CAM3D.blendFrom));
+  if (t <= 0) {
+    if (cam3dBase) {
+      engine.orbit_camera(cam3dBase.yaw - engine.get_camera_yaw(), cam3dBase.pitch - engine.get_camera_pitch());
+      engine.set_camera_target(engine.get_camera_target_x(), cam3dBase.z);
+      cam3dBase = null;
+    }
+    return;
+  }
+  if (!cam3dBase) cam3dBase = { pitch: engine.get_camera_pitch(), yaw: engine.get_camera_yaw(), z: engine.get_camera_target_z() };
+  const e = t * t * (3 - 2 * t);
+  const northUp = Math.round(cam3dBase.yaw / (2 * Math.PI)) * 2 * Math.PI;
+  const yaw = cam3dBase.yaw + (northUp - cam3dBase.yaw) * e;
+  const pitch = cam3dBase.pitch + (CAM3D.topPitch - cam3dBase.pitch) * e;
+  engine.orbit_camera(yaw - engine.get_camera_yaw(), pitch - engine.get_camera_pitch());
+  engine.set_camera_target(engine.get_camera_target_x(), cam3dBase.z + (H / 2 - cam3dBase.z) * e);
+}
+function zoom3dBy(f) {
+  const d = engine.get_camera_distance();
+  engine.zoom_camera(Math.min(CAM3D.topDown, d * f) / d);
+  applyCam3dBlend();
+}
+function zoomOutFromSurface() {
+  if (!in3dSurface()) { cosmos.zoomOut(G); return; }
+  cam3dTween = { from: engine.get_camera_distance(), t0: performance.now(), dur: 350 };
+}
+function zoomInOnSurface() {
+  if (in3dSurface()) { cam3dTween = null; zoom3dBy(0.8); return; }
+  cosmos.zoomIn(G);
+}
+function stepCam3dTween() {
+  if (!cam3dTween) return;
+  const k = clamp((performance.now() - cam3dTween.t0) / cam3dTween.dur);
+  const d = engine.get_camera_distance();
+  engine.zoom_camera((cam3dTween.from + (CAM3D.topDown - cam3dTween.from) * k) / d);
+  applyCam3dBlend();
+  if (k >= 1) { cam3dTween = null; cosmos.zoomOut(G); }
+}
 
 screen.addEventListener('pointermove', (e) => {
   if (G && cosmos.active) { const p = worldFromEvent(e); cosmos.pointerMove(e.pointerId, p.x, p.y, G); return; }
-  if (panDrag && panDrag.id === e.pointerId) { const x = worldFromEvent(e).x; cosmos.pan(x - panDrag.x); panDrag.x = x; return; }
+  if (orbitDrag && orbitDrag.id === e.pointerId) {
+    const dx = e.clientX - orbitDrag.x;
+    const dy = e.clientY - orbitDrag.y;
+    orbitDrag.x = e.clientX;
+    orbitDrag.y = e.clientY;
+    if (engine && engine.is_3d_mode()) {
+      engine.orbit_camera(dx * 0.008, dy * 0.008);
+      cam3dBase = null;
+    }
+    return;
+  }
+  if (panDrag && panDrag.id === e.pointerId) {
+    // East–west, plus north–south on the vast worlds (planets #68). In 3D the camera follows the pan.
+    const q = worldFromEvent(e);
+    cosmos.pan(q.x - panDrag.x, q.y - (panDrag.y ?? q.y));
+    panDrag.x = q.x; panDrag.y = q.y;
+    cam3dBase = null;
+    return;
+  }
   const s = sim(); if (!s) return;
   const a = surfaceAim(e);
   s.setAim(a.x, a.y);
@@ -348,11 +599,27 @@ screen.addEventListener('pointerdown', (e) => {
     cosmos.pointerDown(e.pointerId, p.x, p.y);
     return;
   }
-  // Right or middle drag pans the planet's surface; left click stays the blink.
-  if (G && (e.button === 1 || e.button === 2)) {
+  // Right-drag or Alt-drag orbits the camera, in 3D only. (Shift is the racing-pulse key.)
+  if (G && engine && engine.is_3d_mode() && !cosmos.active && (e.button === 2 || (e.button === 0 && e.altKey))) {
     e.preventDefault();
     screen.setPointerCapture?.(e.pointerId);
-    panDrag = { id: e.pointerId, x: worldFromEvent(e).x };
+    orbitDrag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    return;
+  }
+  // Middle click pans the camera
+  if (G && e.button === 1) {
+    e.preventDefault();
+    screen.setPointerCapture?.(e.pointerId);
+    const q0 = worldFromEvent(e);
+    panDrag = { id: e.pointerId, x: q0.x, y: q0.y };
+    return;
+  }
+  // Right drag in 2D mode pans surface
+  if (G && e.button === 2) {
+    e.preventDefault();
+    screen.setPointerCapture?.(e.pointerId);
+    const q = worldFromEvent(e);
+    panDrag = { id: e.pointerId, x: q.x, y: q.y };
     return;
   }
   const s = sim(); if (!s) return;
@@ -362,6 +629,7 @@ screen.addEventListener('pointerdown', (e) => {
   s.blink();
 });
 const endPointer = (e) => {
+  if (orbitDrag && orbitDrag.id === e.pointerId) { orbitDrag = null; return; }
   if (panDrag && panDrag.id === e.pointerId) { panDrag = null; return; }
   if (!G || !cosmos.pointers.has(e.pointerId)) return;
   const p = worldFromEvent(e);
@@ -373,9 +641,16 @@ screen.addEventListener('pointercancel', endPointer);
 screen.addEventListener('wheel', (e) => {
   if (!G) return;
   e.preventDefault();
-  // Horizontal scroll (or Shift+scroll) pans the surface; vertical scroll zooms.
+  // Horizontal scroll (or Shift+scroll) pans the surface; in 3D the camera follows the pan.
   const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey;
   if (horizontal && !cosmos.active) { cosmos.pan(-(e.shiftKey ? e.deltaY : e.deltaX) * 0.15); return; }
+  if (in3dSurface()) {
+    cam3dTween = null;
+    // Already looking straight down at the whole map: the next notch hands over to the globe.
+    if (e.deltaY > 0 && engine.get_camera_distance() >= CAM3D.topDown - 0.5) { cosmos.zoomOut(G); return; }
+    zoom3dBy(e.deltaY > 0 ? 1.1 : 0.91);
+    return;
+  }
   cosmos.wheel(e.deltaY, G);
 }, { passive: false });
 screen.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -384,9 +659,16 @@ const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'pa
 window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input')) return;
   if (e.code === 'KeyM') { toggleModel(); return; }
-  if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { cosmos.zoomOut(G); return; }
-  if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { cosmos.zoomIn(G); return; }
+  if (e.code === 'Escape' && eegPanel.wiz?.active) { eegPanel.closeWizard(); return; }
+  if (e.code === 'KeyE') { eegPanel.toggle(); return; }
+  if (e.code === 'KeyC') { eegPanel.calibrateCenter(); return; }
+  if (e.code === 'KeyT') { toggle3D(); return; }
+  if (e.code === 'KeyG') { toggleAIGod(); return; }
+  if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { zoomOutFromSurface(); return; }
+  if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { zoomInOnSurface(); return; }
   if (G && !cosmos.active && (e.code === 'KeyA' || e.code === 'KeyD')) { cosmos.panVel = e.code === 'KeyA' ? 140 : -140; return; }
+  if (G && !cosmos.active && cosmos.surfaceInView && (e.code === 'KeyW' || e.code === 'KeyS')) { cosmos.panVelY = e.code === 'KeyW' ? 110 : -110; return; } // planets (#68)
+  if (G && e.code === 'KeyN' && !e.repeat) { if (cosmos.visitNextWorld(G)) audio.blip(); return; } // planets (#68, #43): visit the next AI world (G is the AI God toggle)
   if (e.code === 'Enter') {
     if (banner) dismissBanner();
     else if (!$('failScreen').hidden) retryEra();
@@ -437,6 +719,17 @@ function toggleModel() {
 }
 $('modelBtn').addEventListener('click', toggleModel);
 $('modelClose').addEventListener('click', toggleModel);
+
+function toggle3D() {
+  if (!engine || !has3d) return;
+  engine.set_3d_mode(!engine.is_3d_mode());
+  cam3dBase = null; cam3dTween = null;
+  sync3dButton();
+  const on = engine.is_3d_mode();
+  advisor.say('3d-toggle', on ? '3D view: right-drag to orbit, wheel to zoom.' : '2D classic view.', { mood: 'happy', priority: 2, cooldown: 1 });
+}
+$('mode3dBtn')?.addEventListener('click', toggle3D);
+$('aiGodBtn')?.addEventListener('click', toggleAIGod);
 $('soundBtn').addEventListener('click', () => {
   audio.unlock();
   const on = audio.toggle();
@@ -479,8 +772,10 @@ function updateCosmosUi(dt) {
     const mirrored = p.home && !p.autonomous;
     const era = p.pop > 0 ? ERA_LABEL[ERA_NAMES[p.eraIndex]] : 'Barren';
     const owner = gal.attended === p ? `${ownerLabel(p)} · you're here` : ownerLabel(p);
-    return { p, era: p.forming ? 'Forming' : era, pop: `${mirrored ? `${p.pop} people` : fmtPop(p.pop)} · ${owner}`, prog: mirrored ? (p.eraIndex + 1) / 4 : p.pop > 0 ? p.progress : 0 };
+    const tier = worldMeta(p); // planets (#68): settlement tier and strife
+    return { p, era: p.forming ? 'Forming' : tier ? `${era} · ${tier}` : era, pop: `${mirrored ? `${p.pop} people` : fmtPop(p.pop)} · ${owner}`, prog: mirrored ? (p.eraIndex + 1) / 4 : p.pop > 0 ? p.progress : 0 };
   });
+  renderWorldDetail($('worldDetail'), cosmos.detailPlanet()); // planets (#68): milestones and history
   const key = rows.map((r) => `${r.p.name}|${r.era}|${r.pop}|${Math.round(r.prog * 20)}|${gal.attended === r.p}|${cosmos.target}|${r.p.effect}|${r.p.channel}`).join(';');
   if (key !== lastListKey) {
     lastListKey = key;
@@ -503,14 +798,17 @@ function updateCosmosUi(dt) {
     }));
   }
   const m = gal.mind;
+  const pulseStr = (G?.brain?.hr && G.brain.hr > 0)
+    ? `pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, `
+    : (m.stress ? `tension ${Math.round(m.stress * 100)}%, ` : '');
   $('mindLine').textContent = m.done
-    ? `Read from your first 10 s: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, ${m.blinks} blinks.`
+    ? `Read from your first 10 s: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, ${pulseStr}${m.blinks} blinks.`
     : `Reading your mind: ${Math.max(0, Math.ceil(SIM.MIND_SECONDS - m.t))} s of play left.`;
   $('galaxyLog').replaceChildren(...gal.log.slice(0, 4).map((l) => { const li = document.createElement('li'); li.textContent = l.text; return li; }));
 }
 
-$('zoomIn').addEventListener('click', () => { if (G) { audio.unlock(); cosmos.zoomIn(G); } });
-$('zoomOut').addEventListener('click', () => { if (G) { audio.unlock(); cosmos.zoomOut(G); } });
+$('zoomIn').addEventListener('click', () => { if (G) { audio.unlock(); zoomInOnSurface(); } });
+$('zoomOut').addEventListener('click', () => { if (G) { audio.unlock(); zoomOutFromSurface(); } });
 $('makePlanet').addEventListener('click', () => {
   if (!G) return;
   audio.unlock();
@@ -544,7 +842,7 @@ $('galaxyBtn').addEventListener('click', () => {
   $('endScreen').hidden = true;
   audio.unlock();
   openGalaxy({ fromEnding: true });
-  advisor.say('galaxy', 'Behold, my lord: the galaxy. Make planets. Keep your pulse down near them.', { mood: 'happy', priority: 3, cooldown: 999 });
+  advisor.say('galaxy', 'Behold, my lord: the galaxy. Make planets. Keep your calm and focus near them.', { mood: 'happy', priority: 3, cooldown: 999 });
 });
 
 // ---------- title screen ----------
@@ -553,9 +851,9 @@ function begin(source) {
   $('titleScreen').hidden = true;
   newGame(source);
 }
-$('playSim').addEventListener('click', () => begin(new SimSource()));
+$('playSim').addEventListener('click', () => begin(previewSource?.kind === 'bridge' && previewSource.connected ? previewSource : new SimSource()));
 $('playSandbox').addEventListener('click', () => {
-  begin(new SimSource());
+  begin(previewSource?.kind === 'bridge' && previewSource.connected ? previewSource : new SimSource());
   dismissBanner();
   G.sandbox = true;
   cosmos.sandbox = true;
@@ -591,14 +889,19 @@ $('playBridge').addEventListener('click', async () => {
 });
 
 // Debug handle for the console (and for automated playtests).
-window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos };
+window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos, get engine() { return engine; } };
 
 // camera (#33): opt-in webcam. Hand gestures cast spells (keys 1-7 without a webcam), the face sets
 // the world's mood. It adds to the brain and keyboard inputs and never replaces them.
 window.__moc.camera = initCamera({
-  getG: () => G,
+  getG: () => cosmos.castG(G), // planets (#68): casts and mood reach the world you're on
   canCast: () => !!G?.scene && !banner && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,
+  // camera debug (#67): the fingertip aims on the panned surface like the mouse does.
+  mapX: (x) => cosmos.mapX(x * W) / W,
+  screenX: (x) => ((((x * W + cosmos.panX) % W) + W) % W) / W,
 });
+// camera debug (#67): Debug tab (button in the top bar, ` key; D pans the planet).
+window.__moc.debug = initDebug({ getG: () => G, camera: window.__moc.camera });
 
 // ---------- boot ----------
 function start(data = {}) {
