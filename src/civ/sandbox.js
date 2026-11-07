@@ -74,10 +74,10 @@ export class CivSandbox {
   constructor({ cosmos = null, seed = null } = {}) {
     this.id = 'civ';
     this.era = 'kingdoms';
-    this.label = 'Sandbox · Four civilisations';
+    this.label = 'Sandbox · A crowded planet';
     this.intro = {
       title: 'Four civilisations',
-      goal: 'Found four peoples on one big planet, one at a time: choose one, place it, and seed its temper from your mind for 5 seconds. Then watch them climb twenty ages, fight and split. Your mind tilts war and peace.',
+      goal: 'Found your four peoples on one huge planet, one at a time: choose one, place it, and seed its temper from your mind for 5 seconds. A dozen rival peoples rise on their own (?civs=4..20). Watch them all climb twenty ages, trade, ally, fight and split. Your mind tilts war and peace.',
       how: [
         ['Calm', 'Hold Space: friendlier chiefs, trade, peace treaties, fewer rebels.'],
         ['Stress', 'Hold Shift (or frown at the camera): stress and anger bring raids, wars and rebellions.'],
@@ -149,9 +149,12 @@ export class CivSandbox {
     G.advisor.say('civ-intro', 'Four peoples, one planet, my lord. They will grow, squabble and split. Your moods are now everyone\'s problem.', { priority: 3, cooldown: 999 });
     // calibration (#54): one run seed for the planet, the civilisations and the dummy seed.
     this.seed = (this.seedArg ?? G.calibration?.config?.seed ?? Math.random() * 2 ** 32) >>> 0;
-    // ?civs=8..12 (#101): the player's four and rivals that arrive on their own (default 10 in all).
-    const civs = Math.max(4, Math.min(16, Number(new URLSearchParams(location.search).get('civs')) || 10));
-    createCiv(this.seed, { staged: true, rivals: civs - 4 })
+    // A big world full of peoples (Alex): ?civs=4..20 (default 16: the player's four plus rivals
+    // that arrive on their own) on ?planet=WxH (default 2560x1280, 4x the old planet).
+    const q = new URLSearchParams(location.search);
+    const civs = Math.max(4, Math.min(20, Number(q.get('civs')) || 16));
+    const [pw, ph] = (q.get('planet') || '2560x1280').split('x').map((v) => Math.max(320, Math.min(4096, Number(v) || 0)));
+    createCiv(this.seed, { staged: true, rivals: civs - 4, width: pw, height: ph })
       .then((civ) => {
         if (G.scene !== this) { civ.free(); return; }
         this.civ = civ;
