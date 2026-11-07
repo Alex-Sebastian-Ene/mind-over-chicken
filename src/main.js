@@ -44,6 +44,28 @@ try {
 // Without WebGL, fall back to a plain 2D upscale so the game still shows.
 const fallback2d = engine ? null : screen.getContext('2d');
 
+// 3D world (#51): set_3d_mode only takes effect once the 3D renderer exists, so create it
+// here and start in 3D. If the GPU can't do it, stay in 2D and hide the toggle.
+let has3d = false;
+if (engine) {
+  try {
+    engine.init_3d();
+    engine.set_3d_mode(true);
+    has3d = engine.is_3d_mode();
+  } catch (err) {
+    console.warn('3D renderer unavailable; staying in 2D:', err);
+  }
+}
+function sync3dButton() {
+  const btn = $('mode3dBtn');
+  if (!btn) return;
+  const on = !!engine && engine.is_3d_mode();
+  btn.hidden = !has3d;
+  btn.textContent = on ? '3D: ON' : '3D: OFF';
+  btn.setAttribute('aria-pressed', String(on));
+}
+sync3dButton();
+
 function resize() {
   const rect = screen.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
@@ -96,6 +118,13 @@ function newGame(source, startIndex = 0) {
   $('failScreen').hidden = true;
   if (engine && G.world) {
     engine.init_world(G.world.seed);
+    // The 3D relief must be the world the simulation runs on (#71). Older pkg builds lack this.
+    if (engine.set_heightmap) {
+      try { engine.set_heightmap(G.world.h); } catch (err) { console.warn('set_heightmap failed:', err); }
+    }
+    // Around the 3D map: this world's deep sea, so the edges read as open ocean.
+    const deep = G.world.palette?.[0]?.[0];
+    if (deep && engine.set_backdrop) engine.set_backdrop(deep[0], deep[1], deep[2]);
     engine.set_era(startIndex);
   }
   startScene(startIndex);
@@ -216,9 +245,18 @@ function render() {
   }
   lowCtx.imageSmoothingEnabled = false;
   lowCtx.setTransform(1, 0, 0, 1, 0, 0);
+  // 3D only on the surface itself: once the globe zoom starts, the flat 2D map takes over (the
+  // 3D camera has already tipped over to that exact frame, so the hand-over is seamless).
+  G.render3d = in3dSurface();
+  if (G.render3d) {
+    // The 3D camera follows the same east–west pan as the 2D map (A/D, Shift+scroll, drag).
+    engine.set_camera_target(cosmos.mapX(W / 2), engine.get_camera_target_z());
+    stepCam3dTween();
+  }
+  // In 3D, scenes with draw3d stand their actors up as sprites, so they skip painting them flat.
   scene.draw(lowCtx);
   scene.drawAfterLight?.(lowCtx);
-  cosmos.applyPan(low);   // the surface is a planet: it wraps east–west
+  if (!G.render3d) cosmos.applyPan(low);   // the surface is a planet: it wraps east–west (3D pans the camera instead)
   const cosmic = cosmos.render(low, lowCtx, G);
 
   // Zooming out fades the surface's night lighting and labels; the globe and galaxy
@@ -237,7 +275,7 @@ function render() {
 
   if (engine) {
     try {
-      if (surface && engine.is_3d_mode()) {
+      if (surface && G.render3d) {
         engine.upload_canvas(low);
         if (scene.draw3d) {
           scene.draw3d(engine, 0.016);
@@ -359,6 +397,56 @@ function surfaceAim(e) {
 }
 let panDrag = null;
 let orbitDrag = null;
+// ---------- 3D camera <-> globe hand-off ----------
+// The globe zoom (cosmos) starts from the flat 2D map. So zooming the 3D camera out past its
+// default distance tips it, smoothly, to look straight down, north-up, at the whole map: exactly
+// the 2D frame. Only then does the globe take over. Zooming back in reverses it.
+// topDown is where the 30 degree lens frames the 180-tile-high map at sea level (y = 7.92):
+// 90 / tan(15 deg) + 7.92 = 344.
+const CAM3D = { blendFrom: 300, topDown: 344, topPitch: 1.55 };
+let cam3dBase = null;   // the player's own angle when the tip-over began
+let cam3dTween = null;  // a keyboard/button zoom-out animates the tip-over, then hands over
+function in3dSurface() { return !!(engine && engine.is_3d_mode() && !cosmos.active && !((cosmos.z || 0) > 0)); }
+function applyCam3dBlend() {
+  const d = engine.get_camera_distance();
+  const t = clamp((d - CAM3D.blendFrom) / (CAM3D.topDown - CAM3D.blendFrom));
+  if (t <= 0) {
+    if (cam3dBase) {
+      engine.orbit_camera(cam3dBase.yaw - engine.get_camera_yaw(), cam3dBase.pitch - engine.get_camera_pitch());
+      engine.set_camera_target(engine.get_camera_target_x(), cam3dBase.z);
+      cam3dBase = null;
+    }
+    return;
+  }
+  if (!cam3dBase) cam3dBase = { pitch: engine.get_camera_pitch(), yaw: engine.get_camera_yaw(), z: engine.get_camera_target_z() };
+  const e = t * t * (3 - 2 * t);
+  const northUp = Math.round(cam3dBase.yaw / (2 * Math.PI)) * 2 * Math.PI;
+  const yaw = cam3dBase.yaw + (northUp - cam3dBase.yaw) * e;
+  const pitch = cam3dBase.pitch + (CAM3D.topPitch - cam3dBase.pitch) * e;
+  engine.orbit_camera(yaw - engine.get_camera_yaw(), pitch - engine.get_camera_pitch());
+  engine.set_camera_target(engine.get_camera_target_x(), cam3dBase.z + (H / 2 - cam3dBase.z) * e);
+}
+function zoom3dBy(f) {
+  const d = engine.get_camera_distance();
+  engine.zoom_camera(Math.min(CAM3D.topDown, d * f) / d);
+  applyCam3dBlend();
+}
+function zoomOutFromSurface() {
+  if (!in3dSurface()) { cosmos.zoomOut(G); return; }
+  cam3dTween = { from: engine.get_camera_distance(), t0: performance.now(), dur: 350 };
+}
+function zoomInOnSurface() {
+  if (in3dSurface()) { cam3dTween = null; zoom3dBy(0.8); return; }
+  cosmos.zoomIn(G);
+}
+function stepCam3dTween() {
+  if (!cam3dTween) return;
+  const k = clamp((performance.now() - cam3dTween.t0) / cam3dTween.dur);
+  const d = engine.get_camera_distance();
+  engine.zoom_camera((cam3dTween.from + (CAM3D.topDown - cam3dTween.from) * k) / d);
+  applyCam3dBlend();
+  if (k >= 1) { cam3dTween = null; cosmos.zoomOut(G); }
+}
 
 screen.addEventListener('pointermove', (e) => {
   if (G && cosmos.active) { const p = worldFromEvent(e); cosmos.pointerMove(e.pointerId, p.x, p.y, G); return; }
@@ -369,6 +457,7 @@ screen.addEventListener('pointermove', (e) => {
     orbitDrag.y = e.clientY;
     if (engine && engine.is_3d_mode()) {
       engine.orbit_camera(dx * 0.008, dy * 0.008);
+      cam3dBase = null;
     }
     return;
   }
@@ -376,11 +465,8 @@ screen.addEventListener('pointermove', (e) => {
     const x = worldFromEvent(e).x;
     const dx = x - panDrag.x;
     panDrag.x = x;
-    if (engine && engine.is_3d_mode()) {
-      engine.pan_camera(-dx * 0.4, 0);
-    } else {
-      cosmos.pan(dx);
-    }
+    cosmos.pan(dx);   // in 3D the camera follows this pan (see render)
+    cam3dBase = null;
     return;
   }
   const s = sim(); if (!s) return;
@@ -397,8 +483,8 @@ screen.addEventListener('pointerdown', (e) => {
     cosmos.pointerDown(e.pointerId, p.x, p.y);
     return;
   }
-  // Right-click or Alt/Shift-click orbits camera in 3D
-  if (G && (e.button === 2 || (e.button === 0 && (e.altKey || e.shiftKey)))) {
+  // Right-drag or Alt-drag orbits the camera, in 3D only. (Shift is the racing-pulse key.)
+  if (G && engine && engine.is_3d_mode() && !cosmos.active && (e.button === 2 || (e.button === 0 && e.altKey))) {
     e.preventDefault();
     screen.setPointerCapture?.(e.pointerId);
     orbitDrag = { id: e.pointerId, x: e.clientX, y: e.clientY };
@@ -437,21 +523,16 @@ screen.addEventListener('pointercancel', endPointer);
 screen.addEventListener('wheel', (e) => {
   if (!G) return;
   e.preventDefault();
-  if (engine && engine.is_3d_mode() && !cosmos.active) {
-    if (e.deltaY > 0) {
-      if (engine.get_camera_distance() > 220) {
-        cosmos.zoomOut(G);
-      } else {
-        engine.zoom_camera(1.1);
-      }
-    } else {
-      engine.zoom_camera(0.91);
-    }
-    return;
-  }
-  // Horizontal scroll (or Shift+scroll) pans the surface; vertical scroll zooms.
+  // Horizontal scroll (or Shift+scroll) pans the surface; in 3D the camera follows the pan.
   const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey;
   if (horizontal && !cosmos.active) { cosmos.pan(-(e.shiftKey ? e.deltaY : e.deltaX) * 0.15); return; }
+  if (in3dSurface()) {
+    cam3dTween = null;
+    // Already looking straight down at the whole map: the next notch hands over to the globe.
+    if (e.deltaY > 0 && engine.get_camera_distance() >= CAM3D.topDown - 0.5) { cosmos.zoomOut(G); return; }
+    zoom3dBy(e.deltaY > 0 ? 1.1 : 0.91);
+    return;
+  }
   cosmos.wheel(e.deltaY, G);
 }, { passive: false });
 screen.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -460,9 +541,9 @@ const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'pa
 window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input')) return;
   if (e.code === 'KeyM') { toggleModel(); return; }
-  if (e.code === 'KeyT' || e.code === 'Digit3') { toggle3D(); return; }
-  if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { cosmos.zoomOut(G); return; }
-  if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { cosmos.zoomIn(G); return; }
+  if (e.code === 'KeyT') { toggle3D(); return; }
+  if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { zoomOutFromSurface(); return; }
+  if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { zoomInOnSurface(); return; }
   if (G && !cosmos.active && (e.code === 'KeyA' || e.code === 'KeyD')) { cosmos.panVel = e.code === 'KeyA' ? 140 : -140; return; }
   if (e.code === 'Enter') {
     if (banner) dismissBanner();
@@ -516,15 +597,12 @@ $('modelBtn').addEventListener('click', toggleModel);
 $('modelClose').addEventListener('click', toggleModel);
 
 function toggle3D() {
-  if (!engine) return;
-  const next = !engine.is_3d_mode();
-  engine.set_3d_mode(next);
-  const btn = $('mode3dBtn');
-  if (btn) {
-    btn.textContent = next ? '3D: ON' : '3D: OFF';
-    btn.setAttribute('aria-pressed', String(next));
-  }
-  advisor.say('3d-toggle', next ? '3D View: right-drag to orbit, wheel to zoom.' : '2D Classic Mode.', { mood: 'happy', priority: 2, cooldown: 1 });
+  if (!engine || !has3d) return;
+  engine.set_3d_mode(!engine.is_3d_mode());
+  cam3dBase = null; cam3dTween = null;
+  sync3dButton();
+  const on = engine.is_3d_mode();
+  advisor.say('3d-toggle', on ? '3D view: right-drag to orbit, wheel to zoom.' : '2D classic view.', { mood: 'happy', priority: 2, cooldown: 1 });
 }
 $('mode3dBtn')?.addEventListener('click', toggle3D);
 $('soundBtn').addEventListener('click', () => {
@@ -599,8 +677,8 @@ function updateCosmosUi(dt) {
   $('galaxyLog').replaceChildren(...gal.log.slice(0, 4).map((l) => { const li = document.createElement('li'); li.textContent = l.text; return li; }));
 }
 
-$('zoomIn').addEventListener('click', () => { if (G) { audio.unlock(); cosmos.zoomIn(G); } });
-$('zoomOut').addEventListener('click', () => { if (G) { audio.unlock(); cosmos.zoomOut(G); } });
+$('zoomIn').addEventListener('click', () => { if (G) { audio.unlock(); zoomInOnSurface(); } });
+$('zoomOut').addEventListener('click', () => { if (G) { audio.unlock(); zoomOutFromSurface(); } });
 $('makePlanet').addEventListener('click', () => {
   if (!G) return;
   audio.unlock();
@@ -670,7 +748,7 @@ $('playBridge').addEventListener('click', async () => {
 });
 
 // Debug handle for the console (and for automated playtests).
-window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos };
+window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos, get engine() { return engine; } };
 
 // camera (#33): opt-in webcam. Hand gestures cast spells (keys 1-7 without a webcam), the face sets
 // the world's mood. It adds to the brain and keyboard inputs and never replaces them.

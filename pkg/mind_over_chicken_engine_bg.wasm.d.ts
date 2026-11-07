@@ -53,8 +53,10 @@ export const engine_render_3d: (a: number, b: number, c: number, d: number, e: n
 export const engine_render_uploaded_canvas: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
 export const engine_screen_to_ground: (a: number, b: number, c: number, d: number, e: number) => any;
 export const engine_set_3d_mode: (a: number, b: number) => void;
+export const engine_set_backdrop: (a: number, b: number, c: number, d: number) => void;
 export const engine_set_camera_target: (a: number, b: number, c: number) => void;
 export const engine_set_era: (a: number, b: number) => void;
+export const engine_set_heightmap: (a: number, b: number, c: number) => [number, number];
 export const engine_upload_canvas: (a: number, b: any) => [number, number];
 export const engine_zoom_camera: (a: number, b: number) => void;
 export const __wbindgen_malloc: (a: number, b: number) => number;
