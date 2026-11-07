@@ -31,6 +31,15 @@
 //! measured and climbed (`ages`), conflict levels and strifes move (`conflict`), and wars are
 //! declared from age 7 (or after two battles). A civilisation fighting a civil war inside
 //! itself is not also split by the unrest rule; the war decides it.
+//!
+//! With resources (#165): tension also rises with what a civilisation wants of what a neighbour
+//! holds (`resources::pressure`), and falls with trade and alliances (`pacts::pressure`). A war
+//! over a deposit names it (`Decision::ClaimDeposit`); a strong civilisation that badly needs a
+//! weaker neighbour's deposit goes to war for it at lower tension. Once it holds the deposit it
+//! offers peace; a peace it was winning cedes the deposit's village (`resources::on_peace`).
+//! Allies never raid or fight each other, answer each other's calls (`Decision::JoinWar`),
+//! and break their pacts when the balance shifts (`pacts`). Rebels rise for the parent's best
+//! deposit near them.
 
 use std::f32::consts::TAU;
 

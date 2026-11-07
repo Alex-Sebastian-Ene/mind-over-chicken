@@ -217,6 +217,14 @@ export class Civ {
     return Object.fromEntries(keys.map((k, i) => [k, s[i]]));
   }
 
+  // Resources, pacts and the land (#165; the words and icons come from Rust).
+  resStats() {
+    if (!this.ex.civ_res_stat) return null;
+    const keys = ['deposits', 'held', 'spent', 'resourceWars', 'seized', 'ceded', 'trades', 'pacts', 'betrayals', 'lapses', 'joined',
+      'improved', 'worn', 'stripped', 'dust', 'irrigated', 'terraced', 'replanted', 'reclaimed', 'ms', 'pactsNow', 'goalsNow'];
+    return Object.fromEntries(keys.map((k, i) => [k, this.ex.civ_res_stat(this.w, i)]));
+  }
+
   warState(a, b) { return this.ex.civ_war_state(this.w, a, b); }
   tension(a, b) { return this.ex.civ_tension(this.w, a, b); }
   ownerAt(x, y) { return this.ex.civ_owner_at(this.w, x, y); }

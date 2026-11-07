@@ -39,7 +39,15 @@ pub const NAT: u8 = 128;
 /// Forest thinned below this is cleared to grass.
 pub const STRIP: u8 = 60;
 /// Grass worn below this turns to sand.
-pub const DUST: u8 = 44;
+pub const DUST: u8 = 56;
+
+#[inline]
+fn hash2(x: u32, y: u32) -> u32 {
+    let mut h = x.wrapping_mul(0x9e37_79b9) ^ y.wrapping_mul(0x85eb_ca6b);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2c1b_3c6d);
+    h ^ (h >> 13)
+}
 
 /// Food multiplier of a fertility byte.
 #[inline]
@@ -126,7 +134,8 @@ fn care(w: &World, f: &Faction, v: &Village) -> f32 {
     (know * (0.35 + 0.65 * f.metrics.stability) + works + 0.15 * f.traits.cohesion + mood - war - 0.3 * hungry).clamp(0.0, 1.2)
 }
 
-/// How hard a village is working its land (0..1.5).
+/// How hard a village is working its land (0..1.5): overcrowding, hunger, raids, war, a Dark
+/// Age, drought and the god's stress.
 fn strain(w: &World, f: &Faction, v: &Village) -> f32 {
     let wgt = if f.is_player { 1.0 } else { 0.6 };
     let crowd = v.pop as f32 / v.cap.max(1) as f32;
@@ -136,7 +145,9 @@ fn strain(w: &World, f: &Faction, v: &Village) -> f32 {
     let dark = if f.dark_t > 0.0 { 0.2 } else { 0.0 };
     let dry = if f.drought_t > 0.0 { 0.25 } else { 0.0 };
     let war = if w.at_war[f.id as usize] { 0.2 } else { 0.0 };
-    (people * (0.5 * crowd + 0.9 * hunger) + raided + dark + dry + war + 0.3 * w.inputs.agitation() * wgt).clamp(0.0, 1.5)
+    // Foragers tread lightly; farmers and cities work the land hard.
+    let footprint = 0.4 + 0.15 * (f.age.min(4) as f32);
+    (footprint * people * (0.15 + 1.5 * (crowd - 0.85).max(0.0) + 0.9 * hunger) + raided + dark + dry + war + 0.3 * w.inputs.agitation() * wgt).clamp(0.0, 1.5)
 }
 
 fn river_or_water_near(w: &World, x: i32, y: i32, r: i32) -> bool {
@@ -182,7 +193,7 @@ fn improve(w: &mut World, i: usize, f: u8, v: &Village) -> Option<Work> {
                 138
             };
             let cap = if age >= 15 { cap.saturating_add(16) } else { cap };
-            if up(w, cap, 12) {
+            if up(w, cap, 14) {
                 return Some(if irrigable && w.food.fert[i] > 170 { Work::Irrigation } else { Work::Fields });
             }
             None
@@ -218,7 +229,7 @@ fn wear(w: &mut World, i: usize) -> bool {
     let fe = w.food.fert[i];
     match w.terrain.kind[i] {
         GRASS => {
-            let n = fe.saturating_sub(10);
+            let n = fe.saturating_sub(14);
             if n < DUST {
                 set_kind(w, i, SAND);
                 w.food.fert[i] = 100;
@@ -228,7 +239,7 @@ fn wear(w: &mut World, i: usize) -> bool {
             w.food.fert[i] = n;
         }
         FOREST => {
-            let n = fe.saturating_sub(8);
+            let n = fe.saturating_sub(12);
             if n < STRIP {
                 set_kind(w, i, GRASS);
                 w.food.fert[i] = 96;
@@ -288,7 +299,7 @@ pub fn tick(w: &mut World, dt: f32) {
         let f = v.owner;
         let fac = &w.factions[f as usize];
         let (c, s) = (care(w, fac, &v), strain(w, fac, &v));
-        let samples = 2 + (v.radius / 3).max(0) as usize;
+        let samples = 3 + (v.radius / 2).max(0) as usize;
         let r = v.radius;
         for _ in 0..samples {
             let ox = w.land.rng.below((2 * r + 1) as usize) as i32 - r;
@@ -397,34 +408,43 @@ impl World {
                 let o = (sy * VW + sx) * 4;
                 let p = &mut data[o..o + 3];
                 let k = kind[i];
+                let (gx, gy) = (px as u32, py as u32);
                 if fe > NAT {
                     let t = ((fe - NAT) as u32).min(100);
                     match k {
-                        GRASS => {
-                            blend(p, [70, 168, 54], t * 140 / 100);
-                            // Ploughed rows, and canals where it is irrigated.
-                            if fe >= 196 && py % 6 == 0 {
-                                blend(p, [70, 130, 196], 150);
-                            } else if fe >= 160 && py % 2 == 0 {
-                                blend(p, [168, 196, 76], 90);
+                        GRASS if fe >= 156 => {
+                            // Field plots of 4×3 tiles (lush, young and ripening crops) with
+                            // furrows, and a grid of canals where it is irrigated.
+                            let h = hash2(gx / 4, gy / 3);
+                            let c = [[92, 182, 58], [140, 204, 74], [190, 190, 80]][(h % 3) as usize];
+                            blend(p, c, 110 + t / 2);
+                            if gy % 3 == 2 {
+                                blend(p, [52, 118, 40], 60);
+                            }
+                            if fe >= 190 && (gx % 8 == 0 || gy % 6 == 0) {
+                                blend(p, [74, 136, 204], 190);
                             }
                         }
+                        GRASS => blend(p, [76, 178, 56], 30 + t * 4),
                         HILLS => {
-                            if py % 2 == 0 {
-                                blend(p, [96, 156, 64], t * 170 / 100);
+                            // Terraces: green steps on the hillside.
+                            if gy % 2 == 0 {
+                                blend(p, [104, 166, 64], 60 + t * 150 / 100);
                             } else {
-                                blend(p, [120, 118, 70], t * 60 / 100);
+                                blend(p, [96, 86, 56], t * 90 / 100);
                             }
                         }
-                        FOREST => blend(p, [28, 96, 40], t * 120 / 100),
-                        _ => blend(p, [120, 170, 80], t * 100 / 100),
+                        FOREST => blend(p, [24, 92, 36], t * 140 / 100),
+                        _ => blend(p, [120, 170, 80], t),
                     }
                 } else {
+                    // Worn land: dust and bare earth.
                     let t = ((NAT - fe) as u32).min(90);
+                    let speck = hash2(gx, gy) % 4 == 0;
                     match k {
-                        FOREST => blend(p, [110, 92, 60], t * 150 / 90),
-                        SAND => blend(p, [186, 160, 112], t * 120 / 90),
-                        _ => blend(p, [168, 140, 96], t * 160 / 90),
+                        FOREST => blend(p, [120, 98, 62], t * 160 / 90),
+                        SAND => blend(p, [196, 168, 116], t * 120 / 90),
+                        _ => blend(p, if speck { [140, 112, 74] } else { [184, 156, 104] }, t * 190 / 90),
                     }
                 }
             }

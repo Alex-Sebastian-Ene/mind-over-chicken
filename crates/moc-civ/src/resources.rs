@@ -1325,8 +1325,8 @@ pub fn obs_neigh(w: &World, a: u8, b: u8) -> [f32; 7] {
 /// 5×5 icons, top row first: '.' clear, letters a palette (`icon_colour`).
 fn sprite(k: Res) -> [&'static str; 5] {
     match k {
-        Res::Soil => [".g.g.", "ggggg", ".ggg.", "..g..", "nnnnn"],
-        Res::Timber => ["..G..", ".GgG.", "GgGgG", "..n..", ".nnn."],
+        Res::Soil => ["y.y.y", "yyYyy", ".yYy.", ".nnn.", "y.y.y"],
+        Res::Timber => ["..g..", ".gGg.", "gGgGg", "..n..", ".nnn."],
         Res::Stone => [".....", "..S..", ".sSs.", "sssSs", "sssss"],
         Res::Fish => [".....", "b.bb.", "bbbwb", "b.bb.", "....."],
         Res::Copper => [".....", ".sos.", "soOos", "sssos", ".sss."],
@@ -1340,8 +1340,10 @@ fn sprite(k: Res) -> [&'static str; 5] {
 
 fn icon_colour(c: u8) -> Option<[u8; 3]> {
     Some(match c {
-        b'g' => [120, 220, 80],
-        b'G' => [70, 170, 70],
+        b'g' => [130, 214, 84],
+        b'G' => [84, 170, 64],
+        b'y' => [244, 212, 92],
+        b'Y' => [206, 160, 54],
         b'n' => [130, 86, 48],
         b'w' => [245, 245, 245],
         b's' => [150, 150, 160],
@@ -1373,17 +1375,17 @@ impl World {
             if sx < -8 || sy < -10 || sx > VW as i32 + 2 || sy > VH as i32 + 2 {
                 continue;
             }
-            // Not yet of use to anyone: faint. Run dry: grey.
-            let known = self.res.max_age + 1 >= dp.kind.unlock();
+            // Run dry: grey.
             let grey = dp.spent;
             let spr = sprite(dp.kind);
-            let alpha = if known { 255 } else { 110 };
+            let alpha = 255;
+            // A bold dark outline (all eight sides), so it reads on any ground.
             for (ry, row) in spr.iter().enumerate() {
                 for (rx, ch) in row.bytes().enumerate() {
                     if icon_colour(ch).is_none() {
                         continue;
                     }
-                    for (ox, oy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                    for (ox, oy) in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
                         let (nx, ny) = (rx as i32 + ox, ry as i32 + oy);
                         let clear = nx < 0 || ny < 0 || nx > 4 || ny > 4 || icon_colour(spr[ny as usize].as_bytes()[nx as usize]).is_none();
                         if clear {
@@ -1440,13 +1442,33 @@ impl World {
                 continue;
             }
             let fought = self.time - dp.fought_t < 3.0;
-            if self.res.max_age + 1 < dp.kind.unlock() && !fought {
+            if self.res.max_age + 2 < dp.kind.unlock() && !fought {
                 continue;
             }
             let (mx, my) = (dp.x as usize * MINI_W / self.d.w, dp.y as usize * MINI_H / self.d.h);
             let o = (my.min(MINI_H - 1) * MINI_W + mx.min(MINI_W - 1)) * 4;
-            let c = if fought { if blink { [255, 60, 40] } else { [255, 255, 255] } } else { dp.kind.colour() };
+            let c = if fought {
+                if blink {
+                    [255, 60, 40]
+                } else {
+                    [255, 255, 255]
+                }
+            } else {
+                match dp.kind {
+                    Res::Copper => [255, 140, 40],
+                    Res::Horses => [255, 226, 160],
+                    Res::Iron => [226, 236, 255],
+                    Res::Coal => [120, 120, 136],
+                    Res::Oil => [196, 80, 255],
+                    _ => [120, 255, 140],
+                }
+            };
             self.minimap[o..o + 3].copy_from_slice(&c);
+            // A dark shadow under the dot, so it never reads as a people's colour.
+            if my + 1 < MINI_H {
+                let o = ((my + 1) * MINI_W + mx.min(MINI_W - 1)) * 4;
+                self.minimap[o..o + 3].copy_from_slice(&[18, 16, 26]);
+            }
         }
     }
 }
