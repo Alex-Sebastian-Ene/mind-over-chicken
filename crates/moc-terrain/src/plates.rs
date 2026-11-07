@@ -1,6 +1,6 @@
-//! Tectonic plate kinematics on an east-west wrapping cylinder.
+//! Tectonic plate kinematics on a seamless torus (#111).
 //! Computes continental landmass uplift, subduction zones, collision mountain ranges,
-//! and oceanic rifting.
+//! and oceanic rifting with dual east-west and north-south wrapping.
 
 use moc_planet::rng::Rng;
 
@@ -14,7 +14,7 @@ pub enum CrustType {
 pub struct Plate {
     pub id: usize,
     pub center_u: f32, // [0, 1) wrapping longitude
-    pub center_v: f32, // [0, 1] latitude
+    pub center_v: f32, // [0, 1) wrapping latitude
     pub vel_u: f32,    // drift velocity along longitude
     pub vel_v: f32,    // drift velocity along latitude
     pub crust: CrustType,
@@ -30,8 +30,7 @@ impl PlateSystem {
         let mut plates = Vec::with_capacity(num_plates);
         for id in 0..num_plates {
             let center_u = rng.f32();
-            // Bias away from extreme poles to keep continents mostly in temperate/tropical zones
-            let center_v = 0.15 + 0.70 * rng.f32();
+            let center_v = rng.f32();
             let angle = rng.f32() * std::f32::consts::TAU;
             let speed = 0.5 + 0.5 * rng.f32();
             let vel_u = angle.cos() * speed;
@@ -64,14 +63,14 @@ impl PlateSystem {
         Self { plates }
     }
 
-    /// Calculate distance squared between (u, v) and plate center on an east-west cylinder.
+    /// Calculate distance squared between (u, v) and plate center on a seamless torus (#111).
     #[inline]
     pub fn distance_sq(u: f32, v: f32, plate: &Plate) -> f32 {
         let du = (u - plate.center_u).abs();
         let du_wrap = if du > 0.5 { 1.0 - du } else { du };
-        // Multiply du by aspect to balance spherical geometry
-        let dv = v - plate.center_v;
-        du_wrap * du_wrap + dv * dv
+        let dv = (v - plate.center_v).abs();
+        let dv_wrap = if dv > 0.5 { 1.0 - dv } else { dv };
+        du_wrap * du_wrap + dv_wrap * dv_wrap
     }
 
     /// Evaluates plate elevation, boundary convergence, and plate affiliation for a coordinate (u, v).
@@ -108,14 +107,19 @@ impl PlateSystem {
         let boundary_width = 0.12;
         let boundary = ((boundary_width - (d2 - d1)) / boundary_width).clamp(0.0, 1.0);
 
-        // Vector pointing from p1 to p2 across cylinder seam
+        // Vector pointing from p1 to p2 across torus seams (#111)
         let mut dir_u = p2.center_u - p1.center_u;
         if dir_u > 0.5 {
             dir_u -= 1.0;
         } else if dir_u < -0.5 {
             dir_u += 1.0;
         }
-        let dir_v = p2.center_v - p1.center_v;
+        let mut dir_v = p2.center_v - p1.center_v;
+        if dir_v > 0.5 {
+            dir_v -= 1.0;
+        } else if dir_v < -0.5 {
+            dir_v += 1.0;
+        }
         let dir_len = (dir_u * dir_u + dir_v * dir_v).sqrt().max(1e-5);
         let norm_u = dir_u / dir_len;
         let norm_v = dir_v / dir_len;

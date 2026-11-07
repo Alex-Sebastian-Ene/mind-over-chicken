@@ -282,7 +282,16 @@ impl Era for StoneAge {
         // Lose condition
         if !self.done && living <= 2 {
             self.done = true;
-            self.failed = Some("The tribe has perished. The gods try again.".to_string());
+            let reason = if !self.fire.ever_lit {
+                "The tribe froze in the dark: blink directly on the fire pit to light it."
+            } else if self.food <= 0.0 {
+                "The tribe starved: blink to strike mammoths and feed your people."
+            } else if !self.fire.lit {
+                "The fire went out: stay calm when the flame fades to kindle it."
+            } else {
+                "The tribe has perished: keep the fire lit and hunt mammoths for dinner."
+            };
+            self.failed = Some(reason.to_string());
             events.push(EraEvent::PlaySound(SoundKind::Bad));
         }
 
@@ -295,9 +304,10 @@ impl Era for StoneAge {
         events.push(EraEvent::PlaySound(SoundKind::Thunder));
         events.push(EraEvent::StatAddLightning);
 
-        // Check fire strike
+        // Check fire strike (either fire pit or label area)
         let df = ((aim_x - self.fire.x).powi(2) + (aim_y - self.fire.y).powi(2)).sqrt();
-        if df < 14.0 {
+        let df_label = ((aim_x - self.fire.x).powi(2) + (aim_y - (self.fire.y - 12.0)).powi(2)).sqrt();
+        if df < 18.0 || df_label < 14.0 {
             let first = !self.fire.ever_lit;
             self.fire.lit = true;
             self.fire.ever_lit = true;
@@ -316,11 +326,11 @@ impl Era for StoneAge {
             });
         }
 
-        // Check mammoth strike
+        // Check mammoth strike (generous hit testing)
         for m in &mut self.mammoths {
             if m.alive {
                 let dm = ((aim_x - m.x).powi(2) + (aim_y - m.y).powi(2)).sqrt();
-                if dm < 15.0 {
+                if dm < 18.0 {
                     m.alive = false;
                     self.food += 5.0;
                     events.push(EraEvent::PlaySound(SoundKind::Coin));
@@ -330,6 +340,25 @@ impl Era for StoneAge {
                         mood: "happy".to_string(),
                         priority: 2,
                         cooldown: 5.0,
+                    });
+                    break;
+                }
+            }
+        }
+
+        // Direct lightning strike kills person
+        for p in &mut self.people {
+            if p.alive {
+                let dp = ((aim_x - p.x).powi(2) + (aim_y - p.y).powi(2)).sqrt();
+                if dp < 9.0 {
+                    p.alive = false;
+                    events.push(EraEvent::StatAddSmitten);
+                    events.push(EraEvent::AdvisorSay {
+                        key: "smitten-person".to_string(),
+                        text: "A direct lightning strike! You smote a villager. The tribe trembles in fear.".to_string(),
+                        mood: "nervous".to_string(),
+                        priority: 3,
+                        cooldown: 3.0,
                     });
                     break;
                 }
@@ -402,5 +431,37 @@ mod tests {
             stone.update(0.1, &brain);
         }
         assert!(stone.hold.successes >= 1);
+    }
+
+    #[test]
+    fn test_stone_age_label_strike_and_failure_explanation() {
+        let mut stone = StoneAge::new();
+        assert!(!stone.fire.lit);
+
+        // Strike 12px above the fire pit (where the tutorial text is drawn)
+        let label_y = stone.fire.y - 12.0;
+        let events = stone.on_blink(stone.fire.x, label_y);
+        assert!(stone.fire.lit, "Blinking the tutorial label must ignite the fire");
+        assert!(events.contains(&EraEvent::PlaySound(SoundKind::Ignite)));
+
+        // Test specific failure explanation when tribe perishes without food
+        stone.food = 0.0;
+        stone.people.retain(|_| false); // All perish
+        let brain = BrainInput::default();
+        stone.update(0.1, &brain);
+        assert!(stone.is_failed().is_some());
+        let reason = stone.is_failed().unwrap();
+        assert!(reason.contains("starved"), "Failure must explain starvation: {}", reason);
+    }
+
+    #[test]
+    fn test_stone_age_lightning_kills_person() {
+        let mut stone = StoneAge::new();
+        assert!(stone.people[0].alive);
+        let px = stone.people[0].x;
+        let py = stone.people[0].y;
+        let events = stone.on_blink(px, py);
+        assert!(!stone.people[0].alive, "Direct lightning strike must smite/kill villager");
+        assert!(events.contains(&EraEvent::StatAddSmitten));
     }
 }

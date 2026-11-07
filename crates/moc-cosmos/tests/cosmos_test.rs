@@ -99,20 +99,20 @@ fn test_blink_strikes_and_storms() {
 #[test]
 fn test_mind_snapshot_ranking() {
     let mut mind = MindSnapshot::new();
-    // Simulate 10 seconds of high calm and moderate focus
-    for _ in 0..55 {
-        let finished = mind.update(0.2, 0.85, 0.40, 0.15, 1);
-        if finished.is_some() {
-            break;
+    let mut formed_channels = Vec::new();
+    // Simulate sequential 5-second mind readings for 3 worlds (15s total)
+    for _ in 0..80 {
+        if let Some(ch) = mind.update(0.2, 0.85, 0.40, 0.15, 1) {
+            formed_channels.push(ch);
         }
     }
 
-    assert!(mind.done, "Mind snapshot should complete after 10s");
-    let ranked = mind.ranked.as_ref().unwrap();
+    assert!(mind.done, "Sequential mind snapshot should complete all 3 worlds after 15s");
+    assert_eq!(formed_channels.len(), 3);
     assert_eq!(
-        ranked[0].0,
+        formed_channels[0],
         Channel::Calm,
-        "Calm should be ranked #1 channel"
+        "Calm should be formed as first world"
     );
 }
 
@@ -128,8 +128,8 @@ fn test_galaxy_orchestration_and_ships() {
         blink_rate: 0.0,
     };
 
-    // Step galaxy through the 10s mind snapshot
-    for _ in 0..55 {
+    // Step galaxy through the sequential 5s mind snapshots (15s total)
+    for _ in 0..80 {
         galaxy.step(0.2, &fx, 0);
     }
 

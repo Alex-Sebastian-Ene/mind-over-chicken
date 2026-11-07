@@ -44,6 +44,7 @@ export class StoneAge {
     this.meat = [];
     this.done = false;
     this.strikes = 0;
+    this.grabbedEntity = null;
     this.boats = [];
     this.colonies = {};
     this.expTimer = 0;
@@ -51,7 +52,8 @@ export class StoneAge {
     for (let i = 0; i < POP_START; i++) this.people.push(this.makePerson(w.randomLand(w.sites.cave.x, w.sites.cave.y, 2, 14), NAMES[i]));
     this.mammoths = [];
     for (let i = 0; i < 4; i++) this.spawnMammoth();
-    this.chicken = { x: this.fire.x + 8, y: this.fire.y + 4, frame: 0, ft: 0, facing: 1, tx: this.fire.x + 8, ty: this.fire.y + 4, t: 0 };
+    const cp = w.nearestWalkable ? w.nearestWalkable(this.fire.x + 8, this.fire.y + 4) : { x: this.fire.x + 8, y: this.fire.y + 4 };
+    this.chicken = { x: cp.x, y: cp.y, frame: 0, ft: 0, facing: 1, tx: cp.x, ty: cp.y, t: 0 };
     G.brain.setCue('rest');
     G.advisor.say('intro', 'My lord! The tribe is cold, hungry and quietly judging you. Blink to throw lightning at the fire pit.', { priority: 3, cooldown: 999 });
   }
@@ -65,6 +67,14 @@ export class StoneAge {
     const w = this.G.world, v = w.sites.village;
     const p = w.randomLand(v.x, v.y, 40, 85, (x, y) => w.get(x, y) === 3 && w.reachable(x, y));
     this.mammoths.push({ x: p.x, y: p.y, tx: p.x, ty: p.y, alive: true, frame: 0, ft: 0, facing: 1, hunt: 0, lone: 0, side: 1, pause: 0 });
+  }
+
+  spawnTutorialMammoth() {
+    const w = this.G.world, v = w.sites.village;
+    const p = w.randomLand(v.x, v.y, 16, 26, (x, y) => w.walkable(x, y) && w.reachable(x, y));
+    const m = { x: p.x, y: p.y, tx: p.x, ty: p.y, alive: true, frame: 0, ft: 0, facing: 1, hunt: 0, lone: 0, side: 1, pause: 0, tutorial: true };
+    this.mammoths.unshift(m);
+    return m;
   }
 
   living() { return this.people.filter((p) => p.alive); }
@@ -81,38 +91,66 @@ export class StoneAge {
     G.audio.thunder();
     this.particles.burst(14, () => ({ x, y, vx: rand(-30, 30), vy: rand(-40, 5), g: 60, life: 0.6, maxLife: 0.6, size: 1, color: pick(['#fff4c2', '#ffd166', '#ffffff']) }));
 
-    // Fire pit
-    if (dist(x, y, this.fire.x, this.fire.y) < 9) {
+    // Fire pit & tutorial label (generous target area so clicking label or pit lights fire)
+    if (dist(x, y, this.fire.x, this.fire.y) < 18 || dist(x, y, this.fire.x, this.fire.y - 12) < 14) {
       const first = !this.fire.everLit;
       this.fire.lit = true; this.fire.everLit = true;
       this.fire.heat = Math.max(this.fire.heat, 0.7);
       G.audio.ignite();
       floater(this.particles, this.fire.x, this.fire.y - 10, first ? 'FIRE!' : 'Relit!', '#ffd166', 8);
-      if (first) G.advisor.say('fire', 'FIRE! You have invented fire! Please do not invent it on Grug.', { mood: 'happy', priority: 3, cooldown: 999 });
-      else G.advisor.say('relit', 'The flame lives again. The tribe pretends it was never worried.', { mood: 'happy', priority: 2 });
+      if (first) {
+        G.advisor.say('fire', 'FIRE! You have invented fire! Now blink a mammoth to feed the tribe.', { mood: 'happy', priority: 3, cooldown: 999 });
+        this.spawnTutorialMammoth();
+      } else {
+        G.advisor.say('relit', 'The flame lives again. The tribe pretends it was never worried.', { mood: 'happy', priority: 2 });
+      }
     }
-    // Mammoths
+    // Mammoths (generous hit radius for lightning strike)
     for (const m of this.mammoths) {
-      if (m.alive && dist(x, y, m.x, m.y - 2) < 7) {
+      if (m.alive && dist(x, y, m.x, m.y - 2) < 14) {
         m.alive = false; m.dead = true;
         this.meat.push({ x: m.x, y: m.y, amount: 5, cooked: true, claimed: 0 });
         floater(this.particles, m.x, m.y - 8, 'barbecue', '#ff9a2e', 7);
-        G.advisor.say('bbq', 'Cooked mammoth! We shall call it... barbecue. Someone carry it to the fire.', { mood: 'happy', priority: 2 });
+        G.advisor.say('bbq', 'Cooked mammoth! Barbecue time. Hunters will carry the meat to the fire.', { mood: 'happy', priority: 2 });
       }
     }
-    // People
+    // People (lightning strikes kill people as well as animals)
+    let smoteSomeone = false;
     for (const p of this.people) {
       if (!p.alive) continue;
       const d = dist(x, y, p.x, p.y - 2);
-      if (d < 4) {
-        p.halo = true; p.faith = 1; p.fear = Math.min(1, p.fear + 0.4);
-        G.stats.smitten++;
-        floater(this.particles, p.x, p.y - 8, `${p.name} found religion`, '#ffe066', 6);
-        G.advisor.say('smite', `My lord, that was ${p.name}. ${p.name} has found religion. Also, eyebrows are gone.`, { priority: 2 });
-      } else if (d < 50) {
-        p.fear = Math.min(1, p.fear + 0.12);
-        p.faith = Math.min(1, p.faith + 0.15);
+      if (d < 8) {
+        p.alive = false;
+        p.dead = true;
+        p.deadT = 0;
+        p.cause = 'smitten';
+        G.stats.smitten = (G.stats.smitten || 0) + 1;
+        G.stats.deaths = (G.stats.deaths || 0) + 1;
+        this.particles.burst(20, () => ({
+          x: p.x,
+          y: p.y - 2,
+          vx: rand(-25, 25),
+          vy: rand(-30, 5),
+          g: 45,
+          life: 0.7,
+          maxLife: 0.7,
+          size: 1.5,
+          color: pick(['#222222', '#444444', '#ff9a2e', '#ffe066', '#ffffff']),
+        }));
+        floater(this.particles, p.x, p.y - 8, `${p.name} SMITTEN!`, '#ff4444', 8);
+        G.advisor.say('smite', `Direct hit on ${p.name}! Smitten to ashes. The tribe trembles before your divine wrath.`, { mood: 'panic', priority: 3 });
+        smoteSomeone = true;
+      } else if (d < 45) {
+        p.fear = Math.min(1, p.fear + 0.4);
+        p.faith = Math.min(1, p.faith + 0.2);
+        if (['idle', 'warm', 'dance', 'huddle', 'hunt'].includes(p.state)) {
+          p.state = 'cower';
+          p.target = null;
+        }
       }
+    }
+    if (smoteSomeone && this.living().length === 0) {
+      this.fail('Your divine lightning smote every single member of the tribe.');
     }
     if (this.strikes > 6 && this.t < 20) G.advisor.say('spam', 'With respect, my lord, lightning is not a fidget toy.', { priority: 1, cooldown: 30 });
   }
@@ -127,7 +165,8 @@ export class StoneAge {
     // ---- Fire and the calm challenge ----
     const f = this.fire;
     if (f.lit) {
-      f.heat -= dt * (this.hold.active ? 0.022 : 0.034);
+      const decayMult = this.G.assistMode ? 0.5 : 1.0;
+      f.heat -= dt * (this.hold.active ? 0.022 : 0.034) * decayMult;
       if (f.heat <= 0) {
         f.heat = 0; f.lit = false;
         if (this.hold.active) this.endHold(false);
@@ -159,6 +198,11 @@ export class StoneAge {
     if (this.mammoths.filter((m) => m.alive).length < 3 && this.spawnTimer > 6) { this.spawnTimer = 0; this.spawnMammoth(); }
     for (const m of this.mammoths) {
       if (!m.alive) continue;
+      // Invariant: mammoths must never stand or walk on water
+      if (w.isWater && (w.isWater(m.x, m.y) || !w.walkable(m.x, m.y))) {
+        const safe = w.nearestWalkable(m.x, m.y);
+        m.x = safe.x; m.y = safe.y;
+      }
       animate(m, dt, 3);
       m.pause -= dt;
       if (m.pause <= 0 && walk(m, m.tx, m.ty, 4, dt, w)) {
@@ -194,13 +238,21 @@ export class StoneAge {
     const camp = w.sites.village;
     for (const p of this.people) {
       if (!p.alive) continue;
+      // Invariant: people must never stand or walk on water
+      if (w.isWater && (w.isWater(p.x, p.y) || !w.walkable(p.x, p.y))) {
+        const safe = w.nearestWalkable(p.x, p.y);
+        p.x = safe.x; p.y = safe.y;
+      }
       animate(p, dt, 6);
       const dFire = dist(p.x, p.y, f.x, f.y);
-      p.hunger = clamp(p.hunger + dt * (p.colony ? -0.01 : 0.017));
+      const hungerRate = this.G.assistMode ? 0.008 : 0.017;
+      p.hunger = clamp(p.hunger + dt * (p.colony ? -0.01 : hungerRate));
       p.faith = clamp(p.faith - dt * 0.008);
       if ((f.lit && dFire < 24) || p.colony) p.fear = clamp(p.fear - dt * 0.22);
       else p.fear = clamp(p.fear + dt * 0.03 * (1 - 0.5 * p.faith));
-      if (p.hunger >= 1) {
+      // 75-second initial starvation grace period so new players have time to learn
+      const inGrace = this.t < 75;
+      if (p.hunger >= 1 && !inGrace) {
         p.starve += dt;
         if (p.starve > 8) {
           this.kill(p);
@@ -271,22 +323,33 @@ export class StoneAge {
 
     // ---- The sacred chicken pecks around the fire ----
     const c = this.chicken;
+    if (w.isWater && (w.isWater(c.x, c.y) || !w.walkable(c.x, c.y))) {
+      const safe = w.nearestWalkable(c.x, c.y);
+      c.x = safe.x; c.y = safe.y;
+    }
     animate(c, dt, 5);
     c.t -= dt;
     if (c.t <= 0) { const p = w.randomLand(f.x, f.y, 5, 12); c.tx = p.x; c.ty = p.y; c.t = rand(1.5, 4); }
     walk(c, c.tx, c.ty, 6, dt, w);
 
     // ---- Live reactions ----
-    if (brain.hr && brain.hrDelta() > 18) {
-      G.advisor.say('hr', 'Your pulse is thundering, my lord. Even the mammoths are nervous.', { mood: 'panic', priority: 1, cooldown: 25 });
-    } else if ((brain.panic || 0) > 0.7) {
-      G.advisor.say('hr', 'Your tension is high, my lord. Even the mammoths are nervous.', { mood: 'panic', priority: 1, cooldown: 25 });
-    }
+    if ((brain.stress ?? 0) > 0.9) G.advisor.say('stress', 'Your stress is thundering, my lord. Even the mammoths are nervous.', { mood: 'panic', priority: 1, cooldown: 25 });
 
     // ---- Win / lose ----
     const alive = this.living().length;
-    if (!this.done && alive <= 3) { this.done = true; G.fail('The tribe has perished. The gods try again.'); }
-    if (!this.done && alive >= POP_TARGET && this.hold.successes >= CALM_TARGET && f.lit) {
+    if (!this.done && alive <= 3) {
+      this.done = true;
+      const reason = !this.fire.everLit
+        ? 'The tribe froze in the dark: blink directly on the fire pit to light it.'
+        : this.food === 0 && !this.meat.length
+        ? 'The tribe starved: blink to strike mammoths and feed your people.'
+        : !f.lit
+        ? 'The fire went out: stay calm when the flame fades to kindle it.'
+        : 'The tribe has perished: keep the fire lit and hunt mammoths for dinner.';
+      G.fail(reason);
+    }
+    const calmTarget = this.G.assistMode ? 1 : CALM_TARGET;
+    if (!this.done && alive >= POP_TARGET && this.hold.successes >= calmTarget && f.lit) {
       this.done = true;
       brain.setCue(null);
       G.audio.fanfare();
@@ -384,21 +447,31 @@ export class StoneAge {
         break;
       case 'warm':
       case 'dance': {
-        if (!p.spot || p.spotT-- <= 0) { const a = rand(0, Math.PI * 2), r = rand(5, 12); p.spot = { x: f.x + Math.cos(a) * r, y: f.y + Math.sin(a) * r * 0.7 }; p.spotT = 300; }
+        if (!p.spot || p.spotT-- <= 0 || !w.walkable(p.spot.x, p.spot.y)) {
+          p.spot = w.randomLand(f.x, f.y, 4, 12);
+          p.spotT = 300;
+        }
         walk(p, p.spot.x, p.spot.y, 8, dt, w);
         break;
       }
-      case 'cower':
-        walk(p, w.sites.cave.x + p.side * 2, w.sites.cave.y, 12, dt, w);
+      case 'cower': {
+        const caveSpot = w.nearestWalkable(w.sites.cave.x + p.side * 2, w.sites.cave.y);
+        walk(p, caveSpot.x, caveSpot.y, 12, dt, w);
         break;
+      }
       case 'huddle': {
-        if (!p.spot || p.spotT-- <= 0) { p.spot = w.randomLand(f.x, f.y, 3, 10); p.spotT = 200; }
+        if (!p.spot || p.spotT-- <= 0 || !w.walkable(p.spot.x, p.spot.y)) {
+          p.spot = w.randomLand(f.x, f.y, 3, 10);
+          p.spotT = 200;
+        }
         walk(p, p.spot.x, p.spot.y, 7, dt, w);
         break;
       }
-      case 'flee':
-        if (walk(p, camp.x + p.side * 6, camp.y + 4, 16, dt, w)) p.state = 'idle';
+      case 'flee': {
+        const fleeSpot = w.nearestWalkable(camp.x + p.side * 6, camp.y + 4);
+        if (walk(p, fleeSpot.x, fleeSpot.y, 16, dt, w)) p.state = 'idle';
         break;
+      }
       default: {
         if (!p.spot || dist(p.x, p.y, p.spot.x, p.spot.y) < 1.5) p.spot = w.randomLand(camp.x, camp.y, 4, 22);
         walk(p, p.spot.x, p.spot.y, 5, dt, w);
@@ -408,11 +481,19 @@ export class StoneAge {
 
   objectives() {
     const alive = this.living().length;
+    const calmTarget = this.G.assistMode ? 1 : CALM_TARGET;
+    const foodHint = !this.fire.lit
+      ? 'light fire'
+      : this.food < 1 && !this.meat.length
+      ? 'hunt mammoth'
+      : this.meat.length
+      ? 'carry meat'
+      : `${Math.floor(this.food)}`;
     return [
       { label: 'Fire', value: this.fire.lit ? 'lit' : 'out', done: this.fire.lit },
       { label: 'Tribe', value: `${alive}/${POP_TARGET}`, done: alive >= POP_TARGET, bad: alive <= 5 },
-      { label: 'Calm holds', value: `${this.hold.successes}/${CALM_TARGET}`, done: this.hold.successes >= CALM_TARGET },
-      { label: 'Food', value: `${Math.floor(this.food)}`, done: false, plain: true },
+      { label: 'Calm holds', value: `${this.hold.successes}/${calmTarget}`, done: this.hold.successes >= calmTarget },
+      { label: 'Food', value: foodHint, done: this.food >= 3, plain: this.food >= 1 },
       { label: 'Continents', value: `${1 + Object.keys(this.colonies).length}/${this.G.world.continents.length}`, plain: true },
     ];
   }
@@ -440,8 +521,8 @@ export class StoneAge {
     }
 
     // Billboards
-    // Fire pit
-    engine.add_billboard(4, f.x, f.y, 1, Math.floor(this.t * 6) % 3, 0);
+    // Fire pit (variant 1 is unlit firewood logs; variant 0 is roaring flame)
+    engine.add_billboard(4, f.x, f.y, 1, Math.floor(this.t * 6) % 3, f.lit ? 0 : 1);
 
     // Mammoths
     for (const m of this.mammoths) {
@@ -511,6 +592,12 @@ export class StoneAge {
     if (!f.lit && !this.done) {
       const bob = Math.sin(this.t * 5) * 1.5;
       label(ctx, f.x, f.y - 12 + bob, 'blink here to light the fire', '#ffd166', 6);
+    } else if (f.lit && this.food < 1 && !this.meat.length && !this.done) {
+      const nearby = this.mammoths.find((m) => m.alive && dist(m.x, m.y, f.x, f.y) < 70);
+      if (nearby) {
+        const bob = Math.sin(this.t * 5) * 1.5;
+        label(ctx, nearby.x, nearby.y - 14 + bob, 'blink mammoth for food', '#ffd166', 5.5);
+      }
     }
     if (this.hold.active) {
       const p = this.hold.progress / HOLD_SECONDS;
@@ -526,6 +613,68 @@ export class StoneAge {
 
   // ---- camera (#33): hand casts and face mood. Extra inputs on top of the brain, never instead of it. ----
 
+  // Living-entity pinch-grab support (#120)
+  onGrabStart(aim) {
+    if (this.done) return null;
+    const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
+    // Reject non-living targets: fire pit, rocks, water
+    if (dist(x, y, this.fire.x, this.fire.y) < 14) {
+      return { ok: false, reason: 'Fire pit cannot be picked up' };
+    }
+    // Check sacred chicken
+    if (dist(x, y, this.chicken.x, this.chicken.y) < 8) {
+      this.grabbedEntity = { entity: this.chicken, kind: 'chicken', label: 'Sacred Chicken' };
+      floater(this.particles, this.chicken.x, this.chicken.y - 8, 'grabbed chicken!', '#ffe066', 6);
+      return { ok: true, label: 'Sacred Chicken', kind: 'chicken' };
+    }
+    // Check people
+    for (const p of this.living()) {
+      if (dist(x, y, p.x, p.y - 2) < 6) {
+        this.grabbedEntity = { entity: p, kind: 'person', label: p.name };
+        p.state = 'idle';
+        floater(this.particles, p.x, p.y - 8, `grabbed ${p.name}!`, '#ffd166', 6);
+        return { ok: true, label: p.name, kind: 'person' };
+      }
+    }
+    // Check alive mammoths
+    for (const m of this.mammoths) {
+      if (m.alive && dist(x, y, m.x, m.y - 2) < 10) {
+        this.grabbedEntity = { entity: m, kind: 'mammoth', label: 'Mammoth' };
+        m.pause = 999;
+        floater(this.particles, m.x, m.y - 8, 'grabbed mammoth!', '#ff9a2e', 6);
+        return { ok: true, label: 'Mammoth', kind: 'mammoth' };
+      }
+    }
+    return { ok: false, reason: 'Pinch over a villager, mammoth, or chicken to grab' };
+  }
+
+  onGrabMove(aim) {
+    if (!this.grabbedEntity) return;
+    const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
+    const e = this.grabbedEntity.entity;
+    e.x = x;
+    e.y = y;
+    if (e.tx !== undefined) { e.tx = x; e.ty = y; }
+  }
+
+  onGrabEnd({ x: aimX, y: aimY, cancelled = false }) {
+    if (!this.grabbedEntity) return;
+    const { entity, label: entLabel, kind } = this.grabbedEntity;
+    this.grabbedEntity = null;
+    if (cancelled) return;
+    const w = this.G.world;
+    const targetX = Math.round(aimX * (W - 1)), targetY = Math.round(aimY * (H - 1));
+    const safeLand = w.walkable(targetX, targetY) && w.reachable(targetX, targetY)
+      ? { x: targetX, y: targetY }
+      : w.randomLand(targetX, targetY, 1, 8);
+    entity.x = safeLand.x;
+    entity.y = safeLand.y;
+    entity.tx = safeLand.x;
+    entity.ty = safeLand.y;
+    if (kind === 'mammoth') entity.pause = rand(1, 3);
+    floater(this.particles, safeLand.x, safeLand.y - 8, `placed ${entLabel}`, '#9be38a', 6);
+  }
+
   // aim is 0..1 like the brain's. The fist (fireball) normally arrives through onBlink.
   onCast(spell, aim) {
     const G = this.G;
@@ -533,6 +682,18 @@ export class StoneAge {
     const w = G.world, f = this.fire;
     const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
     switch (spell) {
+      case 'palm': {
+        // Core move Palm (#122): calm fear, soothe people, feed fire a bit
+        for (const p of this.living()) {
+          p.fear = clamp(p.fear - 0.3);
+          p.faith = clamp(p.faith + 0.15);
+        }
+        if (f.lit) f.heat = Math.min(1, f.heat + 0.15);
+        floater(this.particles, f.x, f.y - 14, 'peace & calm', '#9be38a', 7);
+        G.advisor.say('cast-palm', 'Your open palm calms the tribe and soothes the fire.', { mood: 'happy', priority: 1, cooldown: 20 });
+        break;
+      }
+      case 'fist':
       case 'fireball': this.onBlink(aim); break;
       case 'spawn': {
         // Open palm: a cooked haunch drops where you aim and the tribe carries it to the fire.

@@ -48,11 +48,16 @@ impl SiteFinder {
         x.rem_euclid(self.width as i32) as usize
     }
 
+    #[inline]
+    fn wrap_y(&self, y: i32) -> usize {
+        y.rem_euclid(self.height as i32) as usize
+    }
+
     pub fn is_walkable(ty: u8) -> bool {
         ty >= T_SAND && ty != T_MOUNTAIN && ty != T_SNOW
     }
 
-    /// Discovers connected landmasses (continents) across cylinder wrapping.
+    /// Discovers connected landmasses (continents) across torus wrapping (#111).
     pub fn find_continents(
         &self,
         types: &[u8],
@@ -87,16 +92,13 @@ impl SiteFinder {
                     sum_y += cy;
 
                     for &(dx, dy) in &[(-1, 0), (1, 0), (0, -1), (0, 1)] {
-                        let ny = cy as i32 + dy;
-                        if ny < 0 || ny >= self.height as i32 {
-                            continue;
-                        }
+                        let ny = self.wrap_y(cy as i32 + dy);
                         let nx = self.wrap_x(cx as i32 + dx);
-                        let n_idx = self.idx(nx, ny as usize);
+                        let n_idx = self.idx(nx, ny);
 
                         if Self::is_walkable(types[n_idx]) && land_id[n_idx] == 0 {
                             land_id[n_idx] = current_id;
-                            queue.push_back((nx, ny as usize));
+                            queue.push_back((nx, ny));
                         }
                     }
                 }
@@ -147,16 +149,14 @@ impl SiteFinder {
                 }
 
                 let mut score = 50.0;
-                // Flatness: check height delta with neighbors
+                // Flatness: check height delta with neighbors across torus
                 let mut max_diff = 0.0f32;
                 for &(dx, dy) in &[(-2, 0), (2, 0), (0, -2), (0, 2)] {
-                    let ny = y as i32 + dy;
-                    if ny >= 0 && ny < self.height as i32 {
-                        let nx = self.wrap_x(x as i32 + dx);
-                        let diff = (heights[self.idx(nx, ny as usize)] - heights[idx]).abs();
-                        if diff > max_diff {
-                            max_diff = diff;
-                        }
+                    let ny = self.wrap_y(y as i32 + dy);
+                    let nx = self.wrap_x(x as i32 + dx);
+                    let diff = (heights[self.idx(nx, ny)] - heights[idx]).abs();
+                    if diff > max_diff {
+                        max_diff = diff;
                     }
                 }
                 score -= max_diff * 60.0;
@@ -164,14 +164,12 @@ impl SiteFinder {
                 // Fresh water bonus
                 for dy in -5..=5 {
                     for dx in -5..=5 {
-                        let ny = y as i32 + dy;
-                        if ny >= 0 && ny < self.height as i32 {
-                            let nx = self.wrap_x(x as i32 + dx);
-                            let n_idx = self.idx(nx, ny as usize);
-                            if river_mask[n_idx] {
-                                score += 25.0;
-                                break;
-                            }
+                        let ny = self.wrap_y(y as i32 + dy);
+                        let nx = self.wrap_x(x as i32 + dx);
+                        let n_idx = self.idx(nx, ny);
+                        if river_mask[n_idx] {
+                            score += 25.0;
+                            break;
                         }
                     }
                 }

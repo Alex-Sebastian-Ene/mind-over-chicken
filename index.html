@@ -86,6 +86,9 @@
     <aside class="eeg-panel cam-panel" id="camPanel" hidden aria-label="Camera casts and mood"></aside>
     <!-- camera debug (#67): camera, gestures, inference rates and brain signals. Filled by src/camera/debug.js. -->
     <aside class="dbg-panel" id="dbgPanel" hidden aria-label="Debug"></aside>
+
+    <!-- coach (#123): animated ghost hand procedural coach panel. Filled by src/camera/coach.js. -->
+    <aside class="coach-panel" id="coachPanel" aria-label="Hand Coach"></aside>
   </main>
 
   <nav class="powers" aria-label="God powers">
@@ -109,10 +112,10 @@
       <span class="power-value">0%</span>
       <span class="meter"><span></span></span>
     </button>
-    <button type="button" class="power" data-power="heart">
+    <button type="button" class="power" data-power="stress">
       <canvas class="power-icon" width="8" height="8" aria-hidden="true"></canvas>
       <span class="power-name">Markets</span>
-      <span class="power-sub">Tension · hold <kbd>Shift</kbd></span>
+      <span class="power-sub">Stress · hold <kbd>Shift</kbd></span>
       <span class="power-value">0%</span>
       <span class="meter"><span></span></span>
     </button>
@@ -123,12 +126,12 @@
   <div class="title-inner">
     <p class="eyebrow">A god game you play with your brain</p>
     <h1 id="titleHeading">Mind <span>over</span> Chicken</h1>
-    <p class="lede">You are the god of one small tribe. Keep it alive through the ages with calm, focus, blinks and steady nerves, until it builds a rocket and leaves for a new world.</p>
+    <p class="lede">You are the god of one small tribe. Keep it alive through the ages with calm, focus and blinks, until it builds a rocket and leaves for a new world.</p>
 
     <ol class="eras">
       <li><b>Stone Age</b><span>Blink to throw lightning. Stay calm to keep the fire alive.</span></li>
       <li class="skip"><b>Farming · Kingdoms</b><span>Ten thousand years in a montage. The scholars ask you some sums.</span></li>
-      <li><b>Industry</b><span>Your tension moves the goat market. Stay steady or it crashes.</span></li>
+      <li><b>Industry</b><span>Your stress moves the goat market. Stay calm or it crashes.</span></li>
       <li><b>Space Age</b><span>Hold focus through a ten-second countdown.</span></li>
     </ol>
 
@@ -136,16 +139,16 @@
       <div class="start-main">
         <button type="button" class="btn btn-primary" id="playSim">Play with the emulated headset</button>
         <p class="hint">Placeholder for the Muse: it sends the same signals, driven by your keyboard.
-          <kbd>Space</kbd> calm · <kbd>F</kbd> focus · <kbd>Shift</kbd> tension · <kbd>B</kbd> or click to blink · drag to pan the planet · mouse is head tilt. Scroll, pinch or <kbd>Z</kbd> / <kbd>X</kbd> to zoom out to the planet and the galaxy; zoom into any world to land on it, or press <kbd>N</kbd> to visit the next one <!-- planets (#68) -->. On a phone, hold the power tiles and tap the map.</p>
+          <kbd>Space</kbd> calm · <kbd>F</kbd> focus · <kbd>Shift</kbd> stress · <kbd>B</kbd> or click to blink · drag to pan the planet · mouse is head tilt. Scroll, pinch or <kbd>Z</kbd> / <kbd>X</kbd> to zoom out to the planet and the galaxy; zoom into any world to land on it, or press <kbd>N</kbd> to visit the next one <!-- planets (#68) -->. On a phone, hold the power tiles and tap the map.</p>
       </div>
       <div class="start-sandbox">
         <button type="button" class="btn" id="playSandbox">Galaxy sandbox</button>
-        <p class="hint">Skip the story: make planets and let their civilisations run on their own. Your calm, focus and agitation still steer all of them.</p>
+        <p class="hint">Skip the story: make planets and let their civilisations run on their own. Your calm, focus and stress still steer all of them.</p>
       </div>
       <!-- civ (#50) -->
       <div class="start-sandbox">
         <button type="button" class="btn" id="playCiv">Sandbox: four civilisations</button>
-        <p class="hint">Four peoples on one big planet grow, fight for land and rebel. Calm makes peace; a racing pulse makes war.</p>
+        <p class="hint">Four peoples on one big planet grow, fight for land and rebel. Calm makes peace; stress and anger make war.</p>
       </div>
       <details class="start-real">
         <summary>Connect a real headset</summary>
@@ -163,11 +166,29 @@
 </section>
 
 <section class="overlay fail-screen" id="failScreen" hidden aria-live="assertive">
-  <div class="card">
-    <p class="eyebrow">Collapse</p>
-    <h2 id="failReason">The tribe has perished.</h2>
-    <p class="goal">Only this era restarts. Everything you built before it stays.</p>
-    <button type="button" class="btn btn-primary" id="retryBtn">Retry this era <kbd>Enter</kbd></button>
+  <div class="card fail-card">
+    <p class="eyebrow" id="failEyebrow">Collapse</p>
+    <h2 id="failHeading">The era has ended</h2>
+    <div class="fail-body">
+      <div class="fail-cause-box">
+        <span class="fail-label">What happened</span>
+        <p class="fail-cause" id="failCause">The tribe froze in the dark.</p>
+      </div>
+      <div class="fail-advice-box">
+        <span class="fail-label">Next step</span>
+        <p class="fail-advice" id="failAdvice">Blink directly on the fire pit to strike and kindle the flame.</p>
+      </div>
+    </div>
+    <div class="fail-actions">
+      <button type="button" class="btn btn-primary" id="retryBtn">Retry era <kbd>Enter</kbd></button>
+      <button type="button" class="btn" id="assistBtn" title="Toggle easier pacing (Key A)">Assist: <span id="assistState">Off</span></button>
+      <button type="button" class="btn" id="showHowBtn" title="View controls and tips (Key ?)">Controls <kbd>?</kbd></button>
+      <button type="button" class="btn" id="quitTitleBtn" title="Return to title screen (Key Esc)">Quit to Title</button>
+    </div>
+    <div class="fail-feedback">
+      <button type="button" class="feedback-link" id="biometricFeedbackBtn">Was this your input or the game?</button>
+      <p class="feedback-ack" id="biometricFeedbackAck" hidden>Tolerance widened! Your biometric sensitivity has been softened for the next attempt.</p>
+    </div>
   </div>
 </section>
 

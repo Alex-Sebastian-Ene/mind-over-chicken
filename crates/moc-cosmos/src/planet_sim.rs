@@ -66,7 +66,9 @@ pub const REINFORCE_PROGRESS: f32 = 0.1;
 
 pub const STRESS_BPM: f32 = 20.0;
 pub const STRESS_MAX: f32 = 1.5;
-pub const MIND_SECONDS: f32 = 10.0;
+pub const MIND_SECONDS: f32 = 5.0;
+pub const MIND_SECONDS_PER_PLANET: f32 = 5.0;
+pub const MAX_MIND_PLANETS: usize = 3;
 
 pub const ERA_TITLES: [&str; ERA_COUNT] = ["Stone Age", "Farming", "Industry", "Space Age"];
 
@@ -463,15 +465,18 @@ pub fn arrive_ship(to: &mut PlanetState) -> &'static str {
     }
 }
 
-/// Mind snapshot accumulator for the first 10 seconds of play.
+/// Mind snapshot accumulator: sequentially forms one world every 5 seconds (#108).
 #[derive(Debug, Clone, Default)]
 pub struct MindSnapshot {
     pub t: f32,
-    pub calm: f32,
-    pub focus: f32,
-    pub stress: f32,
+    pub t_slot: f32,
+    pub calm_slot: f32,
+    pub focus_slot: f32,
+    pub stress_slot: f32,
     pub blinks_start: Option<u32>,
-    pub blinks: u32,
+    pub blinks_slot_start: u32,
+    pub formed_count: usize,
+    pub used_channels: Vec<Channel>,
     pub done: bool,
     pub ranked: Option<Vec<(Channel, f32)>>,
 }
@@ -488,44 +493,63 @@ impl MindSnapshot {
         focus: f32,
         stress: f32,
         blinks_total: u32,
-    ) -> Option<&[(Channel, f32)]> {
-        if self.done || dt <= 0.0 {
-            return self.ranked.as_deref();
+    ) -> Option<Channel> {
+        if self.done || dt <= 0.0 || self.formed_count >= MAX_MIND_PLANETS {
+            return None;
         }
 
         if self.blinks_start.is_none() {
             self.blinks_start = Some(blinks_total);
+            self.blinks_slot_start = blinks_total;
         }
 
         self.t += dt;
-        self.calm += calm * dt;
-        self.focus += focus * dt;
-        self.stress += stress * dt;
+        self.t_slot += dt;
+        self.calm_slot += calm * dt;
+        self.focus_slot += focus * dt;
+        self.stress_slot += stress * dt;
 
-        if self.t < MIND_SECONDS {
+        if self.t_slot < MIND_SECONDS_PER_PLANET {
             return None;
         }
 
-        self.done = true;
-        let avg_calm = self.calm / self.t;
-        let avg_focus = self.focus / self.t;
-        let avg_stress = self.stress / self.t;
-        let blinks = blinks_total.saturating_sub(self.blinks_start.unwrap_or(0));
+        let avg_calm = self.calm_slot / self.t_slot;
+        let avg_focus = self.focus_slot / self.t_slot;
+        let avg_stress = self.stress_slot / self.t_slot;
+        let blinks = blinks_total.saturating_sub(self.blinks_slot_start);
 
         let score_calm = avg_calm / 0.35;
         let score_focus = avg_focus / 0.30;
         let score_stress = avg_stress / 0.35;
-        let score_blink = blinks as f32 / 3.0;
+        let score_blink = blinks as f32 / 2.0;
 
-        let mut ranked = vec![
+        let mut candidates = vec![
             (Channel::Calm, score_calm),
             (Channel::Focus, score_focus),
             (Channel::Stress, score_stress),
             (Channel::Blink, score_blink),
         ];
 
-        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        self.ranked = Some(ranked);
-        self.ranked.as_deref()
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        let chosen = candidates
+            .iter()
+            .map(|c| c.0)
+            .find(|ch| !self.used_channels.contains(ch))
+            .unwrap_or(candidates[0].0);
+
+        self.used_channels.push(chosen);
+        self.formed_count += 1;
+        self.t_slot = 0.0;
+        self.calm_slot = 0.0;
+        self.focus_slot = 0.0;
+        self.stress_slot = 0.0;
+        self.blinks_slot_start = blinks_total;
+
+        if self.formed_count >= MAX_MIND_PLANETS {
+            self.done = true;
+        }
+
+        Some(chosen)
     }
 }

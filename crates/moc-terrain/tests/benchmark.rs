@@ -23,5 +23,6 @@ fn test_civ_planet_generation_speed() {
     println!("Civ planet (640x320) generated in: {:?}", elapsed);
     assert_eq!(map.width, 640);
     assert_eq!(map.height, 320);
-    assert!(elapsed.as_secs_f32() < 1.0, "Civ planet must generate under 1 second: {:?} elapsed", elapsed);
+    let max_sec = if cfg!(debug_assertions) { 2.5 } else { 0.5 };
+    assert!(elapsed.as_secs_f32() < max_sec, "Civ planet must generate under {}s: {:?} elapsed", max_sec, elapsed);
 }

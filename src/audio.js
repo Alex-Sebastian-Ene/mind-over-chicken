@@ -5,7 +5,6 @@ export class Audio {
     this.ctx = null;
     this.enabled = true;
     this.master = null;
-    this.lastBeat = 0;
   }
 
   // Must be called from a user gesture.
@@ -71,14 +70,4 @@ export class Audio {
   tick() { this.tone({ freq: 1200, dur: 0.04, type: 'square', gain: 0.05 }); }
   rumble(dur = 3) { this.noise({ dur, freq: 120, sweepTo: 900, gain: 0.7, attack: 0.3 }); }
   fanfare() { [523, 659, 784, 1047, 784, 1047].forEach((f, i) => this.tone({ freq: f, dur: 0.22, type: 'triangle', gain: 0.1, delay: i * 0.14 })); }
-
-  // Thump at the player's own heart rate when it is running hot.
-  heartbeat(now, bpm, intensity) {
-    if (!this.ctx || !this.enabled || !bpm || intensity <= 0) return;
-    if (now - this.lastBeat < 60 / bpm) return;
-    this.lastBeat = now;
-    const g = Math.min(0.25, 0.05 + intensity * 0.2);
-    this.tone({ freq: 70, dur: 0.12, type: 'sine', gain: g, slideTo: 40 });
-    this.tone({ freq: 60, dur: 0.1, type: 'sine', gain: g * 0.7, slideTo: 35, delay: 0.16 });
-  }
 }

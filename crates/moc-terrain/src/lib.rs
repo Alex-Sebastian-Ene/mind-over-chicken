@@ -272,12 +272,20 @@ mod tests {
         assert_eq!(map1.types, map2.types, "Same seed must produce identical types");
         assert_eq!(map1.rgba, map2.rgba, "Same seed must produce identical RGBA texture");
 
-        // Verify cylinder wrapping: left edge and right edge heights should have continuous gradients
+        // Verify torus wrapping: left edge and right edge heights should have continuous gradients
         for y in 0..map1.height {
             let left_h = map1.heights[y * map1.width];
             let right_h = map1.heights[y * map1.width + map1.width - 1];
             let diff = (left_h - right_h).abs();
             assert!(diff < 0.40, "Wrapping boundary should not have extreme cliff seam: diff={diff} at y={y}");
+        }
+
+        // Verify north-south torus wrapping: top row (y=0) and bottom row (y=h-1) (#111)
+        for x in 0..map1.width {
+            let top_h = map1.heights[x];
+            let bot_h = map1.heights[(map1.height - 1) * map1.width + x];
+            let diff = (top_h - bot_h).abs();
+            assert!(diff < 0.40, "North-south torus boundary should not have extreme cliff seam: diff={diff} at x={x}");
         }
     }
 

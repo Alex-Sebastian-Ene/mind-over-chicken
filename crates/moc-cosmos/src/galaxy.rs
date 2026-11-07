@@ -207,41 +207,29 @@ impl Galaxy {
         self.time += dt;
         let mut all_events = Vec::new();
 
-        // 1. Advance the 10-second mind snapshot
+        // 1. Advance sequential 5-second mind readings for world formation (#108)
         if !self.mind.done {
-            if let Some(ranked) = self.mind.update(dt, fx.calm, fx.focus, fx.stress, blinks_total) {
-                // Form the 3 mind worlds from the top 3 channels!
-                let top_3: Vec<Channel> = ranked.iter().take(3).map(|&(ch, _)| ch).collect();
-                let mut mind_slot_indices = Vec::new();
-                for (i, p) in self.planets.iter().enumerate() {
-                    if p.mind_slot && p.forming {
-                        mind_slot_indices.push(i);
-                    }
-                }
+            if let Some(ch) = self.mind.update(dt, fx.calm, fx.focus, fx.stress, blinks_total) {
+                // Find next forming planet slot
+                if let Some(p) = self.planets.iter_mut().find(|p| p.mind_slot && p.forming) {
+                    let (name, biome) = match ch {
+                        Channel::Calm => ("Stillwater", Biome::Temperate),
+                        Channel::Focus => ("Lumen", Biome::Alien),
+                        Channel::Stress => ("Thrum", Biome::Desert),
+                        Channel::Blink => ("Flicker", Biome::Ice),
+                        Channel::Mixed => ("Roostia", Biome::Jungle),
+                    };
+                    p.name = name.to_string();
+                    p.biome = biome;
+                    p.state.channel = ch;
+                    p.forming = false;
+                    p.alive = true;
+                    p.state.pop = 10.0;
+                    p.state.era_index = 0;
+                    p.state.progress = 0.0;
 
-                for (slot_idx, &ch) in top_3.iter().enumerate() {
-                    if slot_idx < mind_slot_indices.len() {
-                        let p_idx = mind_slot_indices[slot_idx];
-                        let p = &mut self.planets[p_idx];
-                        let (name, biome) = match ch {
-                            Channel::Calm => ("Stillwater", Biome::Temperate),
-                            Channel::Focus => ("Lumen", Biome::Alien),
-                            Channel::Stress => ("Thrum", Biome::Desert),
-                            Channel::Blink => ("Flicker", Biome::Ice),
-                            Channel::Mixed => ("Roostia", Biome::Jungle),
-                        };
-                        p.name = name.to_string();
-                        p.biome = biome;
-                        p.state.channel = ch;
-                        p.forming = false;
-                        p.alive = true;
-                        p.state.pop = 10.0;
-                        p.state.era_index = 0;
-                        p.state.progress = 0.0;
-
-                        let note_msg = format!("{}: formed from your {}.", name, ch.name());
-                        self.log.insert(0, (self.time, note_msg));
-                    }
+                    let note_msg = format!("{}: formed from your {}.", name, ch.name());
+                    self.log.insert(0, (self.time, note_msg));
                 }
             }
         }

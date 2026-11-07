@@ -103,6 +103,7 @@ export class CivSandbox {
     this.byId = new Map();
     this.villages = [];
     this.stats = null;
+    this.grabbedEntity = null;
     this.mini = null;
     this.miniTimer = 0;
     this.infoTimer = 0;
@@ -307,6 +308,43 @@ export class CivSandbox {
     if (killed > 0) G.advisor.say('civ-smite', `${killed === 1 ? 'Someone' : `${killed} people`} just met their god, my lord. The neighbours have gone very quiet.`, { priority: 1, cooldown: 12 });
   }
 
+  // Living-entity pinch grab (#120)
+  onGrabStart(aim) {
+    const civ = this.civ;
+    if (!civ) return null;
+    const p = this.aimPlanet(aim);
+    // Find closest village within 12 world units
+    let best = null, bestDist = 12;
+    for (const v of this.villages) {
+      const d = Math.hypot(p.x - v.x, p.y - v.y);
+      if (d < bestDist) { bestDist = d; best = v; }
+    }
+    if (best) {
+      const fac = this.byId.get(best.factionId);
+      const name = fac ? `${fac.name} village` : 'Village';
+      this.grabbedEntity = { village: best, p0: { x: best.x, y: best.y }, label: name };
+      return { ok: true, label: name, kind: 'village' };
+    }
+    return { ok: false, reason: 'Pinch over a village or tribe to grab' };
+  }
+
+  onGrabMove(aim) {
+    if (!this.grabbedEntity) return;
+    const p = this.aimPlanet(aim);
+    this.grabbedEntity.village.x = p.x;
+    this.grabbedEntity.village.y = p.y;
+  }
+
+  onGrabEnd({ x: aimX, y: aimY, cancelled = false }) {
+    if (!this.grabbedEntity) return;
+    const { village, p0 } = this.grabbedEntity;
+    this.grabbedEntity = null;
+    if (cancelled) {
+      village.x = p0.x;
+      village.y = p0.y;
+    }
+  }
+
   // camera (#49): hand casts. aim is 0..1 like the brain's.
   onCast(spell, aim) {
     const civ = this.civ, G = this.G;
@@ -315,10 +353,10 @@ export class CivSandbox {
     const p = this.aimPlanet(aim);
     const n = civ.cast(kind, p.x, p.y);
     const say = G.advisor.say.bind(G.advisor);
-    if (spell === 'fireball') { this.flash = 0.4; G.audio?.thunder?.(); G.shake = Math.max(G.shake || 0, 1.2); }
+    if (spell === 'fist' || spell === 'fireball') { this.flash = 0.4; G.audio?.thunder?.(); G.shake = Math.max(G.shake || 0, 1.2); }
+    if (spell === 'palm' || spell === 'peace') { G.audio?.good?.(); say('civ-cast-peace', n ? `Peace! ${n} war${n === 1 ? '' : 's'} ended near your hand.` : 'Peace descends. Nobody was fighting there, but they appreciate it.', { mood: 'happy', priority: 2, cooldown: 15 }); }
     if (spell === 'disaster') { this.flash = 0.5; G.audio?.thunder?.(); G.shake = Math.max(G.shake || 0, 2); say('civ-cast-storm', 'A storm! That will settle a few arguments. And a few villages.', { mood: 'panic', priority: 2, cooldown: 15 }); }
     if (spell === 'spawn') { G.audio?.coin?.(); say('civ-cast-food', 'Food from the sky. Nobody will ask questions.', { mood: 'happy', priority: 1, cooldown: 15 }); }
-    if (spell === 'peace') { G.audio?.good?.(); say('civ-cast-peace', n ? `Peace! ${n} war${n === 1 ? '' : 's'} ended near your hand.` : 'Peace descends. Nobody was fighting there, but they appreciate it.', { mood: 'happy', priority: 2, cooldown: 15 }); }
     if (spell === 'bless') { G.audio?.good?.(); say('civ-cast-bless', 'Blessed! The grumbling stops. For now.', { mood: 'happy', priority: 1, cooldown: 15 }); }
     if (spell === 'rain') say('civ-cast-rain', 'Rain! The fires go out and the fields drink.', { mood: 'happy', priority: 1, cooldown: 15 });
   }

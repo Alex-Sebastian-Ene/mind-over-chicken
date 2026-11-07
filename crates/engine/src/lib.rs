@@ -1,5 +1,7 @@
+pub mod agents;
 pub mod audio;
 pub mod biosignal;
+pub mod camera;
 mod camera3d;
 pub mod eras;
 pub mod input; // pointer gestures: tap blinks, drag pans
@@ -8,6 +10,7 @@ mod gl;
 mod gl3d;
 mod math3d;
 mod mesh3d;
+pub mod particles;
 pub mod shell;
 mod sprites;
 mod terrain;
@@ -190,12 +193,11 @@ impl Engine {
     // Unproject screen coordinates to 3D terrain surface for click aiming & lightning
     pub fn screen_to_ground(&self, sx: f32, sy: f32, cw: f32, ch: f32) -> js_sys::Float32Array {
         let result = js_sys::Float32Array::new_with_length(2);
-        // Land on the terrain surface (hills included), never below the sea. The map repeats
-        // east-west, so wrap x; beyond the poles, clamp to the edge row.
-        let ground_at = |x: f32, z: f32| (self.get_terrain_height_at(x.rem_euclid(W as f32), z) * 24.0).max(7.92);
+        // Land on the terrain surface (hills included), never below the sea. Seamless torus (#111).
+        let ground_at = |x: f32, z: f32| (self.get_terrain_height_at(x.rem_euclid(W as f32), z.rem_euclid(H as f32)) * 24.0).max(7.92);
         if let Some([hx, hz]) = self.camera_3d.screen_to_terrain(sx, sy, cw, ch, 24.0, ground_at) {
             let hx = hx.rem_euclid(W as f32);
-            let hz = hz.clamp(0.0, H as f32 - 1.0);
+            let hz = hz.rem_euclid(H as f32);
             result.set_index(0, hx);
             result.set_index(1, hz);
         } else {
@@ -208,9 +210,22 @@ impl Engine {
     // Project 3D terrain world coordinates [wx, wz] to screen pixels [sx, sy]
     pub fn project_to_screen(&self, wx: f32, wz: f32, cw: f32, ch: f32) -> js_sys::Float32Array {
         let result = js_sys::Float32Array::new_with_length(2);
-        let h_norm = self.get_terrain_height_at(wx.rem_euclid(W as f32), wz);
+        let mut wrapped_x = wx.rem_euclid(W as f32);
+        let mut wrapped_z = wz.rem_euclid(H as f32);
+        // Torus seam wrapping relative to camera target (#111)
+        if wrapped_x - self.camera_3d.target.x > (W as f32) * 0.5 {
+            wrapped_x -= W as f32;
+        } else if self.camera_3d.target.x - wrapped_x > (W as f32) * 0.5 {
+            wrapped_x += W as f32;
+        }
+        if wrapped_z - self.camera_3d.target.z > (H as f32) * 0.5 {
+            wrapped_z -= H as f32;
+        } else if self.camera_3d.target.z - wrapped_z > (H as f32) * 0.5 {
+            wrapped_z += H as f32;
+        }
+        let h_norm = self.get_terrain_height_at(wrapped_x.rem_euclid(W as f32), wrapped_z.rem_euclid(H as f32));
         let wy = (h_norm * 24.0).max(7.92);
-        if let Some([sx, sy]) = self.camera_3d.world_to_screen(wx, wy, wz, cw, ch) {
+        if let Some([sx, sy]) = self.camera_3d.world_to_screen(wrapped_x, wy, wrapped_z, cw, ch) {
             result.set_index(0, sx);
             result.set_index(1, sy);
         } else {
@@ -291,9 +306,23 @@ impl Engine {
 
     fn get_terrain_height_at(&self, x: f32, z: f32) -> f32 {
         if let Some(t) = &self.terrain {
-            let px = (x.round().max(0.0) as usize).min(W - 1);
-            let pz = (z.round().max(0.0) as usize).min(H - 1);
-            t.h[pz * W + px]
+            let map_w = W as f32;
+            let map_h = H as f32;
+            let wx = x.rem_euclid(map_w);
+            let wz = z.rem_euclid(map_h);
+            let x0 = wx.floor() as usize;
+            let z0 = wz.floor() as usize;
+            let x1 = (x0 + 1) % W;
+            let z1 = (z0 + 1) % H;
+            let fx = wx - wx.floor();
+            let fz = wz - wz.floor();
+            let h00 = t.h[z0 * W + x0];
+            let h10 = t.h[z0 * W + x1];
+            let h01 = t.h[z1 * W + x0];
+            let h11 = t.h[z1 * W + x1];
+            let h0 = h00 * (1.0 - fx) + h10 * fx;
+            let h1 = h01 * (1.0 - fx) + h11 * fx;
+            h0 * (1.0 - fz) + h1 * fz
         } else {
             0.33
         }
@@ -308,9 +337,51 @@ impl Engine {
         frame: u32,
         variant: u32,
     ) {
-        let h_norm = self.get_terrain_height_at(x, z);
-        let ground_y = (h_norm * 24.0).max(7.92); // Never sink below sea level
-        let center = [x, ground_y, z];
+        let map_w = W as f32;
+        let map_h = H as f32;
+        let wx = x.rem_euclid(map_w);
+        let wz = z.rem_euclid(map_h);
+        let h_norm = self.get_terrain_height_at(wx, wz);
+
+        // Never let land entities (villagers, mammoths, chickens, goats, fires) stand or walk on water
+        let is_land_entity = matches!(
+            sprite_id,
+            sprites::SPRITE_VILLAGER
+                | sprites::SPRITE_MAMMOTH
+                | sprites::SPRITE_CHICKEN
+                | sprites::SPRITE_GOAT
+                | sprites::SPRITE_FIRE
+        );
+        let (wx, wz, h_norm) = if is_land_entity && h_norm < 0.33 {
+            // Find nearest land point on the coast
+            let mut best_x = wx;
+            let mut best_z = wz;
+            let mut best_h = h_norm;
+            'search_land: for r in 1..=8 {
+                let rf = r as f32;
+                for &(dx, dz) in &[
+                    (rf, 0.0), (-rf, 0.0), (0.0, rf), (0.0, -rf),
+                    (rf * 0.707, rf * 0.707), (-rf * 0.707, rf * 0.707),
+                    (rf * 0.707, -rf * 0.707), (-rf * 0.707, -rf * 0.707),
+                ] {
+                    let tx = (wx + dx).rem_euclid(map_w);
+                    let tz = (wz + dz).rem_euclid(map_h);
+                    let th = self.get_terrain_height_at(tx, tz);
+                    if th >= 0.33 {
+                        best_x = tx;
+                        best_z = tz;
+                        best_h = th;
+                        break 'search_land;
+                    }
+                }
+            }
+            (best_x, best_z, best_h)
+        } else {
+            (wx, wz, h_norm)
+        };
+
+        let ground_y = (h_norm * 24.0).max(7.92) + 0.15; // Slightly above ground so feet never clip into slopes
+        let center = [wx, ground_y, wz];
 
         // Soft ground contact shadow beneath entities, trees, and structures
         let shadow_variant = match sprite_id {
@@ -441,8 +512,9 @@ impl Engine {
         canvas_h: i32,
     ) {
         self.time_3d += dt;
-        // East-west wrap camera target
+        // Torus wrap camera target along both axes (#111)
         self.camera_3d.target.x = self.camera_3d.target.x.rem_euclid(W as f32);
+        self.camera_3d.target.z = self.camera_3d.target.z.rem_euclid(H as f32);
 
         let sun_dir = Vec3::new(sun_x, sun_y, sun_z).normalize();
 
@@ -778,79 +850,154 @@ impl Engine {
         self.terrain
             .as_ref()
             .map(|t| t.sites.village.x)
-            .unwrap_or(150)
+            .unwrap_or(116)
     }
     pub fn get_site_village_y(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.village.y)
-            .unwrap_or(102)
+            .unwrap_or(100)
     }
 
     pub fn get_site_pad_x(&self) -> i32 {
-        self.terrain.as_ref().map(|t| t.sites.pad.x).unwrap_or(262)
+        self.terrain.as_ref().map(|t| t.sites.pad.x).unwrap_or(198)
     }
     pub fn get_site_pad_y(&self) -> i32 {
         self.terrain.as_ref().map(|t| t.sites.pad.y).unwrap_or(104)
     }
 
     pub fn get_site_cave_x(&self) -> i32 {
-        self.terrain.as_ref().map(|t| t.sites.cave.x).unwrap_or(130)
+        self.terrain.as_ref().map(|t| t.sites.cave.x).unwrap_or(96)
     }
     pub fn get_site_cave_y(&self) -> i32 {
-        self.terrain.as_ref().map(|t| t.sites.cave.y).unwrap_or(82)
+        self.terrain.as_ref().map(|t| t.sites.cave.y).unwrap_or(80)
     }
 
     pub fn get_site_cave_mouth_x(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.cave_mouth.x)
-            .unwrap_or(130)
+            .unwrap_or(96)
     }
     pub fn get_site_cave_mouth_y(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.cave_mouth.y)
-            .unwrap_or(82)
+            .unwrap_or(80)
     }
 
     pub fn get_site_factory_x(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.factory.x)
-            .unwrap_or(104)
+            .unwrap_or(70)
     }
     pub fn get_site_factory_y(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.factory.y)
-            .unwrap_or(128)
+            .unwrap_or(126)
     }
 
     pub fn get_site_exchange_x(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.exchange.x)
-            .unwrap_or(168)
+            .unwrap_or(134)
     }
     pub fn get_site_exchange_y(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.exchange.y)
-            .unwrap_or(92)
+            .unwrap_or(90)
     }
 
     pub fn get_site_hangar_x(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.hangar.x)
-            .unwrap_or(236)
+            .unwrap_or(172)
     }
     pub fn get_site_hangar_y(&self) -> i32 {
         self.terrain
             .as_ref()
             .map(|t| t.sites.hangar.y)
             .unwrap_or(114)
+    }
+
+    pub fn get_site_fire_x(&self) -> i32 {
+        self.terrain
+            .as_ref()
+            .map(|t| t.sites.fire.x)
+            .unwrap_or(116)
+    }
+    pub fn get_site_fire_y(&self) -> i32 {
+        self.terrain
+            .as_ref()
+            .map(|t| t.sites.fire.y)
+            .unwrap_or(100)
+    }
+
+    pub fn get_terrain_field(&mut self, tx: i32, ty: i32) -> Vec<i16> {
+        if let Some(t) = &mut self.terrain {
+            t.field(tx, ty).to_vec()
+        } else {
+            vec![-1i16; 320 * 180]
+        }
+    }
+
+    pub fn get_terrain_sea_field(&mut self, tx: i32, ty: i32) -> Vec<i16> {
+        if let Some(t) = &mut self.terrain {
+            t.sea_field(tx, ty).to_vec()
+        } else {
+            vec![-1i16; 320 * 180]
+        }
+    }
+
+    pub fn is_terrain_reachable(&mut self, x: i32, y: i32) -> bool {
+        if let Some(t) = &mut self.terrain {
+            t.reachable(x, y)
+        } else {
+            false
+        }
+    }
+
+    pub fn set_terrain_biome(&mut self, biome_name: &str) {
+        let biome = match biome_name {
+            "desert" => terrain::BiomeType::Desert,
+            "ice" => terrain::BiomeType::Ice,
+            "jungle" => terrain::BiomeType::Jungle,
+            "alien" => terrain::BiomeType::Alien,
+            _ => terrain::BiomeType::Temperate,
+        };
+        if let Some(t) = &mut self.terrain {
+            t.biome = biome;
+            t.palette = terrain::BiomePalette::for_biome(biome);
+            t.bake_era(self.game.era_index as u8);
+            if let Some(r3d) = &mut self.renderer_3d {
+                r3d.upload_terrain_texture(&t.pixels, 320, 180);
+            }
+        }
+    }
+
+    pub fn get_tree_count(&self) -> usize {
+        self.terrain.as_ref().map(|t| t.trees.len()).unwrap_or(0)
+    }
+
+    pub fn get_tree_x(&self, idx: usize) -> i32 {
+        self.terrain.as_ref().and_then(|t| t.trees.get(idx)).map(|tr| tr.x).unwrap_or(0)
+    }
+
+    pub fn get_tree_y(&self, idx: usize) -> i32 {
+        self.terrain.as_ref().and_then(|t| t.trees.get(idx)).map(|tr| tr.y).unwrap_or(0)
+    }
+
+    pub fn get_tree_variant(&self, idx: usize) -> u32 {
+        self.terrain.as_ref().and_then(|t| t.trees.get(idx)).map(|tr| tr.variant).unwrap_or(0)
+    }
+
+    pub fn get_continent_count(&self) -> usize {
+        self.terrain.as_ref().map(|t| t.continents.len()).unwrap_or(0)
     }
 
     pub fn bind_dom_shell(&mut self) -> Result<(), JsValue> {
@@ -892,10 +1039,6 @@ impl Engine {
         }
     }
 
-    pub fn audio_heartbeat(&mut self, now: f64, bpm: f32, intensity: f32) {
-        self.audio.heartbeat(now, bpm, intensity);
-    }
-
     pub fn game_start_era(&mut self, index: usize) {
         self.game.start_era(index);
         self.set_era(index as u8);
@@ -910,24 +1053,13 @@ impl Engine {
         self.advisor.set_era(self.game.era.id());
     }
 
-    pub fn game_tick(
-        &mut self,
-        dt: f32,
-        calm: f32,
-        focus: f32,
-        panic: f32,
-        hr: f32,
-        rest_hr: f32,
-        hr_delta: f32,
-        blinks: u32,
-    ) {
+    /// One tick of the Rust eras. `stress` is the JS brain's `brain.stress`
+    /// (EEG agitation or face anger, 0..1, about 0.15 at rest).
+    pub fn game_tick(&mut self, dt: f32, calm: f32, focus: f32, stress: f32, blinks: u32) {
         let brain = eras::BrainInput {
             calm,
             focus,
-            panic,
-            hr,
-            rest_hr,
-            hr_delta,
+            stress,
             blinks,
         };
 
@@ -936,7 +1068,7 @@ impl Engine {
 
         self.advisor.update(dt);
         self.hud.update_clock(self.game.stats.runtime);
-        self.hud.update_meters(calm, None, focus, None, hr, rest_hr, hr_delta, blinks, panic);
+        self.hud.update_meters(calm, None, focus, None, stress, blinks);
         self.hud.update_objectives(&self.game.era.objectives());
     }
 
@@ -1041,10 +1173,10 @@ impl Engine {
     }
 }
 
-/// Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109)
+/// Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109, #19, #128)
 #[wasm_bindgen]
 pub struct RustWorldGen {
-    map: moc_terrain::TerrainMap,
+    terrain: crate::terrain::Terrain,
 }
 
 #[wasm_bindgen]
@@ -1052,27 +1184,545 @@ impl RustWorldGen {
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Self {
         Self {
-            map: moc_terrain::TerrainMap::generate_home_world(seed),
+            terrain: crate::terrain::Terrain::new(seed),
         }
     }
 
     pub fn heights(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.map.heights[..])
+        js_sys::Float32Array::from(&self.terrain.h[..])
     }
 
     pub fn types(&self) -> js_sys::Uint8Array {
-        js_sys::Uint8Array::from(&self.map.types[..])
+        js_sys::Uint8Array::from(&self.terrain.tile_type[..])
     }
 
     pub fn rgba(&self) -> js_sys::Uint8Array {
-        js_sys::Uint8Array::from(&self.map.rgba[..])
+        js_sys::Uint8Array::from(&self.terrain.pixels[..])
     }
 
     pub fn sites_json(&self) -> String {
-        self.map.sites_json()
+        self.terrain.sites_json()
     }
 
     pub fn continents_json(&self) -> String {
-        self.map.continents_json()
+        self.terrain.continents_json()
+    }
+}
+
+/// Standalone WebAssembly Cast Controller for camera god powers (#33, #108)
+#[wasm_bindgen]
+pub struct RustCastController {
+    inner: camera::casts::CastController,
+}
+
+#[wasm_bindgen]
+impl RustCastController {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: camera::casts::CastController::default(),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    pub fn spell_for(&self, gesture: &str) -> Option<String> {
+        self.inner.spell_for(gesture).map(|s| s.as_str().to_string())
+    }
+
+    pub fn update(&mut self, gesture: &str, score: f64, now: f64) -> js_sys::Array {
+        let u = self.inner.update(gesture, score, now);
+        let arr = js_sys::Array::new();
+        arr.push(&JsValue::from(u.held.map(|s| s.as_str())));
+        arr.push(&JsValue::from_f64(u.progress));
+        arr.push(&JsValue::from(u.cast.map(|s| s.as_str())));
+        arr.push(&JsValue::from_bool(u.aiming));
+        arr
+    }
+
+    pub fn trigger(&mut self, spell_id: &str, now: f64) -> bool {
+        if let Some(id) = camera::spells::SpellId::from_str(spell_id) {
+            self.inner.trigger(id, now)
+        } else {
+            false
+        }
+    }
+
+    pub fn ready(&self, spell_id: &str, now: f64) -> bool {
+        if let Some(id) = camera::spells::SpellId::from_str(spell_id) {
+            self.inner.ready(id, now)
+        } else {
+            false
+        }
+    }
+
+    pub fn cooldown_left(&self, spell_id: &str, now: f64) -> f64 {
+        if let Some(id) = camera::spells::SpellId::from_str(spell_id) {
+            self.inner.cooldown_left(id, now)
+        } else {
+            0.0
+        }
+    }
+
+    pub fn cooldown_frac(&self, spell_id: &str, now: f64) -> f64 {
+        if let Some(id) = camera::spells::SpellId::from_str(spell_id) {
+            self.inner.cooldown_frac(id, now)
+        } else {
+            0.0
+        }
+    }
+}
+
+/// Standalone WebAssembly Finger Controller for smoothing, deadzone and pinching (#33, #67, #108)
+#[wasm_bindgen]
+pub struct RustFingerController {
+    inner: camera::fingers::FingerController,
+}
+
+#[wasm_bindgen]
+impl RustFingerController {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: camera::fingers::FingerController::default(),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    pub fn update(
+        &mut self,
+        landmarks: Option<Vec<f64>>,
+        gesture: &str,
+        score: f64,
+        now: f64,
+        aspect: f64,
+    ) -> js_sys::Array {
+        let landmarks_vec = landmarks.and_then(|coords| {
+            if coords.len() >= 63 {
+                let mut v = Vec::with_capacity(21);
+                for i in 0..21 {
+                    v.push(camera::fingers::Landmark {
+                        x: coords[i * 3],
+                        y: coords[i * 3 + 1],
+                        z: coords[i * 3 + 2],
+                    });
+                }
+                Some(v)
+            } else {
+                None
+            }
+        });
+
+        let u = self.inner.update(
+            landmarks_vec.as_deref(),
+            gesture,
+            score,
+            now,
+            aspect,
+        );
+
+        let arr = js_sys::Array::new();
+        let mode_str = match u.mode {
+            camera::fingers::FingerMode::None => "none",
+            camera::fingers::FingerMode::Point => "point",
+            camera::fingers::FingerMode::Pinch => "pinch",
+            camera::fingers::FingerMode::Release => "release",
+        };
+        arr.push(&JsValue::from_str(mode_str));
+        if let Some((ax, ay)) = u.aim {
+            let aim_arr = js_sys::Array::new();
+            aim_arr.push(&JsValue::from_f64(ax));
+            aim_arr.push(&JsValue::from_f64(ay));
+            arr.push(&aim_arr);
+        } else {
+            arr.push(&JsValue::NULL);
+        }
+        arr.push(&JsValue::from_bool(u.cast));
+        arr.push(&JsValue::from_bool(u.cancelled));
+        arr.push(&JsValue::from_bool(u.suppress));
+        arr.push(&JsValue::from_f64(u.progress));
+        arr
+    }
+}
+
+/// Standalone WebAssembly Face Emotion Tracker (#33, #108)
+#[wasm_bindgen]
+pub struct RustEmotionTracker {
+    inner: camera::emotion::EmotionTracker,
+}
+
+#[wasm_bindgen]
+impl RustEmotionTracker {
+    #[wasm_bindgen(constructor)]
+    pub fn new(calibrate_seconds: f64) -> Self {
+        Self {
+            inner: camera::emotion::EmotionTracker::new(calibrate_seconds),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    pub fn update_direct(
+        &mut self,
+        has_face: bool,
+        mouth_smile_left: f64,
+        mouth_smile_right: f64,
+        brow_down_left: f64,
+        brow_down_right: f64,
+        mouth_press_left: f64,
+        mouth_press_right: f64,
+        jaw_open: f64,
+        brow_inner_up: f64,
+        eye_wide_left: f64,
+        eye_wide_right: f64,
+        mouth_frown_left: f64,
+        mouth_frown_right: f64,
+        dt: f64,
+    ) -> js_sys::Array {
+        let mut map = std::collections::HashMap::new();
+        if has_face {
+            map.insert("mouthSmileLeft".to_string(), mouth_smile_left);
+            map.insert("mouthSmileRight".to_string(), mouth_smile_right);
+            map.insert("browDownLeft".to_string(), brow_down_left);
+            map.insert("browDownRight".to_string(), brow_down_right);
+            map.insert("mouthPressLeft".to_string(), mouth_press_left);
+            map.insert("mouthPressRight".to_string(), mouth_press_right);
+            map.insert("jawOpen".to_string(), jaw_open);
+            map.insert("browInnerUp".to_string(), brow_inner_up);
+            map.insert("eyeWideLeft".to_string(), eye_wide_left);
+            map.insert("eyeWideRight".to_string(), eye_wide_right);
+            map.insert("mouthFrownLeft".to_string(), mouth_frown_left);
+            map.insert("mouthFrownRight".to_string(), mouth_frown_right);
+        }
+
+        let (mood, ev) = self.inner.update(if has_face { Some(&map) } else { None }, dt);
+
+        let arr = js_sys::Array::new();
+        arr.push(&JsValue::from_str(mood.dominant.as_str()));
+        arr.push(&JsValue::from_f64(mood.joy));
+        arr.push(&JsValue::from_f64(mood.anger));
+        arr.push(&JsValue::from_f64(mood.surprise));
+        arr.push(&JsValue::from_f64(mood.sadness));
+        arr.push(&JsValue::from_f64(mood.neutral));
+        arr.push(&JsValue::from_f64(mood.intensity));
+        arr.push(&JsValue::from_bool(mood.face));
+        let ev_str = match ev {
+            Some(camera::emotion::EmotionEvent::Change) => "change",
+            Some(camera::emotion::EmotionEvent::Strong) => "strong",
+            None => "",
+        };
+        arr.push(&JsValue::from_str(ev_str));
+        arr
+    }
+}
+
+/// Standalone WebAssembly Galaxy & Multi-World Simulator (#24, #108)
+#[wasm_bindgen]
+pub struct RustGalaxy {
+    inner: moc_cosmos::galaxy::Galaxy,
+}
+
+#[wasm_bindgen]
+impl RustGalaxy {
+    #[wasm_bindgen(constructor)]
+    pub fn new(seed: u32) -> Self {
+        Self {
+            inner: moc_cosmos::galaxy::Galaxy::new(seed),
+        }
+    }
+
+    pub fn step(
+        &mut self,
+        dt: f32,
+        calm: f32,
+        focus: f32,
+        stress: f32,
+        blinks_last_10s: u32,
+        blinks_total: u32,
+    ) {
+        let fx = moc_cosmos::planet_sim::BrainEffects::from_signals(calm, focus, stress, blinks_last_10s);
+        self.inner.step(dt, &fx, blinks_total);
+    }
+
+    pub fn on_blink(&mut self) {
+        self.inner.on_blink();
+    }
+
+    pub fn set_attended(&mut self, planet_idx: i32) {
+        self.inner.attended = if planet_idx >= 0 {
+            Some(planet_idx as usize)
+        } else {
+            None
+        };
+    }
+
+    pub fn get_attended(&self) -> i32 {
+        self.inner.attended.map(|idx| idx as i32).unwrap_or(-1)
+    }
+
+    pub fn planet_count(&self) -> usize {
+        self.inner.planets.len()
+    }
+
+    pub fn planet_pop(&self, idx: usize) -> f32 {
+        self.inner.planets.get(idx).map(|p| p.state.pop).unwrap_or(0.0)
+    }
+
+    pub fn planet_era(&self, idx: usize) -> usize {
+        self.inner.planets.get(idx).map(|p| p.state.era_index).unwrap_or(0)
+    }
+
+    pub fn planet_progress(&self, idx: usize) -> f32 {
+        self.inner.planets.get(idx).map(|p| p.state.progress).unwrap_or(0.0)
+    }
+
+    pub fn planet_market(&self, idx: usize) -> f32 {
+        self.inner.planets.get(idx).map(|p| p.state.market).unwrap_or(100.0)
+    }
+
+    pub fn planet_is_alive(&self, idx: usize) -> bool {
+        self.inner.planets.get(idx).map(|p| p.alive).unwrap_or(false)
+    }
+
+    pub fn planet_is_forming(&self, idx: usize) -> bool {
+        self.inner.planets.get(idx).map(|p| p.forming).unwrap_or(false)
+    }
+
+    pub fn planet_name(&self, idx: usize) -> String {
+        self.inner.planets.get(idx).map(|p| p.name.clone()).unwrap_or_default()
+    }
+
+    pub fn planet_biome(&self, idx: usize) -> String {
+        self.inner.planets.get(idx).map(|p| p.biome.name().to_string()).unwrap_or_else(|| "forming".to_string())
+    }
+
+    pub fn planet_channel(&self, idx: usize) -> String {
+        self.inner.planets.get(idx).map(|p| p.state.channel.name().to_string()).unwrap_or_else(|| "mixed".to_string())
+    }
+
+    pub fn planet_pos_x(&self, idx: usize) -> f32 {
+        self.inner.planets.get(idx).map(|p| p.position(self.inner.time).0).unwrap_or(0.0)
+    }
+
+    pub fn planet_pos_y(&self, idx: usize) -> f32 {
+        self.inner.planets.get(idx).map(|p| p.position(self.inner.time).1).unwrap_or(0.0)
+    }
+
+    pub fn is_mind_done(&self) -> bool {
+        self.inner.mind.done
+    }
+}
+
+/// Standalone WebAssembly MLP Policy AI God (#25, #108)
+#[wasm_bindgen]
+pub struct RustAiPolicy {
+    inner: moc_ai::policy::MLPPolicy,
+}
+
+#[wasm_bindgen]
+impl RustAiPolicy {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: moc_ai::policy::MLPPolicy::from_embedded(),
+        }
+    }
+
+    pub fn act(&self, obs: &[f32], greedy: bool, sample_val: f32) -> u32 {
+        if obs.len() < moc_ai::policy::NUM_INPUTS {
+            return 0;
+        }
+        self.inner.act(obs, greedy, sample_val) as u32
+    }
+
+    pub fn probs(&self, obs: &[f32]) -> js_sys::Float32Array {
+        if obs.len() < moc_ai::policy::NUM_INPUTS {
+            return js_sys::Float32Array::new_with_length(moc_ai::policy::NUM_ACTIONS as u32);
+        }
+        let probs = self.inner.probs(obs);
+        js_sys::Float32Array::from(&probs[..])
+    }
+
+    pub fn self_check(&self) -> f32 {
+        self.inner.self_check()
+    }
+}
+
+/// Standalone WebAssembly Brain signal processor and personal model (#20, #108)
+#[wasm_bindgen]
+pub struct RustBrain {
+    inner: moc_brain::brain::Brain,
+}
+
+#[wasm_bindgen]
+impl RustBrain {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: moc_brain::brain::Brain::new(),
+        }
+    }
+
+    pub fn update(&mut self, dt: f32) -> bool {
+        self.inner.update(dt)
+    }
+
+    pub fn set_cue(&mut self, cue_id: i32) {
+        let cue = match cue_id {
+            0 => Some(moc_brain::model::Class::Rest),
+            1 => Some(moc_brain::model::Class::Calm),
+            2 => Some(moc_brain::model::Class::Focus),
+            _ => None,
+        };
+        self.inner.set_cue(cue);
+    }
+
+    pub fn ingest(
+        &mut self,
+        delta: f32,
+        theta: f32,
+        alpha: f32,
+        beta: f32,
+        gamma: f32,
+        blink: bool,
+        hr: f32,
+        tilt_x: f32,
+        tilt_y: f32,
+        motion: f32,
+        quality: f32,
+    ) -> bool {
+        let frame = moc_brain::sim_source::BrainFrame {
+            bands: moc_brain::model::Bands {
+                delta,
+                theta,
+                alpha,
+                beta,
+                gamma,
+            },
+            blink,
+            hr: if hr > 0.0 { Some(hr) } else { None },
+            tilt: Some((tilt_x, tilt_y)),
+            motion,
+            quality,
+        };
+        self.inner.ingest(&frame)
+    }
+
+    pub fn calm(&self) -> f32 {
+        self.inner.calm
+    }
+
+    pub fn focus(&self) -> f32 {
+        self.inner.focus
+    }
+
+    pub fn stress(&self) -> f32 {
+        self.inner.stress
+    }
+
+    pub fn anger(&self) -> f32 {
+        self.inner.anger
+    }
+
+    pub fn blinks(&self) -> u32 {
+        self.inner.stats.blinks
+    }
+
+    pub fn retrain(&mut self) -> bool {
+        self.inner.model.maybe_train()
+    }
+
+    pub fn accuracy(&self) -> f32 {
+        self.inner.model.accuracy
+    }
+}
+
+/// Standalone WebAssembly Simulated Headset Source (#20, #108)
+#[wasm_bindgen]
+pub struct RustSimSource {
+    inner: moc_brain::sim_source::SimSource,
+}
+
+#[wasm_bindgen]
+impl RustSimSource {
+    #[wasm_bindgen(constructor)]
+    pub fn new(seed: u32) -> Self {
+        Self {
+            inner: moc_brain::sim_source::SimSource::new(seed),
+        }
+    }
+
+    pub fn set_input(&mut self, calm: bool, focus: bool, panic: bool) {
+        self.inner.input.calm = calm;
+        self.inner.input.focus = focus;
+        self.inner.input.panic = panic;
+    }
+
+    pub fn blink(&mut self) {
+        self.inner.blink();
+    }
+
+    pub fn step(&mut self, dt: f32) -> js_sys::Float32Array {
+        let mut out = [0.0f32; 11];
+        self.inner.update(dt, |f| {
+            out = [
+                f.bands.delta,
+                f.bands.theta,
+                f.bands.alpha,
+                f.bands.beta,
+                f.bands.gamma,
+                if f.blink { 1.0 } else { 0.0 },
+                f.hr.unwrap_or(0.0),
+                f.tilt.map(|t| t.0).unwrap_or(0.0),
+                f.tilt.map(|t| t.1).unwrap_or(0.0),
+                f.motion,
+                f.quality,
+            ];
+        });
+        js_sys::Float32Array::from(&out[..])
+    }
+}
+
+/// Standalone WebAssembly Calibration traits (#54, #108)
+#[wasm_bindgen]
+pub struct RustCalibration;
+
+#[wasm_bindgen]
+impl RustCalibration {
+    pub fn random_traits(seed: u32) -> js_sys::Float32Array {
+        let t = moc_brain::calibration::random_seed_traits(seed);
+        let out = [t.friendliness, t.aggressiveness, t.violence];
+        js_sys::Float32Array::from(&out[..])
+    }
+
+    pub fn traits_from_sensors(
+        calm: f32,
+        focus: f32,
+        stress: f32,
+        blink_rate: f32,
+        joy: f32,
+        anger: f32,
+    ) -> js_sys::Float32Array {
+        let features = moc_brain::calibration::SensorFeatures {
+            calm,
+            focus,
+            stress,
+            blink_rate,
+            joy,
+            anger,
+            surprise: 0.0,
+            sadness: 0.0,
+            face_seen: joy > 0.0 || anger > 0.0,
+        };
+        let t = moc_brain::calibration::traits_from_features(&features);
+        let out = [t.friendliness, t.aggressiveness, t.violence];
+        js_sys::Float32Array::from(&out[..])
     }
 }

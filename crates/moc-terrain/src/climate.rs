@@ -38,12 +38,12 @@ impl Default for ClimateModel {
 }
 
 impl ClimateModel {
-    /// Computes temperature in [0, 1] based on latitude and altitude.
-    /// `v` in [0, 1] is latitude (0 = North Pole, 0.5 = Equator, 1 = South Pole).
+    /// Computes temperature in [0, 1] based on periodic latitude and altitude (#111).
+    /// On a torus, latitude is periodic (cold bands at v=0.0/1.0, warm belt at v=0.5).
     pub fn temperature(&self, v: f32, height: f32) -> f32 {
-        // Solar insolation: maximum at equator (v = 0.5), drops to 0 at poles
-        let lat_factor = (1.0 - (2.0 * v - 1.0).abs()).max(0.0);
-        let base_temp = 0.05 + 0.90 * (lat_factor * std::f32::consts::PI * 0.5).sin();
+        // Periodic insolation: cold belts at v=0 and v=1 (seam), warm belt at v=0.5
+        let lat_factor = 0.5 * (1.0 - (v * std::f32::consts::TAU).cos());
+        let base_temp = 0.05 + 0.90 * lat_factor;
 
         // Lapse rate: mountains are colder than coastal plains
         let altitude_above_sea = (height - self.sea_level).max(0.0);
@@ -51,18 +51,16 @@ impl ClimateModel {
         cooled.clamp(0.0, 1.0)
     }
 
-    /// Determines the prevailing wind direction along longitude (-1 = East-to-West, +1 = West-to-East).
-    /// Follows Earth-like atmospheric circulation cells:
-    /// - Hadley cells (0.35..0.65): Trade winds blow East-to-West (-1.0)
-    /// - Ferrel cells (0.15..0.35 and 0.65..0.85): Westerlies blow West-to-East (+1.0)
-    /// - Polar cells (0.0..0.15 and 0.85..1.0): Polar easterlies blow East-to-West (-1.0)
+    /// Determines prevailing wind direction along longitude (-1 = East-to-West, +1 = West-to-East).
+    /// Follows periodic atmospheric circulation cells across the torus (#111).
     pub fn prevailing_wind(&self, v: f32) -> f32 {
-        if (0.35..=0.65).contains(&v) {
-            -1.0 // Easterly trade winds
-        } else if (0.15..=0.85).contains(&v) {
+        let v_wrap = v.rem_euclid(1.0);
+        if (0.35..=0.65).contains(&v_wrap) {
+            -1.0 // Easterly trade winds around warm belt
+        } else if (0.15..=0.85).contains(&v_wrap) {
             1.0 // Mid-latitude westerlies
         } else {
-            -1.0 // Polar easterlies
+            -1.0 // Cold belt easterlies
         }
     }
 

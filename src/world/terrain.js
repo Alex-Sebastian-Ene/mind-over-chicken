@@ -251,13 +251,19 @@ export class World {
 
   nearestWalkable(x, y, maxR = 60) {
     x = Math.round(x); y = Math.round(y);
-    for (let r = 0; r <= maxR; r++) {
+    if (this.walkable(x, y)) return { x, y };
+    let fallback = null;
+    for (let r = 1; r <= maxR; r++) {
       for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-        if (this.walkable(x + dx, y + dy) && this.get(x + dx, y + dy) !== T.FOREST) return { x: x + dx, y: y + dy };
+        const px = x + dx, py = y + dy;
+        if (this.walkable(px, py)) {
+          if (this.get(px, py) !== T.FOREST) return { x: px, y: py };
+          fallback ??= { x: px, y: py };
+        }
       }
     }
-    return { x, y };
+    return fallback || (this.sites?.village ? { ...this.sites.village } : { x, y });
   }
 
   // Random walkable point in a ring around (x,y).
