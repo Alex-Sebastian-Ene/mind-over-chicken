@@ -83,6 +83,7 @@ export class Engine {
     constructor(canvas_id: string);
     orbit_camera(delta_yaw: number, delta_pitch: number): void;
     pan_camera(dx: number, dz: number): void;
+    project_to_screen(wx: number, wz: number, cw: number, ch: number): Float32Array;
     render_3d(dt: number, sun_x: number, sun_y: number, sun_z: number, night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
     render_uploaded_canvas(night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
     screen_to_ground(sx: number, sy: number, cw: number, ch: number): Float32Array;
@@ -263,6 +264,7 @@ export interface InitOutput {
     readonly engine_new: (a: number, b: number) => [number, number, number];
     readonly engine_orbit_camera: (a: number, b: number, c: number) => void;
     readonly engine_pan_camera: (a: number, b: number, c: number) => void;
+    readonly engine_project_to_screen: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly engine_render_3d: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
     readonly engine_render_uploaded_canvas: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly engine_screen_to_ground: (a: number, b: number, c: number, d: number, e: number) => any;

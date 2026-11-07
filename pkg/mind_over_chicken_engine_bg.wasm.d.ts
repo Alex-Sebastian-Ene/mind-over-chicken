@@ -76,6 +76,7 @@ export const engine_is_walkable: (a: number, b: number, c: number) => number;
 export const engine_new: (a: number, b: number) => [number, number, number];
 export const engine_orbit_camera: (a: number, b: number, c: number) => void;
 export const engine_pan_camera: (a: number, b: number, c: number) => void;
+export const engine_project_to_screen: (a: number, b: number, c: number, d: number, e: number) => any;
 export const engine_render_3d: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
 export const engine_render_uploaded_canvas: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
 export const engine_screen_to_ground: (a: number, b: number, c: number, d: number, e: number) => any;
