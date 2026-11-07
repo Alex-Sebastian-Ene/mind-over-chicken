@@ -78,6 +78,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "moc-cosmos"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "moc-planet"
 version = "0.1.0"
 
