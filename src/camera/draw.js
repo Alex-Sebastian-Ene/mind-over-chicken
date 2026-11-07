@@ -4,12 +4,12 @@ export const HAND_LINKS = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7
   [9, 13], [13, 14], [14, 15], [15, 16], [13, 17], [17, 18], [18, 19], [19, 20], [0, 17]];
 
 // hand: 21 landmarks in frame coordinates (0..1). The canvas is w × h; mirror the context first if
-// the picture is mirrored. state: { held, aiming, pinching, nearPinch }.
+// the picture is mirrored. state: { held, aiming, pinching, nearPinch, side }.
 export function drawHand(ctx, hand, w, h, state = {}) {
-  if (!hand) return;
+  if (!hand || hand.length < 21) return;
   const lw = Math.max(1.5, w / 160);
   ctx.lineWidth = lw;
-  ctx.strokeStyle = state.held ? '#ffcf4a' : 'rgba(89,216,200,0.9)';
+  ctx.strokeStyle = state.held ? '#ffcf4a' : state.side === 'left' ? 'rgba(139,212,255,0.9)' : 'rgba(89,216,200,0.9)';
   ctx.beginPath();
   for (const [a, b] of HAND_LINKS) { ctx.moveTo(hand[a].x * w, hand[a].y * h); ctx.lineTo(hand[b].x * w, hand[b].y * h); }
   ctx.stroke();
@@ -21,7 +21,7 @@ export function drawHand(ctx, hand, w, h, state = {}) {
     ctx.lineWidth = lw * (state.pinching ? 2 : 1);
     ctx.beginPath(); ctx.moveTo(hand[4].x * w, hand[4].y * h); ctx.lineTo(hand[8].x * w, hand[8].y * h); ctx.stroke();
   }
-  // The index fingertip, which aims.
+  // The index fingertip.
   ctx.lineWidth = lw;
   ctx.strokeStyle = state.aiming || state.pinching ? '#ff5a72' : 'rgba(255,90,114,0.6)';
   ctx.beginPath(); ctx.arc(hand[8].x * w, hand[8].y * h, lw * 3.5, 0, Math.PI * 2); ctx.stroke();
