@@ -51,7 +51,7 @@ pub struct WebGl3DRenderer {
     // Terrain uniforms
     pub u_terrain_vp: WebGlUniformLocation,
     pub u_terrain_sun_dir: WebGlUniformLocation,
-    pub u_terrain_ambient: WebGlUniformLocation,
+    pub u_terrain_ambient: Option<WebGlUniformLocation>,
     pub u_terrain_night: WebGlUniformLocation,
     pub u_terrain_time: Option<WebGlUniformLocation>,
     pub u_terrain_cam_pos: Option<WebGlUniformLocation>,
@@ -479,8 +479,9 @@ impl WebGl3DRenderer {
             .get_uniform_location(&terrain_program, "u_sunDir")
             .ok_or("Missing u_sunDir in terrain shader")?;
         let u_terrain_ambient = gl
-            .get_uniform_location(&terrain_program, "u_ambient")
-            .ok_or("Missing u_ambient in terrain shader")?;
+            // Optional: the redesigned terrain shader lights from sun/moon colour and AO, so the
+            // compiler strips u_ambient. A required lookup made 3D silently fall back to 2D.
+            .get_uniform_location(&terrain_program, "u_ambient");
         let u_terrain_night = gl
             .get_uniform_location(&terrain_program, "u_night")
             .ok_or("Missing u_night in terrain shader")?;
@@ -726,7 +727,9 @@ impl WebGl3DRenderer {
         gl.use_program(Some(&self.terrain_program));
         gl.uniform_matrix4fv_with_f32_array(Some(&self.u_terrain_vp), false, &view_proj.m);
         gl.uniform3f(Some(&self.u_terrain_sun_dir), sun_dir.x, sun_dir.y, sun_dir.z);
-        gl.uniform1f(Some(&self.u_terrain_ambient), 0.38);
+        if let Some(loc) = self.u_terrain_ambient.as_ref() {
+            gl.uniform1f(Some(loc), 0.38);
+        }
         gl.uniform1f(Some(&self.u_terrain_night), night);
         if let Some(loc) = self.u_terrain_time.as_ref() {
             gl.uniform1f(Some(loc), time);

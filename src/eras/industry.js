@@ -207,6 +207,7 @@ export class Industry {
     // GDP
     this.gdpRate = working * 0.62 * this.confidence * clamp(0.65 + 0.35 * this.price / this.value, 0.4, 1.3) - rioting * 0.6;
     this.gdp = Math.max(0, this.gdp + this.gdpRate * dt);
+    if (this.gdp >= GDP_TARGET) this.gdpReached = true;
 
     // Factory smoke
     if (Math.random() < dt * (2 + working * 0.3)) this.particles.add({ x: fx.x - 4 + (chance(0.5) ? 8 : 0), y: fx.y - 13, vx: rand(2, 6), vy: rand(-7, -4), grow: 0.5, life: 3, maxLife: 3, size: 1, color: 'rgba(90,85,85,0.7)' });
@@ -313,10 +314,13 @@ export class Industry {
   }
 
   objectives() {
+    const gdpDone = this.gdp >= GDP_TARGET || !!this.gdpReached;
+    const gdpVal = gdpDone ? `${GDP_TARGET}/${GDP_TARGET}` : `${Math.floor(this.gdp)}/${GDP_TARGET}`;
     const st = this.ipo.state;
+    const ipoProgress = Math.min(IPO_SECONDS, Math.ceil(this.ipo.progress));
     return [
-      { label: 'GDP', value: `${Math.floor(this.gdp)}/${GDP_TARGET}`, done: this.gdp >= GDP_TARGET },
-      { label: 'Goat IPO', value: st === 'done' ? 'priced' : st === 'active' ? `${this.ipo.progress.toFixed(1)}/${IPO_SECONDS}s` : 'soon', done: st === 'done' },
+      { label: 'GDP', value: gdpVal, done: gdpDone },
+      { label: 'Goat IPO', value: st === 'done' ? 'priced' : st === 'active' ? `${ipoProgress}/${IPO_SECONDS}s` : 'soon', done: st === 'done' },
       { label: 'Goat index', value: this.price.toFixed(1), plain: true, bad: this.price < this.peak * 0.8 },
       { label: 'Striking', value: `${this.agents.filter((a) => a.state === 'strike' || a.state === 'riot').length}`, plain: true },
     ];
