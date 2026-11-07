@@ -20,8 +20,11 @@
     <div class="bar-tools">
       <span class="source" id="sourceStatus" data-ok="0">No headset</span>
       <span class="clock" id="clock" aria-label="Run time">0:00</span>
+      <button type="button" class="tool eeg-btn" id="eegBtn" aria-pressed="false" aria-controls="eegPanel" title="Connect or disconnect EEG headset and view live signals (E)">EEG <kbd>E</kbd></button>
       <!-- camera (#33) --><button type="button" class="tool cam-btn" id="camBtn" aria-pressed="false" aria-controls="camPanel" title="Cast spells with hand gestures and set the mood with your face. Opt-in; frames never leave this device.">Camera</button>
       <!-- camera debug (#67) --><button type="button" class="tool dbg-btn" id="dbgBtn" aria-pressed="false" aria-controls="dbgPanel" title="Debug: what the camera and headset read (` key)">Debug <kbd>`</kbd></button>
+      <button type="button" class="tool" id="mode3dBtn" aria-pressed="false" title="Toggle 3D world (T)">3D</button>
+      <button type="button" class="tool" id="aiGodBtn" aria-pressed="false" title="Toggle AI God autopilot (G)">AI God <kbd>G</kbd></button>
       <button type="button" class="tool" id="modelBtn" aria-pressed="false" title="Show the model of your brain (M)">Model <kbd>M</kbd></button>
       <button type="button" class="tool" id="soundBtn" aria-pressed="true">Sound on</button>
     </div>
@@ -97,8 +100,8 @@
     <button type="button" class="power" data-power="heart">
       <canvas class="power-icon" width="8" height="8" aria-hidden="true"></canvas>
       <span class="power-name">Markets</span>
-      <span class="power-sub">Heart rate</span>
-      <span class="power-value">-- bpm</span>
+      <span class="power-sub">Tension · hold <kbd>Shift</kbd></span>
+      <span class="power-value">0%</span>
       <span class="meter"><span></span></span>
     </button>
   </nav>
@@ -108,12 +111,12 @@
   <div class="title-inner">
     <p class="eyebrow">A god game you play with your brain</p>
     <h1 id="titleHeading">Mind <span>over</span> Chicken</h1>
-    <p class="lede">You are the god of one small tribe. Keep it alive through the ages with calm, focus, blinks and a steady heart, until it builds a rocket and leaves for a new world.</p>
+    <p class="lede">You are the god of one small tribe. Keep it alive through the ages with calm, focus, blinks and steady nerves, until it builds a rocket and leaves for a new world.</p>
 
     <ol class="eras">
       <li><b>Stone Age</b><span>Blink to throw lightning. Stay calm to keep the fire alive.</span></li>
       <li class="skip"><b>Farming · Kingdoms</b><span>Ten thousand years in a montage. The scholars ask you some sums.</span></li>
-      <li><b>Industry</b><span>Your pulse moves the goat market. Stay steady or it crashes.</span></li>
+      <li><b>Industry</b><span>Your tension moves the goat market. Stay steady or it crashes.</span></li>
       <li><b>Space Age</b><span>Hold focus through a ten-second countdown.</span></li>
     </ol>
 
@@ -121,11 +124,11 @@
       <div class="start-main">
         <button type="button" class="btn btn-primary" id="playSim">Play with the emulated headset</button>
         <p class="hint">Placeholder for the Muse: it sends the same signals, driven by your keyboard.
-          <kbd>Space</kbd> calm · <kbd>F</kbd> focus · <kbd>Shift</kbd> racing pulse · <kbd>B</kbd> or click to blink · mouse is head tilt. Scroll, pinch or <kbd>Z</kbd> / <kbd>X</kbd> to zoom out to the planet and the galaxy. On a phone, hold the power tiles and tap the map.</p>
+          <kbd>Space</kbd> calm · <kbd>F</kbd> focus · <kbd>Shift</kbd> tension · <kbd>B</kbd> or click to blink · mouse is head tilt. Scroll, pinch or <kbd>Z</kbd> / <kbd>X</kbd> to zoom out to the planet and the galaxy. On a phone, hold the power tiles and tap the map.</p>
       </div>
       <div class="start-sandbox">
         <button type="button" class="btn" id="playSandbox">Galaxy sandbox</button>
-        <p class="hint">Skip the story: make planets and let their civilisations run on their own. Your calm, focus and pulse still steer all of them.</p>
+        <p class="hint">Skip the story: make planets and let their civilisations run on their own. Your calm, focus and agitation still steer all of them.</p>
       </div>
       <details class="start-real">
         <summary>Connect a real headset</summary>
@@ -164,6 +167,8 @@
     </div>
   </div>
 </section>
+
+<aside class="eeg-panel" id="eegPanel" hidden aria-labelledby="eegHeading"></aside>
 
 <aside class="model-panel" id="modelPanel" hidden aria-labelledby="modelHeading">
   <header>

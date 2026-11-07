@@ -18,6 +18,8 @@ import { rand, pick, chance } from '../sim/util.js';
 import { generateWorld } from './worldgen.js';
 import { label } from '../eras/stone.js';
 import { SIM, TEMPERAMENT, newPlanetState, brainEffects, stepPlanet, blinkPlanet, arriveShip, newMind, stepMind } from './planet-sim.js';
+import { SimPlanet } from '../ai/planet.js';
+import { AIGod } from '../ai/autopilot.js';
 
 export const ERA_NAMES = ['stone', 'farming', 'industry', 'space'];
 export const ERA_LABEL = { stone: 'Stone Age', farming: 'Farming', industry: 'Industry', space: 'Space Age' };
@@ -60,7 +62,15 @@ export class Galaxy {
   }
 
   addHome(world, { autonomous = false } = {}) {
-    return this.add({ name: 'Home', home: true, biome: world.biome || 'temperate', autonomous, world: autonomous ? world : null, homeWorld: world, eraIndex: 0, pop: autonomous ? 10 : 0, size: 12, channel: 'mixed', alive: true });
+    const p = this.add({ name: 'Home', home: true, biome: world.biome || 'temperate', autonomous, world: autonomous ? world : null, homeWorld: world, eraIndex: 0, pop: autonomous ? 10 : 0, size: 12, channel: 'mixed', alive: true, seed: world.seed });
+    if (autonomous) {
+      try {
+        p.simPlanet = new SimPlanet({ seed: world.seed, biome: world.biome, brain: 'proxy' }).setGod(new AIGod());
+      } catch (e) {
+        console.warn('Could not initialize SimPlanet for autonomous home:', e);
+      }
+    }
+    return p;
   }
 
   // Three worlds that will be shaped by the player's mind once the snapshot is in.
@@ -81,11 +91,13 @@ export class Galaxy {
 
   add(o) {
     const i = this.planets.length;
+    const seed = o.seed ?? ((Math.random() * 1e9) | 0);
     const p = {
       ...newPlanetState({ channel: o.channel || 'mixed', pop: o.pop || 0, eraIndex: o.eraIndex || 0 }),
       // presentation only
       labels: [], layers: {}, structs: {}, flash: 0, effect: '',
       orbit: ORBIT_FIRST + i * ORBIT_STEP, phase: rand(0, Math.PI * 2), speed: 0.2 / (1 + i * 0.45), spin: rand(0.25, 0.5),
+      seed,
       ...o,
     };
     p.atmosphere = ATMOS[p.biome] || ATMOS.temperate;
@@ -97,9 +109,16 @@ export class Galaxy {
   // Generate the planet's world off-thread, then bring it to life.
   form(p, biome, { pop, eraIndex = 0, born }) {
     p.forming = true;
-    generateWorld((Math.random() * 1e9) | 0, biome).then((world) => {
+    generateWorld(p.seed, biome).then((world) => {
       p.world = world; p.biome = biome; p.atmosphere = ATMOS[biome] || ATMOS.temperate;
       p.forming = false; p.alive = true; p.pop = pop; p.eraIndex = eraIndex; p.progress = 0;
+      if (pop > 0 && !p.home) {
+        try {
+          p.simPlanet = new SimPlanet({ seed: p.seed, biome, brain: 'proxy' }).setGod(new AIGod());
+        } catch (e) {
+          console.warn('Could not initialize SimPlanet for galaxy world:', e);
+        }
+      }
       p.labels.push({ text: born, t: 4, color: CHANNELS[p.channel]?.color || '#9be38a' });
       this.note(p, pop > 0 ? `${p.name}: ${born.toLowerCase()}.` : `${p.name} formed. Nobody lives there yet.`);
       this.onEvent?.(p, born, 'born');
@@ -135,6 +154,9 @@ export class Galaxy {
     this.recentBlinks.push(this.time);
     for (const p of this.planets) {
       const attended = p === this.attended;
+      if (attended && p.simPlanet) {
+        p.simPlanet.humanBlink({ x: 0.5, y: 0.5 });
+      }
       if (p.home && !p.autonomous) {
         // The hand-played home takes its lightning on the surface; at globe level it still flashes.
         if (attended) { p.flash = 0.6; p.labels.push({ text: 'lightning strike!', t: 2, color: '#ffe066' }); }
@@ -153,8 +175,15 @@ export class Galaxy {
   // playDt: seconds of real play this frame (0 while paused), used for the mind snapshot.
   update(dt, brain, home, playDt = dt) {
     this.time += dt;
+    this.humanBrain = brain;
     this.recentBlinks = this.recentBlinks.filter((t) => this.time - t < 10);
-    const fx = brainEffects({ calm: brain.calm, focus: brain.focus, hrDelta: brain.hrDelta?.() ?? 0, blinksLast10s: this.recentBlinks.length });
+    const fx = brainEffects({
+      calm: brain.calm,
+      focus: brain.focus,
+      hrDelta: brain.hr ? (brain.hrDelta?.() ?? 0) : 0,
+      blinksLast10s: this.recentBlinks.length,
+      panic: brain.panic,
+    });
     this.fx = fx;
     this.sampleMind(playDt, brain, fx);
 
@@ -179,6 +208,11 @@ export class Galaxy {
         s.done = true;
         const to = s.to;
         if (arriveShip(to) === 'settled') {
+          if (!to.simPlanet) {
+            try {
+              to.simPlanet = new SimPlanet({ seed: to.seed, biome: to.biome, brain: 'proxy' }).setGod(new AIGod());
+            } catch {}
+          }
           to.labels.push({ text: 'settled!', t: 3.5, color: '#9be38a' });
           this.note(to, `Settlers from ${s.from.name} landed on ${to.name}.`);
           this.onEvent?.(to, 'settled', 'settled');
@@ -198,7 +232,10 @@ export class Galaxy {
       if (!ranked) return;
       this.planets.filter((p) => p.mindSlot).forEach((p, i) => this.revealQueue.push({ p, ch: ranked[i].ch }));
       this.revealT = 0;
-      this.note(null, `Your first ${SIM.MIND_SECONDS} seconds: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, ${m.blinks} blinks.`);
+      const pulseStr = (brain.hr && brain.hr > 0)
+        ? `pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, `
+        : (m.stress ? `tension ${Math.round(m.stress * 100)}%, ` : '');
+      this.note(null, `Your first ${SIM.MIND_SECONDS} seconds: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, ${pulseStr}${m.blinks} blinks.`);
       return;
     }
     // Staggered reveal so each world gets its moment.
@@ -212,6 +249,14 @@ export class Galaxy {
   }
 
   simulate(p, dt, fx) {
+    if (p.simPlanet) {
+      if (p === this.attended && this.humanBrain) {
+        p.simPlanet.attachHuman(this.humanBrain);
+      } else {
+        p.simPlanet.attachHuman(null);
+      }
+      p.simPlanet.update(dt);
+    }
     const { events, growth, research } = stepPlanet(p, dt, fx, Math.random, p === this.attended);
     const colour = { era: '#ffd166', good: '#59d8c8', bad: '#ff8a9c', flavour: '#f2e8d5' };
     for (const ev of events) {
@@ -226,7 +271,9 @@ export class Galaxy {
     p.effect = {
       calm: `Calm ${pct(fx.calm)} → growth ${signed(growth * 100, 1)}%/s`,
       focus: `Focus ${pct(fx.focus)} → research ×${research.toFixed(1)}`,
-      pulse: `Pulse ${signed(fx.hrDelta, 0)} bpm → goat index ${p.market.toFixed(0)}`,
+      pulse: (this.humanBrain?.hr && this.humanBrain.hr > 0)
+        ? `Pulse ${signed(fx.hrDelta, 0)} bpm → goat index ${p.market.toFixed(0)}`
+        : `Tension ${pct(fx.stress)} → goat index ${p.market.toFixed(0)}`,
       blink: `Blinks ${(fx.blinkRate * 10).toFixed(0)}/10s → ${p.storms} storms`,
       mixed: `Growth ${signed(growth * 100, 1)}%/s · research ×${research.toFixed(1)}`,
     }[p.channel || 'mixed'];

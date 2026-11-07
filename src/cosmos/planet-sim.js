@@ -47,7 +47,7 @@ export const CHANNEL_KEYS = ['calm', 'focus', 'pulse', 'blink'];
 export const CHANNEL_SCORE = {
   calm: (m) => m.calm / 0.35,
   focus: (m) => m.focus / 0.3,
-  pulse: (m) => Math.max(0, m.hrDelta) / 8,
+  pulse: (m) => Math.max(0, m.hrDelta ? m.hrDelta / 8 : (m.stress ?? 0) * 2.5),
   blink: (m) => m.blinks / 3,
 };
 
@@ -89,8 +89,11 @@ export function newPlanetState({ channel = 'mixed', pop = 0, eraIndex = 0 } = {}
 }
 
 // Brain readings every world sees this frame.
-export function brainEffects({ calm, focus, hrDelta, blinksLast10s }) {
-  return { calm, focus, hrDelta, stress: clamp(hrDelta / SIM.STRESS_BPM, 0, SIM.STRESS_MAX), blinkRate: blinksLast10s / 10 };
+export function brainEffects({ calm, focus, hrDelta, blinksLast10s, panic }) {
+  const pulseStress = hrDelta ? clamp(hrDelta / SIM.STRESS_BPM, 0, SIM.STRESS_MAX) : 0;
+  const eegStress = Math.max(panic || 0, calm < 0.35 ? (0.35 - calm) * 1.5 : 0);
+  const stress = Math.max(pulseStress, clamp(eegStress, 0, SIM.STRESS_MAX));
+  return { calm, focus, hrDelta: hrDelta || 0, stress, blinkRate: blinksLast10s / 10 };
 }
 
 export function observe(p, fx) {
@@ -151,11 +154,13 @@ export function stepPlanet(p, dt, fx, rng = Math.random, attended = false) {
       p.crashed = true;
       p.pop = Math.max(SIM.MIN_POP, p.pop * (1 - (1 - SIM.CRASH_POP) * steady));
       p.progress = Math.max(0, p.progress - SIM.CRASH_PROGRESS * steady);
-      events.push({ kind: 'bad', text: 'goat crash', cause: `your pulse at ${fx.hrDelta >= 0 ? '+' : ''}${Math.round(fx.hrDelta)} bpm` });
+      const cause = fx.hrDelta ? `your pulse at ${fx.hrDelta >= 0 ? '+' : ''}${Math.round(fx.hrDelta)} bpm` : 'your tension';
+      events.push({ kind: 'bad', text: 'goat crash', cause });
     } else if (!p.boomed && p.market > SIM.BOOM_LEVEL) {
       p.boomed = true;
       p.progress = Math.min(1, p.progress + SIM.BOOM_PROGRESS);
-      events.push({ kind: 'good', text: 'goat boom', cause: 'a lively pulse' });
+      const boomCause = fx.hrDelta ? 'a lively pulse' : 'a lively mind';
+      events.push({ kind: 'good', text: 'goat boom', cause: boomCause });
     }
     if (p.market > p.marketPeak * SIM.CRASH_RESET) p.crashed = false;
     if (p.market < SIM.BOOM_RESET) p.boomed = false;
@@ -189,15 +194,16 @@ export function arriveShip(to) {
 }
 
 // Mind snapshot accumulator. Returns the channels ranked strongest-first once done.
-export function newMind() { return { t: 0, calm: 0, focus: 0, hr: 0, blinks0: null, blinks: 0, hrDelta: 0, done: false, ranked: null }; }
+export function newMind() { return { t: 0, calm: 0, focus: 0, hr: 0, stress: 0, blinks0: null, blinks: 0, hrDelta: 0, done: false, ranked: null }; }
 export function stepMind(m, playDt, fx, blinksTotal) {
   if (m.done || playDt <= 0) return null;
   if (m.blinks0 == null) m.blinks0 = blinksTotal;
   m.t += playDt;
   m.calm += fx.calm * playDt; m.focus += fx.focus * playDt; m.hr += fx.hrDelta * playDt;
+  m.stress = (m.stress || 0) + (fx.stress || 0) * playDt;
   if (m.t < SIM.MIND_SECONDS) return null;
   m.done = true;
-  m.calm /= m.t; m.focus /= m.t; m.hrDelta = m.hr / m.t;
+  m.calm /= m.t; m.focus /= m.t; m.hrDelta = m.hr / m.t; m.stress /= m.t;
   m.blinks = blinksTotal - m.blinks0;
   m.ranked = CHANNEL_KEYS.map((ch) => ({ ch, s: CHANNEL_SCORE[ch](m) })).sort((a, b) => b.s - a.s);
   return m.ranked;
