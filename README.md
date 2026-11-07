@@ -14,12 +14,12 @@ This README is the canonical specification. If the code or an issue disagrees wi
 | **Seeds** | For the current dummy run, all four civilizations use **randomly generated seeds**. The player's civilization will later be seeded from biometric calibration. | Canonical for now |
 | **Progression** | **No tech tree and no evolution system.** The eras are fixed content/levels that present the civilization's ages; they are not research or evolution branches. | Canonical |
 | **Stack** | Rust compiled to WebAssembly, rendered with WebGL2. The current JavaScript/Canvas build is the playable reference until the Rust port reaches parity (#17). | Canonical target |
-| **Camera** | Camera input is **required**. Face detection supplies expressions and concentration cues. Hand-gesture detection is part of the camera input, but gesture-driven spell selection and UI navigation are deferred. | Required |
+| **Camera** | Camera input is **required**. Face detection supplies expressions and concentration cues. Hand-gesture detection casts god powers (decided on #55); gesture-driven UI navigation is deferred. | Required |
 | **Head tracking** | Accelerometer **and gyroscope** supply head orientation and movement. | Required |
 | **Calibration** | The 10-second window is a placeholder for the dummy run. The window must be configurable, and the dummy run uses a **random setup** instead of a real seed. | Canonical placeholder |
 | **Ambient modulation** | EEG/facial signals driving global temperament, chaos, and weather. | Deferred; not important for the current milestone |
-| **Gesture UI** | Hand gestures selecting, activating, and targeting spells, and navigating the UI. | Deferred |
-| **God powers** | Spawn resources, send fireball, trigger natural disasters. | Deferred |
+| **Gesture UI** | Hand gestures selecting menus and navigating the UI. | Deferred |
+| **God powers** | Deliberate blinks throw lightning; hand-gesture casts throw a fireball, spawn resources, bring rain, bless, trigger natural disasters and make peace (keys 1–7 without a webcam). | In scope (decided on #55) |
 
 ---
 
@@ -32,7 +32,7 @@ Raw physical and biometric streams captured from the player:
   * **Accelerometer and gyroscope:** head orientation and movement.
 * **External camera**
   * **Face detection:** facial expressions (for example smiling) and concentration cues.
-  * **Hand-gesture detection:** hand movement and position in real time. Detection is in scope; gesture-driven UI and spellcasting are deferred.
+  * **Hand-gesture detection:** hand movement and position in real time. Detection and gesture spellcasting are in scope; gesture-driven UI navigation is deferred.
 * **Fallback input**
   * **Mouse, keyboard, and touch:** local development, testing, and demo fallback only. They are not the product input model.
 
@@ -59,7 +59,7 @@ Continuously maps live EEG activity and facial expressions into global world var
 
 * Target design: hand gestures select and activate spells and target locations in the world.
 * Target design: head tracking (accelerometer plus gyroscope), facial focus, and hand gestures navigate the UI.
-* **Current milestone:** head tracking and facial/biometric signals are required; gesture-driven spell selection and UI navigation are **deferred**.
+* **Current milestone:** head tracking and facial/biometric signals are required, and hand-gesture spellcasting is in; gesture-driven UI navigation is **deferred**.
 
 ---
 
@@ -88,7 +88,7 @@ The Rust/Wasm simulation loop and world rules.
 * **Send Fireball:** launch a destructive fireball at a targeted location.
 * **Natural Disasters:** trigger global or localized environmental events.
 
-**Status: deferred.** These are not part of the current milestone. The eventual cast path is camera gestures plus head tracking.
+**Status: implemented** (#33; decided on #55). Hand gestures cast them through the camera (keys 1–7 without a webcam), aimed with the fingertip or head tracking; deliberate blinks throw lightning.
 
 ---
 
@@ -105,7 +105,7 @@ The Rust/Wasm simulation loop and world rules.
 ### Required next
 
 * [ ] **Circular world with four civilizations:** one circular map, four separate starting regions, four agents per civilization, and random seeds for the dummy run. Tracked in #52.
-* [ ] **Camera input:** face detection and expression/concentration cues. Hand-gesture detection is part of the camera input; gesture-driven UI remains deferred. Tracked in #33.
+* [ ] **Camera input:** face detection and expression/concentration cues. Hand-gesture detection casts god powers; gesture-driven UI navigation remains deferred. Tracked in #33.
 * [ ] **Head tracking:** accelerometer plus gyroscope orientation, neutral-point calibration, and aim. Tracked in #53.
 * [ ] **Calibration seed:** configurable window, random dummy setup, and the final sensor-to-trait mapping for friendliness, aggressiveness, and violence. Tracked in #54.
 * [ ] **Inter-civilization interactions:** define contact, combat, and non-hostile interaction between the four civilizations.
@@ -118,8 +118,7 @@ The Rust/Wasm simulation loop and world rules.
 ### Deferred
 
 * [ ] **Ambient world modulation:** EEG and facial expressions driving global temperament, chaos, and weather.
-* [ ] **Gesture UI:** gesture-based spell selection, activation, targeting, and navigation.
-* [ ] **God powers:** spawn resources, fireball, and natural disasters.
+* [ ] **Gesture UI:** gesture-based menu selection and UI navigation.
 
 Tracked in #55.
 
@@ -127,7 +126,7 @@ Tracked in #55.
 
 ## 7. Current build status
 
-The Rust/Wasm engine and WebGL renderer are landing under #17; the JavaScript game shell remains playable while the port reaches parity. The current build runs one hand-played civilization on the home world plus three autonomous brain-seeded worlds, one civilization each — not four civilizations sharing one circular world. Camera face mood is active; hand-gesture casts and camera god powers are gated behind `CAMERA_CASTS_ENABLED` until the deferred milestone. It uses accelerometer tilt without gyroscope fusion, and trains a hidden calm/focus classifier instead of producing civilization traits. Treat the build as a reference implementation, not as the specification.
+The Rust/Wasm engine and WebGL renderer are landing under #17; the JavaScript game shell remains playable while the port reaches parity. The current build runs one hand-played civilization on the home world plus three autonomous brain-seeded worlds, one civilization each — not four civilizations sharing one circular world. Camera face mood and hand-gesture casts (god powers) are active; `CAMERA_CASTS_ENABLED` can switch the casts off. It uses accelerometer tilt without gyroscope fusion, and trains a hidden calm/focus classifier instead of producing civilization traits. Treat the build as a reference implementation, not as the specification.
 
 ---
 
@@ -140,5 +139,5 @@ The Rust/Wasm engine and WebGL renderer are landing under #17; the JavaScript ga
 | Circular world with four civilizations | #52 |
 | Accelerometer plus gyroscope head tracking | #53 |
 | Calibration seed | #54 |
-| Deferred scope (ambient, gesture UI, god powers) | #55 |
+| Deferred scope (ambient, gesture UI navigation) | #55 |
 | Continuous README/code coherence loop | #56 |

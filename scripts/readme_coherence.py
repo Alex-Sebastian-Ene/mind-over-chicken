@@ -218,21 +218,21 @@ CHECKS = [
         "claim": "Gesture UI is deferred.",
         "readme": r"Gesture UI|gesture-driven",
         "status": "deferred",
-        "patterns": [r"gesture[A-Za-z_]*(?:select|cast|navigate)", r"spell[A-Za-z_]*select", r"hand[A-Za-z_]*navigate"],
-        "gated_by": r"CAMERA_CASTS_ENABLED\s*=\s*false",
+        # Gesture *casting* is in scope (decided on #55); only menu selection / UI navigation by
+        # gesture is still deferred, so casting code must not trip this check.
+        "patterns": [r"gesture[A-Za-z_]*(?:select|navigate)", r"menu[A-Za-z_]*select", r"hand[A-Za-z_]*navigate"],
         "paths": ("src/", "crates/"),
         "hint": "If gesture selection/navigation is now in, update README §1/§3.3 and the gesture issue.",
     },
     {
-        "key": "deferred.god_powers",
-        "group": "deferred",
-        "claim": "God powers are deferred.",
-        "readme": r"God powers|god powers",
-        "status": "deferred",
+        "key": "powers.god_powers",
+        "group": "camera",
+        "claim": "God powers are implemented: blink lightning and hand-gesture casts (decided on #55).",
+        "readme": r"God powers.*In scope|Status: implemented",
+        "status": "required",
         "patterns": [r"\bfireball\b", r"spawn[A-Za-z_]*resource", r"natural[A-Za-z_]*disaster", r"\bdisaster\b"],
-        "gated_by": r"CAMERA_CASTS_ENABLED\s*=\s*false",
         "paths": ("src/", "crates/"),
-        "hint": "If god powers are now in, update README §1/§4.3 and the deferred scope.",
+        "hint": "God powers are in scope: keep the casts wired (CAMERA_CASTS_ENABLED = true) or update README §1/§4.3.",
     },
 ]
 
