@@ -109,10 +109,32 @@ the rules, then the councils, then the rules again, with 1,500–2,100 agents:
 The difference is within the noise. That includes 8 rival civilisations arriving on their own
 (#101), at about 2,100 agents.
 
+With 16 rivals on the 2560×1280 planet (about 3,100–3,800 agents, 15–20 civilisations with
+rebels):
+
+| | rules | councils | rules again |
+|---|---|---|---|
+| one frame at ×1: mean, p95 | 0.61 ms, 1.0 ms | 0.67 ms, 1.1 ms | 0.67 ms, 1.3 ms |
+| one frame at ×16: mean, p95 | 3.6 ms, 6.3 ms | 4.9 ms, 7.8 ms | 4.5 ms, 7.6 ms |
+
+There were no fallbacks and no warnings.
+
 Natively, 12 civilisations on 2560×1280 with about 3,700 agents cost 39 ms per simulated second
 under the councils and 50 ms under the rules. The rules' worlds are busier with wars.
 
 The wasm grows by about 160 KB: 97 KB of weights and about 65 KB of code.
+
+## Robustness
+
+- **In the sandbox:** the councils are on by default; `?council=rules` turns them off.
+- **At load:** weights for another observation layout (`OBS_VERSION`, input count, heads), corrupt
+  weights, weights failing their self-check, or weights containing NaN are refused. The rules
+  decide and the console says why (`civ_ppo_error_ptr`/`len`).
+- **At run time:** a decision whose observation or logits are not finite is made by the rules
+  (or the scripted commander) instead, and counted (`civ_ppo_fallbacks`).
+- **Layout changes:** each observation layout has a fingerprint, and a test ties it to
+  `OBS_VERSION`. Change what the councils observe and the tests fail until the version is bumped
+  (and the policy retrained), so stale weights can't silently misread new inputs.
 
 ## What's missing
 
