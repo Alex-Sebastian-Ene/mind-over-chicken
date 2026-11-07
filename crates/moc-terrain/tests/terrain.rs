@@ -159,6 +159,23 @@ fn home_worlds_have_five_continents_and_a_real_layout() {
 }
 
 #[test]
+fn civ_planets_have_a_continent_per_people() {
+    // #101 / #164: the small civ planet (1280×640, 8 peoples).
+    let seed = random_seed(7);
+    let m = generate(&TerrainParams::civ_planet_for(seed, 1280, 640, 8));
+    assert!(m.continents.len() >= 8, "seed {seed}: {} landmasses for 8 peoples", m.continents.len());
+    for c in m.continents.iter() {
+        assert!(c.area >= m.stats.min_island, "seed {seed}: landmass of {} tiles", c.area);
+    }
+    let sea = m.biome.iter().filter(|&&b| !biome::is_land(b)).count() as f32 / (m.width * m.height) as f32;
+    assert!((0.45..=0.75).contains(&sea), "seed {seed}: sea share {sea}");
+    let l = &m.stats.layout;
+    assert!(l.size_cv > 0.6, "seed {seed}: continent sizes too even (CV {})", l.size_cv);
+    assert_eq!(l.straight_strips, 0, "seed {seed}: a straight strip of land");
+    assert!(m.sites.len() >= 8, "seed {seed}: {} sites", m.sites.len());
+}
+
+#[test]
 fn landforms_and_biomes_are_varied() {
     for (seed, m) in maps() {
         let v = &m.stats.variety;

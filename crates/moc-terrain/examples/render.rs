@@ -1,7 +1,7 @@
 //! Generate maps and write their base colour layer as raw RGBA, with a summary.
 //!
 //! ```text
-//! cargo run --release -p moc-terrain --example render -- <home|galaxy|civ> <out_dir> <seed>... [--biome NAME] [--size W H]
+//! cargo run --release -p moc-terrain --example render -- <home|galaxy|civ> <out_dir> <seed>... [--biome NAME] [--size W H] [--peoples N]
 //! ```
 //! Writes `<out_dir>/<kind>-<seed>.rgba` (and `.txt` with the size). `scripts/terrain_images.py`
 //! turns them into PNGs.
@@ -14,7 +14,7 @@ use moc_terrain::{climate::biome, generate, TerrainParams};
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() < 3 {
-        eprintln!("usage: render <home|galaxy|civ> <out_dir> <seed>... [--biome NAME] [--size W H]");
+        eprintln!("usage: render <home|galaxy|civ> <out_dir> <seed>... [--biome NAME] [--size W H] [--peoples N]");
         std::process::exit(2);
     }
     let kind = args[0].clone();
@@ -24,6 +24,7 @@ fn main() {
     let mut biome_name = "temperate".to_string();
     let mut repeat = 1;
     let mut size = (2560usize, 1280usize);
+    let mut peoples = 0usize;
     let mut i = 2;
     while i < args.len() {
         match args[i].as_str() {
@@ -33,6 +34,10 @@ fn main() {
             }
             "--repeat" => {
                 repeat = args[i + 1].parse().unwrap();
+                i += 2;
+            }
+            "--peoples" => {
+                peoples = args[i + 1].parse().unwrap();
                 i += 2;
             }
             "--size" => {
@@ -50,6 +55,7 @@ fn main() {
             "home" => TerrainParams::home_world(seed),
             "home640" => TerrainParams::home_world_sized(seed, 640, 360),
             "galaxy" => TerrainParams::galaxy_surface(seed, &biome_name),
+            _ if peoples > 0 => TerrainParams::civ_planet_for(seed, size.0, size.1, peoples),
             _ => TerrainParams::civ_planet(seed, size.0, size.1),
         };
         // The fastest of `repeat` runs (the machine may be busy), and the thread's CPU time per
@@ -130,6 +136,9 @@ fn main() {
         println!("{name}: {}x{} in {ms:.1} ms wall, {cpu:.1} ms CPU (sim cell {}, {} DLA nodes)", t.width, t.height, t.stats.sim_cell, t.stats.dla_nodes);
         println!("  stages: {}", t.stats.stages.iter().map(|(s, v)| format!("{s} {v:.1}")).collect::<Vec<_>>().join(", "));
         println!("  land {:.1}%, major continents {:?}, {} landmasses, river px {rivers}, lake px {lakes}, {} sites", 100.0 * land as f32 / t.biome.len() as f32, majors, t.continents.len(), t.sites.len());
+        let land_mask: Vec<bool> = t.biome.iter().map(|&b| biome::is_land(b)).collect();
+        let (threads, diagonals, _) = moc_terrain::filter::defects(t.dims(), &land_mask);
+        println!("  seed {}: coast threads {threads}, diagonal joins {diagonals}", t.seed);
         let mut isl: Vec<usize> = t.continents.iter().filter(|c| !c.major).map(|c| c.area).collect();
         isl.sort();
         if isl.is_empty() {

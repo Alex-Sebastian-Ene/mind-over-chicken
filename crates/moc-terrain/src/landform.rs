@@ -36,8 +36,8 @@ pub const ARCHETYPES: [Character; 6] = [
 
 /// One character per continent, shuffled so a map mixes them. With `home` set, continent 0
 /// (the campaign's home) is never broken up or a desert.
-pub fn characters(n: usize, home: bool, rng: &mut Rng) -> Vec<Character> {
-    let mut order: Vec<usize> = (0..ARCHETYPES.len()).collect();
+pub fn characters(n: usize, home: bool, allow_broken: bool, rng: &mut Rng) -> Vec<Character> {
+    let mut order: Vec<usize> = (0..ARCHETYPES.len()).filter(|&k| allow_broken || ARCHETYPES[k].broken == 0.0).collect();
     for k in (1..order.len()).rev() {
         let j = rng.below(k + 1);
         order.swap(k, j);

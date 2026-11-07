@@ -135,6 +135,31 @@ pub struct TerrainParams {
     pub campaign: bool,
     /// Continents stay out of the middle of the cold belt beyond this coldness (0..1).
     pub cold_limit: f32,
+    /// Never draw the "broken" (inland seas and straits) continent character.
+    pub no_broken: bool,
+    /// Groups the continents bunch into (0: one or two, at random).
+    pub clusters: usize,
+    /// Layout guarantees: a run that misses them (about one in fifty) is redrawn.
+    pub guarantee: Option<Guarantee>,
+}
+
+/// What every map of a preset must have (#129: at least five continents, 45–70% sea; Alex:
+/// uneven sizes). Checked after generation; a miss redraws the layout with a fresh seed.
+#[derive(Clone, Copy, Debug)]
+pub struct Guarantee {
+    pub majors: usize,
+    pub sea: (f32, f32),
+    pub size_cv: f32,
+    /// Largest empty-ocean disc, as a share of the map (continents bunch, leaving open sea).
+    pub open_ocean: f32,
+}
+
+impl Guarantee {
+    pub fn holds(&self, m: &TerrainMap) -> bool {
+        let majors = m.continents.iter().filter(|c| c.major).count();
+        let sea = m.biome.iter().filter(|&&b| !biome::is_land(b)).count() as f32 / m.biome.len().max(1) as f32;
+        majors >= self.majors && sea >= self.sea.0 && sea <= self.sea.1 && m.stats.layout.size_cv > self.size_cv && m.stats.layout.open_ocean > self.open_ocean
+    }
 }
 
 impl TerrainParams {
@@ -169,6 +194,9 @@ impl TerrainParams {
             min_island: 0.005,
             campaign: false,
             cold_limit: 0.86,
+            no_broken: false,
+            clusters: 0,
+            guarantee: None,
         }
     }
 
@@ -208,6 +236,9 @@ impl TerrainParams {
         // (< 50 ms for 320×180).
         p.sim_cell = 2;
         p.campaign = true;
+        // Margins inside the acceptance tests' bounds (5+ continents, 45–70% sea, CV > 0.6,
+        // open ocean > 3%).
+        p.guarantee = Some(Guarantee { majors: 5, sea: (0.46, 0.69), size_cv: 0.63, open_ocean: 0.035 });
         p
     }
 
@@ -247,16 +278,37 @@ impl TerrainParams {
     /// The civ sandbox planet (#101): 3–5 major continents of about 330k land tiles each (10×
     /// the old average), plus island chains, on at least 2560×1280.
     pub fn civ_planet(seed: u32, w: usize, h: usize) -> Self {
+        // As many peoples as the #164 planet sizes give: 8 at 1280×640, 12 at 1920×960, 16 at
+        // 2560×1280, about 20 at 3072×1536.
+        let peoples = (16.0 * ((w * h) as f32 / (2560.0 * 1280.0)).sqrt()).round().max(4.0) as usize;
+        Self::civ_planet_for(seed, w, h, peoples)
+    }
+
+    /// The civ sandbox planet (#101, #164) for `peoples` civilisations: a few more continents
+    /// than peoples, power-law sizes (a few large landmasses where neighbours meet, many
+    /// mid-sized ones, island chains), bunched into three or four groups with open ocean
+    /// between them.
+    pub fn civ_planet_for(seed: u32, w: usize, h: usize, peoples: usize) -> Self {
+        let k = ((w * h) as f32 / (320.0 * 180.0)).sqrt();
         let mut r = Rng::stream(seed, 0xC1F);
         let mut p = TerrainParams::base(w, h, seed);
-        p.continents = 3 + r.below(3);
-        let budget = 0.44 * (w * h) as f32;
-        p.continent_area = (330_000.0f32).min(budget / p.continents as f32);
-        p.size_spread = 0.12;
+        p.continents = peoples.max(4) + 2 + r.below(4);
+        p.land_fraction = r.range(0.32, 0.38);
+        p.size_spread = 0.15;
+        p.size_power = r.range(0.85, 1.1);
+        p.clusters = 3 + r.below(2);
+        // Every continent is somebody's homeland: none is broken up into islands.
+        p.no_broken = true;
         p.islands = 1.0;
-        p.plates = 26;
-        p.gap = 48.0;
-        p.max_sites = 160;
+        p.min_island = 0.0015;
+        p.plates = (3.5 * k).round() as usize + 2 * p.continents / 3;
+        p.gap = 5.0 * k;
+        p.seam_margin = 0.0;
+        p.max_sites = 10 * peoples.max(4);
+        // Simulate on 4×4-tile cells at most, so the biggest planets keep their ranges and rivers.
+        if w % 8 == 0 && h % 8 == 0 && w * h > 240_000 * 4 {
+            p.sim_cell = 4;
+        }
         p
     }
 
@@ -677,12 +729,29 @@ impl Clock {
 
 /// Generate a map, with the procedural diffusion as the detail stage.
 pub fn generate(p: &TerrainParams) -> TerrainMap {
-    build(p, None)
+    build_checked(p, None)
 }
 
 /// Generate a map with another detail stage (e.g. a learned diffusion model, #110).
 pub fn generate_with(p: &TerrainParams, detail: &dyn ReliefDetail) -> TerrainMap {
-    build(p, Some(detail))
+    build_checked(p, Some(detail))
+}
+
+/// [`build`], redrawn with a fresh seed (up to three times) while the preset's
+/// [`Guarantee`] doesn't hold.
+fn build_checked(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
+    let mut m = build(p, custom);
+    if let Some(g) = p.guarantee {
+        let mut q = p.clone();
+        for k in 1..=3u32 {
+            if g.holds(&m) {
+                break;
+            }
+            q.seed = p.seed.wrapping_add(k.wrapping_mul(0x9E37_79B9));
+            m = build(&q, custom);
+        }
+    }
+    m
 }
 
 fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
@@ -727,7 +796,7 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
         cold_limit: p.cold_limit,
         bands: p.climate.bands,
         roughness: p.roughness,
-        clusters: 0,
+        clusters: p.clusters,
     };
     // ~8000 growth cells on big maps, fewer on small ones (never finer than ~3 tiles).
     let gd0 = plates::growth_dims(p.w, p.h, p.wrap_x, (n_tiles as usize / 12).clamp(2_000, 8_000));
@@ -779,7 +848,7 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
 
     // Each continent's character (mountainous, arid, wet, broken, highland, plains), drawn at
     // random each run and spread over its territory (smoothly, across the open sea).
-    let mut chars = landform::characters(nc, p.campaign, &mut rng);
+    let mut chars = landform::characters(nc, p.campaign, !p.no_broken, &mut rng);
     // Only a big continent can be broken into islands that clear the minimum island size.
     for (c, ch) in chars.iter_mut().enumerate() {
         if ch.broken > 0.0 && areas[c] < 12.0 * p.min_island * n_tiles {
