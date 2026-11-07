@@ -471,7 +471,8 @@ export class StoneAge {
 
   draw(ctx) {
     const G = this.G;
-    ctx.drawImage(this.layer, 0, 0);
+    const base = G.render3d ? (G.world?.layers3d?.stone || this.layer) : this.layer;
+    ctx.drawImage(base, 0, 0);
     if (!G.render3d) G.world.drawWater(ctx, this.t);
     for (const m of this.meat) { ctx.fillStyle = m.cooked ? '#c0562f' : '#9e3d3d'; ctx.fillRect(m.x - 1, m.y - 1, 3, 2); }
     // In 3D, draw3d stands people, mammoths, fires and the chicken up as sprites; painting them

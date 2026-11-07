@@ -368,6 +368,7 @@ function render() {
     try {
       if (surface && G.render3d) {
         engine.upload_canvas(low);
+        G.world?.draw3d?.(engine);
         if (scene.draw3d) {
           scene.draw3d(engine, 0.016);
         } else if (scene.lights) {
