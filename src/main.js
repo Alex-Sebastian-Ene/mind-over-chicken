@@ -19,6 +19,7 @@ import { initCamera } from './camera/camera.js'; // camera (#33)
 import { initDebug } from './camera/debug.js'; // camera debug (#67)
 import { Calibration, readCalibrationConfig } from './brain/calibration.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
+import { CivSandbox } from './civ/sandbox.js'; // civ (#50)
 import { worldMeta, renderWorldDetail } from './cosmos/panel.js'; // planets (#68)
 import { SimPlanet } from './ai/planet.js';
 import { AIGod } from './ai/autopilot.js';
@@ -521,7 +522,7 @@ const CAM3D = { blendFrom: 300, topDown: 344, topPitch: 1.55 };
 let cam3dBase = null;   // the player's own angle when the tip-over began
 let cam3dTween = null;  // a keyboard/button zoom-out animates the tip-over, then hands over
 // 3D is the home world's relief; other worlds' surfaces (planets #68) stay 2D until they get their own mesh.
-function in3dSurface() { return !!(engine && engine.is_3d_mode() && !cosmos.active && !((cosmos.z || 0) > 0) && (!G || !cosmos.viewScene || cosmos.viewScene(G) === G.scene)); }
+function in3dSurface() { return !!(engine && engine.is_3d_mode() && !cosmos.active && !((cosmos.z || 0) > 0) && (!G || !cosmos.viewScene || cosmos.viewScene(G) === G.scene) && !(G?.scene instanceof CivSandbox)); } // civ (#50) runs on its own planet: 2D
 function applyCam3dBlend() {
   const d = engine.get_camera_distance();
   const t = clamp((d - CAM3D.blendFrom) / (CAM3D.topDown - CAM3D.blendFrom));
@@ -861,6 +862,17 @@ $('playSandbox').addEventListener('click', () => {
   cosmos.z = 1; cosmos.target = 2;
   advisor.setEra('space');
   advisor.say('sandbox', 'Galaxy sandbox, my lord. Three worlds are forming from your thoughts. Make more planets and let them run.', { mood: 'happy', priority: 3, cooldown: 999 });
+});
+// civ (#50): "Sandbox: four civilisations" runs its own scene (Rust sim in src/civ/) on the emulated headset.
+$('playCiv').addEventListener('click', () => {
+  begin(new SimSource());
+  const scene = new CivSandbox({ cosmos });
+  G.scene = scene;
+  advisor.setEra(scene.era);
+  scene.enter(G);
+  hud.setScene(scene);
+  document.body.dataset.era = scene.era;
+  showBanner(scene, -1);
 });
 $('playBridge').addEventListener('click', async () => {
   const url = $('bridgeUrl').value.trim() || 'ws://localhost:8765';
