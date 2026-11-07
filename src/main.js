@@ -12,7 +12,7 @@ import { StoneAge } from './eras/stone.js';
 import { FarmingToKingdoms, InfoAge } from './eras/timeskip.js';
 import { Industry } from './eras/industry.js';
 import { SpaceAge } from './eras/space.js';
-import initEngine, { Engine } from '../pkg/mind_over_chicken_engine.js';
+import initEngine, { Engine, RustImuTracker, RustBlinkClassifier } from '../pkg/mind_over_chicken_engine.js';
 import { Cosmos } from './cosmos/cosmos.js';
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
@@ -38,6 +38,7 @@ let engine = null;
 
 try {
   await initEngine();
+  BridgeSource.setWasmClasses(RustImuTracker, RustBlinkClassifier);
   engine = new Engine('screen');
 } catch (err) {
   console.error('Failed to initialize Rust WebGL engine:', err);
@@ -302,21 +303,6 @@ function render() {
   textCtx.setTransform(K, 0, 0, K, 0, 0);
   textCtx.globalAlpha = visible;
   if (cosmic) cosmos.overlay(textCtx, G);
-  if (G.source?.kind === 'bridge' && G.source.streaming && G.brain?.aim) {
-    const ax = G.brain.aim.x * W, ay = G.brain.aim.y * H;
-    const locked = (G.brain.imuCalib ?? 1) >= 1 && (G.brain.neutralProgress ?? 1) >= 1;
-    textCtx.save();
-    textCtx.strokeStyle = locked ? 'rgba(126, 224, 138, 0.9)' : 'rgba(255, 207, 74, 0.9)';
-    textCtx.lineWidth = 1;
-    textCtx.beginPath();
-    textCtx.arc(ax, ay, 5, 0, Math.PI * 2);
-    textCtx.moveTo(ax - 8, ay); textCtx.lineTo(ax - 3, ay);
-    textCtx.moveTo(ax + 3, ay); textCtx.lineTo(ax + 8, ay);
-    textCtx.moveTo(ax, ay - 8); textCtx.lineTo(ax, ay - 3);
-    textCtx.moveTo(ax, ay + 3); textCtx.lineTo(ax, ay + 8);
-    textCtx.stroke();
-    textCtx.restore();
-  }
   textCtx.globalAlpha = 1;
 }
 

@@ -33,6 +33,7 @@ export class Brain {
     this.relOrientation = null;
     this.imuCalib = 1;
     this.neutralProgress = 1;
+    this.blinkModel = null;
     this.accel = null;
     this.gyro = null;
     this.eegWave = { TP9: [], AF7: [], AF8: [], TP10: [] };
@@ -68,6 +69,7 @@ export class Brain {
     this.relOrientation = null;
     this.imuCalib = 0;
     this.neutralProgress = 0;
+    this.blinkModel = null;
     this.accel = null;
     this.gyro = null;
     this.eegWave = { TP9: [], AF7: [], AF8: [], TP10: [] };
@@ -102,6 +104,7 @@ export class Brain {
     if (frame.relOrientation !== undefined) this.relOrientation = frame.relOrientation;
     if (typeof frame.imuCalib === 'number') this.imuCalib = frame.imuCalib;
     if (typeof frame.neutralProgress === 'number') this.neutralProgress = frame.neutralProgress;
+    if (frame.blinkModel !== undefined) this.blinkModel = frame.blinkModel;
     if (frame.accel !== undefined) {
       this.accel = frame.accel;
       if (Array.isArray(frame.accel) && frame.accel.length === 3) {

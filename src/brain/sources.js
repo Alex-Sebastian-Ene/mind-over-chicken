@@ -122,6 +122,13 @@ export class BridgeSource {
   static YAW_ZERO_TAU = 20;     // s; the yaw neutral fades to 0 as the bridge re-centres yaw itself
   static AIM_SIGN = { yaw: 1, pitch: 1 };   // flip one if a headset aims mirrored
   static DEADZONE_DEG = 0.85;   // degrees of micro-tremor deadband when interactive mode is active
+  static RustImuTracker = null;
+  static RustBlinkClassifier = null;
+
+  static setWasmClasses(ImuCls, BlinkCls) {
+    BridgeSource.RustImuTracker = ImuCls || null;
+    BridgeSource.RustBlinkClassifier = BlinkCls || null;
+  }
 
   constructor(url) {
     this.kind = 'bridge';
@@ -138,11 +145,25 @@ export class BridgeSource {
     this.invertYaw = false;
     this.invertPitch = false;
     this.useDeadzone = false;   // enabled in live browser session so stationary tremor is locked
+    this.rustImu = null;
+    this.rustBlink = null;
+    this.manualBlinkPending = false;
+    this.ensureWasm();
     this.recenter();
+  }
+
+  ensureWasm() {
+    if (!this.rustImu && BridgeSource.RustImuTracker) {
+      try { this.rustImu = new BridgeSource.RustImuTracker(); } catch {}
+    }
+    if (!this.rustBlink && BridgeSource.RustBlinkClassifier) {
+      try { this.rustBlink = new BridgeSource.RustBlinkClassifier(); } catch {}
+    }
   }
 
   // Forget the neutral pose; the next ~1 s of frames becomes the new straight-ahead.
   recenter(recalibrateBridge = false) {
+    this.ensureWasm();
     this.tiltZero = null;
     this.tiltSamples = [];
     this.aimZero = null;        // {yaw, pitch, roll} neutral from frame.orientation
@@ -150,8 +171,34 @@ export class BridgeSource {
     this.aimTilt = null;
     this.lastT = null;
     this.relAngles = { pitch: 0, roll: 0, yaw: 0 };
+    if (this.rustImu) {
+      try { this.rustImu.tare(); } catch {}
+    }
     if (recalibrateBridge && this.ws && this.ws.readyState === 1) {
       try { this.ws.send(JSON.stringify({ type: 'recenter' })); } catch {}
+    }
+  }
+
+  recordBlinkSample() {
+    this.ensureWasm();
+    if (this.rustBlink) {
+      return this.rustBlink.record_blink_button();
+    }
+    return false;
+  }
+
+  recordBaselineSample() {
+    this.ensureWasm();
+    if (this.rustBlink) {
+      return this.rustBlink.record_baseline_button();
+    }
+    return false;
+  }
+
+  resetBlinkModel() {
+    this.ensureWasm();
+    if (this.rustBlink) {
+      this.rustBlink.reset_model();
     }
   }
 
@@ -196,11 +243,35 @@ export class BridgeSource {
   disconnect() { try { this.ws?.close(); } catch {} }
 
   normalise(msg) {
+    this.ensureWasm();
     const b = msg.bands || {};
     const sum = (b.delta || 0) + (b.theta || 0) + (b.alpha || 0) + (b.beta || 0) + (b.gamma || 0) || 1;
+    if (typeof msg.imu_calib === 'number') this.imuCalib = clamp(msg.imu_calib);
+    const motion = clamp(msg.motion ?? 0);
+    const dt = typeof msg.t === 'number' && this.lastT != null ? clamp(msg.t - this.lastT, 0.01, 0.5) : FRAME_DT;
+
     let tilt = null;
     const o = msg.orientation;
-    if (o && Number.isFinite(o.yaw) && Number.isFinite(o.pitch)) {
+    if (this.rustImu && Array.isArray(msg.accel) && msg.accel.length >= 3) {
+      if (typeof msg.t === 'number') this.lastT = msg.t;
+      const [ax, ay, az] = msg.accel;
+      const [gx, gy, gz] = Array.isArray(msg.gyro) && msg.gyro.length >= 3 ? msg.gyro : [0, 0, 0];
+      const hasYaw = !!(o && Number.isFinite(o.yaw));
+      this.rustImu.set_config(
+        this.sensitivity || 1.0,
+        !!this.invertYaw,
+        !!this.invertPitch,
+        this.useDeadzone ? BridgeSource.DEADZONE_DEG : 0.0
+      );
+      this.rustImu.update(ax, ay, az, gx, gy, gz, hasYaw ? o.yaw : 0.0, hasYaw, dt);
+      tilt = { x: this.rustImu.tilt_x(), y: this.rustImu.tilt_y() };
+      this.relAngles = {
+        pitch: this.rustImu.rel_pitch_deg(),
+        roll: this.rustImu.rel_roll_deg(),
+        yaw: this.rustImu.rel_yaw_deg(),
+      };
+      this.imuCalib = Math.max(this.imuCalib, this.rustImu.calib_progress());
+    } else if (o && Number.isFinite(o.yaw) && Number.isFinite(o.pitch)) {
       tilt = this.orientationTilt(o, msg.t);
     } else if (Array.isArray(msg.accel)) {
       // Head tilt from the accelerometer's gravity vector, zeroed on the first second of data.
@@ -216,13 +287,46 @@ export class BridgeSource {
       const z = this.tiltZero || [ax, ay];
       tilt = { x: clamp((ay - z[1]) * 2.6, -1, 1), y: clamp((ax - z[0]) * 2.6, -1, 1) };
     }
-    if (typeof msg.imu_calib === 'number') this.imuCalib = clamp(msg.imu_calib);
+
+    let rustBlinkFired = false;
+    let blinkModel = null;
+    if (this.rustBlink && msg.eeg && typeof msg.eeg === 'object') {
+      const tp9 = new Float32Array(msg.eeg.TP9 || []);
+      const af7 = new Float32Array(msg.eeg.AF7 || []);
+      const af8 = new Float32Array(msg.eeg.AF8 || []);
+      const tp10 = new Float32Array(msg.eeg.TP10 || []);
+      rustBlinkFired = this.rustBlink.ingest_frame(tp9, af7, af8, tp10, motion, dt);
+      blinkModel = {
+        trained: this.rustBlink.is_trained(),
+        capturing: this.rustBlink.is_capturing(),
+        blinks: this.rustBlink.blink_samples(),
+        baselines: this.rustBlink.baseline_samples(),
+        accuracy: this.rustBlink.accuracy(),
+        prob: this.rustBlink.last_probability(),
+        thresholdUv: this.rustBlink.learned_threshold_uv(),
+        learnedAf7Uv: this.rustBlink.learned_af7_uv(),
+        learnedAf8Uv: this.rustBlink.learned_af8_uv(),
+        af7Uv: this.rustBlink.last_af7_ptp(),
+        af8Uv: this.rustBlink.last_af8_ptp(),
+        corr: this.rustBlink.last_corr(),
+      };
+    }
+
+    const blink = (blinkModel && blinkModel.trained)
+      ? (rustBlinkFired || this.manualBlinkPending)
+      : (!!msg.blink || rustBlinkFired || this.manualBlinkPending);
+    this.manualBlinkPending = false;
+
+    const neutralProgress = this.rustImu
+      ? (this.rustImu.is_tared() ? 1 : this.rustImu.calib_progress())
+      : (this.aimZero ? 1 : clamp(this.aimSamples.length / Math.max(1, BridgeSource.NEUTRAL_FRAMES)));
+
     return {
       bands: { delta: (b.delta || 0) / sum, theta: (b.theta || 0) / sum, alpha: (b.alpha || 0) / sum, beta: (b.beta || 0) / sum, gamma: (b.gamma || 0) / sum },
-      blink: !!msg.blink,
+      blink,
       hr: typeof msg.hr === 'number' && msg.hr > 30 && msg.hr < 220 ? msg.hr : null,
       tilt,
-      motion: clamp(msg.motion ?? 0),   // the bridge folds gyro rotation speed into this
+      motion,   // the bridge folds gyro rotation speed into this
       quality: clamp(msg.quality ?? 1),
       eeg: msg.eeg || null,
       ppg: Array.isArray(msg.ppg) ? msg.ppg : null,
@@ -230,7 +334,8 @@ export class BridgeSource {
       orientation: o && Number.isFinite(o.yaw) && Number.isFinite(o.pitch) ? { pitch: o.pitch, roll: o.roll ?? 0, yaw: o.yaw } : null,
       relOrientation: this.relAngles ? { ...this.relAngles } : null,
       imuCalib: this.imuCalib,
-      neutralProgress: this.aimZero ? 1 : clamp(this.aimSamples.length / Math.max(1, BridgeSource.NEUTRAL_FRAMES)),
+      neutralProgress,
+      blinkModel,
       accel: Array.isArray(msg.accel) ? msg.accel : null,
       gyro: Array.isArray(msg.gyro) ? msg.gyro : null,
     };
@@ -245,7 +350,7 @@ export class BridgeSource {
     const dt = typeof t === 'number' && this.lastT != null ? clamp(t - this.lastT, 0, 1) : FRAME_DT;
     if (typeof t === 'number') this.lastT = t;
     if (!this.aimZero) {
-      if (typeof o.imu_calib === 'number' && o.imu_calib < 1) return { x: 0, y: 0 };
+      if (this.useDeadzone && this.imuCalib > 0 && this.imuCalib < 1) return { x: 0, y: 0 };
       this.aimSamples.push([o.yaw, o.pitch, o.roll ?? 0]);
       if (this.aimSamples.length < S.NEUTRAL_FRAMES) return { x: 0, y: 0 };
       const y0 = this.aimSamples[0][0], n = this.aimSamples.length;
@@ -281,7 +386,7 @@ export class BridgeSource {
     return { x: this.aimTilt.x, y: this.aimTilt.y };
   }
 
-  blink() {}
+  blink() { this.manualBlinkPending = true; }
   setAim() {}
   addStartle() {}
 

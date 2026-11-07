@@ -78,6 +78,30 @@ const TEMPLATE = `
 
   <section class="eeg-sec">
     <div class="eeg-sec-head">
+      <h3>Eye Blink Calibration (Rust/WASM Model)</h3>
+      <span class="eeg-qual" data-blink-status>Untrained</span>
+    </div>
+    <p class="eeg-msg" data-blink-hint>Blink your eyes and click <b>Record Blink</b> (or click then blink within 1.5s) to teach the Rust classifier your personal AF7/AF8 blink wave.</p>
+    <div class="eeg-conn-row">
+      <button type="button" class="btn btn-primary btn-small" data-blink-record disabled>⚡ Record Blink Sample</button>
+      <button type="button" class="btn btn-ghost btn-small" data-blink-rest disabled>+ Rest</button>
+      <button type="button" class="btn btn-ghost btn-small" data-blink-reset disabled>Reset</button>
+    </div>
+    <div class="eeg-band-row" style="margin-top:6px">
+      <span class="eeg-band-lbl">Blink Probability</span>
+      <span class="eeg-bar"><span data-blink-prob-bar style="background:var(--blink);width:0%"></span></span>
+      <span class="eeg-band-val" data-blink-prob-val>0%</span>
+    </div>
+    <div class="eeg-imu-mini" style="margin-top:6px">
+      <span>Blinks: <b data-blink-pos>0</b></span>
+      <span>Rest: <b data-blink-neg>0</b></span>
+      <span>Thr: <b data-blink-thr>220 µV</b></span>
+      <span>AF7/8: <b data-blink-uv>-- µV</b></span>
+    </div>
+  </section>
+
+  <section class="eeg-sec">
+    <div class="eeg-sec-head">
       <h3>Accelerometer (g) &amp; Gyroscope (°/s)</h3>
       <span class="eeg-legend">
         <i style="color:#f38ba8">● X</i>
@@ -170,6 +194,17 @@ export class EegPanel {
       recenterBtn: $('[data-eeg-recenter]'),
       calibTxt: $('[data-imu-calib-txt]'),
       calibBar: $('[data-imu-calib-bar]'),
+      blinkStatus: $('[data-blink-status]'),
+      blinkHint: $('[data-blink-hint]'),
+      blinkRecordBtn: $('[data-blink-record]'),
+      blinkRestBtn: $('[data-blink-rest]'),
+      blinkResetBtn: $('[data-blink-reset]'),
+      blinkProbBar: $('[data-blink-prob-bar]'),
+      blinkProbVal: $('[data-blink-prob-val]'),
+      blinkPos: $('[data-blink-pos]'),
+      blinkNeg: $('[data-blink-neg]'),
+      blinkThr: $('[data-blink-thr]'),
+      blinkUv: $('[data-blink-uv]'),
       pad: $('.eeg-pad'),
       sensInput: $('[data-imu-sens]'),
       sensVal: $('[data-imu-sens-val]'),
@@ -216,6 +251,9 @@ export class EegPanel {
     this.ui.connectBtn.addEventListener('click', () => this.handleConnect());
     this.ui.disconnectBtn.addEventListener('click', () => this.handleDisconnect());
     this.ui.recenterBtn.addEventListener('click', () => this.calibrateCenter());
+    this.ui.blinkRecordBtn.addEventListener('click', () => this.handleRecordBlink());
+    this.ui.blinkRestBtn.addEventListener('click', () => this.handleRecordBaseline());
+    this.ui.blinkResetBtn.addEventListener('click', () => this.handleResetBlinkModel());
 
     this.ui.sensInput.addEventListener('input', () => {
       const v = parseFloat(this.ui.sensInput.value) || 1.0;
@@ -249,8 +287,34 @@ export class EegPanel {
     if (src?.recenter) {
       src.recenter(true);
       if (b) { b.aim.x = 0.5; b.aim.y = 0.5; }
-      this.ui.msg.textContent = 'Hold your head still looking at screen center for ~1.5s to lock gyro bias & neutral pose…';
+      this.ui.msg.textContent = '3D Head pose tared to screen center (0, 0) in Rust!';
     }
+  }
+
+  handleRecordBlink() {
+    const src = this.getSource();
+    if (!src?.recordBlinkSample) return;
+    const immediate = src.recordBlinkSample();
+    if (immediate) {
+      this.ui.blinkHint.textContent = '✅ Blink sample captured from recent AF7/AF8 peak and Rust classifier retrained!';
+    } else {
+      this.ui.blinkHint.textContent = '👁️ Armed for 1.5s — blink clearly right now to capture your blink wave!';
+    }
+  }
+
+  handleRecordBaseline() {
+    const src = this.getSource();
+    if (!src?.recordBaselineSample) return;
+    if (src.recordBaselineSample()) {
+      this.ui.blinkHint.textContent = '✅ Resting non-blink EEG sample added to Rust classifier.';
+    }
+  }
+
+  handleResetBlinkModel() {
+    const src = this.getSource();
+    if (!src?.resetBlinkModel) return;
+    src.resetBlinkModel();
+    this.ui.blinkHint.textContent = 'Rust blink classifier reset. Blink and click Record Blink to train.';
   }
 
   toggle(force) {
@@ -333,6 +397,9 @@ export class EegPanel {
 
     this.ui.disconnectBtn.disabled = !isBridge;
     this.ui.recenterBtn.disabled = !hasRealStream;
+    this.ui.blinkRecordBtn.disabled = !hasRealStream;
+    this.ui.blinkRestBtn.disabled = !hasRealStream;
+    this.ui.blinkResetBtn.disabled = !hasRealStream;
     this.ui.connectBtn.textContent = wsConnected ? 'Reconnect' : 'Connect Muse 2';
 
     if (!isBridge) {
@@ -369,8 +436,27 @@ export class EegPanel {
       this.ui.calibBar.style.background = 'var(--focus)';
     } else {
       const stillLocked = (b.motion || 0) < 0.08;
-      this.ui.calibTxt.textContent = stillLocked ? 'Locked (Zero-Drift ZUPT Active)' : 'Tracking Head Motion';
+      this.ui.calibTxt.textContent = stillLocked ? 'Locked (Rust 3D Tare + ZUPT Active)' : 'Tracking Head Motion (Rust 3D)';
       this.ui.calibBar.style.background = 'var(--good)';
+    }
+
+    // Rust Blink Classifier telemetry
+    const bm = b.blinkModel;
+    if (bm) {
+      const probPct = Math.round((bm.prob || 0) * 100);
+      this.ui.blinkProbBar.style.width = `${probPct}%`;
+      this.ui.blinkProbVal.textContent = `${probPct}%`;
+      this.ui.blinkPos.textContent = `${bm.blinks || 0}`;
+      this.ui.blinkNeg.textContent = `${bm.baselines || 0}`;
+      this.ui.blinkThr.textContent = `${Math.round(bm.thresholdUv || 220)} µV`;
+      this.ui.blinkUv.textContent = `${Math.round(bm.af7Uv || 0)}/${Math.round(bm.af8Uv || 0)} µV`;
+      if (bm.capturing) {
+        this.ui.blinkStatus.textContent = '👁️ Blink Now…';
+      } else if (bm.trained) {
+        this.ui.blinkStatus.textContent = `Trained (${Math.round((bm.accuracy || 0) * 100)}% acc)`;
+      } else {
+        this.ui.blinkStatus.textContent = 'Default (Untrained)';
+      }
     }
 
     // Contact badges
