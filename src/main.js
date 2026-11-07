@@ -16,6 +16,7 @@ import initEngine, { Engine, RustImuTracker, RustBlinkClassifier } from '../pkg/
 import { Cosmos } from './cosmos/cosmos.js';
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
+import { initDebug } from './camera/debug.js'; // camera debug (#67)
 import { Calibration, readCalibrationConfig } from './brain/calibration.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
 import { SimPlanet } from './ai/planet.js';
@@ -874,7 +875,12 @@ window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos
 window.__moc.camera = initCamera({
   getG: () => G,
   canCast: () => !!G?.scene && !banner && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,
+  // camera debug (#67): the fingertip aims on the panned surface like the mouse does.
+  mapX: (x) => cosmos.mapX(x * W) / W,
+  screenX: (x) => ((((x * W + cosmos.panX) % W) + W) % W) / W,
 });
+// camera debug (#67): Debug tab (button in the top bar, ` key; D pans the planet).
+window.__moc.debug = initDebug({ getG: () => G, camera: window.__moc.camera });
 
 // ---------- boot ----------
 function start(data = {}) {
