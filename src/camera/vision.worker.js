@@ -6,9 +6,9 @@
 // traffic is the one-time download of the pinned runtime and the two models, as on the main thread.
 //
 // Protocol
-//   in   { type: 'init', tasks: ['gesture', 'face'], delegate?: 'GPU' | 'CPU' }   (GPU first by default)
+//   in   { type: 'init', tasks: ['gesture', 'face'], delegate?: 'GPU' | 'CPU' }   (GPU falls back to CPU)
 //   out  { type: 'ready', delegates, timings } | { type: 'error', stage: 'init', message }
-//   in   { type: 'frame', id, ts, aspect, bitmap, run: ['gesture', 'face'] }   (bitmap transferred)
+//   in   { type: 'frame', id, ts, bitmap, run: ['gesture', 'face'] }   (bitmap transferred, closed here)
 //   out  { type: 'result', id, ts, ms: { gesture, face }, gesture?, face?, delegates }
 //   in   { type: 'cpu', reason }   move any GPU task to the CPU
 //   out  { type: 'warn' | 'info', message }

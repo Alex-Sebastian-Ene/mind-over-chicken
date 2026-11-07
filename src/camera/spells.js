@@ -30,7 +30,6 @@ export const SPELL_BY_ID = Object.fromEntries(SPELLS.map((s) => [s.id, s]));
 // Short readable names for the gesture readout.
 export const GESTURE_LABEL = {
   None: 'no gesture',
-  Pinch: 'pinch',
   Pointing_Up: 'pointing',
   Closed_Fist: 'fist',
   Open_Palm: 'open palm',

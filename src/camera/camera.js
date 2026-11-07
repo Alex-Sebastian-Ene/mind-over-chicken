@@ -577,7 +577,7 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
       const old = engine;
       engine = null;
       old?.close();
-      if (stream && status === 'on') { await ensureEngine(() => {}); engine.resetStats(); }
+      if (stream && status === 'on') { await ensureEngine(() => {}); engine.resetStats(); guardAt = performance.now() + GPU_GUARD.graceMs; }
       return engine?.snapshot().mode || null;
     },
     // Download and initialise the main-thread models without a camera, e.g. to time them.
