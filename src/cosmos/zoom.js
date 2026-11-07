@@ -11,16 +11,20 @@
 //   galaxy ──click a planet / zoom in──▶ its globe ──zoom in──▶ its surface
 //   surface ──zoom out──▶ globe ──zoom out──▶ galaxy
 //
-// `z` animates toward `target` at ZOOM_SPEED levels per second; renderers read `z`.
+// `z` follows `target` on a critically damped spring (#138): it eases out of rest, eases into
+// the new level and never overshoots. Renderers read `z`. ZOOM_OMEGA sets the pace: halfway
+// in about 0.3 s, 90% in about 0.75 s, whatever the distance.
 
 export const LEVELS = ['Surface', 'Planet', 'Galaxy'];
-export const ZOOM_SPEED = 1.5;
+export const ZOOM_OMEGA = 5.2;
+export const ZOOM_SPEED = 1.5; // the old linear pace, kept for anything that reads it
 
 const clampLevel = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 export class ZoomState {
   constructor() {
     this.z = 0;          // animated zoom, 0..2
+    this.vz = 0;         // its velocity (levels per second)
     this.target = 0;     // requested level
     this.focus = null;   // planet in view (null = the hand-played home)
     this.sandbox = false;
@@ -78,7 +82,7 @@ export class ZoomState {
     if (p.forming) return { ok: false, refused: 'Still forming. Give it a second.' };
     this.focus = this.isCampaign(p) ? null : p;
     this.target = 1;
-    if (this.z < 1) this.z = 1;
+    if (this.z < 1) { this.z = 1; this.vz = 0; }
     return { ok: true, refused: null };
   }
 
@@ -95,8 +99,20 @@ export class ZoomState {
   }
 
   update(dt) {
-    if (this.z < this.target) this.z = Math.min(this.target, this.z + dt * ZOOM_SPEED);
-    else if (this.z > this.target) this.z = Math.max(this.target, this.z - dt * ZOOM_SPEED);
+    const h = Math.min(Math.max(dt || 0, 0), 0.05);
+    const x = this.z - this.target;
+    if (x !== 0 || this.vz !== 0) {
+      // Semi-implicit Euler on z'' = -w^2 (z - target) - 2 w z' (critically damped).
+      this.vz += (-ZOOM_OMEGA * ZOOM_OMEGA * x - 2 * ZOOM_OMEGA * this.vz) * h;
+      const next = this.z + this.vz * h;
+      const settled = Math.abs(next - this.target) < 0.002 && Math.abs(this.vz) < 0.05;
+      // Land exactly when arriving gently. Coming in fast (the zoom was reversed mid-flight), glide
+      // through and settle back instead of stopping dead.
+      if (settled || ((next - this.target) * x < 0 && Math.abs(this.vz) < 1)) { this.z = this.target; this.vz = 0; }
+      else this.z = next;
+    }
+    if (this.z < 0) { this.z = 0; this.vz = 0; }
+    if (this.z > 2) { this.z = 2; this.vz = 0; }
     // A world that loses its surface (say it is still forming) can't stay landed.
     if (this.target < this.minLevel()) this.target = this.minLevel();
   }
