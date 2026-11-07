@@ -1,0 +1,18 @@
+{
+  "name": "full",
+  "comment": "Cluster run (one 64-core node, ~8 h): the full curriculum up to 12 civs on the 2560x1280 planet. Sizes and civ counts are parameters: once #101's large continents land, the last stages run on that map unchanged.",
+  "n_procs": 60,
+  "torch_threads": 2,
+  "net": [64, 64],
+  "ppo": {"lr": 0.0003, "batch_size": 2048, "n_epochs": 6, "gamma": 0.99, "gae_lambda": 0.95, "ent_coef": 0.01, "clip_range": 0.2, "rollout": 30720},
+  "league": {"every_minutes": 10, "max_size": 16},
+  "stages": [
+    {"name": "c1_duel_small", "mode": "council", "n_civs": 2, "size": [640, 320], "learners": 1, "minutes": 40, "max_seconds": 700, "warmup": [150, 400], "p_rules": 0.4},
+    {"name": "c2_four", "mode": "council", "n_civs": 4, "size": [1280, 640], "learners": 2, "minutes": 70, "max_seconds": 900, "warmup": [200, 450], "p_rules": 0.35},
+    {"name": "c3_eight", "mode": "council", "n_civs": 8, "size": [1280, 640], "learners": 4, "minutes": 80, "max_seconds": 900, "warmup": [200, 450], "p_rules": 0.3},
+    {"name": "c4_ten_big", "mode": "council", "n_civs": 10, "size": [2560, 1280], "learners": 5, "minutes": 90, "max_seconds": 1100, "warmup": [250, 500], "p_rules": 0.25},
+    {"name": "c5_twelve_big", "mode": "council", "n_civs": 12, "size": [2560, 1280], "learners": 6, "minutes": 70, "max_seconds": 1200, "warmup": [250, 500], "p_rules": 0.25},
+    {"name": "k1_commander", "mode": "commander", "n_civs": 6, "size": [1280, 640], "minutes": 60, "max_seconds": 900, "warmup": [250, 450], "p_rules": 0.0},
+    {"name": "k2_commander_big", "mode": "commander", "n_civs": 10, "size": [2560, 1280], "minutes": 50, "max_seconds": 1100, "warmup": [250, 500], "p_rules": 0.0}
+  ]
+}
