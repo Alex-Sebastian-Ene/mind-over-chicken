@@ -644,6 +644,17 @@ export class Engine {
         wasm.engine_pan_camera(this.__wbg_ptr, dx, dz);
     }
     /**
+     * @param {number} wx
+     * @param {number} wz
+     * @param {number} cw
+     * @param {number} ch
+     * @returns {Float32Array}
+     */
+    project_to_screen(wx, wz, cw, ch) {
+        const ret = wasm.engine_project_to_screen(this.__wbg_ptr, wx, wz, cw, ch);
+        return ret;
+    }
+    /**
      * @param {number} dt
      * @param {number} sun_x
      * @param {number} sun_y

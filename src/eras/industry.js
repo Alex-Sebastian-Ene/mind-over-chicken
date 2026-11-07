@@ -322,11 +322,63 @@ export class Industry {
     ];
   }
 
-  lights() { return []; }
+  lights() {
+    const L = [];
+    const w = this.G?.world;
+    if (w?.sites) {
+      const fx = w.sites.factory, ex = w.sites.exchange;
+      if (fx) L.push({ x: fx.x, y: fx.y, r: 24 + Math.sin(this.t * 5) * 2.0 });
+      if (ex) L.push({ x: ex.x, y: ex.y, r: 20 });
+    }
+    return L;
+  }
+
+  draw3d(engine, _dt) {
+    const w = this.G?.world;
+    if (!w) return;
+    const fx = w.sites.factory, ex = w.sites.exchange;
+
+    // 3D Point Lights (smokestack furnace and market lanterns)
+    if (fx) {
+      engine.add_3d_light(fx.x, 8.0, fx.y, 30.0 + Math.sin(this.t * 5.0) * 2.0, 1.4);
+    }
+    if (ex) {
+      engine.add_3d_light(ex.x, 8.0, ex.y, 22.0, 1.2);
+    }
+
+    // Billboards
+    // Goats (SPRITE_GOAT = 2)
+    for (const g of this.goats) {
+      engine.add_billboard(2, g.x, g.y, g.facing || 1, g.frame || 0, 0);
+    }
+
+    // Agents: workers, traders, strikers (SPRITE_VILLAGER = 0)
+    for (const a of this.agents) {
+      if (a.state === 'work') continue; // inside factory
+      const pose = a.state === 'strike' ? 1 : a.state === 'riot' ? 2 : 0;
+      engine.add_billboard(0, a.x, a.y, a.facing || 1, a.frame || 0, pose);
+    }
+
+    // Chicken (SPRITE_CHICKEN = 3)
+    engine.add_billboard(3, this.chicken.x, this.chicken.y, this.chicken.facing || 1, this.chicken.frame || 0, 0);
+
+    // Aim reticle (SPRITE_RETICLE = 13)
+    const aim = this.G.brain?.aim;
+    if (aim) {
+      engine.add_billboard(13, aim.x * (W - 1), aim.y * (H - 1), 1, 0, 0);
+    }
+  }
 
   draw(ctx) {
+    const G = this.G;
     ctx.drawImage(this.layer, 0, 0);
-    this.G.world.drawWater(ctx, this.t);
+    if (!G.render3d) G.world.drawWater(ctx, this.t);
+    // In 3D, draw3d stands workers, traders, goats and chicken up as billboards
+    if (G.render3d) {
+      for (const sh of this.ships) drawBoat(ctx, sh.x, sh.y, sh);
+      this.particles.draw(ctx);
+      return;
+    }
     const actors = [];
     for (const g of this.goats) actors.push({ y: g.y, d: () => drawGoat(ctx, g.x, g.y, g) });
     for (const sh of this.ships) actors.push({ y: sh.y, d: () => drawBoat(ctx, sh.x, sh.y, sh) });

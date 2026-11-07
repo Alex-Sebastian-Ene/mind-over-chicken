@@ -97,10 +97,15 @@ export class Particles {
       const t = clamp(p.life / p.maxLife);
       ctx.globalAlpha = t;
       ctx.font = `${p.size}px "Pixelify Sans", monospace`;
+      let x = p.x, y = p.y;
+      if (ctx.__project3d) {
+        const pr = ctx.__project3d(x, y);
+        if (pr) { x = pr[0]; y = pr[1]; }
+      }
       ctx.fillStyle = 'rgba(10,10,20,0.85)';
-      ctx.fillText(p.text, p.x + 0.5, p.y + 0.5);
+      ctx.fillText(p.text, x + 0.5, y + 0.5);
       ctx.fillStyle = p.color;
-      ctx.fillText(p.text, p.x, p.y);
+      ctx.fillText(p.text, x, y);
     }
     ctx.globalAlpha = 1;
   }
