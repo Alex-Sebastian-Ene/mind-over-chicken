@@ -1463,9 +1463,11 @@ pub struct RustGalaxy {
 impl RustGalaxy {
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Self {
-        Self {
-            inner: moc_cosmos::galaxy::Galaxy::new(seed),
-        }
+        let mut inner = moc_cosmos::galaxy::Galaxy::new(seed);
+        // The browser's galaxy (src/cosmos/galaxy.js) has more planets than this one and syncs
+        // every one of them into the war itself (#166).
+        inner.war_auto = false;
+        Self { inner }
     }
 
     pub fn step(
