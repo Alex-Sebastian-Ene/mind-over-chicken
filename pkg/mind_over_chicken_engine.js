@@ -755,6 +755,96 @@ export class Engine {
 }
 if (Symbol.dispose) Engine.prototype[Symbol.dispose] = Engine.prototype.free;
 
+export class PointerGesture {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        PointerGestureFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_pointergesture_free(ptr, 0);
+    }
+    /**
+     * A main-button or touch press. `sx, sy` screen pixels; `wx, wy` world units.
+     * @param {number} id
+     * @param {number} sx
+     * @param {number} sy
+     * @param {number} wx
+     * @param {number} wy
+     */
+    down(id, sx, sy, wx, wy) {
+        wasm.pointergesture_down(this.__wbg_ptr, id, sx, sy, wx, wy);
+    }
+    /**
+     * @returns {boolean}
+     */
+    is_panning() {
+        const ret = wasm.pointergesture_is_panning(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Pointer moved. Returns true when this move pans the map; read the delta with
+     * `pan_dx()` / `pan_dy()` (world units since the previous move). Returns false while the
+     * press is still a possible tap, or for another pointer.
+     * @param {number} id
+     * @param {number} sx
+     * @param {number} sy
+     * @param {number} wx
+     * @param {number} wy
+     * @returns {boolean}
+     */
+    moved(id, sx, sy, wx, wy) {
+        const ret = wasm.pointergesture_moved(this.__wbg_ptr, id, sx, sy, wx, wy);
+        return ret !== 0;
+    }
+    /**
+     * `threshold_px`: how far (screen pixels) a press must move before it counts as a drag.
+     * @param {number} threshold_px
+     */
+    constructor(threshold_px) {
+        const ret = wasm.pointergesture_new(threshold_px);
+        this.__wbg_ptr = ret;
+        PointerGestureFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * Is this pointer the press being tracked?
+     * @param {number} id
+     * @returns {boolean}
+     */
+    owns(id) {
+        const ret = wasm.pointergesture_owns(this.__wbg_ptr, id);
+        return ret !== 0;
+    }
+    /**
+     * @returns {number}
+     */
+    pan_dx() {
+        const ret = wasm.pointergesture_pan_dx(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    pan_dy() {
+        const ret = wasm.pointergesture_pan_dy(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Press ended. Returns true when it was a tap (blink). A cancelled pointer never taps.
+     * @param {number} id
+     * @param {boolean} cancelled
+     * @returns {boolean}
+     */
+    up(id, cancelled) {
+        const ret = wasm.pointergesture_up(this.__wbg_ptr, id, cancelled);
+        return ret !== 0;
+    }
+}
+if (Symbol.dispose) PointerGesture.prototype[Symbol.dispose] = PointerGesture.prototype.free;
+
 export class RustBlinkClassifier {
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
@@ -1652,6 +1742,9 @@ const __wbindgen_enum_OscillatorType = ["sine", "square", "sawtooth", "triangle"
 const EngineFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_engine_free(ptr, 1));
+const PointerGestureFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_pointergesture_free(ptr, 1));
 const RustBlinkClassifierFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_rustblinkclassifier_free(ptr, 1));

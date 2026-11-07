@@ -464,9 +464,6 @@ export class StoneAge {
       engine.add_billboard(4, c.x, c.y, 1, Math.floor(this.t * 6 + 1) % 3, 0);
     }
 
-    // Reticle
-    const a = this.G.brain.aim;
-    engine.add_billboard(13, a.x * (W - 1), a.y * (H - 1), 1, 0, 0);
   }
 
   draw(ctx) {
@@ -501,7 +498,9 @@ export class StoneAge {
   drawAfterLight(ctx) {
     for (const b of this.bolts) drawBolt(ctx, b.pts, Math.min(1, b.life * 4));
     const a = this.G.brain.aim;
-    if (!this.G.render3d) drawReticle(ctx, a.x * (W - 1), a.y * (H - 1), this.t, '#ffe066'); // 3D: a sprite
+    // Painted into the map in 3D too: the map drapes over the terrain, so it lands exactly on the
+    // ground point under the cursor (the standing sprite version sat above it, or didn't show).
+    drawReticle(ctx, a.x * (W - 1), a.y * (H - 1), this.t, '#ffe066');
     if (this.flash > 0) { ctx.fillStyle = `rgba(220,230,255,${this.flash * 0.9})`; ctx.fillRect(0, 0, W, H); }
   }
 
