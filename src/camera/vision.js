@@ -18,7 +18,7 @@ export const VISION_URLS = {
 };
 
 export const OPTIONS = {
-  gesture: { baseOptions: { modelAssetPath: VISION_URLS.gesture }, runningMode: 'VIDEO', numHands: 1 },
+  gesture: { baseOptions: { modelAssetPath: VISION_URLS.gesture }, runningMode: 'VIDEO', numHands: 2 },
   face: { baseOptions: { modelAssetPath: VISION_URLS.face }, runningMode: 'VIDEO', numFaces: 1, outputFaceBlendshapes: true },
 };
 

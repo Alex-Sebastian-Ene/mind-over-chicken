@@ -5,9 +5,10 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OneEuroFilter, PointFilter, softDeadZone, HandRange, FIXED_RANGE, pinchMetrics, PinchDetector, PINCH, FingerController } from '../src/camera/fingers.js';
+import { OneEuroFilter, PointFilter, softDeadZone, HandRange, FIXED_RANGE, pinchMetrics, PinchDetector, PINCH, FingerController, WaveDetector, MultiHandTracker } from '../src/camera/fingers.js';
 import { RateMeter, Ema, FrameMeter } from '../src/camera/meter.js';
 import { workerPreference, workerSupport } from '../src/camera/engine.js';
+import { COACH_MOVES, buildGhostHand } from '../src/camera/coach.js';
 
 // ---------- helpers ----------
 // Deterministic noise in [-1, 1].
@@ -337,4 +338,96 @@ test('engine: ?camworker= picks the inference path; missing worker features are 
   assert.equal(workerSupport({}), 'no Web Workers');
   assert.equal(workerSupport({ Worker: class {}, createImageBitmap() {} }), 'no OffscreenCanvas');
   assert.equal(workerSupport({ Worker: class {}, createImageBitmap() {}, OffscreenCanvas: class {} }), null);
+});
+
+// ---------- multi-hand tracking & continuous zoom (#118, #119) ----------
+test('MultiHandTracker: tracks left and right hands stably across hand crossing and brief loss', () => {
+  const m = new MultiHandTracker({ lossMs: 300 });
+  const handL = makeHand('open', { cx: 0.3, cy: 0.7 });
+  const handR = makeHand('open', { cx: 0.7, cy: 0.7 });
+
+  // Initial detection: slot L and R
+  const r1 = m.assignHands([{ landmarks: handL }, { landmarks: handR }], 0);
+  assert.equal(r1.left.wrist.x, 0.3);
+  assert.equal(r1.right.wrist.x, 0.7);
+
+  // Small movement across steps so distance matching tracks crossing
+  const crossL = makeHand('open', { cx: 0.45, cy: 0.7 });
+  const crossR = makeHand('open', { cx: 0.55, cy: 0.7 });
+  const r2 = m.assignHands([{ landmarks: crossL }, { landmarks: crossR }], 50);
+  assert.ok(Math.abs(r2.left.wrist.x - 0.45) < 0.01, 'left hand followed movement');
+  assert.ok(Math.abs(r2.right.wrist.x - 0.55) < 0.01, 'right hand followed movement');
+
+  // Brief dropout under 300 ms preserves slot
+  m.assignHands([], 100);
+  assert.ok(m.slots.left && !m.slots.left.visible);
+  assert.ok(m.slots.right && !m.slots.right.visible);
+});
+
+test('MultiHandTracker: two-hand pinch continuous zoom freezes on unpinch or hand loss (#119)', () => {
+  const m = new MultiHandTracker({ pinch: { enterMs: 30 } });
+  const pL1 = makeHand('pinch', { cx: 0.4, cy: 0.7 });
+  const pR1 = makeHand('pinch', { cx: 0.6, cy: 0.7 });
+
+  // Both pinch at distance 0.2
+  let out;
+  for (let t = 0; t <= 100; t += 25) {
+    out = m.update({ hands: [{ landmarks: pL1 }, { landmarks: pR1 }], now: t });
+  }
+  assert.equal(out.bothPinched, true);
+  assert.equal(out.zoomActive, true);
+
+  // Spread hands apart significantly (from distance 0.2 to 0.5) over multiple frames
+  const pL2 = makeHand('pinch', { cx: 0.25, cy: 0.7 });
+  const pR2 = makeHand('pinch', { cx: 0.75, cy: 0.7 });
+  for (let t = 125; t <= 300; t += 25) {
+    out = m.update({ hands: [{ landmarks: pL2 }, { landmarks: pR2 }], now: t });
+  }
+  assert.ok(out.zoomFactor > 1, 'zoom factor increased');
+  const freezeAt = out.zoomFactor;
+
+  // Unpinch either hand: zoom freezes immediately without jumping back
+  const openL = makeHand('open', { cx: 0.25, cy: 0.7 });
+  // Pass open hand until pinch release debounces (60ms)
+  let freezeZoom = null;
+  for (let t = 325; t <= 450; t += 25) {
+    out = m.update({ hands: [{ landmarks: openL }, { landmarks: pR2 }], now: t });
+    if (!out.zoomActive && freezeZoom == null) freezeZoom = out.zoomFactor;
+  }
+  assert.equal(out.zoomActive, false);
+  assert.equal(out.zoomDelta, 0);
+  assert.equal(out.zoomFactor, freezeZoom);
+});
+
+// ---------- Wave detector (#121) ----------
+test('WaveDetector: horizontal open-hand wave triggers with cooldown', () => {
+  const w = new WaveDetector({ windowMs: 250, cooldownMs: 400 });
+  const h1 = makeHand('open', { cx: 0.3, cy: 0.6 });
+  const h2 = makeHand('open', { cx: 0.6, cy: 0.6 });
+
+  w.update(h1, 0);
+  const out = w.update(h2, 150);
+  assert.equal(out.wave, 'left'); // mirrored coordinates: +x physical = left wave
+
+  // Immediate subsequent wave within cooldown is suppressed
+  const out2 = w.update(h1, 200);
+  assert.equal(out2.wave, null);
+});
+
+// ---------- Coach ghost hand keyframes (#123) ----------
+test('Coach: procedural 21-landmark ghost hands and keyframes exist for all moves', () => {
+  assert.ok(COACH_MOVES.length >= 5);
+  for (const move of COACH_MOVES) {
+    const ghosts = move.sample(0.5);
+    assert.ok(ghosts.length >= 1 && ghosts.length <= 2);
+    for (const g of ghosts) {
+      assert.equal(g.hand.length, 21);
+      for (const pt of g.hand) {
+        assert.ok(pt.x >= 0 && pt.x <= 1);
+        assert.ok(pt.y >= 0 && pt.y <= 1);
+      }
+    }
+  }
+  const ghost = buildGhostHand('open', 'pinch', 0.5);
+  assert.equal(ghost.length, 21);
 });

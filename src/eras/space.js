@@ -337,6 +337,7 @@ export class SpaceAge {
     const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
     const watching = this.citizens.filter((c) => c.state !== 'aboard');
     switch (spell) {
+      case 'fist':
       case 'fireball': {
         G.stats.lightning++;
         G.audio.thunder();
@@ -346,6 +347,7 @@ export class SpaceAge {
         floater(this.particles, x, y - 8, dist(x, y, pad.x, pad.y) < 12 ? 'engine test?' : 'fireball', '#ff9a2e', 6);
         break;
       }
+      case 'palm':
       case 'spawn': {
         // Open palm: a crate of rocket parts lands on the pad.
         const more = this.progress < 1;
