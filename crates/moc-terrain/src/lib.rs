@@ -78,7 +78,7 @@ pub struct ErosionParams {
 
 impl Default for ErosionParams {
     fn default() -> Self {
-        ErosionParams { thermal_passes: 3, stream_iters: 3, k: 0.0022, diffuse_passes: 3 }
+        ErosionParams { thermal_passes: 2, stream_iters: 2, k: 0.0028, diffuse_passes: 3 }
     }
 }
 
@@ -726,7 +726,8 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
         roughness: p.roughness,
         clusters: 0,
     };
-    let gd0 = plates::growth_dims(p.w, p.h, p.wrap_x, 8_000);
+    // ~8000 growth cells on big maps, fewer on small ones (never finer than ~3 tiles).
+    let gd0 = plates::growth_dims(p.w, p.h, p.wrap_x, (n_tiles as usize / 12).clamp(2_000, 8_000));
     let gd = Dims { wrap_y: p.wrap_y, ..gd0 };
     let plates = if p.plates > 0 { p.plates } else { (n_tiles / (scale * scale * 0.4)).round().clamp(6.0, 40.0) as usize };
     let tect = plates::build(p.w, p.h, gd, &plan, plates, seed);
@@ -874,6 +875,11 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
             } else {
                 -0.035 - 0.7 * smoothstep(0.0, 0.11 * scale, -c) + lift[i] * 0.5
             };
+            if c < -0.12 * scale {
+                // Open ocean: no hills, ranges or tablelands to add.
+                h[i] = base;
+                continue;
+            }
             let wp = tor.at(x, y).moved(warp_x[i], warp_y[i]);
             let fine = if c > -0.05 * scale && hills_oct > 2 { hills_n.sample_octaves(&wp, 2, hills_oct) } else { 0.0 };
             // Rugged regions are hilly, smooth ones plains (so hills aren't everywhere).

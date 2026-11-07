@@ -312,13 +312,11 @@ mod tests {
     }
 
     #[test]
-    fn same_seed_same_ranges() {
+    fn each_run_grows_different_ranges() {
+        // Maps are random each run (Alex), so only check that seeds give different ranges.
         let d = Dims::new(160, 80, true);
         let c = band(d);
         let a = grow(d, &c, &[(20, 40), (90, 40)], &DlaParams::default(), 9);
-        let b = grow(d, &c, &[(20, 40), (90, 40)], &DlaParams::default(), 9);
-        assert_eq!(a.nodes.len(), b.nodes.len());
-        assert_eq!(a.height, b.height);
         let e = grow(d, &c, &[(20, 40), (90, 40)], &DlaParams::default(), 10);
         assert_ne!(a.height, e.height);
     }

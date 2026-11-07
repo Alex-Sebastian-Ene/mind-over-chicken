@@ -266,7 +266,7 @@ pub fn clean(d: Dims, land: &mut [bool], height: &[f32], min_island: usize, min_
     }
     let (band, in_band) = coast_band(d, land, 4);
     let mut eroded = vec![false; d.n()];
-    for round in 0..6 {
+    for round in 0..4 {
         let mut changed = 0;
         // 2. opening: keep land only inside a 3×3 block of land. (`eroded` is only computed
         // inside the band; outside it every tile is surrounded by its own kind.)
@@ -309,7 +309,7 @@ pub fn clean(d: Dims, land: &mut [bool], height: &[f32], min_island: usize, min_
                 changed += 1;
             }
         }
-        if round == 5 {
+        if round == 3 {
             break;
         }
         // 4. water slivers: fill water that isn't in any 2×2 of water.
