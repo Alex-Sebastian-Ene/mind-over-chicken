@@ -1,4 +1,4 @@
-use super::{BrainInput, Era, EraEvent, Objective, SoundKind};
+use super::{BrainInput, Era, EraEvent, Objective, SoundKind, STRESS_LIMIT};
 
 const MIN_PASSENGERS: u32 = 8;
 const COUNT_FROM: f32 = 10.0;
@@ -50,7 +50,7 @@ impl Era for SpaceAge {
     }
 
     fn powers(&self) -> &[&str] {
-        &["focus", "calm"]
+        &["focus", "calm", "stress"]
     }
 
     fn darkness(&self) -> f32 {
@@ -106,9 +106,8 @@ impl Era for SpaceAge {
                 let build_rate = 0.05 + 0.15 * brain.focus;
                 self.progress = (self.progress + build_rate * dt).min(1.0);
 
-                // Stress/agitation drops parts (pulse contributes optionally if present)
-                let stress = brain.panic.max((1.0 - brain.calm) * 0.8).max(if brain.hr_delta > 0.0 { brain.hr_delta / 25.0 } else { 0.0 });
-                if stress > 0.6 && self.progress > 0.05 {
+                // Stress (max(1 - calm, face anger)) makes the engineers drop parts
+                if brain.stress > STRESS_LIMIT && self.progress > 0.05 {
                     self.progress = (self.progress - dt * 0.04).max(0.0);
                 }
 
@@ -141,7 +140,7 @@ impl Era for SpaceAge {
                     events.push(EraEvent::PlaySound(SoundKind::Bell));
                     events.push(EraEvent::AdvisorSay {
                         key: "countdown-start".to_string(),
-                        text: "All passengers aboard! Hold focus and maintain calm for the final 10s countdown!"
+                        text: "All passengers aboard! Hold focus for the final 10s countdown!"
                             .to_string(),
                         mood: "nervous".to_string(),
                         priority: 4,
@@ -150,10 +149,11 @@ impl Era for SpaceAge {
                 }
             }
             "countdown" => {
+                // Focus only: calm and focus share one softmax in the personal classifier, so while
+                // the player holds focus, calm is near 0 and stress near 1 (see src/eras/space.js).
                 let focus_ok = brain.focus >= 0.45;
-                let steady_ok = brain.calm >= 0.35 && brain.panic <= 0.35 && (brain.hr_delta <= 0.0 || brain.hr_delta <= 14.0);
 
-                if focus_ok && steady_ok {
+                if focus_ok {
                     self.countdown -= dt;
                     self.hold_time = 0.0;
                     if (self.countdown % 1.0) < dt {
@@ -183,7 +183,7 @@ impl Era for SpaceAge {
                         events.push(EraEvent::PlaySound(SoundKind::Bad));
                         events.push(EraEvent::AdvisorSay {
                             key: "count-scrub".to_string(),
-                            text: "Countdown scrubbed due to stress! Resetting to T-10s.".to_string(),
+                            text: "Countdown scrubbed: focus slipped! Resetting to T-10s.".to_string(),
                             mood: "panic".to_string(),
                             priority: 3,
                             cooldown: 6.0,
@@ -224,11 +224,11 @@ mod tests {
     fn test_space_age_flow_and_countdown() {
         let mut space = SpaceAge::new();
 
-        // Build with high focus and calm, zero pulse dependency
+        // Build with focus while calm (low stress), board with calm
         let focus_brain = BrainInput {
             focus: 0.9,
             calm: 0.8,
-            hr_delta: 0.0,
+            stress: 0.2,
             ..Default::default()
         };
         while space.phase == "build" {
@@ -244,9 +244,15 @@ mod tests {
         assert!(space.passengers >= MIN_PASSENGERS);
         assert_eq!(space.phase, "countdown");
 
-        // Countdown with focus & low pulse
+        // Countdown on focus alone, even at full stress (calm is near 0 while focusing)
+        let focused = BrainInput {
+            focus: 0.9,
+            calm: 0.0,
+            stress: 1.0,
+            ..Default::default()
+        };
         while space.phase == "countdown" {
-            space.update(0.1, &focus_brain);
+            space.update(0.1, &focused);
         }
         assert_eq!(space.phase, "launch");
         assert!(space.is_complete());

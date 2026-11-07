@@ -45,16 +45,18 @@ pub enum EraEvent {
     StatAddRecession,
 }
 
+/// What the eras read from the player each tick. `stress` is the JS brain's
+/// `brain.stress = max(1 - calm, face anger)`, 0..1: the one stress signal the game uses.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BrainInput {
     pub calm: f32,
     pub focus: f32,
-    pub panic: f32,
-    pub hr: f32,
-    pub rest_hr: f32,
-    pub hr_delta: f32,
+    pub stress: f32,
     pub blinks: u32,
 }
+
+/// Stress at or below this counts as calm enough: 1 - the 0.55 calm bar the JS eras use.
+pub const STRESS_LIMIT: f32 = 0.45;
 
 pub trait Era {
     fn id(&self) -> &str;

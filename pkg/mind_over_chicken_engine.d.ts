@@ -9,7 +9,6 @@ export class Engine {
     add_custom_billboard(x: number, y: number, z: number, w: number, h: number, u0: number, v0: number, u1: number, v1: number): void;
     add_light(x: number, y: number, radius: number, intensity: number): void;
     advisor_say(key: string, text: string, mood: string, priority: number, cooldown: number): boolean;
-    audio_heartbeat(now: number, bpm: number, intensity: number): void;
     audio_play(sound: string): void;
     audio_toggle(): boolean;
     audio_unlock(): void;
@@ -34,7 +33,11 @@ export class Engine {
     game_on_cast(spell: string, aim_x: number, aim_y: number): void;
     game_restart_era(): void;
     game_start_era(index: number): void;
-    game_tick(dt: number, calm: number, focus: number, panic: number, hr: number, rest_hr: number, hr_delta: number, blinks: number): void;
+    /**
+     * One tick of the Rust eras. `stress` is the JS brain's `brain.stress`
+     * (max(1 - calm, face anger), 0..1).
+     */
+    game_tick(dt: number, calm: number, focus: number, stress: number, blinks: number): void;
     get_camera_distance(): number;
     get_camera_pitch(): number;
     get_camera_target_x(): number;
@@ -183,7 +186,6 @@ export interface InitOutput {
     readonly engine_add_custom_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
     readonly engine_add_light: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly engine_advisor_say: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
-    readonly engine_audio_heartbeat: (a: number, b: number, c: number, d: number) => void;
     readonly engine_audio_play: (a: number, b: number, c: number) => void;
     readonly engine_audio_toggle: (a: number) => number;
     readonly engine_audio_unlock: (a: number) => void;
@@ -208,7 +210,7 @@ export interface InitOutput {
     readonly engine_game_on_cast: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly engine_game_restart_era: (a: number) => void;
     readonly engine_game_start_era: (a: number, b: number) => void;
-    readonly engine_game_tick: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+    readonly engine_game_tick: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly engine_get_camera_distance: (a: number) => number;
     readonly engine_get_camera_pitch: (a: number) => number;
     readonly engine_get_camera_target_x: (a: number) => number;

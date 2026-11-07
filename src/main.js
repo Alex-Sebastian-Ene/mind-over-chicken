@@ -432,10 +432,7 @@ function frame(ts) {
     G.brain.update(dt, G.mood);   // the camera's face anger counts toward brain.stress
     if (engine) {
       const b = G.brain;
-      // The game reads no heart rate. crates/engine's game_tick still has heart-rate parameters
-      // (hr, rest_hr, hr_delta; a follow-up for the Rust port), so they get 0 and the god's
-      // stress goes in its panic slot.
-      engine.game_tick(dt, b.calm || 0, b.focus || 0, b.stress ?? 0, 0, 0, 0, b.stats?.blinks || 0);
+      engine.game_tick(dt, b.calm || 0, b.focus || 0, b.stress ?? 0, b.stats?.blinks || 0);
     }
     if (banner) {
       banner.t += dt;

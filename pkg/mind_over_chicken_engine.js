@@ -84,14 +84,6 @@ export class Engine {
         return ret !== 0;
     }
     /**
-     * @param {number} now
-     * @param {number} bpm
-     * @param {number} intensity
-     */
-    audio_heartbeat(now, bpm, intensity) {
-        wasm.engine_audio_heartbeat(this.__wbg_ptr, now, bpm, intensity);
-    }
-    /**
      * @param {string} sound
      */
     audio_play(sound) {
@@ -328,17 +320,16 @@ export class Engine {
         wasm.engine_game_start_era(this.__wbg_ptr, index);
     }
     /**
+     * One tick of the Rust eras. `stress` is the JS brain's `brain.stress`
+     * (max(1 - calm, face anger), 0..1).
      * @param {number} dt
      * @param {number} calm
      * @param {number} focus
-     * @param {number} panic
-     * @param {number} hr
-     * @param {number} rest_hr
-     * @param {number} hr_delta
+     * @param {number} stress
      * @param {number} blinks
      */
-    game_tick(dt, calm, focus, panic, hr, rest_hr, hr_delta, blinks) {
-        wasm.engine_game_tick(this.__wbg_ptr, dt, calm, focus, panic, hr, rest_hr, hr_delta, blinks);
+    game_tick(dt, calm, focus, stress, blinks) {
+        wasm.engine_game_tick(this.__wbg_ptr, dt, calm, focus, stress, blinks);
     }
     /**
      * @returns {number}

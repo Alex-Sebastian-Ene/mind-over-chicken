@@ -222,7 +222,7 @@ impl HudDriver {
         self.clock = document.get_element_by_id("clock");
         self.source_status = document.get_element_by_id("sourceStatus");
 
-        for p in &["blink", "calm", "focus", "heart"] {
+        for p in &["blink", "calm", "focus", "stress"] {
             if let Ok(Some(el)) = document.query_selector(&format!("[data-power=\"{}\"]", p)) {
                 self.powers.insert(p.to_string(), el);
             }
@@ -310,11 +310,8 @@ impl HudDriver {
         calm_thr: Option<f32>,
         focus: f32,
         focus_thr: Option<f32>,
-        hr: f32,
-        rest_hr: f32,
-        hr_delta: f32,
+        stress: f32,
         blinks: u32,
-        panic: f32,
     ) {
         #[cfg(target_arch = "wasm32")]
         {
@@ -347,38 +344,14 @@ impl HudDriver {
                     &format!("{}%", (focus * 100.0).round() as i32),
                 );
             }
-            if let Some(el) = self.powers.get("heart") {
-                if hr > 0.0 {
-                    let d_norm = (hr_delta / 30.0).clamp(0.0, 1.0);
-                    let text = format!("{} bpm", hr.round() as i32);
-                    set_meter(el, d_norm, None, &text);
-                    if hr_delta > 10.0 {
-                        let _ = el.class_list().add_1("is-hot");
-                    } else {
-                        let _ = el.class_list().remove_1("is-hot");
-                    }
-                    if let Ok(Some(sub_el)) = el.query_selector(".power-sub") {
-                        let sub_text = if rest_hr > 0.0 {
-                            let sign = if hr_delta >= 0.0 { "+" } else { "" };
-                            format!("{}{} vs resting", sign, hr_delta.round() as i32)
-                        } else {
-                            "Pulse".to_string()
-                        };
-                        sub_el.set_text_content(Some(&sub_text));
-                    }
+            // Stress = max(1 - calm, face anger), as the JS HUD shows it (src/ui/hud.js).
+            if let Some(el) = self.powers.get("stress") {
+                let s = stress.clamp(0.0, 1.0);
+                set_meter(el, s, None, &format!("{}%", (s * 100.0).round() as i32));
+                if s > 0.9 {
+                    let _ = el.class_list().add_1("is-hot");
                 } else {
-                    // No pulse hardware: display biometric tension/arousal from EEG panic & agitation
-                    let tension = panic.max((1.0 - calm) * 0.7).clamp(0.0, 1.0);
-                    let text = format!("{}%", (tension * 100.0).round() as i32);
-                    set_meter(el, tension, None, &text);
-                    if tension > 0.5 {
-                        let _ = el.class_list().add_1("is-hot");
-                    } else {
-                        let _ = el.class_list().remove_1("is-hot");
-                    }
-                    if let Ok(Some(sub_el)) = el.query_selector(".power-sub") {
-                        sub_el.set_text_content(Some("Tension"));
-                    }
+                    let _ = el.class_list().remove_1("is-hot");
                 }
             }
             if let Some(el) = self.powers.get("blink") {
@@ -388,7 +361,7 @@ impl HudDriver {
             }
         }
         let _ = (
-            calm, calm_thr, focus, focus_thr, hr, rest_hr, hr_delta, blinks, panic,
+            calm, calm_thr, focus, focus_thr, stress, blinks,
         );
     }
 }
