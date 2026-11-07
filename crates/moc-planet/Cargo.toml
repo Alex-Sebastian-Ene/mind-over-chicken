@@ -1,0 +1,9 @@
+[package]
+name = "moc-planet"
+description = "Planetary layer for Mind over Chicken: east-west wrapping world, pannable camera, seam-safe blits, wrap-aware pathfinding"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Alex-Sebastian-Ene/mind-over-chicken"
+
+[dependencies]
