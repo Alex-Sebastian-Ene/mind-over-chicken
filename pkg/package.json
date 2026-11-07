@@ -1,0 +1,19 @@
+{
+  "name": "mind-over-chicken-engine",
+  "type": "module",
+  "collaborators": [
+    "Mind Over Chicken Team"
+  ],
+  "description": "WebAssembly + WebGL engine for Mind Over Chicken",
+  "version": "0.1.0",
+  "files": [
+    "mind_over_chicken_engine_bg.wasm",
+    "mind_over_chicken_engine.js",
+    "mind_over_chicken_engine.d.ts"
+  ],
+  "main": "mind_over_chicken_engine.js",
+  "types": "mind_over_chicken_engine.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
