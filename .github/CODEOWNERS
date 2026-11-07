@@ -1,0 +1,14 @@
+# Area owners get an automatic review request on PRs touching their area.
+# Proposed from current claims (see CONTRIBUTING.md and the workboard); edit as ownership changes.
+# Later lines win when patterns overlap.
+
+*                               @Alex-Sebastian-Ene
+
+# Rust/WebGL engine and deploy: Ben (#21, #8)
+/crates/engine/                 @BenDz143
+/pkg/                           @BenDz143
+/.github/workflows/deploy.yml   @BenDz143
+/scripts/serve.py               @BenDz143
+
+# Project spec and coherence audits: Radon (#12, #15)
+/README.md                      @Radonchnk
