@@ -347,6 +347,7 @@ pub fn economy(w: &mut World, dt: f32) {
         let fac = &mut w.factions[fi];
         fac.metrics.knowledge += lore * dt;
         fac.drought_t = (fac.drought_t - dt).max(0.0);
+        fac.fortify_t = (fac.fortify_t - dt).max(0.0);
         fac.strike_t = (fac.strike_t - dt).max(0.0);
         fac.censor_t = (fac.censor_t - dt).max(0.0);
         fac.blackout_t = (fac.blackout_t - dt).max(0.0);

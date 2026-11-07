@@ -7,7 +7,7 @@ use moc_civ::ages_table::{self, Metric, AGES, AGE_COUNT, FORMATIONS_FROM_AGE, IN
 use moc_civ::conflict::{self, StrifeKind, BATTLE, CIVIL_WAR, FEUD, NONE, SCUFFLE};
 use moc_civ::jobs::{self, Building};
 use moc_civ::planet::Dims;
-use moc_civ::politics::declare_war;
+use moc_civ::politics::{self, declare_war, decide, Decision, Policy};
 use moc_civ::powers::{cast, lightning, CAST_PEACE};
 use moc_civ::terrain::{GRASS, HILLS};
 use moc_civ::*;
@@ -334,10 +334,13 @@ fn a_civil_war_inside_one_civilisation_splits_it() {
     assert!(rebels.iter().all(|&v| w.villages[v as usize].side == 1));
     let [loyal, rebel] = w.strifes[k].fighters;
     assert!(rebel >= 6 && rebel > loyal, "the rebels rose in arms ({loyal} vs {rebel})");
-    // Nobody wins outright here (no fighting is simulated), so it is settled: the rebels keep
-    // what they hold.
+    // Nobody wins outright here (no fighting is simulated), so the crown concedes
+    // (`politics::decide`): the rebels keep what they hold.
     for _ in 0..(conflict::CIVIL_WAR_SETTLES as usize + 3) {
         conflict::strife_tick(&mut w, 1.0);
+        for d in decide(&w, f) {
+            politics::apply(&mut w, f, d);
+        }
     }
     assert!(!w.strifes[k].alive, "decided");
     assert_eq!(w.alive_factions().count(), 2, "the civilisation split");
@@ -544,4 +547,49 @@ fn hearth_clans_sleep_at_night() {
         w.step(DT);
     }
     assert!(w.agents.iter().filter(|a| a.faction == f).all(|a| a.state != State::Sleep));
+}
+
+/// Every war-and-peace decision goes through `politics::decide` (the rules), or a plugged-in
+/// `Policy` (#100) in its place.
+#[test]
+fn war_and_peace_go_through_one_decision_seam() {
+    let (mut w, a, b) = neighbours();
+    w.factions[a as usize].age = 7;
+    w.rel_mut(a, b).tension = 1.2;
+    assert_eq!(decide(&w, a), vec![Decision::DeclareWar(b)], "hot and old enough: war");
+    w.factions[a as usize].age = 1;
+    assert!(!decide(&w, a).contains(&Decision::DeclareWar(b)), "too young to declare");
+    // A policy that keeps the peace whatever happens.
+    struct Dove;
+    impl Policy for Dove {
+        fn decide(&mut self, _w: &World, _civ: u8, out: &mut Vec<Decision>) {
+            out.push(Decision::KeepPeace);
+        }
+    }
+    let (mut w, a, b) = neighbours();
+    w.factions[a as usize].age = 7;
+    w.policy = Some(Box::new(Dove));
+    for _ in 0..30 {
+        w.rel_mut(a, b).tension = 1.5;
+        w.rel_mut(b, a).tension = 1.5;
+        w.step(0.1);
+    }
+    assert_eq!(w.stats.wars + w.stats.raids, 0, "the policy decides, not the rules");
+    // And one that goes to war at once.
+    struct Hawk;
+    impl Policy for Hawk {
+        fn decide(&mut self, w: &World, civ: u8, out: &mut Vec<Decision>) {
+            for o in w.alive_factions().filter(|o| o.id != civ) {
+                if w.rel(civ, o.id).war == 0 {
+                    out.push(Decision::DeclareWar(o.id));
+                }
+            }
+        }
+    }
+    let (mut w, a, b) = neighbours();
+    w.policy = Some(Box::new(Hawk));
+    for _ in 0..12 {
+        w.step(0.1);
+    }
+    assert!(w.at_war(a, b));
 }

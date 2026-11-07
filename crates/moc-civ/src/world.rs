@@ -323,6 +323,8 @@ pub struct Faction {
     pub crisis_cd: f32,
     /// The chief died and nobody has taken the chair yet.
     pub succession: bool,
+    /// Seconds of manning the walls left (`politics::Decision::Fortify`).
+    pub fortify_t: f32,
 }
 
 impl Faction {
@@ -381,6 +383,7 @@ impl Faction {
             strife_cd: 20.0,
             crisis_cd: 30.0,
             succession: false,
+            fortify_t: 0.0,
         }
     }
 }
@@ -773,8 +776,10 @@ pub struct World {
     /// 0 midday … 1 midnight (the sandbox's day–night cycle).
     pub night: f32,
     pub(crate) scratch: Vec<f32>,
-    /// Steps taken (combat staggers its searches by it).
-    pub(crate) tick: u32,
+    /// Steps taken (combat staggers its searches by it; the rules' dice roll on it).
+    pub tick: u32,
+    /// A war-and-peace policy replacing the rules of `politics::decide` (#100); None = rules.
+    pub policy: Option<Box<dyn crate::politics::Policy>>,
     #[cfg(not(target_arch = "wasm32"))]
     pub prof: [f64; 8],
 }
@@ -882,6 +887,7 @@ impl World {
             night: 0.0,
             scratch: Vec::new(),
             tick: 0,
+            policy: None,
             #[cfg(not(target_arch = "wasm32"))]
             prof: [0.0; 8],
             terrain,

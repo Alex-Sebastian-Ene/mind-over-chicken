@@ -434,7 +434,7 @@ pub fn wants(w: &World, f: &Faction) -> [f32; CATS] {
         0.3 + 0.4 * t.aggressiveness
     } else {
         0.06 + 0.14 * t.aggressiveness + 0.02 * fight_level
-    };
+    } + if f.fortify_t > 0.0 { 0.15 } else { 0.0 };
     s[Cat::Goods as usize] = if f.age >= 2 { 0.08 + 0.018 * age } else { 0.0 };
     s[Cat::Lore as usize] = 0.03 + 0.012 * age + 0.08 * w.inputs.focus.clamp(0.0, 1.0);
     s[Cat::Goats as usize] = 0.04 + 0.08 * t.friendliness;

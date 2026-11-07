@@ -317,7 +317,7 @@ fn update_villages(w: &mut World, dt: f32) {
             let job = jobs::choose(w, v16);
             if let Some(a) = w.spawn_agent(f, v16, job, vx, vy) {
                 if job.fights() && job != Job::Hunt {
-                    let g = job == Job::Guard || w.rng.chance(if at_war { 0.3 } else { 0.5 });
+                    let g = job == Job::Guard || w.rng.chance(if fac.fortify_t > 0.0 { 0.8 } else if at_war { 0.3 } else { 0.5 });
                     w.agents[a].garrison = g;
                     w.villages[vi].warriors += 1;
                 }
@@ -781,11 +781,9 @@ pub fn make_peace(w: &mut World, a: u8, b: u8) {
     w.refresh_hostility();
 }
 
+/// Tension drifts and wars wear on; then every civilisation decides (`decide`, or a `Policy`).
 fn diplomacy(w: &mut World, dt: f32) {
     let hostility = w.inputs.hostility();
-    let calm = w.inputs.calm.clamp(0.0, 1.0);
-    let agitation = w.inputs.agitation();
-    let anger = w.inputs.anger.clamp(0.0, 1.0);
     let alive: Vec<u8> = w.alive_factions().map(|f| f.id).collect();
     // Tension drifts.
     for &a in &alive {
@@ -821,30 +819,13 @@ fn diplomacy(w: &mut World, dt: f32) {
             r.tension = r.tension.clamp(-1.0, 2.0);
         }
     }
-    // Decisions.
+    // War bookkeeping: raids run their course; wars wear both sides down.
     for &a in &alive {
         for &b in &alive {
             if a == b {
                 continue;
             }
-            let ta = w.factions[a as usize].traits;
-            let hungry = w.factions[a as usize].hungry;
-            let (r, rb) = (*w.rel(a, b), *w.rel(b, a));
-            let bound = w.factions[a as usize].overlord == b || w.factions[b as usize].overlord == a;
-            if r.war == 0 && rb.war != 2 && r.cooldown <= 0.0 && r.near && r.met && !bound {
-                if r.tension >= WAR_TENSION && conflict::may_declare(w, a, b) {
-                    declare_war(w, a, b);
-                    continue;
-                }
-                if r.tension >= RAID_TENSION && ta.aggressiveness >= 0.45 && rb.war == 0 && (hungry > 0.2 || w.rng.chance(0.1 * ta.aggressiveness + 0.1 * agitation)) {
-                    let rr = w.rel_mut(a, b);
-                    rr.war = 1;
-                    rr.war_t = 0.0;
-                    rr.raid_looted = false;
-                    w.stats.raids += 1;
-                    continue;
-                }
-            }
+            let r = *w.rel(a, b);
             if r.war == 1 {
                 let rr = w.rel_mut(a, b);
                 rr.war_t += dt;
@@ -854,30 +835,220 @@ fn diplomacy(w: &mut World, dt: f32) {
                     w.rel_mut(b, a).tension += 0.2;
                 }
             }
-            if r.war == 2 && r.war_t > 20.0 {
-                let (pa, pb) = (w.factions[a as usize].pop, w.factions[b as usize].pop);
-                let (la, lb) = (w.factions[a as usize].recent_losses, w.factions[b as usize].recent_losses);
-                if pa * 10 < pb * 4 && la > lb && w.factions[a as usize].overlord == NO_F && w.factions[b as usize].overlord != a && w.rng.chance(0.1) {
-                    make_peace(w, a, b);
-                    conflict::make_vassal(w, a, b, 0);
-                    continue;
-                }
-            }
             if r.war == 2 && a < b {
                 let (fa, fb) = (&w.factions[a as usize], &w.factions[b as usize]);
                 let losses = (fa.recent_losses + fb.recent_losses) / (fa.pop + fb.pop + 10) as f32;
-                let fr = (fa.traits.friendliness + fb.traits.friendliness) * 0.5;
-                let mood = (1.0 + 1.6 * calm - 0.6 * agitation - 0.6 * anger).max(0.1);
                 let rr = w.rel_mut(a, b);
                 rr.war_t += dt;
                 rr.weariness += dt * (0.01 + 0.4 * losses);
                 let (wt, wear) = (rr.war_t, rr.weariness);
-                w.rel_mut(b, a).war_t = wt;
-                if wt > 20.0 && wear * (0.4 + fr) * mood > 1.0 {
-                    make_peace(w, a, b);
+                let rb = w.rel_mut(b, a);
+                rb.war_t = wt;
+                rb.weariness = wear;
+            }
+        }
+    }
+    // Decisions: every civilisation's war-and-peace policy (`decide`, unless one is plugged in).
+    let mut out = Vec::new();
+    for &a in &alive {
+        if !w.factions[a as usize].alive {
+            continue;
+        }
+        out.clear();
+        match w.policy.take() {
+            Some(mut p) => {
+                p.decide(w, a, &mut out);
+                w.policy = Some(p);
+            }
+            None => decide_into(w, a, &mut out),
+        }
+        for &d in &out {
+            apply(w, a, d);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// War and peace: the policy seam (#100).
+//
+// Every decision a civilisation makes about war and peace, with others or with its own rebels,
+// goes through one function: `decide(&World, civ) -> Vec<Decision>`. It reads the world and
+// returns what the civilisation does this second; `apply` carries it out. The rules below
+// (tension thresholds, weariness, numbers) are the default. A trained policy (#100: PPO war
+// councils) replaces them by implementing `Policy` and setting `World::policy`; it sees the
+// same `World` and returns the same `Decision`s, so nothing else changes. Decisions are made
+// once a second (the politics tick), for every living civilisation in id order.
+//
+// What stays outside the seam is the world's own physics: tension drifting with traits,
+// hunger, borders, grudges and the player's mind; raids ending once looted; war weariness;
+// conflict levels (scuffle, feud, battle) following tension; strife heating and its civil wars
+// being won or lost in the field.
+
+/// One thing a civilisation decides to do this second.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Decision {
+    /// Carry on as before (the policy may also just return nothing).
+    KeepPeace,
+    /// Court civilisation `k`: warmer relations; a much weaker friendly neighbour of a
+    /// kingdom (age 9+) accepts its protection and pays tribute.
+    OfferAlliance(u8),
+    /// Send war bands to steal from `k` (no conquest; ends once looted or after 25 s).
+    Raid(u8),
+    /// Open war on `k`: armies march, villages change hands (age 7+, or after two battles).
+    DeclareWar(u8),
+    /// Man the walls for 30 s: more fighters, kept at home.
+    Fortify,
+    /// End the war with `with`; `vassal`: accept being its tributary.
+    SueForPeace { with: u8, vassal: bool },
+    /// Commit the crown to putting down the rebels of strife `s` (`World::strifes` index).
+    CrushRebels(u16),
+    /// Let the rebels of strife `s` go with what they hold (a truce before civil war).
+    ConcedeToRebels(u16),
+}
+
+/// A war-and-peace policy: given the world, what civilisation `civ` does this second.
+pub trait Policy {
+    fn decide(&mut self, w: &World, civ: u8, out: &mut Vec<Decision>);
+}
+
+/// The default policy: today's rules, as a pure function of the world.
+pub fn decide(w: &World, civ: u8) -> Vec<Decision> {
+    let mut out = Vec::new();
+    decide_into(w, civ, &mut out);
+    out
+}
+
+/// A deterministic die for the rules (so `decide` needs no mutable state): 0..1, different for
+/// every second, pair and question.
+fn roll(w: &World, a: u8, b: u8, salt: u32) -> f32 {
+    let mut h = w.seed ^ w.tick.wrapping_mul(0x9e37_79b9) ^ ((a as u32) << 8 | b as u32).wrapping_mul(0x85eb_ca6b) ^ salt.wrapping_mul(0xc2b2_ae35);
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x7feb_352d);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x846c_a68b);
+    h ^= h >> 16;
+    (h >> 8) as f32 / (1u32 << 24) as f32
+}
+
+/// The rules (`decide`), into a buffer.
+pub fn decide_into(w: &World, a: u8, out: &mut Vec<Decision>) {
+    let fa = &w.factions[a as usize];
+    if !fa.alive {
+        return;
+    }
+    let ta = fa.traits;
+    let calm = w.inputs.calm.clamp(0.0, 1.0);
+    let agitation = w.inputs.agitation();
+    let anger = w.inputs.anger.clamp(0.0, 1.0);
+    let mut threatened = false;
+    for b in 0..MAX_FACTIONS as u8 {
+        let fb = &w.factions[b as usize];
+        if b == a || !fb.alive {
+            continue;
+        }
+        let (r, rb) = (*w.rel(a, b), *w.rel(b, a));
+        threatened |= rb.met && rb.near && (rb.tension >= 0.8 || rb.war > 0);
+        let bound = fa.overlord == b || fb.overlord == a;
+        if r.war == 0 && rb.war != 2 && r.cooldown <= 0.0 && r.near && r.met && !bound {
+            if r.tension >= WAR_TENSION && conflict::may_declare(w, a, b) {
+                out.push(Decision::DeclareWar(b));
+                continue;
+            }
+            if r.tension >= RAID_TENSION && ta.aggressiveness >= 0.45 && rb.war == 0 && (fa.hungry > 0.2 || roll(w, a, b, 1) < 0.1 * ta.aggressiveness + 0.1 * agitation) {
+                out.push(Decision::Raid(b));
+                continue;
+            }
+        }
+        if r.war == 2 && r.war_t > 20.0 {
+            // Beaten: sue for peace and pay tribute.
+            if fa.pop * 10 < fb.pop * 4 && fa.recent_losses > fb.recent_losses && fa.overlord == NO_F && fb.overlord != a && roll(w, a, b, 2) < 0.1 {
+                out.push(Decision::SueForPeace { with: b, vassal: true });
+                continue;
+            }
+            // Weary: both sides have had enough (decided once per pair).
+            let fr = (ta.friendliness + fb.traits.friendliness) * 0.5;
+            let mood = (1.0 + 1.6 * calm - 0.6 * agitation - 0.6 * anger).max(0.1);
+            if a < b && r.weariness * (0.4 + fr) * mood > 1.0 {
+                out.push(Decision::SueForPeace { with: b, vassal: false });
+                continue;
+            }
+        }
+        // A friendly kingdom takes a much weaker friendly neighbour under its protection.
+        if fa.age >= 9
+            && ta.friendliness >= 0.45
+            && fa.overlord == NO_F
+            && fb.overlord == NO_F
+            && rb.met
+            && rb.near
+            && r.war == 0
+            && rb.war == 0
+            && rb.tension <= 0.1
+            && fb.pop * 3 <= fa.pop * 2
+            && fb.traits.friendliness >= 0.3
+            && !w.factions.iter().any(|x| x.alive && x.overlord == b)
+            && roll(w, a, b, 3) < 0.03 * (ta.friendliness + fb.traits.friendliness)
+        {
+            out.push(Decision::OfferAlliance(b));
+        }
+    }
+    if threatened && fa.fortify_t <= 0.0 && fa.age >= 5 {
+        out.push(Decision::Fortify);
+    }
+    // Rebels: a civil war nobody can win is conceded; a rising the crown outnumbers two to
+    // one, it sets out to crush.
+    for (k, s) in w.strifes.iter().enumerate() {
+        if !s.alive || s.civ != a {
+            continue;
+        }
+        if s.level >= CIVIL_WAR && s.civil_t > conflict::CIVIL_WAR_SETTLES {
+            out.push(Decision::ConcedeToRebels(k as u16));
+        } else if s.level >= RAID && !s.committed && s.fighters[0] >= 2 * s.fighters[1].max(1) {
+            out.push(Decision::CrushRebels(k as u16));
+        }
+    }
+}
+
+/// Carry out a decision of civilisation `a` (checked against the world as it is now).
+pub fn apply(w: &mut World, a: u8, d: Decision) {
+    let ok = |w: &World, b: u8| (b as usize) < MAX_FACTIONS && b != a && w.factions[b as usize].alive;
+    match d {
+        Decision::KeepPeace => {}
+        Decision::OfferAlliance(b) => {
+            if ok(w, b) && w.rel(a, b).war == 0 && w.rel(b, a).war == 0 {
+                w.rel_mut(a, b).tension -= 0.05;
+                w.rel_mut(b, a).tension -= 0.05;
+                if w.factions[a as usize].age >= 9 && w.factions[b as usize].pop * 3 <= w.factions[a as usize].pop * 2 {
+                    conflict::make_vassal(w, b, a, 1);
                 }
             }
         }
+        Decision::Raid(b) => {
+            if ok(w, b) && w.rel(a, b).war == 0 && w.rel(b, a).war != 2 {
+                let rr = w.rel_mut(a, b);
+                rr.war = 1;
+                rr.war_t = 0.0;
+                rr.raid_looted = false;
+                w.stats.raids += 1;
+            }
+        }
+        Decision::DeclareWar(b) => {
+            if ok(w, b) {
+                declare_war(w, a, b);
+            }
+        }
+        Decision::Fortify => {
+            w.factions[a as usize].fortify_t = 30.0;
+        }
+        Decision::SueForPeace { with, vassal } => {
+            if ok(w, with) && (w.rel(a, with).war > 0 || w.rel(with, a).war > 0) {
+                make_peace(w, a, with);
+                if vassal {
+                    conflict::make_vassal(w, a, with, 0);
+                }
+            }
+        }
+        Decision::CrushRebels(k) => conflict::crush_rebels(w, a, k as usize),
+        Decision::ConcedeToRebels(k) => conflict::concede(w, a, k as usize),
     }
 }
 

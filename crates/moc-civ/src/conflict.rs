@@ -123,6 +123,8 @@ pub struct Strife {
     pub people: [u32; 2],
     pub vills: [u32; 2],
     pub lost_t: [f32; 2],
+    /// The crown has set out to crush it (`politics::Decision::CrushRebels`).
+    pub committed: bool,
 }
 
 /// Level of a pair of civilisations from tension, before raids and wars.
@@ -389,6 +391,7 @@ fn start(w: &mut World, civ: u8, kind: StrifeKind, level: u8, clans: [u8; 2], re
         people: [0; 2],
         vills: [0; 2],
         lost_t: [0.0; 2],
+        committed: false,
     };
     let k = match w.strifes.iter().position(|s| !s.alive) {
         Some(k) => {
@@ -660,11 +663,8 @@ pub fn strife_tick(w: &mut World, dt: f32) {
                 crushed(w, k);
             } else if lost[0] >= 8.0 || rebels_hold {
                 rebels_win(w, k);
-            } else if ct > CIVIL_WAR_SETTLES {
-                // Neither side can finish it: the rebels keep what they hold and go their own way
-                // (a tributary province, if the crown is the stronger).
-                rebels_win(w, k);
             }
+            // A war neither side can finish is the crown's to concede (`politics::decide`).
         } else if st.by_village && st.vills[1] == 0 {
             end(w, k, None);
         } else if st.t > 240.0 && st.level <= FEUD {
@@ -707,6 +707,51 @@ fn crushed(w: &mut World, k: usize) {
         v.unrest = if v.side == 1 { 0.1 } else { v.unrest * 0.6 };
     }
     end(w, k, None);
+}
+
+/// The crown commits to crushing a rising: more of its people take up arms, and the fight
+/// grows hotter (`politics::Decision::CrushRebels`).
+pub fn crush_rebels(w: &mut World, civ: u8, k: usize) {
+    let Some(s) = w.strifes.get(k) else { return };
+    if !s.alive || s.civ != civ || s.committed {
+        return;
+    }
+    w.strifes[k].committed = true;
+    w.strifes[k].heat = (w.strifes[k].heat + 0.1).min(1.3);
+    let tag = k as u8 + 1;
+    let age = w.factions[civ as usize].age;
+    for i in 0..w.agents.len() {
+        let a = &w.agents[i];
+        if !a.alive || a.faction != civ || a.job.fights() || a.prisoner > 0.0 || a.camp != tag || a.side != 0 || a.job.role() == crate::jobs::Role::Lead {
+            continue;
+        }
+        if w.rng.chance(0.15) {
+            let mut r = std::mem::replace(&mut w.rng, moc_planet::rng::Rng::new(0));
+            let j = crate::jobs::fighter(age, &mut r, false, false);
+            w.rng = r;
+            crate::jobs::set_job(w, i, j);
+        }
+    }
+}
+
+/// The crown gives way (`politics::Decision::ConcedeToRebels`): in a civil war the rebels keep
+/// what they hold and go their own way; before one, a truce with concessions.
+pub fn concede(w: &mut World, civ: u8, k: usize) {
+    let Some(s) = w.strifes.get(k) else { return };
+    if !s.alive || s.civ != civ {
+        return;
+    }
+    let (x, y, kind) = (s.x, s.y, s.kind as i32);
+    if s.level >= CIVIL_WAR {
+        rebels_win(w, k);
+    } else {
+        let tag = k as u8 + 1;
+        for v in w.villages.iter_mut().filter(|v| v.alive && v.owner == civ && v.camp == tag && v.side == 1) {
+            v.unrest *= 0.5;
+        }
+        w.log_x(ev::TRUCE, civ, civ, x, y, 0, kind);
+        end(w, k, None);
+    }
 }
 
 /// The rebels won: they break away as a new civilisation, or (a revolution, or when no new
@@ -1084,7 +1129,7 @@ pub fn make_vassal(w: &mut World, vassal: u8, lord: u8, how: i32) {
     refresh(w);
 }
 
-/// Tribute flows up; treaties are offered; vassals grow restless and break free.
+/// Tribute flows up; vassals grow restless and break free.
 pub fn vassals(w: &mut World, dt: f32) {
     for c in 0..MAX_FACTIONS as u8 {
         let f = &w.factions[c as usize];
@@ -1129,28 +1174,7 @@ pub fn vassals(w: &mut World, dt: f32) {
             }
         }
     }
-    // Treaties: a friendly kingdom takes a weak, friendly neighbour under its protection.
-    let alive: Vec<u8> = w.alive_factions().map(|f| f.id).collect();
-    for &a in &alive {
-        let fa = &w.factions[a as usize];
-        if fa.age < 9 || fa.traits.friendliness < 0.45 || fa.overlord != NO_F {
-            continue;
-        }
-        for &b in &alive {
-            let fb = &w.factions[b as usize];
-            let r = w.rel(b, a);
-            if a == b || fb.overlord != NO_F || !r.met || !r.near || r.war != 0 || r.tension > 0.1 || fb.pop * 3 > fa.pop * 2 || fb.traits.friendliness < 0.3 {
-                continue;
-            }
-            if w.factions.iter().any(|x| x.alive && x.overlord == b) {
-                continue;
-            }
-            if w.rng.chance(dt * 0.03 * (fa.traits.friendliness + fb.traits.friendliness)) {
-                make_vassal(w, b, a, 1);
-                break;
-            }
-        }
-    }
+    // (Treaties of protection are a civilisation's decision: `politics::Decision::OfferAlliance`.)
 }
 
 /// A captive taken: forced labour for the captor until peace ransoms it home.
