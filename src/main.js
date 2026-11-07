@@ -313,7 +313,7 @@ function showBanner(scene, i) {
     return li;
   }));
   el.hidden = false;
-  banner = { t: 0 };
+  banner = { t: 0, manual: (i === 0) };
   G.brain.setCue(null);
 }
 
@@ -331,7 +331,7 @@ function showFail(reason) {
   $('failScreen').hidden = false;
   audio.bad();
   clearTimeout(failTimer);
-  failTimer = setTimeout(retryEra, 5000);
+  failTimer = setTimeout(retryEra, 20000);
 }
 function retryEra() {
   clearTimeout(failTimer);
@@ -505,7 +505,7 @@ function frame(ts) {
     }
     if (banner) {
       banner.t += dt;
-      if (banner.t > 6) dismissBanner();
+      if (!banner.manual && banner.t > 8) dismissBanner();
     } else if (G.sandbox) {
       G.runTime += dt;   // the hand-played game stays paused in the sandbox
       G.calibration?.update(dt, G.brain, G.mood);
