@@ -27,6 +27,19 @@ export class Brain {
     this.aim = { x: 0.5, y: 0.55 };
     this.motion = 0;
     this.quality = 1;
+    this.bands = { delta: 0.2, theta: 0.2, alpha: 0.2, beta: 0.2, gamma: 0.2 };
+    this.contact = null;
+    this.orientation = null;
+    this.relOrientation = null;
+    this.imuCalib = 1;
+    this.neutralProgress = 1;
+    this.blinkModel = null;
+    this.accel = null;
+    this.gyro = null;
+    this.eegWave = { TP9: [], AF7: [], AF8: [], TP10: [] };
+    this.ppgWave = [];
+    this.accelHistory = [];
+    this.gyroHistory = [];
     this.cue = null;          // 'rest' | 'calm' | 'focus' | null
     this.blinkListeners = [];
     this.lastBlinkAt = -10;
@@ -39,6 +52,31 @@ export class Brain {
 
   onBlink(fn) { this.blinkListeners.push(fn); }
   setCue(label) { this.cue = label; }
+
+  resetTelemetry() {
+    this.window = [];
+    this.feat = null;
+    this.calm = 0;
+    this.focus = 0;
+    this.calmRaw = 0;
+    this.focusRaw = 0;
+    this.hr = null;
+    this.motion = 0;
+    this.quality = 0;
+    this.bands = { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 };
+    this.contact = null;
+    this.orientation = null;
+    this.relOrientation = null;
+    this.imuCalib = 0;
+    this.neutralProgress = 0;
+    this.blinkModel = null;
+    this.accel = null;
+    this.gyro = null;
+    this.eegWave = { TP9: [], AF7: [], AF8: [], TP10: [] };
+    this.ppgWave = [];
+    this.accelHistory = [];
+    this.gyroHistory = [];
+  }
 
   update(dt) {
     this.time += dt;
@@ -60,6 +98,40 @@ export class Brain {
   ingest(frame) {
     this.stats.framesSeen++;
     this.quality = frame.quality;
+    if (frame.bands) this.bands = { ...frame.bands };
+    if (frame.contact) this.contact = frame.contact;
+    if (frame.orientation !== undefined) this.orientation = frame.orientation;
+    if (frame.relOrientation !== undefined) this.relOrientation = frame.relOrientation;
+    if (typeof frame.imuCalib === 'number') this.imuCalib = frame.imuCalib;
+    if (typeof frame.neutralProgress === 'number') this.neutralProgress = frame.neutralProgress;
+    if (frame.motionModel !== undefined) this.motionModel = frame.motionModel;
+    if (frame.blinkModel !== undefined) this.blinkModel = frame.blinkModel;
+    if (frame.accel !== undefined) {
+      this.accel = frame.accel;
+      if (Array.isArray(frame.accel) && frame.accel.length === 3) {
+        this.accelHistory.push(frame.accel);
+        if (this.accelHistory.length > 150) this.accelHistory.shift();
+      }
+    }
+    if (frame.gyro !== undefined) {
+      this.gyro = frame.gyro;
+      if (Array.isArray(frame.gyro) && frame.gyro.length === 3) {
+        this.gyroHistory.push(frame.gyro);
+        if (this.gyroHistory.length > 150) this.gyroHistory.shift();
+      }
+    }
+    if (Array.isArray(frame.ppg) && frame.ppg.length) {
+      this.ppgWave.push(...frame.ppg);
+      if (this.ppgWave.length > 180) this.ppgWave.splice(0, this.ppgWave.length - 180);
+    }
+    if (frame.eeg && typeof frame.eeg === 'object') {
+      for (const [ch, vals] of Object.entries(frame.eeg)) {
+        if (!Array.isArray(vals)) continue;
+        if (!this.eegWave[ch]) this.eegWave[ch] = [];
+        this.eegWave[ch].push(...vals);
+        if (this.eegWave[ch].length > 180) this.eegWave[ch].splice(0, this.eegWave[ch].length - 180);
+      }
+    }
     if (frame.tilt) {
       this.aim.x = smooth(this.aim.x, clamp(0.5 + frame.tilt.x * 0.5), 10, 0.1);
       this.aim.y = smooth(this.aim.y, clamp(0.5 + frame.tilt.y * 0.5), 10, 0.1);
