@@ -1,4 +1,5 @@
 pub mod audio;
+pub mod biosignal;
 mod camera3d;
 pub mod eras;
 mod font;
@@ -10,6 +11,7 @@ pub mod shell;
 mod sprites;
 mod terrain;
 
+pub use biosignal::{RustBlinkClassifier, RustImuTracker};
 use camera3d::OrbitCamera;
 use gl::{Light, WebGlRenderer};
 use gl3d::{BillboardVertex, Light3D, WebGl3DRenderer};

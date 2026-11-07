@@ -20,6 +20,7 @@
     <div class="bar-tools">
       <span class="source" id="sourceStatus" data-ok="0">No headset</span>
       <span class="clock" id="clock" aria-label="Run time">0:00</span>
+      <button type="button" class="tool eeg-btn" id="eegBtn" aria-pressed="false" aria-controls="eegPanel" title="Connect or disconnect EEG headset and view live signals (E)">EEG <kbd>E</kbd></button>
       <!-- camera (#33) --><button type="button" class="tool cam-btn" id="camBtn" aria-pressed="false" aria-controls="camPanel" title="Cast spells with hand gestures and set the mood with your face. Opt-in; frames never leave this device.">Camera</button>
       <button type="button" class="tool" id="mode3dBtn" aria-pressed="false" title="Toggle 3D world (T)">3D</button>
       <button type="button" class="tool" id="aiGodBtn" aria-pressed="false" title="Toggle AI God autopilot (G)">AI God <kbd>G</kbd></button>
@@ -163,6 +164,8 @@
     </div>
   </div>
 </section>
+
+<aside class="eeg-panel" id="eegPanel" hidden aria-labelledby="eegHeading"></aside>
 
 <aside class="model-panel" id="modelPanel" hidden aria-labelledby="modelHeading">
   <header>
