@@ -526,21 +526,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 .cam-btn[data-live="1"]::before { background: var(--heart); animation: cam-pulse 1.6s ease-in-out infinite; }
 @keyframes cam-pulse { 50% { opacity: 0.3; } }
 
-.cam-panel {
-  position: absolute;
-  z-index: 3;
-  right: max(8px, calc((100cqw - min(100cqw, calc(100cqh * 16 / 9))) / 2 + 8px));
-  bottom: max(8px, calc((100cqh - min(100cqh, calc(100cqw * 9 / 16))) / 2 + 14px));
-  width: 262px;
-  display: grid;
-  gap: 6px;
-  padding: 8px;
-  background: rgba(20, 23, 42, 0.94);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  box-shadow: 0 12px 40px -16px rgba(0, 0, 0, 0.9);
-  font-size: 12px;
-}
+.cam-panel[hidden] { display: none !important; }
 .cam-panel[data-live="1"] { border-color: color-mix(in srgb, var(--heart) 55%, var(--line)); }
 .cam-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .cam-live { display: inline-flex; align-items: center; gap: 6px; font: 600 12px var(--pixel); color: var(--muted); }
@@ -549,9 +535,8 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 .cam-panel[data-live="1"] .cam-live i { background: var(--heart); animation: cam-pulse 1.6s ease-in-out infinite; }
 .cam-close { padding: 2px 6px; font-size: 11px; }
 .cam-msg { margin: 0; font-size: 12px; line-height: 1.35; color: var(--bone); }
-.cam-panel[data-state="error"] .cam-msg { color: #ffb3c0; }
-.cam-body { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px; align-items: start; }
-.cam-panel:not([data-live="1"]) .cam-body { display: none; }
+.cam-panel[data-state="error"] [data-cam-msg] { color: #ffb3c0; }
+.cam-body { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px; align-items: start; }
 .cam-view {
   position: relative;
   aspect-ratio: 4 / 3;
