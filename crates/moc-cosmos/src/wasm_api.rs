@@ -21,12 +21,12 @@ pub unsafe extern "C" fn moc_galaxy_step(
     dt: f32,
     calm: f32,
     focus: f32,
-    hr_delta: f32,
+    stress: f32,
     blinks_last_10s: u32,
     blinks_total: u32,
 ) {
     if let Some(galaxy) = ptr.as_mut() {
-        let fx = BrainEffects::from_signals(calm, focus, hr_delta, blinks_last_10s);
+        let fx = BrainEffects::from_signals(calm, focus, stress, blinks_last_10s);
         galaxy.step(dt, &fx, blinks_total);
     }
 }

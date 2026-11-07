@@ -105,13 +105,25 @@ const round = (v) => Math.round(v * 10000) / 10000;
 
 function runGesture(bitmap, ts) {
   const r = tasks.gesture.recognizeForVideo(bitmap, ts);
-  const lm = r?.landmarks?.[0];
-  const top = r?.gestures?.[0]?.[0];
+  const lms = r?.landmarks || [];
+  const hands = lms.map((lm, i) => {
+    const top = r?.gestures?.[i]?.[0];
+    const h = r?.handedness?.[i]?.[0];
+    return {
+      landmarks: lm.map((p) => ({ x: round(p.x), y: round(p.y), z: round(p.z) })),
+      name: top?.categoryName || 'None',
+      score: top?.score || 0,
+      handedness: h?.categoryName || null,
+      handednessScore: h?.score || 0,
+    };
+  });
+  const first = hands[0] || null;
   return {
-    hand: lm ? lm.map((p) => ({ x: round(p.x), y: round(p.y), z: round(p.z) })) : null,
-    name: top?.categoryName || 'None',
-    score: top?.score || 0,
-    handedness: r?.handedness?.[0]?.[0]?.categoryName || null,
+    hands,
+    hand: first ? first.landmarks : null,
+    name: first ? first.name : 'None',
+    score: first ? first.score : 0,
+    handedness: first ? first.handedness : null,
   };
 }
 

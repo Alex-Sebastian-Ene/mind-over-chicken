@@ -16,7 +16,7 @@ pub struct Light3D {
 #[derive(Clone, Copy, Debug)]
 pub struct BillboardVertex {
     pub center: [f32; 3],
-    pub offset: [f32; 2],
+    pub offset: [f32; 3],
     pub uv: [f32; 2],
 }
 
@@ -74,16 +74,20 @@ pub struct WebGl3DRenderer {
     // Billboard uniforms
     pub u_billboard_vp: WebGlUniformLocation,
     pub u_billboard_cam_right: WebGlUniformLocation,
+    pub u_billboard_cam_up: WebGlUniformLocation,
+    pub u_billboard_ground_forward: WebGlUniformLocation,
     pub u_billboard_night: WebGlUniformLocation,
-    pub u_billboard_up_scale: WebGlUniformLocation,
     pub u_billboard_sun_dir: Option<WebGlUniformLocation>,
     pub u_billboard_light_count: Option<WebGlUniformLocation>,
     pub u_billboard_light_pos: Option<WebGlUniformLocation>,
     pub u_billboard_light_rad: Option<WebGlUniformLocation>,
     pub u_billboard_light_int: Option<WebGlUniformLocation>,
     pub u_terrain_offset_x: WebGlUniformLocation,
+    pub u_terrain_offset_z: WebGlUniformLocation,
     pub u_water_offset_x: WebGlUniformLocation,
+    pub u_water_offset_z: WebGlUniformLocation,
     pub u_billboard_offset_x: WebGlUniformLocation,
+    pub u_billboard_offset_z: WebGlUniformLocation,
 
     /// Clear colour around the map (rgb 0..1): the world's deep sea, so the view's edges read
     /// as open ocean rather than a void. Set from JS with `Engine::set_backdrop`.
@@ -97,13 +101,14 @@ attribute vec3 a_normal;
 
 uniform mat4 u_viewProjection;
 uniform float u_offsetX; // east-west copy of the map (the planet wraps)
+uniform float u_offsetZ; // north-south copy for torus world (#111)
 
 varying vec2 v_texCoord;
 varying vec3 v_normal;
 varying vec3 v_worldPos;
 
 void main() {
-    vec3 wpos = a_position + vec3(u_offsetX, 0.0, 0.0);
+    vec3 wpos = a_position + vec3(u_offsetX, 0.0, u_offsetZ);
     v_worldPos = wpos;
     v_normal = a_normal;
     v_texCoord = a_texCoord;
@@ -186,6 +191,7 @@ attribute vec3 a_normal;
 uniform mat4 u_viewProjection;
 uniform mediump float u_time; // must match WATER_FS precision or the program fails to link
 uniform float u_offsetX;
+uniform float u_offsetZ;
 
 varying vec2 v_texCoord;
 varying vec3 v_worldPos;
@@ -197,7 +203,7 @@ void main() {
     float w2 = sin(pos.x * 0.28 - u_time * 3.1) * cos(pos.z * 0.24 + u_time * 2.7) * 0.14;
     pos.y += w1 + w2;
 
-    vec3 wpos = pos + vec3(u_offsetX, 0.0, 0.0);
+    vec3 wpos = pos + vec3(u_offsetX, 0.0, u_offsetZ);
     v_worldPos = wpos;
     v_texCoord = a_texCoord;
     gl_Position = u_viewProjection * vec4(wpos, 1.0);
@@ -278,24 +284,36 @@ void main() {
 
 const BILLBOARD_VS: &str = r#"
 attribute vec3 a_center;
-attribute vec2 a_offset;
+attribute vec3 a_offset;
 attribute vec2 a_texCoord;
 
 uniform mat4 u_viewProjection;
 uniform vec3 u_camRight;
-uniform float u_upScale; // 1 / cos(pitch): an upright sprite keeps its pixel height when seen from above
+uniform vec3 u_camUp;
+uniform vec3 u_groundForward;
 uniform float u_offsetX;
+uniform float u_offsetZ;
 
 varying vec2 v_texCoord;
 varying vec3 v_worldPos;
 
 void main() {
     v_texCoord = a_texCoord;
-    vec3 camUp = vec3(0.0, u_upScale, 0.0);
-    // 1.25x size boost so pixel sprites stand out clearly from orbit distance 300
-    vec3 worldPos = a_center + vec3(u_offsetX, 0.0, 0.0) + u_camRight * (a_offset.x * 1.25) + camUp * (a_offset.y * 1.25);
+    // Diorama cylindrical tilt: blend world-up with camera-up so sprites face the player comfortably
+    vec3 spriteUp = normalize(mix(vec3(0.0, 1.0, 0.0), u_camUp, 0.68));
+
+    // a_offset.x is along camRight
+    // a_offset.y is along spriteUp (height)
+    // a_offset.z is along groundForward (ground contact shadow)
+    vec3 worldPos = a_center + vec3(u_offsetX, 0.0, u_offsetZ)
+                  + u_camRight * (a_offset.x * 1.25)
+                  + spriteUp * (a_offset.y * 1.25)
+                  + u_groundForward * (a_offset.z * 1.25);
+
     v_worldPos = worldPos;
     gl_Position = u_viewProjection * vec4(worldPos, 1.0);
+    // Depth bias: pull billboard slightly forward in clip space so it never clips into ground triangles
+    gl_Position.z -= 0.003 * gl_Position.w;
 }
 "#;
 
@@ -315,7 +333,7 @@ uniform float u_lightInt[16];
 
 void main() {
     vec4 c = texture2D(u_texture, v_texCoord);
-    if (c.a < 0.1) discard;
+    if (c.a < 0.02) discard;
 
     // Sprite day vs night lighting
     vec3 nightTint = vec3(0.20, 0.28, 0.50);
@@ -535,12 +553,15 @@ impl WebGl3DRenderer {
         let u_billboard_cam_right = gl
             .get_uniform_location(&billboard_program, "u_camRight")
             .ok_or("Missing u_camRight in billboard shader")?;
+        let u_billboard_cam_up = gl
+            .get_uniform_location(&billboard_program, "u_camUp")
+            .ok_or("Missing u_camUp in billboard shader")?;
+        let u_billboard_ground_forward = gl
+            .get_uniform_location(&billboard_program, "u_groundForward")
+            .ok_or("Missing u_groundForward in billboard shader")?;
         let u_billboard_night = gl
             .get_uniform_location(&billboard_program, "u_night")
             .ok_or("Missing u_night in billboard shader")?;
-        let u_billboard_up_scale = gl
-            .get_uniform_location(&billboard_program, "u_upScale")
-            .ok_or("Missing u_upScale in billboard shader")?;
         let u_billboard_sun_dir = gl.get_uniform_location(&billboard_program, "u_sunDir");
         let u_billboard_light_count = gl.get_uniform_location(&billboard_program, "u_lightCount");
         let u_billboard_light_pos = gl.get_uniform_location(&billboard_program, "u_lightPos");
@@ -549,12 +570,21 @@ impl WebGl3DRenderer {
         let u_terrain_offset_x = gl
             .get_uniform_location(&terrain_program, "u_offsetX")
             .ok_or("Missing u_offsetX in terrain shader")?;
+        let u_terrain_offset_z = gl
+            .get_uniform_location(&terrain_program, "u_offsetZ")
+            .ok_or("Missing u_offsetZ in terrain shader")?;
         let u_water_offset_x = gl
             .get_uniform_location(&water_program, "u_offsetX")
             .ok_or("Missing u_offsetX in water shader")?;
+        let u_water_offset_z = gl
+            .get_uniform_location(&water_program, "u_offsetZ")
+            .ok_or("Missing u_offsetZ in water shader")?;
         let u_billboard_offset_x = gl
             .get_uniform_location(&billboard_program, "u_offsetX")
             .ok_or("Missing u_offsetX in billboard shader")?;
+        let u_billboard_offset_z = gl
+            .get_uniform_location(&billboard_program, "u_offsetZ")
+            .ok_or("Missing u_offsetZ in billboard shader")?;
 
         Ok(Self {
             gl,
@@ -594,16 +624,20 @@ impl WebGl3DRenderer {
             u_water_light_int,
             u_billboard_vp,
             u_billboard_cam_right,
+            u_billboard_cam_up,
+            u_billboard_ground_forward,
             u_billboard_night,
-            u_billboard_up_scale,
             u_billboard_sun_dir,
             u_billboard_light_count,
             u_billboard_light_pos,
             u_billboard_light_rad,
             u_billboard_light_int,
             u_terrain_offset_x,
+            u_terrain_offset_z,
             u_water_offset_x,
+            u_water_offset_z,
             u_billboard_offset_x,
+            u_billboard_offset_z,
             backdrop: [0.09, 0.17, 0.36],
         })
     }
@@ -716,6 +750,12 @@ impl WebGl3DRenderer {
         let aspect = 320.0 / 180.0;
         let (_view, _proj, view_proj) = camera.compute_matrices(aspect);
         let cam_right = Vec3::new(camera.yaw.cos(), 0.0, -camera.yaw.sin());
+        let ground_forward = Vec3::new(-camera.yaw.sin(), 0.0, -camera.yaw.cos());
+        let cam_up = Vec3::new(
+            -camera.yaw.sin() * camera.pitch.sin(),
+            camera.pitch.cos(),
+            -camera.yaw.cos() * camera.pitch.sin(),
+        );
 
         gl.enable(WebGlRenderingContext::DEPTH_TEST);
         gl.depth_func(WebGlRenderingContext::LEQUAL);
@@ -766,15 +806,40 @@ impl WebGl3DRenderer {
             bind_attr(gl, &self.terrain_program, "a_normal", 3, stride, 5 * 4),
         ];
 
+        // Determine visible wrap copies along both axes for seamless torus world (#111)
+        let map_w = crate::sprites::W as f32;
+        let map_h = crate::sprites::H as f32;
+        let view_radius_x = (camera.distance * 0.75 + 40.0).max(150.0);
+        let view_radius_z = (camera.distance * 0.55 + 30.0).max(120.0);
+
+        let mut x_offsets = vec![0.0f32];
+        if camera.target.x - view_radius_x < 0.0 {
+            x_offsets.push(-map_w);
+        }
+        if camera.target.x + view_radius_x > map_w {
+            x_offsets.push(map_w);
+        }
+
+        let mut z_offsets = vec![0.0f32];
+        if camera.target.z - view_radius_z < 0.0 {
+            z_offsets.push(-map_h);
+        }
+        if camera.target.z + view_radius_z > map_h {
+            z_offsets.push(map_h);
+        }
+
         gl.bind_buffer(WebGlRenderingContext::ELEMENT_ARRAY_BUFFER, Some(&self.terrain_ibo));
-        for off in WRAP_OFFSETS {
-            gl.uniform1f(Some(&self.u_terrain_offset_x), off);
-            gl.draw_elements_with_i32(
-                WebGlRenderingContext::TRIANGLES,
-                self.terrain_index_count,
-                WebGlRenderingContext::UNSIGNED_SHORT,
-                0,
-            );
+        for &off_z in &z_offsets {
+            for &off_x in &x_offsets {
+                gl.uniform1f(Some(&self.u_terrain_offset_x), off_x);
+                gl.uniform1f(Some(&self.u_terrain_offset_z), off_z);
+                gl.draw_elements_with_i32(
+                    WebGlRenderingContext::TRIANGLES,
+                    self.terrain_index_count,
+                    WebGlRenderingContext::UNSIGNED_SHORT,
+                    0,
+                );
+            }
         }
         unbind_attrs(gl, &terrain_attrs);
 
@@ -808,14 +873,17 @@ impl WebGl3DRenderer {
         gl.bind_buffer(WebGlRenderingContext::ELEMENT_ARRAY_BUFFER, Some(&self.water_ibo));
         // The glaze must not hide sprites standing in shallow water, so it doesn't write depth.
         gl.depth_mask(false);
-        for off in WRAP_OFFSETS {
-            gl.uniform1f(Some(&self.u_water_offset_x), off);
-            gl.draw_elements_with_i32(
-                WebGlRenderingContext::TRIANGLES,
-                self.water_index_count,
-                WebGlRenderingContext::UNSIGNED_SHORT,
-                0,
-            );
+        for &off_z in &z_offsets {
+            for &off_x in &x_offsets {
+                gl.uniform1f(Some(&self.u_water_offset_x), off_x);
+                gl.uniform1f(Some(&self.u_water_offset_z), off_z);
+                gl.draw_elements_with_i32(
+                    WebGlRenderingContext::TRIANGLES,
+                    self.water_index_count,
+                    WebGlRenderingContext::UNSIGNED_SHORT,
+                    0,
+                );
+            }
         }
         gl.depth_mask(true);
         unbind_attrs(gl, &water_attrs);
@@ -830,8 +898,19 @@ impl WebGl3DRenderer {
                 cam_right.y,
                 cam_right.z,
             );
+            gl.uniform3f(
+                Some(&self.u_billboard_cam_up),
+                cam_up.x,
+                cam_up.y,
+                cam_up.z,
+            );
+            gl.uniform3f(
+                Some(&self.u_billboard_ground_forward),
+                ground_forward.x,
+                ground_forward.y,
+                ground_forward.z,
+            );
             gl.uniform1f(Some(&self.u_billboard_night), night);
-            gl.uniform1f(Some(&self.u_billboard_up_scale), 1.0 / camera.pitch.cos().max(0.4));
             if let Some(loc) = self.u_billboard_sun_dir.as_ref() {
                 gl.uniform3f(Some(loc), sun_dir.x, sun_dir.y, sun_dir.z);
             }
@@ -867,13 +946,16 @@ impl WebGl3DRenderer {
             let b_stride = std::mem::size_of::<BillboardVertex>() as i32;
             let billboard_attrs = [
                 bind_attr(gl, &self.billboard_program, "a_center", 3, b_stride, 0),
-                bind_attr(gl, &self.billboard_program, "a_offset", 2, b_stride, 3 * 4),
-                bind_attr(gl, &self.billboard_program, "a_texCoord", 2, b_stride, 5 * 4),
+                bind_attr(gl, &self.billboard_program, "a_offset", 3, b_stride, 3 * 4),
+                bind_attr(gl, &self.billboard_program, "a_texCoord", 2, b_stride, 6 * 4),
             ];
 
-            for off in WRAP_OFFSETS {
-                gl.uniform1f(Some(&self.u_billboard_offset_x), off);
-                gl.draw_arrays(WebGlRenderingContext::TRIANGLES, 0, billboards.len() as i32);
+            for &off_z in &z_offsets {
+                for &off_x in &x_offsets {
+                    gl.uniform1f(Some(&self.u_billboard_offset_x), off_x);
+                    gl.uniform1f(Some(&self.u_billboard_offset_z), off_z);
+                    gl.draw_arrays(WebGlRenderingContext::TRIANGLES, 0, billboards.len() as i32);
+                }
             }
             unbind_attrs(gl, &billboard_attrs);
         }
@@ -883,10 +965,6 @@ impl WebGl3DRenderer {
         gl.bind_framebuffer(WebGlRenderingContext::FRAMEBUFFER, None);
     }
 }
-
-/// The planet wraps east-west: draw the map, and the copies either side of it, so panning
-/// across the date line shows continuous land and sea instead of the map's edge.
-const WRAP_OFFSETS: [f32; 3] = [-(crate::sprites::W as f32), 0.0, crate::sprites::W as f32];
 
 /// Point a vertex attribute at the bound ARRAY_BUFFER. Returns None, and touches nothing, when
 /// the shader compiler stripped the attribute (location -1); `-1 as u32` would otherwise be

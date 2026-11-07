@@ -72,7 +72,26 @@ export class MLPPolicy {
   }
 }
 
+let RustAiPolicyClass = null;
+
+export function setRustAiPolicy(cls) {
+  RustAiPolicyClass = cls;
+}
+
 export async function loadPolicy(url = new URL('./stone_policy.json', import.meta.url)) {
+  if (RustAiPolicyClass) {
+    try {
+      const wasm = new RustAiPolicyClass();
+      return {
+        obsSize: 18,
+        act: (obs, { greedy = true } = {}) => wasm.act(new Float32Array(obs), greedy, Math.random()),
+        probs: (obs) => Array.from(wasm.probs(new Float32Array(obs))),
+        selfCheck: () => wasm.self_check(),
+      };
+    } catch (e) {
+      console.warn('RustAiPolicy fallback to JS policy:', e);
+    }
+  }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`policy: ${res.status} loading ${url}`);
   return new MLPPolicy(await res.json());

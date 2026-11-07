@@ -2,7 +2,7 @@
 // first ten seconds of play. Each of those worlds listens mainly to ONE brain channel, so you
 // steer different civilisations with different mental states:
 //   calm  → harvests and growth        focus → research and era progress
-//   pulse → its goat market's booms and crashes     blink → storms and lightning
+//   stress → its goat market's booms and crashes    blink → storms and lightning
 // Every world still feels a little of every channel. They run on their own in fast-forward
 // (Stone Age → Space Age in about a minute); space-faring worlds send ships to settle barren ones.
 //
@@ -21,7 +21,7 @@
 import { rand, pick, chance } from '../sim/util.js';
 import { generateWorld } from './worldgen.js';
 import { label } from '../eras/stone.js';
-import { SIM, TEMPERAMENT, ERAS, newPlanetState, brainEffects, stepPlanet, blinkPlanet, arriveShip, newMind, stepMind, logHistory, reachMilestone } from './planet-sim.js';
+import { SIM, TEMPERAMENT, ERAS, newPlanetState, brainEffects, stepPlanet, blinkPlanet, arriveShip, newMind, stepMind, logHistory, reachMilestone, trackCampaignPop } from './planet-sim.js';
 import { PlanetSurface } from './surface.js';
 
 export const ERA_NAMES = ['stone', 'farming', 'industry', 'space'];
@@ -43,10 +43,16 @@ const ATMOS = { temperate: [110, 175, 255], desert: [255, 190, 120], ice: [190, 
 export const CHANNELS = {
   calm: { name: 'Stillwater', biome: 'temperate', born: 'Born from your calm', label: 'Calm', color: '#59d8c8' },
   focus: { name: 'Lumen', biome: 'alien', born: 'Born from your focus', label: 'Focus', color: '#ffcf4a' },
-  pulse: { name: 'Thrum', biome: 'desert', born: 'Born from your pulse', label: 'Pulse', color: '#ff5a72' },
+  stress: { name: 'Thrum', biome: 'desert', born: 'Born from your stress', label: 'Stress', color: '#ff5a72' },
   blink: { name: 'Flicker', biome: 'ice', born: 'Born from your blinks', label: 'Blinks', color: '#c9d7ff' },
   mixed: { label: 'Everything', color: '#a3a6c4' },
 };
+
+let RustGalaxyClass = null;
+
+export function setRustGalaxy(cls) {
+  RustGalaxyClass = cls;
+}
 
 export function fmtPop(n) {
   if (n <= 0) return 'barren';
@@ -56,6 +62,13 @@ export function fmtPop(n) {
 
 export class Galaxy {
   constructor() {
+    if (RustGalaxyClass) {
+      try {
+        this.wasm = new RustGalaxyClass(Math.floor(Math.random() * 100000));
+      } catch (e) {
+        this.wasm = null;
+      }
+    }
     this.planets = [];
     this.ships = [];
     this.log = [];
@@ -203,6 +216,7 @@ export class Galaxy {
 
   // Called for every player blink: storms on the blink world.
   onBlink() {
+    if (this.wasm) this.wasm.on_blink();
     this.recentBlinks.push(this.time);
     for (const p of this.planets) {
       const attended = p === this.attended;
@@ -233,12 +247,34 @@ export class Galaxy {
     const fx = brainEffects({
       calm: brain.calm,
       focus: brain.focus,
-      hrDelta: brain.hr ? (brain.hrDelta?.() ?? 0) : 0,
+      stress: brain.stress,           // EEG agitation or face anger, from the brain
       blinksLast10s: this.recentBlinks.length,
-      panic: brain.panic,
       anger: opts.anger ?? 0,
     });
     this.fx = fx;
+    if (this.wasm) {
+      this.wasm.step(dt, brain.calm || 0, brain.focus || 0, brain.stress || 0, this.recentBlinks.length, brain.blinks || 0);
+      const attIdx = this.attended ? this.planets.indexOf(this.attended) : -1;
+      this.wasm.set_attended(attIdx);
+      const count = this.wasm.planet_count();
+      for (let i = 0; i < count && i < this.planets.length; i++) {
+        const p = this.planets[i];
+        if (p.mindSlot && p.forming && !this.wasm.planet_is_forming(i)) {
+          p.forming = false;
+          p.alive = true;
+          p.name = this.wasm.planet_name(i);
+          p.channel = this.wasm.planet_channel(i);
+          p.biome = this.wasm.planet_biome(i);
+          this.note(p, `A new world emerged from your ${p.channel}: behold ${p.name}!`);
+        }
+        if (!p.home) {
+          p.pop = this.wasm.planet_pop(i);
+          p.eraIndex = this.wasm.planet_era(i);
+          p.progress = this.wasm.planet_progress(i);
+          p.market = this.wasm.planet_market(i);
+        }
+      }
+    }
     this.sampleMind(playDt, brain, fx);
 
     for (const p of this.planets) {
@@ -250,7 +286,8 @@ export class Galaxy {
             const era = ERAS[home.eraIndex];
             if (era) { logHistory(p, `Reached ${era.name}`, 'event'); reachMilestone(p, era.key); }
           }
-          p.eraIndex = home.eraIndex; p.pop = home.pop;
+          trackCampaignPop(p, home);   // never "barren" through a time-skip; the civilisation's size (#105)
+          p.eraIndex = home.eraIndex;
           if (home.canLaunch && (p.launchT += dt * (0.6 + fx.focus)) >= SIM.LAUNCH_EVERY) { p.launchT = 0; this.launch(p); }
         }
         p.effect = 'You play this one by hand';
@@ -287,10 +324,7 @@ export class Galaxy {
       if (!ranked) return;
       this.planets.filter((p) => p.mindSlot).forEach((p, i) => this.revealQueue.push({ p, ch: ranked[i].ch }));
       this.revealT = 0;
-      const pulseStr = (brain.hr && brain.hr > 0)
-        ? `pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, `
-        : (m.stress ? `tension ${Math.round(m.stress * 100)}%, ` : '');
-      this.note(null, `Your first ${SIM.MIND_SECONDS} seconds: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, ${pulseStr}${m.blinks} blinks.`);
+      this.note(null, `Your first ${SIM.MIND_SECONDS} seconds: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, stress ${Math.round(m.stress * 100)}%, ${m.blinks} blinks.`);
       return;
     }
     // Staggered reveal so each world gets its moment.
@@ -328,9 +362,7 @@ export class Galaxy {
     p.effect = {
       calm: `Calm ${pct(fx.calm)} → growth ${signed(growth * 100, 1)}%/s`,
       focus: `Focus ${pct(fx.focus)} → research ×${research.toFixed(1)}`,
-      pulse: (this.humanBrain?.hr && this.humanBrain.hr > 0)
-        ? `Pulse ${signed(fx.hrDelta, 0)} bpm → goat index ${p.market.toFixed(0)}`
-        : `Tension ${pct(fx.stress)} → goat index ${p.market.toFixed(0)}`,
+      stress: `Stress ${pct(fx.stress)} → goat index ${p.market.toFixed(0)}`,
       blink: `Blinks ${(fx.blinkRate * 10).toFixed(0)}/10s → ${p.storms} storms`,
       mixed: `Growth ${signed(growth * 100, 1)}%/s · research ×${research.toFixed(1)}`,
     }[p.channel || 'mixed'];

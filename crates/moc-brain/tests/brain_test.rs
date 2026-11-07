@@ -129,14 +129,14 @@ fn test_calibration_traits_reproducibility() {
 
 #[test]
 fn test_calibration_sensor_formula() {
-    // Test the formula from docs/calibration.md and PR #63:
+    // Test the formula from docs/calibration.md:
     // friendliness = clamp(0.55 * calm + 0.35 * joy + 0.1 * (1 - anger))
-    // aggressiveness = clamp(0.5 * pulse + 0.35 * anger + 0.15 * focus)
-    // violence = clamp(0.45 * anger + 0.35 * pulse * (1 - calm) + 0.2 * blinks)
+    // aggressiveness = clamp(0.5 * stress + 0.35 * anger + 0.15 * focus)
+    // violence = clamp(0.45 * anger + 0.35 * stress * (1 - calm) + 0.2 * blinks)
     let features = SensorFeatures {
         calm: 0.8,
         focus: 0.2,
-        hr_delta: 0.0,
+        stress: 0.10,
         blink_rate: 1.0,
         joy: 0.9,
         anger: 0.0,
@@ -147,8 +147,47 @@ fn test_calibration_sensor_formula() {
     let traits = traits_from_features(&features);
     // friendliness: 0.55 * 0.8 + 0.35 * 0.9 + 0.1 * 1.0 = 0.44 + 0.315 + 0.1 = 0.855
     assert!((traits.friendliness - 0.855).abs() < 1e-3);
-    // aggressiveness: 0.5 * 0 + 0.35 * 0 + 0.15 * 0.2 = 0.03
-    assert!((traits.aggressiveness - 0.03).abs() < 1e-3);
+    // aggressiveness: 0.5 * 0.10 + 0.35 * 0 + 0.15 * 0.2 = 0.05 + 0.03 = 0.08
+    assert!((traits.aggressiveness - 0.08).abs() < 1e-3);
+}
+
+#[test]
+fn test_brain_stress_and_agitation() {
+    let mut brain = Brain::new();
+    let mut frame = BrainFrame::default();
+    frame.bands = Bands {
+        delta: 0.2,
+        theta: 0.2,
+        alpha: 0.3,
+        beta: 0.2,
+        gamma: 0.1,
+    };
+
+    // Feed frames at rest
+    for _ in 0..35 {
+        brain.update(0.1);
+        brain.ingest(&frame);
+    }
+
+    // Stress at rest should be neutral (~0.10 - 0.18)
+    assert!(brain.stress >= 0.08 && brain.stress <= 0.20, "stress at rest = {}", brain.stress);
+
+    // High agitation (gamma surge, alpha suppressed)
+    frame.bands = Bands {
+        delta: 0.1,
+        theta: 0.1,
+        alpha: 0.05,
+        beta: 0.3,
+        gamma: 0.7,
+    };
+
+    for _ in 0..20 {
+        brain.update(0.1);
+        brain.ingest(&frame);
+    }
+
+    assert!(brain.agitation > 0.3, "agitation should rise under muscle/gamma surge: {}", brain.agitation);
+    assert!(brain.stress > 0.3, "stress should rise with agitation: {}", brain.stress);
 }
 
 #[test]

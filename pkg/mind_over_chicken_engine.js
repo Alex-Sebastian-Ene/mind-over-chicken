@@ -84,14 +84,6 @@ export class Engine {
         return ret !== 0;
     }
     /**
-     * @param {number} now
-     * @param {number} bpm
-     * @param {number} intensity
-     */
-    audio_heartbeat(now, bpm, intensity) {
-        wasm.engine_audio_heartbeat(this.__wbg_ptr, now, bpm, intensity);
-    }
-    /**
      * @param {string} sound
      */
     audio_play(sound) {
@@ -328,17 +320,40 @@ export class Engine {
         wasm.engine_game_start_era(this.__wbg_ptr, index);
     }
     /**
+     * One tick of the Rust eras. `stress` is the JS brain's `brain.stress`
+     * (EEG agitation or face anger, 0..1, about 0.15 at rest).
      * @param {number} dt
      * @param {number} calm
      * @param {number} focus
-     * @param {number} panic
-     * @param {number} hr
-     * @param {number} rest_hr
-     * @param {number} hr_delta
+     * @param {number} stress
      * @param {number} blinks
      */
-    game_tick(dt, calm, focus, panic, hr, rest_hr, hr_delta, blinks) {
-        wasm.engine_game_tick(this.__wbg_ptr, dt, calm, focus, panic, hr, rest_hr, hr_delta, blinks);
+    game_tick(dt, calm, focus, stress, blinks) {
+        wasm.engine_game_tick(this.__wbg_ptr, dt, calm, focus, stress, blinks);
+    }
+    /**
+     * Standalone helper to generate a civ planet RGBA texture (#109).
+     * @param {number} seed
+     * @param {number} width
+     * @param {number} height
+     * @returns {Uint8Array}
+     */
+    static generate_civ_terrain(seed, width, height) {
+        const ret = wasm.engine_generate_civ_terrain(seed, width, height);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * Generate realistic procedural terrain using moc-terrain (#109).
+     * Updates the engine's internal heightmap, 3D relief mesh, and base pixel texture.
+     * @param {number} seed
+     */
+    generate_terrain(seed) {
+        const ret = wasm.engine_generate_terrain(this.__wbg_ptr, seed);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
     }
     /**
      * @returns {number}
@@ -374,6 +389,13 @@ export class Engine {
     get_camera_yaw() {
         const ret = wasm.engine_get_camera_yaw(this.__wbg_ptr);
         return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get_continent_count() {
+        const ret = wasm.engine_get_continent_count(this.__wbg_ptr);
+        return ret >>> 0;
     }
     /**
      * @returns {number}
@@ -520,6 +542,20 @@ export class Engine {
     /**
      * @returns {number}
      */
+    get_site_fire_x() {
+        const ret = wasm.engine_get_site_fire_x(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get_site_fire_y() {
+        const ret = wasm.engine_get_site_fire_y(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
     get_site_hangar_x() {
         const ret = wasm.engine_get_site_hangar_x(this.__wbg_ptr);
         return ret;
@@ -560,12 +596,65 @@ export class Engine {
         return ret;
     }
     /**
+     * @param {number} tx
+     * @param {number} ty
+     * @returns {Int16Array}
+     */
+    get_terrain_field(tx, ty) {
+        const ret = wasm.engine_get_terrain_field(this.__wbg_ptr, tx, ty);
+        var v1 = getArrayI16FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 2, 2);
+        return v1;
+    }
+    /**
+     * @param {number} tx
+     * @param {number} ty
+     * @returns {Int16Array}
+     */
+    get_terrain_sea_field(tx, ty) {
+        const ret = wasm.engine_get_terrain_sea_field(this.__wbg_ptr, tx, ty);
+        var v1 = getArrayI16FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 2, 2);
+        return v1;
+    }
+    /**
      * @param {number} x
      * @param {number} y
      * @returns {number}
      */
     get_terrain_type(x, y) {
         const ret = wasm.engine_get_terrain_type(this.__wbg_ptr, x, y);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get_tree_count() {
+        const ret = wasm.engine_get_tree_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    get_tree_variant(idx) {
+        const ret = wasm.engine_get_tree_variant(this.__wbg_ptr, idx);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    get_tree_x(idx) {
+        const ret = wasm.engine_get_tree_x(this.__wbg_ptr, idx);
+        return ret;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    get_tree_y(idx) {
+        const ret = wasm.engine_get_tree_y(this.__wbg_ptr, idx);
         return ret;
     }
     init_3d() {
@@ -604,6 +693,15 @@ export class Engine {
      */
     is_game_finished() {
         const ret = wasm.engine_is_game_finished(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    is_terrain_reachable(x, y) {
+        const ret = wasm.engine_is_terrain_reachable(this.__wbg_ptr, x, y);
         return ret !== 0;
     }
     /**
@@ -724,9 +822,7 @@ export class Engine {
     }
     /**
      * Use the JS world's heights (row-major W×H, 0..1, sea level 0.33) for the 3D mesh, the
-     * raycast and where billboards stand. The engine's own `Terrain` is still the old single
-     * island, so without this the relief doesn't match the map the simulation runs on.
-     * Call after `init_world`.
+     * raycast and where billboards stand.
      * @param {Float32Array | number[]} heights
      */
     set_heightmap(heights) {
@@ -736,6 +832,14 @@ export class Engine {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
+    }
+    /**
+     * @param {string} biome_name
+     */
+    set_terrain_biome(biome_name) {
+        const ptr0 = passStringToWasm0(biome_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.engine_set_terrain_biome(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * @param {HTMLCanvasElement} canvas
@@ -754,6 +858,150 @@ export class Engine {
     }
 }
 if (Symbol.dispose) Engine.prototype[Symbol.dispose] = Engine.prototype.free;
+
+export class PointerGesture {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        PointerGestureFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_pointergesture_free(ptr, 0);
+    }
+    /**
+     * A main-button or touch press. `sx, sy` screen pixels; `wx, wy` world units.
+     * @param {number} id
+     * @param {number} sx
+     * @param {number} sy
+     * @param {number} wx
+     * @param {number} wy
+     */
+    down(id, sx, sy, wx, wy) {
+        wasm.pointergesture_down(this.__wbg_ptr, id, sx, sy, wx, wy);
+    }
+    /**
+     * @returns {boolean}
+     */
+    is_panning() {
+        const ret = wasm.pointergesture_is_panning(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Pointer moved. Returns true when this move pans the map; read the delta with
+     * `pan_dx()` / `pan_dy()` (world units since the previous move). Returns false while the
+     * press is still a possible tap, or for another pointer.
+     * @param {number} id
+     * @param {number} sx
+     * @param {number} sy
+     * @param {number} wx
+     * @param {number} wy
+     * @returns {boolean}
+     */
+    moved(id, sx, sy, wx, wy) {
+        const ret = wasm.pointergesture_moved(this.__wbg_ptr, id, sx, sy, wx, wy);
+        return ret !== 0;
+    }
+    /**
+     * `threshold_px`: how far (screen pixels) a press must move before it counts as a drag.
+     * @param {number} threshold_px
+     */
+    constructor(threshold_px) {
+        const ret = wasm.pointergesture_new(threshold_px);
+        this.__wbg_ptr = ret;
+        PointerGestureFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * Is this pointer the press being tracked?
+     * @param {number} id
+     * @returns {boolean}
+     */
+    owns(id) {
+        const ret = wasm.pointergesture_owns(this.__wbg_ptr, id);
+        return ret !== 0;
+    }
+    /**
+     * @returns {number}
+     */
+    pan_dx() {
+        const ret = wasm.pointergesture_pan_dx(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    pan_dy() {
+        const ret = wasm.pointergesture_pan_dy(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Press ended. Returns true when it was a tap (blink). A cancelled pointer never taps.
+     * @param {number} id
+     * @param {boolean} cancelled
+     * @returns {boolean}
+     */
+    up(id, cancelled) {
+        const ret = wasm.pointergesture_up(this.__wbg_ptr, id, cancelled);
+        return ret !== 0;
+    }
+}
+if (Symbol.dispose) PointerGesture.prototype[Symbol.dispose] = PointerGesture.prototype.free;
+
+/**
+ * Standalone WebAssembly MLP Policy AI God (#25, #108)
+ */
+export class RustAiPolicy {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustAiPolicyFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustaipolicy_free(ptr, 0);
+    }
+    /**
+     * @param {Float32Array | number[]} obs
+     * @param {boolean} greedy
+     * @param {number} sample_val
+     * @returns {number}
+     */
+    act(obs, greedy, sample_val) {
+        const val2 = +greedy;
+        const val3 = +sample_val;
+        const ptr0 = passArrayF32ToWasm0(obs, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustaipolicy_act(this.__wbg_ptr, ptr0, len0, val2, val3);
+        return ret >>> 0;
+    }
+    constructor() {
+        const ret = wasm.rustaipolicy_new();
+        this.__wbg_ptr = ret;
+        RustAiPolicyFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @param {Float32Array | number[]} obs
+     * @returns {Float32Array}
+     */
+    probs(obs) {
+        const ptr0 = passArrayF32ToWasm0(obs, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustaipolicy_probs(this.__wbg_ptr, ptr0, len0);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    self_check() {
+        const ret = wasm.rustaipolicy_self_check(this.__wbg_ptr);
+        return ret;
+    }
+}
+if (Symbol.dispose) RustAiPolicy.prototype[Symbol.dispose] = RustAiPolicy.prototype.free;
 
 export class RustBlinkClassifier {
     __destroy_into_raw() {
@@ -947,6 +1195,532 @@ export class RustBlinkClassifier {
 }
 if (Symbol.dispose) RustBlinkClassifier.prototype[Symbol.dispose] = RustBlinkClassifier.prototype.free;
 
+/**
+ * Standalone WebAssembly Brain signal processor and personal model (#20, #108)
+ */
+export class RustBrain {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustBrainFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustbrain_free(ptr, 0);
+    }
+    /**
+     * @returns {number}
+     */
+    accuracy() {
+        const ret = wasm.rustbrain_accuracy(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    anger() {
+        const ret = wasm.rustbrain_anger(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    blinks() {
+        const ret = wasm.rustbrain_blinks(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    calm() {
+        const ret = wasm.rustbrain_calm(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    focus() {
+        const ret = wasm.rustbrain_focus(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {number} delta
+     * @param {number} theta
+     * @param {number} alpha
+     * @param {number} beta
+     * @param {number} gamma
+     * @param {boolean} blink
+     * @param {number} hr
+     * @param {number} tilt_x
+     * @param {number} tilt_y
+     * @param {number} motion
+     * @param {number} quality
+     * @returns {boolean}
+     */
+    ingest(delta, theta, alpha, beta, gamma, blink, hr, tilt_x, tilt_y, motion, quality) {
+        const ret = wasm.rustbrain_ingest(this.__wbg_ptr, delta, theta, alpha, beta, gamma, blink, hr, tilt_x, tilt_y, motion, quality);
+        return ret !== 0;
+    }
+    constructor() {
+        const ret = wasm.rustbrain_new();
+        this.__wbg_ptr = ret;
+        RustBrainFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @returns {boolean}
+     */
+    retrain() {
+        const ret = wasm.rustbrain_retrain(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @param {number} cue_id
+     */
+    set_cue(cue_id) {
+        wasm.rustbrain_set_cue(this.__wbg_ptr, cue_id);
+    }
+    /**
+     * @returns {number}
+     */
+    stress() {
+        const ret = wasm.rustbrain_stress(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {number} dt
+     * @returns {boolean}
+     */
+    update(dt) {
+        const ret = wasm.rustbrain_update(this.__wbg_ptr, dt);
+        return ret !== 0;
+    }
+}
+if (Symbol.dispose) RustBrain.prototype[Symbol.dispose] = RustBrain.prototype.free;
+
+/**
+ * Standalone WebAssembly Calibration traits (#54, #108)
+ */
+export class RustCalibration {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustCalibrationFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustcalibration_free(ptr, 0);
+    }
+    /**
+     * @param {number} seed
+     * @returns {Float32Array}
+     */
+    static random_traits(seed) {
+        const ret = wasm.rustcalibration_random_traits(seed);
+        return ret;
+    }
+    /**
+     * @param {number} calm
+     * @param {number} focus
+     * @param {number} stress
+     * @param {number} blink_rate
+     * @param {number} joy
+     * @param {number} anger
+     * @returns {Float32Array}
+     */
+    static traits_from_sensors(calm, focus, stress, blink_rate, joy, anger) {
+        const ret = wasm.rustcalibration_traits_from_sensors(calm, focus, stress, blink_rate, joy, anger);
+        return ret;
+    }
+}
+if (Symbol.dispose) RustCalibration.prototype[Symbol.dispose] = RustCalibration.prototype.free;
+
+/**
+ * Standalone WebAssembly Cast Controller for camera god powers (#33, #108)
+ */
+export class RustCastController {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustCastControllerFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustcastcontroller_free(ptr, 0);
+    }
+    /**
+     * @param {string} spell_id
+     * @param {number} now
+     * @returns {number}
+     */
+    cooldown_frac(spell_id, now) {
+        const val2 = +now;
+        const ptr0 = passStringToWasm0(spell_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustcastcontroller_cooldown_frac(this.__wbg_ptr, ptr0, len0, val2);
+        return ret;
+    }
+    /**
+     * @param {string} spell_id
+     * @param {number} now
+     * @returns {number}
+     */
+    cooldown_left(spell_id, now) {
+        const val2 = +now;
+        const ptr0 = passStringToWasm0(spell_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustcastcontroller_cooldown_left(this.__wbg_ptr, ptr0, len0, val2);
+        return ret;
+    }
+    constructor() {
+        const ret = wasm.rustcastcontroller_new();
+        this.__wbg_ptr = ret;
+        RustCastControllerFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @param {string} spell_id
+     * @param {number} now
+     * @returns {boolean}
+     */
+    ready(spell_id, now) {
+        const val2 = +now;
+        const ptr0 = passStringToWasm0(spell_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustcastcontroller_ready(this.__wbg_ptr, ptr0, len0, val2);
+        return ret !== 0;
+    }
+    reset() {
+        wasm.rustcastcontroller_reset(this.__wbg_ptr);
+    }
+    /**
+     * @param {string} gesture
+     * @returns {string | undefined}
+     */
+    spell_for(gesture) {
+        const ptr0 = passStringToWasm0(gesture, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustcastcontroller_spell_for(this.__wbg_ptr, ptr0, len0);
+        let v2;
+        if (ret[0] !== 0) {
+            v2 = getStringFromWasm0(ret[0], ret[1]);
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v2;
+    }
+    /**
+     * @param {string} spell_id
+     * @param {number} now
+     * @returns {boolean}
+     */
+    trigger(spell_id, now) {
+        const val2 = +now;
+        const ptr0 = passStringToWasm0(spell_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustcastcontroller_trigger(this.__wbg_ptr, ptr0, len0, val2);
+        return ret !== 0;
+    }
+    /**
+     * @param {string} gesture
+     * @param {number} score
+     * @param {number} now
+     * @returns {Array<any>}
+     */
+    update(gesture, score, now) {
+        const val2 = +score;
+        const val3 = +now;
+        const ptr0 = passStringToWasm0(gesture, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustcastcontroller_update(this.__wbg_ptr, ptr0, len0, val2, val3);
+        return ret;
+    }
+}
+if (Symbol.dispose) RustCastController.prototype[Symbol.dispose] = RustCastController.prototype.free;
+
+/**
+ * Standalone WebAssembly Face Emotion Tracker (#33, #108)
+ */
+export class RustEmotionTracker {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustEmotionTrackerFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustemotiontracker_free(ptr, 0);
+    }
+    /**
+     * @param {number} calibrate_seconds
+     */
+    constructor(calibrate_seconds) {
+        const ret = wasm.rustemotiontracker_new(calibrate_seconds);
+        this.__wbg_ptr = ret;
+        RustEmotionTrackerFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    reset() {
+        wasm.rustemotiontracker_reset(this.__wbg_ptr);
+    }
+    /**
+     * @param {boolean} has_face
+     * @param {number} mouth_smile_left
+     * @param {number} mouth_smile_right
+     * @param {number} brow_down_left
+     * @param {number} brow_down_right
+     * @param {number} mouth_press_left
+     * @param {number} mouth_press_right
+     * @param {number} jaw_open
+     * @param {number} brow_inner_up
+     * @param {number} eye_wide_left
+     * @param {number} eye_wide_right
+     * @param {number} mouth_frown_left
+     * @param {number} mouth_frown_right
+     * @param {number} dt
+     * @returns {Array<any>}
+     */
+    update_direct(has_face, mouth_smile_left, mouth_smile_right, brow_down_left, brow_down_right, mouth_press_left, mouth_press_right, jaw_open, brow_inner_up, eye_wide_left, eye_wide_right, mouth_frown_left, mouth_frown_right, dt) {
+        const ret = wasm.rustemotiontracker_update_direct(this.__wbg_ptr, has_face, mouth_smile_left, mouth_smile_right, brow_down_left, brow_down_right, mouth_press_left, mouth_press_right, jaw_open, brow_inner_up, eye_wide_left, eye_wide_right, mouth_frown_left, mouth_frown_right, dt);
+        return ret;
+    }
+}
+if (Symbol.dispose) RustEmotionTracker.prototype[Symbol.dispose] = RustEmotionTracker.prototype.free;
+
+/**
+ * Standalone WebAssembly Finger Controller for smoothing, deadzone and pinching (#33, #67, #108)
+ */
+export class RustFingerController {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustFingerControllerFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustfingercontroller_free(ptr, 0);
+    }
+    constructor() {
+        const ret = wasm.rustfingercontroller_new();
+        this.__wbg_ptr = ret;
+        RustFingerControllerFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    reset() {
+        wasm.rustfingercontroller_reset(this.__wbg_ptr);
+    }
+    /**
+     * @param {Float64Array | number[] | null | undefined} landmarks
+     * @param {string} gesture
+     * @param {number} score
+     * @param {number} now
+     * @param {number} aspect
+     * @returns {Array<any>}
+     */
+    update(landmarks, gesture, score, now, aspect) {
+        const val3 = +score;
+        const val4 = +now;
+        const val5 = +aspect;
+        let ptr0, len0, ptr1, len1;
+        try {
+            ptr0 = isLikeNone(landmarks) ? 0 : passArrayF64ToWasm0(landmarks, wasm.__wbindgen_malloc);
+            len0 = WASM_VECTOR_LEN;
+            ptr1 = passStringToWasm0(gesture, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len1 = WASM_VECTOR_LEN;
+        } catch (e) {
+            if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+            if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 8, 8); }
+            throw e;
+        }
+        const ret = wasm.rustfingercontroller_update(this.__wbg_ptr, ptr0, len0, ptr1, len1, val3, val4, val5);
+        return ret;
+    }
+}
+if (Symbol.dispose) RustFingerController.prototype[Symbol.dispose] = RustFingerController.prototype.free;
+
+/**
+ * Standalone WebAssembly Galaxy & Multi-World Simulator (#24, #108)
+ */
+export class RustGalaxy {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustGalaxyFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustgalaxy_free(ptr, 0);
+    }
+    /**
+     * @returns {number}
+     */
+    get_attended() {
+        const ret = wasm.rustgalaxy_get_attended(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {boolean}
+     */
+    is_mind_done() {
+        const ret = wasm.rustgalaxy_is_mind_done(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @param {number} seed
+     */
+    constructor(seed) {
+        const ret = wasm.rustgalaxy_new(seed);
+        this.__wbg_ptr = ret;
+        RustGalaxyFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    on_blink() {
+        wasm.rustgalaxy_on_blink(this.__wbg_ptr);
+    }
+    /**
+     * @param {number} idx
+     * @returns {string}
+     */
+    planet_biome(idx) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.rustgalaxy_planet_biome(this.__wbg_ptr, idx);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @param {number} idx
+     * @returns {string}
+     */
+    planet_channel(idx) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.rustgalaxy_planet_channel(this.__wbg_ptr, idx);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {number}
+     */
+    planet_count() {
+        const ret = wasm.rustgalaxy_planet_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    planet_era(idx) {
+        const ret = wasm.rustgalaxy_planet_era(this.__wbg_ptr, idx);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} idx
+     * @returns {boolean}
+     */
+    planet_is_alive(idx) {
+        const ret = wasm.rustgalaxy_planet_is_alive(this.__wbg_ptr, idx);
+        return ret !== 0;
+    }
+    /**
+     * @param {number} idx
+     * @returns {boolean}
+     */
+    planet_is_forming(idx) {
+        const ret = wasm.rustgalaxy_planet_is_forming(this.__wbg_ptr, idx);
+        return ret !== 0;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    planet_market(idx) {
+        const ret = wasm.rustgalaxy_planet_market(this.__wbg_ptr, idx);
+        return ret;
+    }
+    /**
+     * @param {number} idx
+     * @returns {string}
+     */
+    planet_name(idx) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.rustgalaxy_planet_name(this.__wbg_ptr, idx);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    planet_pop(idx) {
+        const ret = wasm.rustgalaxy_planet_pop(this.__wbg_ptr, idx);
+        return ret;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    planet_pos_x(idx) {
+        const ret = wasm.rustgalaxy_planet_pos_x(this.__wbg_ptr, idx);
+        return ret;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    planet_pos_y(idx) {
+        const ret = wasm.rustgalaxy_planet_pos_y(this.__wbg_ptr, idx);
+        return ret;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    planet_progress(idx) {
+        const ret = wasm.rustgalaxy_planet_progress(this.__wbg_ptr, idx);
+        return ret;
+    }
+    /**
+     * @param {number} planet_idx
+     */
+    set_attended(planet_idx) {
+        wasm.rustgalaxy_set_attended(this.__wbg_ptr, planet_idx);
+    }
+    /**
+     * @param {number} dt
+     * @param {number} calm
+     * @param {number} focus
+     * @param {number} stress
+     * @param {number} blinks_last_10s
+     * @param {number} blinks_total
+     */
+    step(dt, calm, focus, stress, blinks_last_10s, blinks_total) {
+        wasm.rustgalaxy_step(this.__wbg_ptr, dt, calm, focus, stress, blinks_last_10s, blinks_total);
+    }
+}
+if (Symbol.dispose) RustGalaxy.prototype[Symbol.dispose] = RustGalaxy.prototype.free;
+
 export class RustImuTracker {
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
@@ -1009,10 +1783,15 @@ export class RustImuTracker {
         wasm.rustimutracker_cancel_motion_calibration(this.__wbg_ptr);
     }
     /**
-     * Fits a 2D Ridge Regression + Piecewise Directional Reach model in Rust mapping
-     * `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
-     * Automatically discovers axis signs, high vertical pitch sensitivity, cross-axis coupling,
-     * and separate Left/Right/Up/Down edge reach scales so every full screen edge is reachable.
+     * Hybrid Smooth-Pursuit + Boundary-Fixation + Center-Checkpoint Solver:
+     * 1. Extracts Center checkpoints (`|tx| < 0.08 && |ty| < 0.08`) to remove any gyro yaw drift
+     *    accumulated across calibration and guarantee zero-intercept symmetry on reverse.
+     * 2. Searches optimal human smooth-pursuit reaction lag `L in 0..=2` on moving segments while
+     *    weighting stationary boundary-hold anchors (`3.0x`) for exact screen edge locking.
+     * 3. Solves zero-prior 3D sensor-to-head Ridge Regression (`[yaw, pitch, roll] -> (u_x, u_y)`)
+     *    with cross-axis Gram-Schmidt decoupling so vertical nods never leak horizontally.
+     * 4. Computes independent 4-boundary reach envelopes (`scale_left, scale_right, scale_up, scale_down`)
+     *    so 89% of the user's calibrated edge posture reaches 100% of all 4 screen boundaries & corners.
      * @returns {boolean}
      */
     finish_motion_calibration() {
@@ -1154,6 +1933,128 @@ export class RustImuTracker {
     }
 }
 if (Symbol.dispose) RustImuTracker.prototype[Symbol.dispose] = RustImuTracker.prototype.free;
+
+/**
+ * Standalone WebAssembly Simulated Headset Source (#20, #108)
+ */
+export class RustSimSource {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustSimSourceFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustsimsource_free(ptr, 0);
+    }
+    blink() {
+        wasm.rustsimsource_blink(this.__wbg_ptr);
+    }
+    /**
+     * @param {number} seed
+     */
+    constructor(seed) {
+        const ret = wasm.rustsimsource_new(seed);
+        this.__wbg_ptr = ret;
+        RustSimSourceFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @param {boolean} calm
+     * @param {boolean} focus
+     * @param {boolean} panic
+     */
+    set_input(calm, focus, panic) {
+        wasm.rustsimsource_set_input(this.__wbg_ptr, calm, focus, panic);
+    }
+    /**
+     * @param {number} dt
+     * @returns {Float32Array}
+     */
+    step(dt) {
+        const ret = wasm.rustsimsource_step(this.__wbg_ptr, dt);
+        return ret;
+    }
+}
+if (Symbol.dispose) RustSimSource.prototype[Symbol.dispose] = RustSimSource.prototype.free;
+
+/**
+ * Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109, #19, #128)
+ */
+export class RustWorldGen {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustWorldGenFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustworldgen_free(ptr, 0);
+    }
+    /**
+     * @returns {string}
+     */
+    continents_json() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.rustworldgen_continents_json(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {Float32Array}
+     */
+    heights() {
+        const ret = wasm.rustworldgen_heights(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {number} seed
+     */
+    constructor(seed) {
+        const ret = wasm.rustworldgen_new(seed);
+        this.__wbg_ptr = ret;
+        RustWorldGenFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    rgba() {
+        const ret = wasm.rustworldgen_rgba(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {string}
+     */
+    sites_json() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.rustworldgen_sites_json(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    types() {
+        const ret = wasm.rustworldgen_types(this.__wbg_ptr);
+        return ret;
+    }
+}
+if (Symbol.dispose) RustWorldGen.prototype[Symbol.dispose] = RustWorldGen.prototype.free;
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -1458,8 +2359,20 @@ function __wbg_get_imports() {
             const ret = new lAudioContext();
             return ret;
         }, arguments); },
+        __wbg_new_37eb45aaf5eeb820: function() {
+            const ret = new Array();
+            return ret;
+        },
         __wbg_new_bb74001155cb8ca8: function() {
             const ret = new Error();
+            return ret;
+        },
+        __wbg_new_from_slice_355c10c5d8f2addb: function(arg0, arg1) {
+            const ret = new Float32Array(getArrayF32FromWasm0(arg0, arg1));
+            return ret;
+        },
+        __wbg_new_from_slice_b8daf545a41c6aa0: function(arg0, arg1) {
+            const ret = new Uint8Array(getArrayU8FromWasm0(arg0, arg1));
             return ret;
         },
         __wbg_new_with_length_5c0c9043ebd9ec32: function(arg0) {
@@ -1469,6 +2382,10 @@ function __wbg_get_imports() {
         __wbg_ownerDocument_adefd47fd596fe80: function(arg0) {
             const ret = arg0.ownerDocument;
             return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        },
+        __wbg_push_c9f4893fc209f768: function(arg0, arg1) {
+            const ret = arg0.push(arg1);
+            return ret;
         },
         __wbg_querySelector_1555c239948f2bf0: function() { return handleError(function (arg0, arg1, arg2) {
             const ret = arg0.querySelector(getStringFromWasm0(arg1, arg2));
@@ -1614,17 +2531,22 @@ function __wbg_get_imports() {
         __wbg_viewport_aaac6dd8cff1831a: function(arg0, arg1, arg2, arg3, arg4) {
             arg0.viewport(arg1, arg2, arg3, arg4);
         },
-        __wbindgen_generic_0000000000000001: function(arg0, arg1) {
+        __wbindgen_generic_0000000000000001: function(arg0) {
+            // Cast intrinsic for `F64 -> Externref`.
+            const ret = arg0;
+            return ret;
+        },
+        __wbindgen_generic_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Ref(Slice(F32)) -> NamedExternref("Float32Array")`.
             const ret = getArrayF32FromWasm0(arg0, arg1);
             return ret;
         },
-        __wbindgen_generic_0000000000000002: function(arg0, arg1) {
+        __wbindgen_generic_0000000000000003: function(arg0, arg1) {
             // Cast intrinsic for `Ref(Slice(U16)) -> NamedExternref("Uint16Array")`.
             const ret = getArrayU16FromWasm0(arg0, arg1);
             return ret;
         },
-        __wbindgen_generic_0000000000000003: function(arg0, arg1) {
+        __wbindgen_generic_0000000000000004: function(arg0, arg1) {
             // Cast intrinsic for `Ref(String) -> Externref`.
             const ret = getStringFromWasm0(arg0, arg1);
             return ret;
@@ -1652,12 +2574,42 @@ const __wbindgen_enum_OscillatorType = ["sine", "square", "sawtooth", "triangle"
 const EngineFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_engine_free(ptr, 1));
+const PointerGestureFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_pointergesture_free(ptr, 1));
+const RustAiPolicyFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustaipolicy_free(ptr, 1));
 const RustBlinkClassifierFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_rustblinkclassifier_free(ptr, 1));
+const RustBrainFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustbrain_free(ptr, 1));
+const RustCalibrationFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustcalibration_free(ptr, 1));
+const RustCastControllerFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustcastcontroller_free(ptr, 1));
+const RustEmotionTrackerFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustemotiontracker_free(ptr, 1));
+const RustFingerControllerFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustfingercontroller_free(ptr, 1));
+const RustGalaxyFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustgalaxy_free(ptr, 1));
 const RustImuTrackerFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_rustimutracker_free(ptr, 1));
+const RustSimSourceFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustsimsource_free(ptr, 1));
+const RustWorldGenFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustworldgen_free(ptr, 1));
 
 function addToExternrefTable0(obj) {
     const idx = wasm.__externref_table_alloc();
@@ -1728,6 +2680,11 @@ function getArrayF32FromWasm0(ptr, len) {
     return getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
 }
 
+function getArrayI16FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getInt16ArrayMemory0().subarray(ptr / 2, ptr / 2 + len);
+}
+
 function getArrayU16FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint16ArrayMemory0().subarray(ptr / 2, ptr / 2 + len);
@@ -1752,6 +2709,22 @@ function getFloat32ArrayMemory0() {
         cachedFloat32ArrayMemory0 = new Float32Array(wasm.memory.buffer);
     }
     return cachedFloat32ArrayMemory0;
+}
+
+let cachedFloat64ArrayMemory0 = null;
+function getFloat64ArrayMemory0() {
+    if (cachedFloat64ArrayMemory0 === null || cachedFloat64ArrayMemory0.byteLength === 0) {
+        cachedFloat64ArrayMemory0 = new Float64Array(wasm.memory.buffer);
+    }
+    return cachedFloat64ArrayMemory0;
+}
+
+let cachedInt16ArrayMemory0 = null;
+function getInt16ArrayMemory0() {
+    if (cachedInt16ArrayMemory0 === null || cachedInt16ArrayMemory0.byteLength === 0) {
+        cachedInt16ArrayMemory0 = new Int16Array(wasm.memory.buffer);
+    }
+    return cachedInt16ArrayMemory0;
 }
 
 function getStringFromWasm0(ptr, len) {
@@ -1791,6 +2764,13 @@ function isLikeNone(x) {
 function passArrayF32ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 4, 4) >>> 0;
     getFloat32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passArrayF64ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 8, 8) >>> 0;
+    getFloat64ArrayMemory0().set(arg, ptr / 8);
     WASM_VECTOR_LEN = arg.length;
     return ptr;
 }
@@ -1874,6 +2854,8 @@ function __wbg_finalize_init(instance, module) {
     wasmModule = module;
     cachedDataViewMemory0 = null;
     cachedFloat32ArrayMemory0 = null;
+    cachedFloat64ArrayMemory0 = null;
+    cachedInt16ArrayMemory0 = null;
     cachedUint16ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();

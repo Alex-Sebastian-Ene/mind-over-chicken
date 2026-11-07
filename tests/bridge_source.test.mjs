@@ -13,7 +13,7 @@ function feed(src, n, make, t0 = 0) {
   let out;
   for (let i = 0; i < n; i++) {
     const t = t0 + i * 0.1;
-    out = src.normalise({ t, bands, blink: false, hr: null, quality: 1, ...make(t, i) });
+    out = src.normalise({ t, bands, blink: false, quality: 1, ...make(t, i) });
   }
   return out;
 }
@@ -84,7 +84,9 @@ test('without orientation it falls back to accelerometer tilt', () => {
 
 test('older bridges without the new keys still work', () => {
   const src = new S('ws://test');
+  // An older bridge also sent a heart-rate field ("hr"); the game no longer reads it.
   const f = src.normalise({ t: 0, bands, blink: false, hr: 70, accel: [0, 0, 1], motion: 0.3, quality: 0.9 });
+  assert.equal('hr' in f, false);
   assert.deepEqual(f.tilt, { x: 0, y: 0 });
   assert.equal(src.normalise({ t: 0.1, bands, accel: null, motion: 0 }).tilt, null);
 });

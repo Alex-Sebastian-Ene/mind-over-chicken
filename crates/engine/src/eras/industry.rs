@@ -1,4 +1,4 @@
-use super::{BrainInput, Era, EraEvent, Objective, SoundKind};
+use super::{BrainInput, Era, EraEvent, Objective, SoundKind, STRESS_LIMIT};
 
 const GDP_TARGET: f32 = 620.0;
 const IPO_HOLD_SECONDS: f32 = 8.0;
@@ -57,7 +57,7 @@ impl Era for IndustryEra {
     }
 
     fn powers(&self) -> &[&str] {
-        &["heart", "calm"]
+        &["stress", "calm"]
     }
 
     fn darkness(&self) -> f32 {
@@ -118,17 +118,14 @@ impl Era for IndustryEra {
             self.crash_cooldown -= dt;
         }
 
-        // Arousal: emergent market agitation derived from EEG panic and lack of calm,
-        // with optional pulse boost if PPG hardware is present (never a hard dependency).
-        let agitation = brain.panic.max((1.0 - brain.calm) * 0.7);
-        let pulse_arousal = if brain.hr_delta > 0.0 { (brain.hr_delta / 22.0).clamp(0.0, 1.8) } else { 0.0 };
-        let arousal = pulse_arousal.max(agitation * 1.5).clamp(0.0, 1.8);
+        // Arousal: the god's stress, as in src/eras/industry.js.
+        let arousal = brain.stress.clamp(0.0, 1.0);
         let herding = 1.0 + 1.6 * arousal;
 
         // Fundamental economy value grows with GDP
         self.value = 100.0 * (1.0 + (self.gdp / GDP_TARGET) * 0.7);
 
-        // Market price dynamics: fundamental pull + chartist momentum + heart herding
+        // Market price dynamics: fundamental pull + chartist momentum + stress herding
         let fundamental_pull = 0.4 * (self.value / self.price).ln();
         let chart_momentum = herding * self.momentum * 12.0;
 
@@ -147,7 +144,7 @@ impl Era for IndustryEra {
             self.gdp_reached = true;
         }
 
-        // Emergent crash condition: high heart rate arousal + rapid price plunge
+        // Emergent crash condition: high stress + rapid price plunge
         let is_plunging = self.momentum < -0.05 || (self.price < self.value * 0.6);
         if arousal > 0.6 && is_plunging && self.crash_cooldown <= 0.0 {
             self.recessions += 1;
@@ -172,9 +169,9 @@ impl Era for IndustryEra {
             self.momentum *= 0.5;
         }
 
-        // IPO countdown hold: steady mind (calm & low panic) completes IPO; pulse is optional
+        // IPO hold: steady nerves (stress at or below STRESS_LIMIT) complete the IPO
         if self.gdp >= GDP_TARGET && !self.ipo_done {
-            let steady = brain.calm >= 0.5 && brain.panic < 0.3 && (brain.hr_delta <= 0.0 || brain.hr_delta < 15.0);
+            let steady = brain.stress <= STRESS_LIMIT;
             if steady {
                 self.ipo_progress += dt;
                 if self.ipo_progress >= IPO_HOLD_SECONDS {
@@ -235,7 +232,7 @@ mod tests {
         // Normal market operations
         let calm_brain = BrainInput {
             calm: 0.8,
-            hr_delta: 0.0,
+            stress: 0.2,
             ..Default::default()
         };
         for _ in 0..30 {
@@ -244,11 +241,10 @@ mod tests {
         assert!(ind.gdp > 50.0);
         assert_eq!(ind.recessions, 0);
 
-        // Panic & agitation alone triggers emergent crash without needing any pulse sensor
+        // Stress triggers an emergent crash
         let panic_brain = BrainInput {
             calm: 0.0,
-            panic: 1.0,
-            hr_delta: 0.0, // No heart rate dependency!
+            stress: 1.0,
             ..Default::default()
         };
         // Introduce downward momentum
@@ -261,7 +257,7 @@ mod tests {
                 break;
             }
         }
-        assert!(crashed, "Agitation/panic must trigger an emergent market crash without pulse");
+        assert!(crashed, "Stress must trigger an emergent market crash");
         assert!(ind.recessions >= 1);
         assert!(ind.general_strike > 0.0);
 

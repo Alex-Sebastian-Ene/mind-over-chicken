@@ -1,9 +1,9 @@
 // Mind over Chicken: boot, scene flow, render pipeline and input.
 
 import { W, H, clamp } from './sim/util.js';
-import { World } from './world/terrain.js';
+import { World, setRustWorldGen } from './world/terrain.js';
 import { SimSource, BridgeSource } from './brain/sources.js';
-import { Brain } from './brain/brain.js';
+import { Brain, setRustBrain } from './brain/brain.js';
 import { Advisor } from './ui/advisor.js';
 import { Hud } from './ui/hud.js';
 import { EegPanel } from './ui/eeg-panel.js';
@@ -12,10 +12,14 @@ import { StoneAge } from './eras/stone.js';
 import { FarmingToKingdoms, InfoAge } from './eras/timeskip.js';
 import { Industry } from './eras/industry.js';
 import { SpaceAge } from './eras/space.js';
-import initEngine, { Engine, RustImuTracker, RustBlinkClassifier } from '../pkg/mind_over_chicken_engine.js';
+import initEngine, { Engine, RustImuTracker, RustBlinkClassifier, PointerGesture, RustWorldGen, RustCastController, RustFingerController, RustEmotionTracker, RustGalaxy, RustAiPolicy, RustBrain, RustSimSource, RustCalibration } from '../pkg/mind_over_chicken_engine.js';
 import { Cosmos } from './cosmos/cosmos.js';
-import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel } from './cosmos/galaxy.js';
+import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel, setRustGalaxy } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
+import { setRustCastController } from './camera/casts.js';
+import { setRustFingerController } from './camera/fingers.js';
+import { setRustEmotionTracker } from './camera/emotion.js';
+import { setRustAiPolicy } from './ai/policy.js';
 import { initDebug } from './camera/debug.js'; // camera debug (#67)
 import { Calibration, readCalibrationConfig } from './brain/calibration.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
@@ -40,9 +44,55 @@ const low = Object.assign(document.createElement('canvas'), { width: W, height: 
 const lowCtx = low.getContext('2d');
 let K = 3;
 let engine = null;
+let gesture = null; // Rust (input.rs): with the main button or a finger, a tap blinks and a drag pans
+// Pan the map by a drag (world units), both axes, wherever you are: a scene with its own camera
+// (the civ sandbox's big planet) takes it directly; otherwise the planet pans east–west (and
+// north–south on vast worlds), and in 3D the camera also moves north–south over the map.
+// 3D: the ground point you pressed on stays under the cursor (raycast in Rust), at any zoom/orbit.
+let grab3d = null;
+function groundAt(e) {
+  const r = screen.getBoundingClientRect();
+  const h = engine.screen_to_ground(e.clientX - r.left, e.clientY - r.top, r.width, r.height);
+  return h && h[0] >= 0 ? { x: h[0], z: h[1] } : null;
+}
+function grabPan3d(e) {
+  if (!grab3d) return false;
+  // Over hills, moving the camera changes which slope the ray hits, so refine a few times until
+  // the grabbed ground point is back under the cursor (each pass is one cheap Rust raycast).
+  for (let pass = 0; pass < 3; pass++) {
+    const g = groundAt(e);
+    if (!g) break;
+    // Wrap-aware east–west difference, then move the camera by it (x is owned by the planet pan).
+    let dx = grab3d.x - g.x; dx = ((dx + W * 1.5) % W) - W / 2;
+    const dz = grab3d.z - g.z;
+    if (Math.abs(dx) < 0.05 && Math.abs(dz) < 0.05) break;
+    if (dx) cosmos.pan(-dx);
+    // Apply now, not at the next frame: a fast mouse sends several moves per frame, and each one
+    // must raycast against the camera it already moved.
+    engine.set_camera_target(cosmos.mapX(W / 2), clamp(engine.get_camera_target_z() + dz, 0, H - 1));
+  }
+  cam3dBase = null;
+  return true;
+}
+function panMap(dx, dy) {
+  if (G?.scene?.panBy) { G.scene.panBy(dx, dy); return; }
+  cosmos.pan(dx, dy);
+  if (dy && in3dSurface()) {
+    engine.set_camera_target(engine.get_camera_target_x(), clamp(engine.get_camera_target_z() - dy, 0, H - 1));
+  }
+  cam3dBase = null;
+}
 
 try {
   await initEngine();
+  setRustWorldGen(RustWorldGen);
+  setRustCastController(RustCastController);
+  setRustFingerController(RustFingerController);
+  setRustEmotionTracker(RustEmotionTracker);
+  setRustGalaxy(RustGalaxy);
+  setRustAiPolicy(RustAiPolicy);
+  setRustBrain(RustBrain);
+  gesture = new PointerGesture(6);
   BridgeSource.setWasmClasses(RustImuTracker, RustBlinkClassifier);
   engine = new Engine('screen');
 } catch (err) {
@@ -99,13 +149,12 @@ const audio = {
   tick() { if (engine) engine.audio_play('tick'); else jsAudio.tick(); },
   rumble(dur) { if (engine) engine.audio_play('rumble'); else jsAudio.rumble(dur); },
   fanfare() { if (engine) engine.audio_play('fanfare'); else jsAudio.fanfare(); },
-  heartbeat(now, bpm, intensity) { if (engine) engine.audio_heartbeat(now, bpm, intensity); else jsAudio.heartbeat(now, bpm, intensity); },
 };
 const advisor = new Advisor($('advisor'));
 const hud = new Hud(document);
 const cosmos = new Cosmos();
 // What the HUD shows while you look at the galaxy.
-const galaxyHudScene = { label: 'Galaxy', powers: ['calm', 'focus', 'heart'], objectives: () => cosmos.galaxy?.objectives() || [] };
+const galaxyHudScene = { label: 'Galaxy', powers: ['calm', 'focus', 'stress'], objectives: () => cosmos.galaxy?.objectives() || [] };
 let hudScene = null;
 let G = null;
 let previewSource = null;
@@ -125,7 +174,10 @@ function setGameSource(nextSource) {
   }
 }
 
-const eegPanel = new EegPanel(document, {
+// A side panel that fails to start must not take the whole game (and every button) down.
+let eegPanel = null;
+try {
+  eegPanel = new EegPanel(document, {
   getSource: () => G?.source || previewSource,
   getBrain: () => G?.brain || previewBrain,
   onConnectBridge: async (url) => {
@@ -137,6 +189,9 @@ const eegPanel = new EegPanel(document, {
     setGameSource(new SimSource());
   },
 });
+} catch (err) {
+  console.error('EEG panel failed to start; the game runs without it:', err);
+}
 let fade = 0;           // 0..1 black overlay for transitions
 let pendingScene = null;
 let pendingTimer = 0;
@@ -267,7 +322,7 @@ function showBanner(scene, i) {
     return li;
   }));
   el.hidden = false;
-  banner = { t: 0 };
+  banner = { t: 0, manual: (i === 0) };
   G.brain.setCue(null);
 }
 
@@ -281,14 +336,78 @@ function dismissBanner() {
 
 let failTimer = null;
 function showFail(reason) {
-  $('failReason').textContent = reason;
+  let heading = 'Collapse';
+  let cause = 'The era has collapsed.';
+  let nextStep = 'Try again with focused calm and steady aim.';
+
+  if (typeof reason === 'string') {
+    if (reason.includes(': ')) {
+      const parts = reason.split(': ');
+      cause = parts[0].trim();
+      nextStep = parts.slice(1).join(': ').trim();
+      heading = cause;
+    } else {
+      cause = reason;
+      heading = reason;
+      const lower = reason.toLowerCase();
+      if (lower.includes('strike') || lower.includes('union')) {
+        nextStep = 'Maintain calm when workers strike to settle tensions and resume production.';
+      } else if (lower.includes('depression') || lower.includes('price')) {
+        nextStep = 'Steady your breathing and focus to stimulate goat market confidence.';
+      } else if (lower.includes('fire')) {
+        nextStep = 'Stay calm when the flame begins to fade to rekindle warmth.';
+      } else if (lower.includes('starv') || lower.includes('food')) {
+        nextStep = 'Strike mammoths with lightning so hunters can gather meat for the tribe.';
+      } else if (lower.includes('dark')) {
+        nextStep = 'Blink directly on the fire pit to strike and kindle the flame.';
+      }
+    }
+  } else if (reason && typeof reason === 'object') {
+    heading = reason.heading || reason.title || 'Collapse';
+    cause = reason.cause || reason.message || 'The tribe was overwhelmed.';
+    nextStep = reason.nextStep || reason.advice || 'Retry the era.';
+  }
+
+  $('failHeading').textContent = heading;
+  $('failCause').textContent = cause;
+  $('failAdvice').textContent = nextStep;
   $('failScreen').hidden = false;
+  $('biometricFeedbackAck').hidden = true;
+  updateAssistUI();
+
   audio.bad();
   clearTimeout(failTimer);
-  failTimer = setTimeout(retryEra, 5000);
+  failTimer = null; // No silent auto-retry (#86)
 }
+
+function updateAssistUI() {
+  const el = $('assistState');
+  if (el) {
+    el.textContent = G?.assistMode ? 'ON (Easier)' : 'Off';
+    el.style.color = G?.assistMode ? '#70d6ff' : 'inherit';
+  }
+}
+
+function toggleAssistMode() {
+  if (!G) return;
+  G.assistMode = !G.assistMode;
+  if (engine?.set_assist_mode) engine.set_assist_mode(G.assistMode);
+  updateAssistUI();
+}
+
+function quitToTitle() {
+  clearTimeout(failTimer);
+  failTimer = null;
+  $('failScreen').hidden = true;
+  $('banner').hidden = true;
+  banner = null;
+  G.scene = null;
+  $('titleScreen').hidden = false;
+}
+
 function retryEra() {
   clearTimeout(failTimer);
+  failTimer = null;
   if ($('failScreen').hidden) return;
   $('failScreen').hidden = true;
   restartScene();
@@ -308,7 +427,6 @@ function showEnd() {
     ['Countdown scrubs', x.scrubs ?? 0],
     ['Seconds of calm', Math.round(b.stats.calmSeconds)],
     ['Seconds of focus', Math.round(b.stats.focusSeconds)],
-    ['Peak heart rate', b.stats.peakHr ? `${Math.round(b.stats.peakHr)} bpm` : 'n/a'],
     ['Brain windows recorded', m.total()],
     ['Personal model accuracy', m.trained ? `${Math.round(m.accuracy * 100)}% (chance ${Math.round(m.chance * 100)}%)` : 'not trained'],
   ];
@@ -336,6 +454,7 @@ function render() {
   }
   lowCtx.imageSmoothingEnabled = false;
   lowCtx.setTransform(1, 0, 0, 1, 0, 0);
+  lowCtx.clearRect(0, 0, W, H);
   // 3D only on the surface itself: once the globe zoom starts, the flat 2D map takes over (the
   // 3D camera has already tipped over to that exact frame, so the hand-over is seamless).
   G.render3d = in3dSurface();
@@ -368,6 +487,7 @@ function render() {
     try {
       if (surface && G.render3d) {
         engine.upload_canvas(low);
+        G.world?.draw3d?.(engine);
         if (scene.draw3d) {
           scene.draw3d(engine, 0.016);
         } else if (scene.lights) {
@@ -438,26 +558,14 @@ function frame(ts) {
   const dt = Math.min(0.05, (ts - lastTs) / 1000 || 0.016);
   lastTs = ts;
   if (G) {
-    G.brain.update(dt);
+    G.brain.update(dt, G.mood);   // the camera's face anger counts toward brain.stress
     if (engine) {
       const b = G.brain;
-      engine.game_tick(
-        dt,
-        b.calm || 0,
-        b.focus || 0,
-        0,
-        b.hr || 0,
-        b.restHr || 70,
-        b.hrDelta(),
-        b.stats?.blinks || 0
-      );
-      if (b.hr > 0) {
-        engine.audio_heartbeat(performance.now() / 1000, b.hr, Math.max(0, b.hrDelta() / 30));
-      }
+      engine.game_tick(dt, b.calm || 0, b.focus || 0, b.stress ?? 0, b.stats?.blinks || 0);
     }
     if (banner) {
       banner.t += dt;
-      if (banner.t > 6) dismissBanner();
+      if (!banner.manual && banner.t > 8) dismissBanner();
     } else if (G.sandbox) {
       G.runTime += dt;   // the hand-played game stays paused in the sandbox
       G.calibration?.update(dt, G.brain, G.mood);
@@ -490,7 +598,7 @@ function frame(ts) {
     $('sourceStatus').textContent = previewSource.status;
     $('sourceStatus').dataset.ok = previewSource.connected ? '1' : '0';
   }
-  eegPanel.update();
+  eegPanel?.update();
   render();
 }
 function rafLoop() { frame(); requestAnimationFrame(rafLoop); }
@@ -586,12 +694,18 @@ screen.addEventListener('pointermove', (e) => {
     }
     return;
   }
+  if (gesture?.owns(e.pointerId)) {
+    const q = worldFromEvent(e);
+    if (gesture.moved(e.pointerId, e.clientX, e.clientY, q.x, q.y)) {
+      if (!grabPan3d(e)) panMap(gesture.pan_dx(), gesture.pan_dy());
+      return;
+    }
+  }
   if (panDrag && panDrag.id === e.pointerId) {
     // East–west, plus north–south on the vast worlds (planets #68). In 3D the camera follows the pan.
     const q = worldFromEvent(e);
-    cosmos.pan(q.x - panDrag.x, q.y - (panDrag.y ?? q.y));
+    panMap(q.x - panDrag.x, q.y - (panDrag.y ?? q.y));
     panDrag.x = q.x; panDrag.y = q.y;
-    cam3dBase = null;
     return;
   }
   const s = sim(); if (!s) return;
@@ -608,7 +722,7 @@ screen.addEventListener('pointerdown', (e) => {
     cosmos.pointerDown(e.pointerId, p.x, p.y);
     return;
   }
-  // Right-drag or Alt-drag orbits the camera, in 3D only. (Shift is the racing-pulse key.)
+  // Right-drag or Alt-drag orbits the camera, in 3D only. (Shift is the Stress key.)
   if (G && engine && engine.is_3d_mode() && !cosmos.active && (e.button === 2 || (e.button === 0 && e.altKey))) {
     e.preventDefault();
     screen.setPointerCapture?.(e.pointerId);
@@ -631,13 +745,32 @@ screen.addEventListener('pointerdown', (e) => {
     panDrag = { id: e.pointerId, x: q.x, y: q.y };
     return;
   }
-  const s = sim(); if (!s) return;
+  const s = sim();
+  if (gesture && G && e.button === 0) {
+    try { screen.setPointerCapture?.(e.pointerId); } catch {}
+    const q0 = worldFromEvent(e);
+    gesture.down(e.pointerId, e.clientX, e.clientY, q0.x, q0.y);
+    grab3d = in3dSurface() ? groundAt(e) : null;
+    if (s) { const a = surfaceAim(e); s.setAim(a.x, a.y); G.brain.aim.x = a.x; G.brain.aim.y = a.y; }
+    return; // the blink happens on release, if Rust says it was a tap
+  }
+  if (!s) return;
   const a = surfaceAim(e);
   s.setAim(a.x, a.y);
   G.brain.aim.x = a.x; G.brain.aim.y = a.y;
   s.blink();
 });
 const endPointer = (e) => {
+  if (gesture?.owns(e.pointerId)) {
+    const s = sim();
+    if (gesture.up(e.pointerId, e.type === 'pointercancel') && s && G) {
+      const a = surfaceAim(e);
+      s.setAim(a.x, a.y);
+      G.brain.aim.x = a.x; G.brain.aim.y = a.y;
+      s.blink();
+    }
+    return;
+  }
   if (orbitDrag && orbitDrag.id === e.pointerId) { orbitDrag = null; return; }
   if (panDrag && panDrag.id === e.pointerId) { panDrag = null; return; }
   if (!G || !cosmos.pointers.has(e.pointerId)) return;
@@ -664,13 +797,29 @@ screen.addEventListener('wheel', (e) => {
 }, { passive: false });
 screen.addEventListener('contextmenu', (e) => e.preventDefault());
 
+// Shift is the Stress demo key: full agitation on the emulated headset (input.panic).
 const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'panic' };
 window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input')) return;
+  if (!$('failScreen').hidden) {
+    if (e.code === 'Enter') { e.preventDefault(); retryEra(); return; }
+    if (e.code === 'KeyA') { e.preventDefault(); toggleAssistMode(); return; }
+    if (e.key === '?' || e.code === 'KeyH') {
+      e.preventDefault();
+      $('failScreen').hidden = true;
+      if (G?.scene?.intro) showBanner(G.scene, G.sceneIndex);
+      return;
+    }
+    if (e.code === 'Escape' || e.code === 'KeyQ') {
+      e.preventDefault();
+      quitToTitle();
+      return;
+    }
+  }
   if (e.code === 'KeyM') { toggleModel(); return; }
-  if (e.code === 'Escape' && eegPanel.wiz?.active) { eegPanel.closeWizard(); return; }
-  if (e.code === 'KeyE') { eegPanel.toggle(); return; }
-  if (e.code === 'KeyC') { eegPanel.calibrateCenter(); return; }
+  if (e.code === 'Escape' && eegPanel?.wiz?.active) { eegPanel?.closeWizard(); return; }
+  if (e.code === 'KeyE') { eegPanel?.toggle(); return; }
+  if (e.code === 'KeyC') { eegPanel?.calibrateCenter(); return; }
   if (e.code === 'KeyT') { toggle3D(); return; }
   if (e.code === 'KeyG') { toggleAIGod(); return; }
   if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { zoomOutFromSurface(); return; }
@@ -707,7 +856,7 @@ window.addEventListener('blur', () => { const s = sim(); if (s) Object.keys(s.in
 // Toolbar tiles double as touch controls for the simulated brain.
 document.querySelectorAll('[data-power]').forEach((tile) => {
   const power = tile.dataset.power;
-  const map = { calm: 'calm', focus: 'focus', heart: 'panic' };
+  const map = { calm: 'calm', focus: 'focus', stress: 'panic' };
   tile.addEventListener('pointerdown', (e) => {
     audio.unlock();
     const s = sim(); if (!s) return;
@@ -739,7 +888,7 @@ function toggle3D() {
   cam3dBase = null; cam3dTween = null;
   sync3dButton();
   const on = engine.is_3d_mode();
-  advisor.say('3d-toggle', on ? '3D view: right-drag to orbit, wheel to zoom.' : '2D classic view.', { mood: 'happy', priority: 2, cooldown: 1 });
+  advisor.say('3d-toggle', on ? '3D view: drag to pan, right-drag to orbit, wheel to zoom.' : '2D classic view.', { mood: 'happy', priority: 2, cooldown: 1 });
 }
 $('mode3dBtn')?.addEventListener('click', toggle3D);
 $('aiGodBtn')?.addEventListener('click', toggleAIGod);
@@ -751,6 +900,19 @@ $('soundBtn').addEventListener('click', () => {
 });
 $('bannerGo').addEventListener('click', dismissBanner);
 $('retryBtn').addEventListener('click', retryEra);
+$('assistBtn')?.addEventListener('click', toggleAssistMode);
+$('showHowBtn')?.addEventListener('click', () => {
+  $('failScreen').hidden = true;
+  if (G?.scene?.intro) showBanner(G.scene, G.sceneIndex);
+});
+$('quitTitleBtn')?.addEventListener('click', quitToTitle);
+$('biometricFeedbackBtn')?.addEventListener('click', () => {
+  $('biometricFeedbackAck').hidden = false;
+  if (G?.brain) {
+    G.brain.toleranceBonus = (G.brain.toleranceBonus || 0) + 0.15;
+    advisor?.say('assist', 'Tolerance widened. Take a deep breath; the gods are forgiving today.', { mood: 'happy', priority: 4, cooldown: 0 });
+  }
+});
 $('againBtn').addEventListener('click', () => { $('endScreen').hidden = true; newGame(new SimSource()); });
 $('endModelBtn').addEventListener('click', toggleModel);
 
@@ -811,11 +973,8 @@ function updateCosmosUi(dt) {
     }));
   }
   const m = gal.mind;
-  const pulseStr = (G?.brain?.hr && G.brain.hr > 0)
-    ? `pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, `
-    : (m.stress ? `tension ${Math.round(m.stress * 100)}%, ` : '');
   $('mindLine').textContent = m.done
-    ? `Read from your first 10 s: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, ${pulseStr}${m.blinks} blinks.`
+    ? `Read from your first 10 s: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, stress ${Math.round((m.stress || 0) * 100)}%, ${m.blinks} blinks.`
     : `Reading your mind: ${Math.max(0, Math.ceil(SIM.MIND_SECONDS - m.t))} s of play left.`;
   $('galaxyLog').replaceChildren(...gal.log.slice(0, 4).map((l) => { const li = document.createElement('li'); li.textContent = l.text; return li; }));
 }
@@ -855,7 +1014,7 @@ $('galaxyBtn').addEventListener('click', () => {
   $('endScreen').hidden = true;
   audio.unlock();
   openGalaxy({ fromEnding: true });
-  advisor.say('galaxy', 'Behold, my lord: the galaxy. Make planets. Keep your calm and focus near them.', { mood: 'happy', priority: 3, cooldown: 999 });
+  advisor.say('galaxy', 'Behold, my lord: the galaxy. Make planets. Stay calm near them.', { mood: 'happy', priority: 3, cooldown: 999 });
 });
 
 // ---------- title screen ----------
@@ -904,14 +1063,26 @@ $('playBridge').addEventListener('click', async () => {
 // Debug handle for the console (and for automated playtests).
 window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos, get engine() { return engine; } };
 
-// camera (#33): opt-in webcam. Hand gestures cast spells (keys 1-7 without a webcam), the face sets
-// the world's mood. It adds to the brain and keyboard inputs and never replaces them.
+// camera (#33, #116–#123): opt-in webcam. Hands perform actions (pinch-grab, 2-hand zoom, palm, fist, wave)
+// with coach visual demonstration. Face sets mood.
 window.__moc.camera = initCamera({
   getG: () => cosmos.castG(G), // planets (#68): casts and mood reach the world you're on
   canCast: () => !!G?.scene && !banner && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,
   // camera debug (#67): the fingertip aims on the panned surface like the mouse does.
   mapX: (x) => cosmos.mapX(x * W) / W,
   screenX: (x) => ((((x * W + cosmos.panX) % W) + W) % W) / W,
+  onZoomDelta: (delta) => {
+    // Two-hand continuous pinch zoom (#119)
+    try {
+      cosmos.onWheel?.({ deltaY: -delta * 120, preventDefault() {} });
+    } catch {}
+  },
+  onWave: (dir) => {
+    // Open-hand wave orbits camera (#121)
+    if (cosmos.mode === 'planet' || cosmos.mode === 'vast') {
+      cosmos.panX += dir * 40;
+    }
+  },
 });
 // camera debug (#67): Debug tab (button in the top bar, ` key; D pans the planet).
 window.__moc.debug = initDebug({ getG: () => G, camera: window.__moc.camera });

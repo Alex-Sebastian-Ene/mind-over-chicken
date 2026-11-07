@@ -18,7 +18,15 @@ port_busy() {
 }
 
 free_port() {
+  if port_busy "$PORT"; then
+    pkill -f "NoCacheHandler.*$PORT" 2>/dev/null || true
+    sleep 0.3
+  fi
   port_busy "$PORT" && die "port $PORT is busy (PORT=$((PORT + 1)) ./run.sh to use another)"
+  if [ ${#bridge_args[@]} -gt 0 ] && port_busy 8765; then
+    pkill -9 -f "[m]use_bridge.py" 2>/dev/null || true
+    sleep 0.4
+  fi
   [ ${#bridge_args[@]} -gt 0 ] && port_busy 8765 \
     && die "port 8765 is busy: another bridge is already running (stop it, or use --port)"
   return 0
@@ -62,7 +70,7 @@ Extra flags go to bridge/muse_bridge.py, e.g. tuning the blink threshold:
 
   ./run.sh muse2 -v --blink-threshold 250
   ./run.sh muse2 --serial-number Muse-1A2B --timeout 20
-  ./run.sh synthetic --no-ppg
+  ./run.sh synthetic --fake-blink-every 2
 
 PORT=8001 ./run.sh muse2   serves the game on another port.
 EOF

@@ -28,6 +28,8 @@ const lerp = (a, b, t) => a + (b - a) * t;
 
 export const wrapX = (x) => ((x % VW) + VW) % VW;
 export const wrapDx = (dx) => dx - VW * Math.round(dx / VW);
+export const wrapY = (y) => ((y % VH) + VH) % VH;
+export const wrapDy = (dy) => dy - VH * Math.round(dy / VH);
 
 // Integer hash → [0, 1).
 function hash(ix, iy, s) {
@@ -36,19 +38,21 @@ function hash(ix, iy, s) {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
-// Fractal value noise whose x period is exactly VW, so the map wraps without a seam.
+// Fractal value noise whose period wraps VW and VH, so the torus map wraps without a seam (#111).
 export function makeNoise(seed) {
   const cell = VW / LATTICE;
   return (x, y, oct = 4) => {
     let s = 0, a = 0.5, norm = 0, f = 1;
     for (let o = 0; o < oct; o++) {
       const period = LATTICE * f;
+      const periodY = Math.round((VH / VW) * period);
       const fx = (x / cell) * f, fy = (y / cell) * f;
       const xi = Math.floor(fx), yi = Math.floor(fy);
       const xf = smooth(fx - xi), yf = smooth(fy - yi);
       const x0 = ((xi % period) + period) % period, x1 = (x0 + 1) % period;
+      const y0 = ((yi % periodY) + periodY) % periodY, y1 = (y0 + 1) % periodY;
       const k = seed + o * 101;
-      const v = lerp(lerp(hash(x0, yi, k), hash(x1, yi, k), xf), lerp(hash(x0, yi + 1, k), hash(x1, yi + 1, k), xf), yf);
+      const v = lerp(lerp(hash(x0, y0, k), hash(x1, y0, k), xf), lerp(hash(x0, y1, k), hash(x1, y1, k), xf), yf);
       s += a * v; norm += a; a *= 0.5; f *= 2;
     }
     return s / norm;

@@ -25,7 +25,7 @@ pub const RESEARCH_MAX: f32 = 2.4;
 pub const MARKET_START: f32 = 100.0;
 pub const MARKET_REVERT: f32 = 0.15;
 pub const MARKET_SIGMA_BASE: f32 = 0.02;
-pub const MARKET_SIGMA_PULSE: f32 = 0.22;
+pub const MARKET_SIGMA_STRESS: f32 = 0.22;
 pub const MARKET_PEAK_DECAY: f32 = 0.05;
 
 pub const CRASH_RATIO: f32 = 0.78;
@@ -66,7 +66,9 @@ pub const REINFORCE_PROGRESS: f32 = 0.1;
 
 pub const STRESS_BPM: f32 = 20.0;
 pub const STRESS_MAX: f32 = 1.5;
-pub const MIND_SECONDS: f32 = 10.0;
+pub const MIND_SECONDS: f32 = 5.0;
+pub const MIND_SECONDS_PER_PLANET: f32 = 5.0;
+pub const MAX_MIND_PLANETS: usize = 3;
 
 pub const ERA_TITLES: [&str; ERA_COUNT] = ["Stone Age", "Farming", "Industry", "Space Age"];
 
@@ -89,7 +91,7 @@ pub const FLAVOUR: [&[&str]; ERA_COUNT] = [
 pub enum Channel {
     Calm,
     Focus,
-    Pulse,
+    Stress,
     Blink,
     Mixed,
 }
@@ -99,7 +101,7 @@ impl Channel {
         match self {
             Channel::Calm => "calm",
             Channel::Focus => "focus",
-            Channel::Pulse => "pulse",
+            Channel::Stress => "stress",
             Channel::Blink => "blink",
             Channel::Mixed => "mixed",
         }
@@ -126,7 +128,7 @@ impl EffortSplit {
                 research: 0.60,
                 stability: 0.20,
             },
-            Channel::Pulse => Self {
+            Channel::Stress => Self {
                 growth: 0.40,
                 research: 0.50,
                 stability: 0.10,
@@ -161,19 +163,16 @@ impl EffortSplit {
 pub struct BrainEffects {
     pub calm: f32,
     pub focus: f32,
-    pub hr_delta: f32,
     pub stress: f32,
     pub blink_rate: f32,
 }
 
 impl BrainEffects {
-    pub fn from_signals(calm: f32, focus: f32, hr_delta: f32, blinks_last_10s: u32) -> Self {
-        let stress = clamp(hr_delta / STRESS_BPM, 0.0, STRESS_MAX);
+    pub fn from_signals(calm: f32, focus: f32, stress: f32, blinks_last_10s: u32) -> Self {
         let blink_rate = blinks_last_10s as f32 / 10.0;
         Self {
             calm,
             focus,
-            hr_delta,
             stress,
             blink_rate,
         }
@@ -272,7 +271,7 @@ pub fn step_planet(
 
     // Population growth: logistic growth driven by calm, dragged by stress
     let growth = (GROWTH_BASE + GROWTH_CALM * w(Channel::Calm) * fx.calm
-        - GROWTH_STRESS * w(Channel::Pulse) * fx.stress)
+        - GROWTH_STRESS * w(Channel::Stress) * fx.stress)
         * (0.5 + alloc.growth);
     p.pop = clamp(
         p.pop + p.pop * growth * (1.0 - p.pop / cap) * dt,
@@ -283,12 +282,12 @@ pub fn step_planet(
     // Research rate: focus speeds up, stress slows down
     let raw_research = RESEARCH_BASE + RESEARCH_FOCUS * w(Channel::Focus) * fx.focus
         + RESEARCH_CALM * fx.calm
-        - RESEARCH_STRESS * w(Channel::Pulse) * fx.stress;
+        - RESEARCH_STRESS * w(Channel::Stress) * fx.stress;
     let research = clamp(raw_research, RESEARCH_MIN, RESEARCH_MAX) * (0.5 + alloc.research);
     p.progress += (dt / ERA_SECONDS) * research;
 
-    // Goat market log-price stochastic process: volatility is the player's pulse
-    let sigma = MARKET_SIGMA_BASE + MARKET_SIGMA_PULSE * w(Channel::Pulse) * fx.stress;
+    // Goat market log-price stochastic process: volatility is the player's stress
+    let sigma = MARKET_SIGMA_BASE + MARKET_SIGMA_STRESS * w(Channel::Stress) * fx.stress;
     let d_log_m = MARKET_REVERT * (MARKET_START / p.market).ln() * dt
         + sigma * dt.sqrt() * rng.gauss();
     p.market *= d_log_m.exp();
@@ -369,17 +368,16 @@ pub fn step_planet(
         }
     }
 
-    // Pulse events (goat market boom & crash)
-    if ch == Channel::Pulse || ch == Channel::Mixed {
+    // Stress events (goat market boom & crash)
+    if ch == Channel::Stress || ch == Channel::Mixed {
         if !p.crashed && p.market < p.market_peak * CRASH_RATIO {
             p.crashed = true;
             p.pop = MIN_POP.max(p.pop * (1.0 - (1.0 - CRASH_POP) * steady));
             p.progress = 0.0f32.max(p.progress - CRASH_PROGRESS * steady);
-            let sign = if fx.hr_delta >= 0.0 { "+" } else { "" };
             events.push(SimEvent {
                 kind: EventKind::Bad,
                 text: "goat crash".to_string(),
-                cause: Some(format!("your pulse at {}{:.0} bpm", sign, fx.hr_delta)),
+                cause: Some(format!("your stress at {:.0}%", fx.stress * 100.0)),
             });
         } else if !p.boomed && p.market > BOOM_LEVEL {
             p.boomed = true;
@@ -387,7 +385,7 @@ pub fn step_planet(
             events.push(SimEvent {
                 kind: EventKind::Good,
                 text: "goat boom".to_string(),
-                cause: Some("a lively pulse".to_string()),
+                cause: Some("a lively mind".to_string()),
             });
         }
 
@@ -467,16 +465,18 @@ pub fn arrive_ship(to: &mut PlanetState) -> &'static str {
     }
 }
 
-/// Mind snapshot accumulator for the first 10 seconds of play.
+/// Mind snapshot accumulator: sequentially forms one world every 5 seconds (#108).
 #[derive(Debug, Clone, Default)]
 pub struct MindSnapshot {
     pub t: f32,
-    pub calm: f32,
-    pub focus: f32,
-    pub hr: f32,
+    pub t_slot: f32,
+    pub calm_slot: f32,
+    pub focus_slot: f32,
+    pub stress_slot: f32,
     pub blinks_start: Option<u32>,
-    pub blinks: u32,
-    pub hr_delta: f32,
+    pub blinks_slot_start: u32,
+    pub formed_count: usize,
+    pub used_channels: Vec<Channel>,
     pub done: bool,
     pub ranked: Option<Vec<(Channel, f32)>>,
 }
@@ -491,46 +491,65 @@ impl MindSnapshot {
         dt: f32,
         calm: f32,
         focus: f32,
-        hr_delta: f32,
+        stress: f32,
         blinks_total: u32,
-    ) -> Option<&[(Channel, f32)]> {
-        if self.done || dt <= 0.0 {
-            return self.ranked.as_deref();
+    ) -> Option<Channel> {
+        if self.done || dt <= 0.0 || self.formed_count >= MAX_MIND_PLANETS {
+            return None;
         }
 
         if self.blinks_start.is_none() {
             self.blinks_start = Some(blinks_total);
+            self.blinks_slot_start = blinks_total;
         }
 
         self.t += dt;
-        self.calm += calm * dt;
-        self.focus += focus * dt;
-        self.hr += hr_delta * dt;
+        self.t_slot += dt;
+        self.calm_slot += calm * dt;
+        self.focus_slot += focus * dt;
+        self.stress_slot += stress * dt;
 
-        if self.t < MIND_SECONDS {
+        if self.t_slot < MIND_SECONDS_PER_PLANET {
             return None;
         }
 
-        self.done = true;
-        let avg_calm = self.calm / self.t;
-        let avg_focus = self.focus / self.t;
-        let avg_hr_delta = self.hr / self.t;
-        let blinks = blinks_total.saturating_sub(self.blinks_start.unwrap_or(0));
+        let avg_calm = self.calm_slot / self.t_slot;
+        let avg_focus = self.focus_slot / self.t_slot;
+        let avg_stress = self.stress_slot / self.t_slot;
+        let blinks = blinks_total.saturating_sub(self.blinks_slot_start);
 
         let score_calm = avg_calm / 0.35;
         let score_focus = avg_focus / 0.30;
-        let score_pulse = avg_hr_delta.max(0.0) / 8.0;
-        let score_blink = blinks as f32 / 3.0;
+        let score_stress = avg_stress / 0.35;
+        let score_blink = blinks as f32 / 2.0;
 
-        let mut ranked = vec![
+        let mut candidates = vec![
             (Channel::Calm, score_calm),
             (Channel::Focus, score_focus),
-            (Channel::Pulse, score_pulse),
+            (Channel::Stress, score_stress),
             (Channel::Blink, score_blink),
         ];
 
-        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        self.ranked = Some(ranked);
-        self.ranked.as_deref()
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        let chosen = candidates
+            .iter()
+            .map(|c| c.0)
+            .find(|ch| !self.used_channels.contains(ch))
+            .unwrap_or(candidates[0].0);
+
+        self.used_channels.push(chosen);
+        self.formed_count += 1;
+        self.t_slot = 0.0;
+        self.calm_slot = 0.0;
+        self.focus_slot = 0.0;
+        self.stress_slot = 0.0;
+        self.blinks_slot_start = blinks_total;
+
+        if self.formed_count >= MAX_MIND_PLANETS {
+            self.done = true;
+        }
+
+        Some(chosen)
     }
 }

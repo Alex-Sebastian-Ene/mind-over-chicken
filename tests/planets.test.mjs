@@ -6,13 +6,14 @@ import { readFileSync } from 'node:fs';
 import {
   SIM, TIERS, ERAS, CONFLICT, newPlanetState, brainEffects, stepPlanet, stepSettlement, stepConflict, stabilityTarget,
   tierReady, eraReady, metrics, meets, castPlanet, tribeOutcome, arriveShip, easeSplit, ACTION_SPLIT, popCap,
+  trackCampaignPop,
 } from '../src/cosmos/planet-sim.js';
 import { ZoomState } from '../src/cosmos/zoom.js';
 import { World } from '../src/world/terrain.js';
 import { buildVast, settlementPlan, VW, VH, TILE, wrapX } from '../src/cosmos/vast.js';
 
 const W = 320, H = 180;
-const calmFx = (o = {}) => brainEffects({ calm: 0.2, focus: 0.2, hrDelta: 0, blinksLast10s: 0, ...o });
+const calmFx = (o = {}) => brainEffects({ calm: 0.2, focus: 0.2, stress: 0, blinksLast10s: 0, ...o });
 const rngOf = (seed) => { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const never = () => 0.999999;   // rng that never rolls a chance event
 const always = () => 1e-9;      // rng that always does (never exactly 0: the market's gaussian redraws 0)
@@ -90,12 +91,12 @@ test('food is eaten every second and hungry people eat their goats', () => {
 
 // ---------- stability and setbacks ----------
 
-test("stability falls with hunger, overcrowding, the player's anger and pulse", () => {
+test("stability falls with hunger, overcrowding, the player's anger and stress", () => {
   const p = newPlanetState({ pop: 30 });
   const w = (k) => 1;
   const base = stabilityTarget(p, calmFx(), ALLOC, w);
   assert.ok(stabilityTarget(p, calmFx({ anger: 1 }), ALLOC, w) < base, 'anger');
-  assert.ok(stabilityTarget(p, calmFx({ hrDelta: 30 }), ALLOC, w) < base, 'pulse');
+  assert.ok(stabilityTarget(p, calmFx({ stress: 1 }), ALLOC, w) < base, 'stress');
   assert.ok(stabilityTarget({ ...p, hunger: 0.6 }, calmFx(), ALLOC, w) < base, 'hunger');
   assert.ok(stabilityTarget({ ...p, crowding: 1.3 }, calmFx(), ALLOC, w) < base, 'overcrowding');
   assert.ok(stabilityTarget(p, calmFx({ calm: 0.9 }), ALLOC, w) > base, 'calm helps');
@@ -128,7 +129,7 @@ test('plague: overcrowding brings disease', () => {
 test('unrest: low stability burns the stores', () => {
   const p = Object.assign(newPlanetState({ pop: 20 }), { stability: 0.2, wood: 50, food: 50 });
   const events = [];
-  stepSettlement(p, 0.1, calmFx({ anger: 1, hrDelta: 30 }), ALLOC, weights(true), always, events);
+  stepSettlement(p, 0.1, calmFx({ anger: 1, stress: 1 }), ALLOC, weights(true), always, events);
   assert.ok(events.some((e) => e.id === 'unrest'));
   assert.ok(p.wood < 50);
 });
@@ -157,7 +158,7 @@ test('setbacks are spaced at least SETBACK_GAP apart', () => {
 
 test("sustained anger escalates feud → revolt → civil war, and the war is decided", () => {
   const p = Object.assign(newPlanetState({ pop: 200, eraIndex: 1 }), { tier: 1, food: 400, wood: 100, stone: 50, goats: 50 });
-  const events = run(p, 60, calmFx({ anger: 1, hrDelta: 30, calm: 0 }), rngOf(3), true);
+  const events = run(p, 60, calmFx({ anger: 1, stress: 1, calm: 0 }), rngOf(3), true);
   const ids = events.filter((e) => e.kind === 'conflict').map((e) => e.id);
   const first = (id) => ids.indexOf(id);
   assert.ok(first('feud') >= 0 && first('revolt') > first('feud') && first('civil_war') > first('revolt'), ids.join(','));
@@ -385,4 +386,23 @@ test('the G key visits every AI world in turn, then home', () => {
   assert.equal(z.target, 0);
   assert.equal(z.surfaceKind(), 'ai');
   assert.equal(new ZoomState().nextWorld([home]).name, 'Home');
+});
+
+// #105: the campaign home never reads "barren" through a time-skip, and the Space Age's small
+// local cast doesn't erase the civilisation's size.
+test('campaign home keeps its population through time-skips and the Space Age', () => {
+  const p = { home: true, eraIndex: 0, pop: 0 };
+  const step = (eraIndex, pop) => { trackCampaignPop(p, { eraIndex, pop }); p.eraIndex = eraIndex; return p.pop; };
+  assert.equal(step(0, 16), 16);      // Stone Age tribe
+  assert.equal(step(1, null), 16);    // Farming → Kingdoms montage: no people in the scene
+  assert.equal(step(2, 120), 120);    // Industry town
+  assert.equal(step(3, null), 120);   // Information Age montage: was 0, i.e. "barren"
+  assert.equal(step(3, 38), 120);     // Space Age: 28 citizens + 10 engineers on screen
+  assert.ok(p.pop > 0);
+});
+
+test('a new campaign run starts the home population again', () => {
+  const p = { home: true, eraIndex: 3, pop: 120, peakPop: 120 };
+  trackCampaignPop(p, { eraIndex: 0, pop: 12 }); p.eraIndex = 0;
+  assert.equal(p.pop, 12);
 });

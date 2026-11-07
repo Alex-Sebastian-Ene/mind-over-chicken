@@ -65,6 +65,12 @@ function makeNoise(rng) {
   };
 }
 
+let RustWorldGenClass = null;
+
+export function setRustWorldGen(cls) {
+  RustWorldGenClass = cls;
+}
+
 export class World {
   constructor(seed = (Math.random() * 1e9) | 0, opts = {}) {
     this.seed = seed;
@@ -78,6 +84,40 @@ export class World {
   }
 
   generate() {
+    if (RustWorldGenClass && (!this.biome || this.biome === 'temperate')) {
+      try {
+        const rustGen = new RustWorldGenClass(this.seed >>> 0);
+        this.h = rustGen.heights();
+        this.type = rustGen.types();
+        this.baseType = this.type.slice();
+        this.sites = JSON.parse(rustGen.sites_json());
+        this.continents = JSON.parse(rustGen.continents_json());
+        this.owner = new Uint8Array(W * H);
+        for (let y = 0; y < H; y++) {
+          for (let x = 0; x < W; x++) {
+            let best = -9, owner = 0;
+            this.continents.forEach((c, i) => {
+              const rx = (x - c.cx) / (c.rx || 60), ry = (y - c.cy) / (c.ry || 40);
+              const b = 1 - (rx * rx + ry * ry);
+              if (b > best) { best = b; owner = i; }
+            });
+            this.owner[y * W + x] = owner;
+          }
+        }
+        for (const [k, pt] of Object.entries(this.sites)) {
+          if (pt && typeof pt.x === 'number' && typeof pt.y === 'number') {
+            if (!this.walkable(pt.x, pt.y) && k !== 'harbour' && k !== 'caveMouth') {
+              this.sites[k] = this.nearestWalkable(pt.x, pt.y);
+            }
+          }
+        }
+        this.initHarbors();
+        return;
+      } catch (err) {
+        console.warn('RustWorldGen failed, falling back to JS terrain generator:', err);
+      }
+    }
+
     const rng = mulberry32(this.seed);
     const noise = makeNoise(rng);
     const moist = makeNoise(mulberry32(this.seed ^ 0x9e3779b9));
@@ -164,13 +204,20 @@ export class World {
     this.sites.crowd = this.nearestWalkable(p.x - 30, p.y - 10);
 
     // Other continents: a village spot and a harbour on the coast facing home.
+    this.initHarbors();
+  }
+
+  initHarbors() {
+    const v = this.sites.village;
     for (const c of this.continents) {
-      c.village = c.id === 'home' ? { ...v } : this.nearestWalkable(c.cx, c.cy);
+      c.village = c.id === 'home' ? { ...v } : (c.village || this.nearestWalkable(c.cx, c.cy));
     }
     const home = this.continents[0];
-    for (const c of this.continents.slice(1)) {
-      c.harbor = this.coastToward(c.village, home.village, (x, y) => this.owner[y * W + x] !== 0);
-      c.homeHarbor = this.coastToward(home.village, c.village, (x, y) => this.owner[y * W + x] === 0);
+    if (home) {
+      for (const c of this.continents.slice(1)) {
+        c.harbor = this.coastToward(c.village, home.village, (x, y) => this.owner[y * W + x] !== 0);
+        c.homeHarbor = this.coastToward(home.village, c.village, (x, y) => this.owner[y * W + x] === 0);
+      }
     }
   }
 
@@ -204,13 +251,19 @@ export class World {
 
   nearestWalkable(x, y, maxR = 60) {
     x = Math.round(x); y = Math.round(y);
-    for (let r = 0; r <= maxR; r++) {
+    if (this.walkable(x, y)) return { x, y };
+    let fallback = null;
+    for (let r = 1; r <= maxR; r++) {
       for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-        if (this.walkable(x + dx, y + dy) && this.get(x + dx, y + dy) !== T.FOREST) return { x: x + dx, y: y + dy };
+        const px = x + dx, py = y + dy;
+        if (this.walkable(px, py)) {
+          if (this.get(px, py) !== T.FOREST) return { x: px, y: py };
+          fallback ??= { x: px, y: py };
+        }
       }
     }
-    return { x, y };
+    return fallback || (this.sites?.village ? { ...this.sites.village } : { x, y });
   }
 
   // Random walkable point in a ring around (x,y).
@@ -304,13 +357,24 @@ export class World {
     this.structures.sort((a, b) => a.y - b.y);
   }
 
-  // Bake terrain + static structures into one pixel canvas for this era.
+  // Bake terrain + static structures into pixel canvases (2D flat and 3D clean landscape).
   paint(era) {
     this.shape(era);
-    const c = document.createElement('canvas');
-    c.width = W; c.height = H;
-    const ctx = c.getContext('2d');
-    const img = ctx.createImageData(W, H);
+    this.layers3d ||= {};
+
+    // 1. Collect 3D tree coordinates for forest tiles
+    this.trees = [];
+    const trng = mulberry32(this.seed + 5);
+    for (let y = 1; y < H; y += 2) for (let x = (y >> 1) % 2; x < W; x += 2) {
+      if (this.type[y * W + x] !== T.FOREST || trng() > 0.7) continue;
+      this.trees.push({ x, y, variant: trng() > 0.5 ? 1 : 0 });
+    }
+
+    // 2. Base landscape texture (used for 3D terrain mesh upload: no flat structure or tree decals)
+    const c3d = document.createElement('canvas');
+    c3d.width = W; c3d.height = H;
+    const ctx3d = c3d.getContext('2d');
+    const img = ctx3d.createImageData(W, H);
     const rng = mulberry32(this.seed + 3);
     for (let i = 0; i < W * H; i++) {
       const t = this.type[i];
@@ -330,32 +394,82 @@ export class World {
       if (t === T.SHALLOW && (this.typeAt(x + 1, y) === T.SAND || this.typeAt(x - 1, y) === T.SAND || this.typeAt(x, y + 1) === T.SAND || this.typeAt(x, y - 1) === T.SAND)) { [r, g, b] = this.palette.foam; }
       img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = 255;
     }
-    ctx.putImageData(img, 0, 0);
-    // Tree crowns on forest pixels.
-    const trng = mulberry32(this.seed + 5);
-    for (let y = 1; y < H; y += 2) for (let x = (y >> 1) % 2; x < W; x += 2) {
-      if (this.type[y * W + x] !== T.FOREST || trng() > 0.7) continue;
-      const tc = this.palette.trees;
-      ctx.fillStyle = tc[0]; ctx.fillRect(x, y, 1, 1);
-      ctx.fillStyle = trng() > 0.5 ? tc[1] : tc[2]; ctx.fillRect(x, y - 1, 1, 1);
-    }
+    ctx3d.putImageData(img, 0, 0);
+
     // Cave mouth.
     if (era === 'stone' || era === 'farming') {
       const m = this.sites.caveMouth;
-      ctx.fillStyle = '#1a1714'; ctx.fillRect(m.x - 2, m.y - 1, 4, 3);
-      ctx.fillStyle = '#2b2622'; ctx.fillRect(m.x - 3, m.y, 1, 2); ctx.fillRect(m.x + 2, m.y, 1, 2);
+      ctx3d.fillStyle = '#1a1714'; ctx3d.fillRect(m.x - 2, m.y - 1, 4, 3);
+      ctx3d.fillStyle = '#2b2622'; ctx3d.fillRect(m.x - 3, m.y, 1, 2); ctx3d.fillRect(m.x + 2, m.y, 1, 2);
     }
+    this.layers3d[era] = c3d;
+
+    // 3. 2D fallback / globe texture (with flat painted trees and structures)
+    const c2d = document.createElement('canvas');
+    c2d.width = W; c2d.height = H;
+    const ctx2d = c2d.getContext('2d');
+    ctx2d.drawImage(c3d, 0, 0);
+
+    // Flat tree crowns for 2D mode
+    const trng2 = mulberry32(this.seed + 5);
+    for (let y = 1; y < H; y += 2) for (let x = (y >> 1) % 2; x < W; x += 2) {
+      if (this.type[y * W + x] !== T.FOREST || trng2() > 0.7) continue;
+      const tc = this.palette.trees;
+      ctx2d.fillStyle = tc[0]; ctx2d.fillRect(x, y, 1, 1);
+      ctx2d.fillStyle = trng2() > 0.5 ? tc[1] : tc[2]; ctx2d.fillRect(x, y - 1, 1, 1);
+    }
+
+    // Flat structures for 2D mode
     for (const s of this.structures) {
-      if (s.kind === 'hut') drawHut(ctx, s.x, s.y);
-      if (s.kind === 'house') drawHouse(ctx, s.x, s.y, s.roof);
-      if (s.kind === 'tower') drawTower(ctx, s.x, s.y, s.h);
-      if (s.kind === 'factory') drawFactory(ctx, s.x, s.y);
-      if (s.kind === 'exchange') drawExchange(ctx, s.x, s.y);
-      if (s.kind === 'hangar') drawHangar(ctx, s.x, s.y);
-      if (s.kind === 'pad') drawPad(ctx, s.x, s.y);
+      if (s.kind === 'hut') drawHut(ctx2d, s.x, s.y);
+      if (s.kind === 'house') drawHouse(ctx2d, s.x, s.y, s.roof);
+      if (s.kind === 'tower') drawTower(ctx2d, s.x, s.y, s.h);
+      if (s.kind === 'factory') drawFactory(ctx2d, s.x, s.y);
+      if (s.kind === 'exchange') drawExchange(ctx2d, s.x, s.y);
+      if (s.kind === 'hangar') drawHangar(ctx2d, s.x, s.y);
+      if (s.kind === 'pad') drawPad(ctx2d, s.x, s.y);
     }
-    this.layers[era] = c;
-    return c;
+    this.layers[era] = c2d;
+    return c2d;
+  }
+
+  // Draw 3D trees and structures as upright billboards standing on the terrain
+  draw3d(engine) {
+    if (!engine) return;
+    // 3D Trees across forest tiles
+    if (this.trees) {
+      for (const t of this.trees) {
+        engine.add_billboard(14, t.x, t.y, 1, 0, t.variant || 0);
+      }
+    }
+    // 3D Structures
+    if (this.structures) {
+      for (const s of this.structures) {
+        switch (s.kind) {
+          case 'hut':
+            engine.add_billboard(5, s.x, s.y, 1, 0, 0);
+            break;
+          case 'house':
+            engine.add_billboard(6, s.x, s.y, 1, 0, 0);
+            break;
+          case 'tower':
+            engine.add_billboard(7, s.x, s.y, 1, 0, 0);
+            break;
+          case 'factory':
+            engine.add_billboard(8, s.x, s.y, 1, 0, 0);
+            break;
+          case 'exchange':
+            engine.add_billboard(9, s.x, s.y, 1, 0, 0);
+            break;
+          case 'hangar':
+            engine.add_billboard(10, s.x, s.y, 1, 0, 0);
+            break;
+          case 'pad':
+            engine.add_billboard(11, s.x, s.y, 1, 0, 0);
+            break;
+        }
+      }
+    }
   }
 
   typeAt(x, y) { if (x < 0 || y < 0 || x >= W || y >= H) return T.DEEP; return this.type[y * W + x]; }

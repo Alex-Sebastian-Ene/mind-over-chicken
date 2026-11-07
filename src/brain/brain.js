@@ -1,16 +1,67 @@
-// Brain = source frames → smoothed features → calm / focus / heart rate the game can use.
+// Brain = source frames → smoothed features → calm / focus / stress the game can use.
 // It blends a generic rule (alpha/beta ratios) with the personal model as that model
 // earns trust, and records labelled windows whenever the game sets a cue.
+//
+// Stress is the one number the game reads for "how wound up is the god", 0..1. It is computed
+// here, once, so the eras, HUD, calibration and galaxy all agree on it. It is neutral at rest
+// (about REST_STRESS) and rises on agitation, not on a missing calm:
+//
+//   stress = max(agitation, face anger while the camera sees a face, REST_STRESS * (1 - calm))
+//
+// Agitation is EEG, measured against the player's own resting level (agitationIndex below): the
+// high-frequency power a tense player adds (gamma, which on a Muse is mostly muscle tension: a
+// clenched jaw, a frown) relative to beta, plus a fifth of the fast/slow ratio beta/(alpha+theta).
+// Focus raises beta far more than gamma, so it lowers this index: focus does not read as stress.
+// The resting level is the calibration window's (#54, lockAgitationBaseline), or a slow running
+// average until that window has run (and for brains without one, like the AI's).
 
 import { clamp, sigmoid, smooth, median } from '../sim/util.js';
 import { PersonalModel, featuresFromBands } from './model.js';
 
+export const REST_STRESS = 0.15;   // stress of a player at rest: the small (1 - calm) term
+export const STRESSED = 0.5;       // above this the god counts as stressed (eras' thresholds)
+const AG_MARGIN = 0.12;            // index above rest that still reads as rest (window noise)
+const AG_SPAN = 0.4;               // index above rest + margin that reads as full agitation
+const AG_WARMUP = 30;              // windows (~3 s) whose median starts the running average
+const AG_HISTORY = 300;            // feature windows kept for the baseline (~30 s at 10 Hz)
+const AG_RUNNING_TAU = 60;         // s, the running-average baseline's time constant
+
+// ProxyBrain and SharedBrain use the same function. All inputs 0..1; `anger` is the face's anger
+// while the camera is on and sees a face, else 0.
+export function stressFrom(calm, anger = 0, agitation = 0) {
+  return clamp(Math.max(clamp(agitation || 0), clamp(anger || 0), REST_STRESS * (1 - clamp(calm || 0))));
+}
+
+// Agitation index of one feature window f (model.js FEATURE_NAMES):
+// ln(gamma/beta) + 0.2 * ln(beta/(alpha+theta)) = ln γ - 0.8 ln β - 0.2 ln(α+θ).
+export function agitationIndex(f) {
+  return f[4] - f[3] + 0.2 * f[6];
+}
+
+// The face's anger, if the camera is on and sees a face (G.mood from src/camera/camera.js).
+export function faceAnger(mood) {
+  return mood?.active && mood.face ? clamp(mood.anger || 0) : 0;
+}
+
 const WINDOW = 6;            // frames averaged per feature window (~0.6 s)
 const TRAIN_EVERY = 2.5;     // seconds between retrains
+
+let RustBrainClass = null;
+
+export function setRustBrain(cls) {
+  RustBrainClass = cls;
+}
 
 export class Brain {
   constructor(source) {
     this.source = source;
+    if (RustBrainClass) {
+      try {
+        this.wasm = new RustBrainClass();
+      } catch (e) {
+        this.wasm = null;
+      }
+    }
     this.model = new PersonalModel();
     this.window = [];
     this.feat = null;
@@ -21,9 +72,13 @@ export class Brain {
     this.genericCalm = 0;
     this.genericFocus = 0;
     this.personal = null;
-    this.hr = null;
-    this.hrHistory = [];      // [{t, hr}]
-    this.restHr = null;
+    this.anger = 0;           // face anger counted into stress (0 without a camera)
+    this.agitation = 0;       // 0..1, EEG agitation above the player's resting level
+    this.agitationRaw = 0;
+    this.agHistory = [];      // recent agitation indices, for the calibration baseline
+    this.agBaseline = null;   // resting index from the calibration window (#54)
+    this.agRunning = null;    // slow running average of the index: the fallback baseline
+    this.stress = REST_STRESS;  // stressFrom(calm, anger, agitation), updated every frame
     this.aim = { x: 0.5, y: 0.55 };
     this.motion = 0;
     this.quality = 1;
@@ -37,7 +92,6 @@ export class Brain {
     this.accel = null;
     this.gyro = null;
     this.eegWave = { TP9: [], AF7: [], AF8: [], TP10: [] };
-    this.ppgWave = [];
     this.accelHistory = [];
     this.gyroHistory = [];
     this.cue = null;          // 'rest' | 'calm' | 'focus' | null
@@ -46,12 +100,18 @@ export class Brain {
     this.time = 0;
     this.trainTimer = 0;
     this.restRef = { ab: [], bat: [] };
-    this.stats = { blinks: 0, calmSeconds: 0, focusSeconds: 0, peakHr: 0, framesSeen: 0 };
+    this.stats = { blinks: 0, calmSeconds: 0, focusSeconds: 0, framesSeen: 0 };
     this.onTrained = null;
   }
 
   onBlink(fn) { this.blinkListeners.push(fn); }
-  setCue(label) { this.cue = label; }
+  setCue(label) {
+    this.cue = label;
+    if (this.wasm) {
+      const id = label === 'rest' ? 0 : label === 'calm' ? 1 : label === 'focus' ? 2 : -1;
+      this.wasm.set_cue(id);
+    }
+  }
 
   resetTelemetry() {
     this.window = [];
@@ -60,7 +120,10 @@ export class Brain {
     this.focus = 0;
     this.calmRaw = 0;
     this.focusRaw = 0;
-    this.hr = null;
+    this.anger = 0;
+    this.agitation = 0;
+    this.agitationRaw = 0;
+    this.stress = REST_STRESS;
     this.motion = 0;
     this.quality = 0;
     this.bands = { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 };
@@ -73,18 +136,21 @@ export class Brain {
     this.accel = null;
     this.gyro = null;
     this.eegWave = { TP9: [], AF7: [], AF8: [], TP10: [] };
-    this.ppgWave = [];
     this.accelHistory = [];
     this.gyroHistory = [];
   }
 
-  update(dt) {
+  // mood: G.mood from the camera (optional). Only its anger is read, for stress.
+  update(dt, mood = null) {
     this.time += dt;
     this.source.update(dt, (frame) => this.ingest(frame));
 
     // Smooth the outputs the game reads, so a single noisy window can't flip a challenge.
     this.calm = smooth(this.calm, this.calmRaw, 4, dt);
     this.focus = smooth(this.focus, this.focusRaw, 4, dt);
+    this.agitation = smooth(this.agitation, this.agitationRaw, 3, dt);
+    this.anger = faceAnger(mood);
+    this.stress = stressFrom(this.calm, this.anger, this.agitation);
     if (this.calm > 0.6) this.stats.calmSeconds += dt;
     if (this.focus > 0.6) this.stats.focusSeconds += dt;
 
@@ -93,10 +159,28 @@ export class Brain {
       this.trainTimer = 0;
       if (this.model.maybeTrain() && this.onTrained) this.onTrained(this.model);
     }
+
+    if (this.wasm) {
+      this.wasm.update(dt);
+      this.calm = this.wasm.calm();
+      this.focus = this.wasm.focus();
+      this.stress = this.wasm.stress();
+      this.anger = this.wasm.anger();
+      this.stats.blinks = this.wasm.blinks();
+    }
   }
 
   ingest(frame) {
     this.stats.framesSeen++;
+    if (this.wasm && frame.bands) {
+      const b = frame.bands;
+      this.wasm.ingest(
+        b.delta || 0, b.theta || 0, b.alpha || 0, b.beta || 0, b.gamma || 0,
+        !!frame.blink, frame.hr || 0,
+        frame.tilt ? frame.tilt[0] : 0, frame.tilt ? frame.tilt[1] : 0,
+        frame.motion || 0, frame.quality || 1
+      );
+    }
     this.quality = frame.quality;
     if (frame.bands) this.bands = { ...frame.bands };
     if (frame.contact) this.contact = frame.contact;
@@ -120,10 +204,6 @@ export class Brain {
         if (this.gyroHistory.length > 150) this.gyroHistory.shift();
       }
     }
-    if (Array.isArray(frame.ppg) && frame.ppg.length) {
-      this.ppgWave.push(...frame.ppg);
-      if (this.ppgWave.length > 180) this.ppgWave.splice(0, this.ppgWave.length - 180);
-    }
     if (frame.eeg && typeof frame.eeg === 'object') {
       for (const [ch, vals] of Object.entries(frame.eeg)) {
         if (!Array.isArray(vals)) continue;
@@ -137,18 +217,6 @@ export class Brain {
       this.aim.y = smooth(this.aim.y, clamp(0.5 + frame.tilt.y * 0.5), 10, 0.1);
     }
     this.motion = frame.motion;
-
-    if (frame.hr) {
-      this.hr = frame.hr;
-      this.hrHistory.push({ t: this.time, hr: frame.hr });
-      while (this.hrHistory.length && this.time - this.hrHistory[0].t > 180) this.hrHistory.shift();
-      if (this.hrHistory.length > 20) {
-        // Resting pulse ≈ 25th percentile of the last three minutes.
-        const s = this.hrHistory.map((h) => h.hr).sort((a, b) => a - b);
-        this.restHr = s[Math.floor(s.length * 0.25)];
-      } else if (this.restHr == null) this.restHr = frame.hr;
-      this.stats.peakHr = Math.max(this.stats.peakHr, frame.hr);
-    }
 
     if (frame.blink) {
       if (this.time - this.lastBlinkAt > 0.45) {
@@ -166,6 +234,7 @@ export class Brain {
     const f = new Array(D).fill(0);
     for (const w of this.window) for (let j = 0; j < D; j++) f[j] += w[j] / this.window.length;
     this.feat = f;
+    this.updateAgitation(agitationIndex(f));
 
     if (this.cue) this.model.add(this.cue, f);
     if (this.cue === 'rest') {
@@ -191,8 +260,22 @@ export class Brain {
     return clamp(base + 0.14 * this.model.trust(kind), 0, 0.85);
   }
 
-  hrDelta() {
-    if (this.hr == null || this.restHr == null) return 0;
-    return this.hr - this.restHr;
+  // One feature window's agitation index → agitationRaw, against the player's resting level.
+  updateAgitation(ag) {
+    this.agHistory.push(ag);
+    if (this.agHistory.length > AG_HISTORY) this.agHistory.shift();
+    // Slow running average (one window ≈ 0.1 s, time constant AG_RUNNING_TAU): the fallback
+    // baseline until the calibration window sets one.
+    if (this.agHistory.length <= AG_WARMUP) this.agRunning = median(this.agHistory);
+    else this.agRunning += (ag - this.agRunning) * (1 - Math.exp(-0.1 / AG_RUNNING_TAU));
+    const base = this.agBaseline ?? this.agRunning;
+    this.agitationRaw = clamp((ag - base - AG_MARGIN) / AG_SPAN);
+  }
+
+  // calibration (#54): the window that seeds the player's civilisation also sets their resting
+  // agitation level, from its last `seconds` of feature windows.
+  lockAgitationBaseline(seconds = 10) {
+    const recent = this.agHistory.slice(-Math.max(10, Math.round(seconds * 10)));
+    if (recent.length >= 10) this.agBaseline = median(recent);
   }
 }

@@ -1,12 +1,12 @@
-// camera (#33): opt-in webcam input.
-//   Hands: MediaPipe Gesture Recognizer → seven casts (spells.js). Pointing up aims with the index
-//          fingertip; pinch-and-hold (thumb + index) aims precisely and letting go casts the armed
-//          spell (fingers.js, #67). Enabled by CAMERA_CASTS_ENABLED (in scope per #55); gesture UI
-//          navigation is deferred.
-//   Face:  MediaPipe Face Landmarker blendshapes → smoothed mood → G.mood and scene.onMood().
-//
-// camera debug (#67): the models run in module Web Workers by default (engine.js), so inference
-// never blocks the game loop; the #59 main-thread path with its budget is the fallback.
+// camera (#33, #67, #116–#123): opt-in webcam input.
+//   Head:  SOLE cursor. Hands never overwrite G.brain.aim (#116, #120).
+//   Hands: MediaPipe Gesture Recognizer (numHands=2, #118) →
+//          1. One-hand pinch grabs & relocates living entities under the head cursor (#120)
+//          2. Two-hand pinch distance continuously zooms in/out & freezes on release (#119)
+//          3. Open-hand wave orbits the 3D camera / cycles planets (#121)
+//          4. Three core moves (#122): Pinch (1), Open Palm / Calm (2), Closed Fist / Strike (3)
+//   Face:  MediaPipe Face Landmarker blendshapes → Joy (continuous) + Surprise (debounced event) (#117).
+//   Coach: Collapsible bottom panel with procedural 21-landmark ghost hands (#123).
 //
 // PRIVACY: the camera starts only when the player clicks "Camera". Frames go from the <video>
 // element to MediaPipe inside this tab (or its own workers). Nothing is recorded, stored or
@@ -15,36 +15,33 @@
 //
 // The player stays in control: casts and moods are an extra channel on top of the headset and
 // keyboard. They call scene hooks and move the aim the way the mouse does; they never change
-// the brain's calm, focus or heart-rate signals and never block another input.
+// the brain's calm or focus and never block another input. Face emotion does count toward
+// brain state and game reactions.
 
-import { W, H, clamp } from '../sim/util.js';
+import { clamp } from '../sim/util.js';
 import { SPELLS, SPELL_BY_ID, GESTURE_LABEL, spellForKeyCode, CAMERA_CASTS_ENABLED } from './spells.js';
 import { CastController } from './casts.js';
 import { EMOTIONS, EmotionTracker, neutralMood } from './emotion.js';
 import { loadVision } from './vision.js';
 import { loadEngine, workerPreference } from './engine.js';
-import { FingerController } from './fingers.js';
+import { FingerController, MultiHandTracker } from './fingers.js';
+import { initCoach } from './coach.js';
 import { FrameMeter } from './meter.js';
 import { drawHand } from './draw.js';
 
 const ADVISOR_GAP = 14;      // seconds between the advisor's mood remarks
 const PING_MS = 900;         // how long a cast marker stays on the map
-const MISS_MS = 1400;        // how long "ready in …" stays up after a pinch on a cooling spell
-// GPU guard (#67): GPU inference shares the browser's GPU process with the game's WebGL. If the game
-// runs below this fraction of its frame rate from before the camera started, the worker models
-// move to the CPU.
+const MISS_MS = 1400;        // how long "ready in …" stays up after a cooling cast
 const GPU_GUARD = { ratio: 0.85, minFps: 30, graceMs: 4000, everyMs: 1000 };
 
 const MOOD_LINES = {
   joy: { mood: 'happy', lines: ['You are smiling, my lord. The people have started dancing. Badly, but with feeling.', 'A divine smile! Everyone down here feels lucky today.'] },
-  anger: { mood: 'nervous', lines: ['That frown, my lord. The people can feel it. So can the goats.', 'Divine scowl detected. Tempers are rising down here.'] },
   surprise: { mood: 'panic', lines: ['You look startled! The sky took it personally.', 'Such a face! The heavens flashed in sympathy.'] },
-  sadness: { mood: 'nervous', lines: ['Why the long face, my lord? The sun is hiding out of sympathy.', 'You seem sad. The whole world has gone a shade darker.'] },
 };
 
 const TEMPLATE = `
   <header class="eeg-head">
-    <h2>Camera &amp; Hand Casts</h2>
+    <h2>Camera &amp; Hand Moves</h2>
     <button type="button" class="tool" data-cam-close title="Close Camera sidebar (\`)">Close <kbd>\`</kbd></button>
   </header>
 
@@ -54,16 +51,16 @@ const TEMPLATE = `
       <strong data-cam-state>Camera off</strong>
       <span class="eeg-qual" data-cam-mode>Idle</span>
     </div>
-    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam: cast spells with hand gestures and set world mood with your face. Frames never leave this device.</p>
+    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam: head cursor aims; hands pinch-grab creatures, two-hand pinch-zoom, wave to orbit, palm to calm, fist to strike. Frames never leave this device.</p>
     <div class="eeg-url-row">
       <button type="button" class="btn btn-primary btn-small" data-cam-start>Start Camera</button>
-      <button type="button" class="btn btn-small" data-cam-stop disabled>Stop Camera</button>
+      <button type="button" class="btn btn-small" data-cam-stop disabled>Stop &amp; Clear</button>
     </div>
   </section>
 
   <section class="eeg-sec">
     <div class="eeg-sec-head">
-      <h3>Live Vision &amp; Hand Landmarks</h3>
+      <h3>Live Vision &amp; Two-Hand Tracking</h3>
       <span class="eeg-qual" data-cam-fps>-- fps</span>
     </div>
     <div class="cam-body">
@@ -77,10 +74,10 @@ const TEMPLATE = `
           <div><span>Face Inference</span><b data-cam-rate-face>--</b></div>
         </div>
         <div class="eeg-imu-mini">
-          <span>Gesture: <b data-cam-gesture>--</b></span>
+          <span>Hands: <b data-cam-gesture>--</b></span>
         </div>
         <div class="eeg-imu-mini">
-          <span>Pinch: <b data-cam-pinch>--</b></span>
+          <span>Pinch / Zoom: <b data-cam-pinch>--</b></span>
         </div>
       </div>
     </div>
@@ -88,24 +85,24 @@ const TEMPLATE = `
 
   <section class="eeg-sec">
     <div class="eeg-sec-head">
-      <h3>Hand Spells (Keys 1–7)</h3>
+      <h3>Core Hand Moves (Keys 1–3)</h3>
       <span class="eeg-qual" data-cam-last>Ready</span>
     </div>
-    <p class="eeg-msg" data-cam-now>Make a gesture, or press 1–7.</p>
-    <div class="cam-spells" role="group" aria-label="Casts, keys 1 to 7">
+    <p class="eeg-msg" data-cam-now>Head aims the cursor. Pinch=Grab (1), Palm=Calm (2), Fist=Strike (3).</p>
+    <div class="cam-spells" role="group" aria-label="Core moves, keys 1 to 3">
       ${SPELLS.map((s) => `<button type="button" class="cam-spell" data-spell="${s.id}" aria-label="${s.name} (key ${s.key})" title="${s.name} · key ${s.key}. ${s.hint}">
         <svg class="cam-ring" viewBox="0 0 36 36" aria-hidden="true"><circle class="cam-ring-track" cx="18" cy="18" r="16"/><circle class="cam-ring-hold" cx="18" cy="18" r="16" pathLength="100"/><circle class="cam-ring-cd" cx="18" cy="18" r="16" pathLength="100"/></svg>
         <span class="cam-glyph" aria-hidden="true">${s.glyph}</span><kbd>${s.key}</kbd>
       </button>`).join('')}
     </div>
     <div class="eeg-imu-mini">
-      <span>Hand Range: <b data-cam-range>learning…</b></span>
+      <span>Action State: <b data-cam-range>head cursor active</b></span>
     </div>
   </section>
 
   <section class="eeg-sec" aria-label="Mood read from your face">
     <div class="eeg-sec-head">
-      <h3>Facial Mood &amp; Expression</h3>
+      <h3>Facial Mood (Joy &amp; Surprise)</h3>
       <span class="eeg-qual">Dominant: <b data-cam-dominant>neutral</b></span>
     </div>
     <div class="eeg-bands">
@@ -120,7 +117,7 @@ const TEMPLATE = `
   </section>`;
 
 function cameraError(err, castsEnabled) {
-  const fallback = castsEnabled ? ' Keys 1–7 still cast every spell.' : '';
+  const fallback = castsEnabled ? ' Keys 1–3 still trigger every move.' : '';
   const name = err?.name || '';
   if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError')
     return `Camera permission was denied. Allow it in the address bar and click Camera again.${fallback}`;
@@ -133,9 +130,17 @@ function cameraError(err, castsEnabled) {
 
 function stopTracks(stream) { stream?.getTracks().forEach((t) => t.stop()); }
 
-// mapX / screenX convert the reticle's x between the visible screen and the (panned, wrapping)
-// planet surface, as the mouse does; both are identity when main.js doesn't pass them.
-export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_CASTS_ENABLED, mapX = (x) => x, screenX = (x) => x } = {}) {
+export function initCamera({
+  getG,
+  canCast = () => true,
+  castsEnabled = CAMERA_CASTS_ENABLED,
+  mapX = (x) => x,
+  screenX = (x) => x,
+  onZoomDelta = null,
+  onWave = null,
+  getContext = () => 'surface',
+  onStatusChange = null,
+} = {}) {
   const btn = document.getElementById('camBtn');
   const panel = document.getElementById('camPanel');
   const screen = document.getElementById('screen');
@@ -146,7 +151,7 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
   if (!castsEnabled) {
     spellRow.style.display = 'none';
     panel.dataset.casts = 'off';
-    $('.cam-now').textContent = 'Face mood is active. Hand casts are deferred.';
+    $('[data-cam-now]').textContent = 'Face mood is active. Hand casts are deferred.';
   }
   const video = $('.cam-video');
   const hands = $('.cam-hands');
@@ -172,8 +177,7 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
     spells: Object.fromEntries(SPELLS.map((s) => [s.id, panel.querySelector(`[data-spell="${s.id}"]`)])),
   };
 
-  // Cast markers, the hand cursor and hold rings, drawn over the game canvas (under the era
-  // banner) so they show in every era without touching the renderer.
+  // Overlay canvas for hold rings, grabbed entity tether, and cast pings.
   const fx = document.createElement('canvas');
   fx.className = 'cam-fx';
   fx.setAttribute('aria-hidden', 'true');
@@ -183,33 +187,40 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
 
   const casts = new CastController();
   const tracker = new EmotionTracker();
-  const fingers = new FingerController();
-  const castFallback = castsEnabled ? ' Keys 1–7 still cast every spell.' : '';
+  const fingers = new FingerController({ headCursorOnly: true });
+  const multiHand = new MultiHandTracker();
+  const castFallback = castsEnabled ? ' Keys 1–3 still trigger every move.' : '';
   let status = 'off';          // off | starting | on | error
   let stream = null;
-  let engine = null;           // engine.js: worker or main-thread inference, kept across camera toggles
+  let engine = null;
   let enginePending = null;
   let prefer = workerPreference();
-  let run = 0;                 // bumps on every start/stop so stale async work can tell
+  let run = 0;
   let lastTick = 0;
   let lastFaceAt = 0;
   let gesture = { name: 'None', score: 0 };
   let hold = { held: null, progress: 0, aiming: false };
   let hand = null, handAspect = 4 / 3, faceBox = null;
-  let finger = null;           // last FingerController output
-  let armed = 'fireball';      // what letting go of a pinch casts: the last aimed spell
+  let finger = null;
+  let multi = null;
+  let grabbed = null;          // { label, kind, at } when holding a living entity (#120)
+  let armed = 'fist';
   let mood = neutralMood();
-  let moodScene = null, moodSent = null, strongPending = false;
+  let moodScene = null, moodSent = null, strongPending = false, surprisePending = false;
   let advisorAt = -Infinity;
-  let lastCast = null;         // { id, at } for the toast and marker
-  let miss = null;             // { id, at } a pinch released while that spell was cooling down
-  const history = [];          // last casts for the debug tab: { id, via, at }
-  let landmarkI = 0, landmarkScene = null;
+  let lastCast = null;
+  let miss = null;
+  const history = [];
   let uiAt = 0;
-  const pings = [];            // { x, y, at, glyph } in map coordinates
+  const pings = [];
   const frames = new FrameMeter();
-  let fpsBefore = 0;           // game frame rate when the player turned the camera on
+  let fpsBefore = 0;
   let guardAt = Infinity;
+
+  const coach = initCoach({
+    getContext,
+    onCastMove: (id) => cast(id, 'tap'),
+  });
 
   // ---------- state & messages ----------
   function setStatus(next, msg = '') {
@@ -229,11 +240,12 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
     if (ui.stopBtn) ui.stopBtn.disabled = !live && next !== 'starting';
     ui.state.textContent = live ? (next === 'on' ? 'Camera on · tracking' : 'Camera on · loading') : next === 'error' ? 'Camera unavailable' : next === 'starting' ? 'Starting camera…' : 'Camera off';
     if (msg) setMsg(msg);
-    else if (live && next === 'on') setMsg('Tracking hands and facial mood locally.');
+    else if (live && next === 'on') setMsg('Tracking hands and facial mood locally. Head cursor is sole aim.');
+    onStatusChange?.({ status: next, live });
   }
   function setMsg(msg) {
     if (!ui.msg) return;
-    ui.msg.textContent = msg || 'Opt-in webcam: cast spells with hand gestures and set world mood with your face.';
+    ui.msg.textContent = msg || 'Opt-in webcam: head cursor aims; hands grab, zoom, wave, calm and strike.';
   }
 
   function togglePanel(force) {
@@ -241,17 +253,13 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
     panel.hidden = !open;
     btn.setAttribute('aria-pressed', String(open));
     if (open) {
-      const eegP = document.getElementById('eegPanel');
-      const eegB = document.getElementById('eegBtn');
-      if (eegP && !eegP.hidden) {
-        eegP.hidden = true;
-        eegB?.setAttribute('aria-pressed', 'false');
-      }
-      const modP = document.getElementById('modelPanel');
-      const modB = document.getElementById('modelBtn');
-      if (modP && !modP.hidden) {
-        modP.hidden = true;
-        modB?.setAttribute('aria-pressed', 'false');
+      for (const [pId, bId] of [['eegPanel', 'eegBtn'], ['modelPanel', 'modelBtn'], ['settingsPanel', 'settingsBtn']]) {
+        const p = document.getElementById(pId);
+        const b = document.getElementById(bId);
+        if (p && !p.hidden) {
+          p.hidden = true;
+          b?.setAttribute('aria-pressed', 'false');
+        }
       }
     }
   }
@@ -266,7 +274,6 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
     return e;
   }
 
-  // A worker died while running: carry on with the main-thread path.
   function onEngineFail(err) {
     console.warn('[camera] worker inference stopped, switching to the main thread:', err?.message || err);
     engine = null;
@@ -298,10 +305,10 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
       if (id === run) setStatus('error', cameraError(err, castsEnabled));
       return;
     }
-    if (id !== run) { stopTracks(s); return; } // turned off while the prompt was open
+    if (id !== run) { stopTracks(s); return; }
     stream = s;
     video.srcObject = stream;
-    try { await video.play(); } catch { /* autoplay of a muted inline video is allowed; ignore */ }
+    try { await video.play(); } catch { /* autoplay of a muted inline video is allowed */ }
     setStatus('starting', castsEnabled ? 'Loading hand and face models…' : 'Loading face model…');
     try {
       await ensureEngine((m) => { if (id === run) setMsg(m); });
@@ -319,26 +326,34 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
   }
 
   function teardown() {
+    const G = getG();
+    if (grabbed && G?.scene?.onGrabEnd) {
+      try { G.scene.onGrabEnd({ x: G.brain?.aim?.x ?? 0.5, y: G.brain?.aim?.y ?? 0.5, cancelled: true }); } catch {}
+    }
+    grabbed = null;
     stopTracks(stream);
     stream = null;
     video.srcObject = null;
     casts.reset();
     tracker.reset();
     fingers.reset();
+    multiHand.reset();
     hand = null;
     finger = null;
+    multi = null;
     faceBox = null;
     gesture = { name: 'None', score: 0 };
     hold = { held: null, progress: 0, aiming: false };
     mood = neutralMood();
     strongPending = false;
+    surprisePending = false;
     handsCtx.clearRect(0, 0, hands.width, hands.height);
   }
 
   function stop() {
     run++;
     teardown();
-    setStatus('off', 'Camera stopped. Keys 1–7 still cast every spell.');
+    setStatus('off', 'Camera stopped and cleared. Keys 1–3 still trigger every move.');
   }
 
   btn.addEventListener('click', () => {
@@ -354,70 +369,91 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
   $('[data-cam-close]').addEventListener('click', () => togglePanel(false));
   window.addEventListener('pagehide', () => { if (stream || status === 'starting') stop(); });
 
-  // ---------- aiming ----------
-  // In map coordinates (key 1's landmarks).
-  function setAim(m) {
-    const G = getG();
-    if (!G?.brain) return;
-    const b = G.brain.aim;
-    b.x = clamp(m.x); b.y = clamp(m.y);
-    // Like the mouse: the emulated headset's head tilt follows, so the next frame doesn't pull it back.
-    if (G.source?.kind === 'sim') G.source.setAim(b.x, b.y);
-  }
-  // In screen coordinates (the finger), converted to the panned surface like a mouse position.
-  const aimAtScreen = (s) => setAim({ x: mapX(clamp(s.x)), y: s.y });
   const reticleOnScreen = (G) => ({ x: clamp(screenX(G.brain.aim.x)), y: G.brain.aim.y });
 
-  function landmarks(G) {
-    const sc = G.scene, s = G.world?.sites || {};
-    const pts = [];
-    if (sc.id === 'stone') {
-      if (sc.fire) pts.push(sc.fire);
-      for (const m of sc.mammoths || []) if (m.alive) pts.push({ x: m.x, y: m.y - 2 });
-    } else if (sc.id === 'industry') pts.push(s.exchange, s.factory, s.picket);
-    else if (sc.id === 'space') pts.push(s.pad, s.hangar, s.crowd);
-    else pts.push(s.village, s.cave);
-    return pts.filter(Boolean);
+  // ---------- living-entity grab (#120) ----------
+  function tryGrabStart(G, now) {
+    const scene = G?.scene;
+    if (!scene || !G?.brain || !canCast()) return false;
+    const aim = { x: G.brain.aim.x, y: G.brain.aim.y };
+    if (typeof scene.onGrabStart === 'function') {
+      const res = scene.onGrabStart(aim);
+      if (res && res.ok) {
+        grabbed = { label: res.label || 'creature', kind: res.kind || 'entity', at: now };
+        coach?.flash(`Picked up ${grabbed.label} · move head & release to drop`, 'ok', 2800);
+        G.hud?.showCause?.(`🤏 Grabbed ${grabbed.label} — move head cursor & release to place`);
+        history.unshift({ id: 'pinch', via: 'pinch', at: now });
+        history.length = Math.min(history.length, 5);
+        lastCast = { id: 'pinch', at: now };
+        return true;
+      }
+      const why = res?.reason || 'Move head cursor over a living creature to grab';
+      coach?.flash(why, 'bad', 2000);
+      return false;
+    }
+    return false;
   }
 
-  function nextLandmark(G) {
-    const pts = landmarks(G);
-    if (!pts.length) return { ...G.brain.aim };
-    if (landmarkScene !== G.scene) { landmarkScene = G.scene; landmarkI = 0; }
-    const p = pts[landmarkI++ % pts.length];
-    return { x: clamp(p.x / (W - 1)), y: clamp(p.y / (H - 1)) };
+  function tryGrabEnd(G, now, cancelled = false) {
+    if (!grabbed) return false;
+    const scene = G?.scene;
+    const label = grabbed.label;
+    grabbed = null;
+    if (scene && typeof scene.onGrabEnd === 'function' && G?.brain) {
+      try {
+        scene.onGrabEnd({ x: G.brain.aim.x, y: G.brain.aim.y, cancelled });
+      } catch (err) {
+        console.error('[camera] onGrabEnd failed:', err);
+      }
+    }
+    if (!cancelled) {
+      coach?.flash(`Dropped ${label}`, 'ok', 1600);
+      G?.hud?.showCause?.(`🤏 Placed ${label}`);
+      if (G?.brain) pings.push({ x: G.brain.aim.x, y: G.brain.aim.y, at: now, glyph: '🤏' });
+    }
+    return true;
   }
 
-  // ---------- casting ----------
-  // via: 'gesture' (already debounced and cooled down by the controller), 'pinch', 'key' or 'tap'.
+  // ---------- casting (#122) ----------
   function cast(id, via, now = performance.now()) {
     if (!castsEnabled) return false;
     const G = getG();
     const scene = G?.scene;
     if (!scene || !SPELL_BY_ID[id] || !canCast()) return false;
+
+    // Key 1 or Pinch button toggles living-entity grab at the head reticle (#120, #122)
+    if (id === 'pinch') {
+      if (grabbed) {
+        return tryGrabEnd(G, now, false);
+      }
+      if (tryGrabStart(G, now)) return true;
+      // Fallback if scene doesn't implement onGrabStart or nothing under cursor
+      if (via !== 'gesture' && !casts.trigger(id, now)) return false;
+      const aim = { x: G.brain.aim.x, y: G.brain.aim.y };
+      scene.onCast?.('pinch', aim);
+      return true;
+    }
+
     if (via !== 'gesture' && !casts.trigger(id, now)) return false;
-    if (id === 'point' && via !== 'gesture') setAim(nextLandmark(G));
     const aim = { x: G.brain.aim.x, y: G.brain.aim.y };
     try {
-      // The fist reuses the existing lightning wherever an era has it.
-      if (id === 'fireball' && scene.onBlink) { G.hud?.flashBlink?.(); scene.onBlink(aim); }
-      else scene.onCast?.(id, aim);
+      if ((id === 'fist' || id === 'fireball') && scene.onBlink && !scene.onCast) {
+        G.hud?.flashBlink?.();
+        scene.onBlink(aim);
+      } else {
+        scene.onCast?.(id, aim);
+      }
     } catch (err) { console.error('[camera] cast failed:', err); }
     G.stats.casts = (G.stats.casts || 0) + 1;
     if (SPELL_BY_ID[id].aimed) armed = id;
     history.unshift({ id, via, at: now });
     history.length = Math.min(history.length, 5);
-    // Pointing by hand already shows the hand cursor; every other cast gets a toast and a marker.
-    if (!(id === 'point' && via === 'gesture')) {
-      lastCast = { id, at: now };
-      pings.push({ ...aim, at: now, glyph: SPELL_BY_ID[id].glyph });
-    }
+    lastCast = { id, at: now };
+    pings.push({ ...aim, at: now, glyph: SPELL_BY_ID[id].glyph });
+    coach?.flash(`${SPELL_BY_ID[id].glyph} ${SPELL_BY_ID[id].name}!`, 'ok', 1600);
+    if (id === 'palm') G.hud?.showCause?.('🖐️ Your open palm spread calm across the land');
+    else if (id === 'fist') G.hud?.showCause?.('✊ Your closed fist called down a strike');
     return true;
-  }
-
-  // Letting go of a pinch: the armed spell lands on the precisely placed reticle.
-  function castArmed(now) {
-    if (!cast(armed, 'pinch', now)) miss = { id: armed, at: now };
   }
 
   window.addEventListener('keydown', (e) => {
@@ -427,57 +463,112 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
     if (!spell) return;
     if (cast(spell.id, 'key')) e.preventDefault();
   });
-  for (const s of SPELLS) ui.spells[s.id].addEventListener('click', () => cast(s.id, 'tap'));
+  for (const s of SPELLS) ui.spells[s.id]?.addEventListener('click', () => cast(s.id, 'tap'));
 
-  // ---------- mood ----------
-  // Level-triggered: whenever the scene or the dominant mood differs from what the scene last
-  // heard, tell it. So a scene that was paused (banner, retry screen) or freshly started still
-  // ends up in the right mood, and turning the camera off returns it to neutral.
+  // ---------- mood (#117: Joy continuous + Surprise debounced event) ----------
   function syncMood(G) {
     const scene = G?.scene;
     if (!scene?.onMood || !canCast()) return;
-    // Camera off and nothing to undo: a fresh scene is already neutral, so leave it alone.
-    if (!stream && scene !== moodScene) { moodScene = scene; moodSent = 'neutral'; strongPending = false; return; }
+    if (!stream && scene !== moodScene) {
+      moodScene = scene;
+      moodSent = 'neutral';
+      strongPending = false;
+      surprisePending = false;
+      return;
+    }
     let reason = null;
-    if (scene !== moodScene || mood.dominant !== moodSent) reason = 'change';
+    if (surprisePending) reason = 'surprise';
+    else if (scene !== moodScene || mood.dominant !== moodSent) reason = 'change';
     else if (strongPending) reason = 'strong';
     if (!reason) return;
     const changed = mood.dominant !== moodSent;
-    moodScene = scene; moodSent = mood.dominant; strongPending = false;
-    try { scene.onMood({ ...mood, reason }); } catch (err) { console.error('[camera] mood failed:', err); }
-    if (reason === 'change' && changed && mood.dominant !== 'neutral') advisorReact(G);
+    const wasSurprise = surprisePending;
+    moodScene = scene;
+    moodSent = mood.dominant;
+    strongPending = false;
+    surprisePending = false;
+    try {
+      scene.onMood({ ...mood, reason, surpriseTriggered: wasSurprise });
+    } catch (err) {
+      console.error('[camera] mood failed:', err);
+    }
+    if (wasSurprise) {
+      G.hud?.showCause?.('😮 Your surprised expression startled the sky!');
+      advisorReact(G, 'surprise');
+    } else if (reason === 'change' && changed && mood.dominant === 'joy') {
+      G.hud?.showCause?.('😊 Your smile boosted morale (+joy)');
+      advisorReact(G, 'joy');
+    }
   }
 
-  function advisorReact(G) {
+  function advisorReact(G, dom = mood.dominant) {
     const t = performance.now() / 1000;
-    const r = MOOD_LINES[mood.dominant];
+    const r = MOOD_LINES[dom];
     if (!r || !G.advisor || t - advisorAt < ADVISOR_GAP) return;
     const line = r.lines[Math.floor(Math.random() * r.lines.length)];
-    if (G.advisor.say(`mood-${mood.dominant}`, line, { mood: r.mood, priority: 1, cooldown: 40 })) advisorAt = t;
+    if (G.advisor.say(`mood-${dom}`, line, { mood: r.mood, priority: 1, cooldown: 40 })) advisorAt = t;
   }
 
   // ---------- model results ----------
-  // r: { hand: 21 landmarks | null, name, score, aspect }
   function onGesture(r) {
     if (!stream || status !== 'on' || !castsEnabled) return;
     const now = performance.now();
     hand = r.hand || null;
     handAspect = r.aspect || 4 / 3;
     gesture = { name: r.name || 'None', score: r.score || 0 };
+    const rawHands = Array.isArray(r.hands) && r.hands.length
+      ? r.hands
+      : (hand ? [{ landmarks: hand, name: gesture.name, score: gesture.score }] : []);
+
     const G = getG();
     const live = canCast() && !!G?.brain;
-    finger = fingers.update({ hand, gesture, aim: live ? reticleOnScreen(G) : { x: 0.5, y: 0.55 }, now, aspect: handAspect });
+
+    // Single-hand metrics preserved in headCursorOnly mode so hands NEVER move G.brain.aim (#116, #120)
+    finger = fingers.update({
+      hand,
+      gesture,
+      aim: live ? reticleOnScreen(G) : { x: 0.5, y: 0.55 },
+      now,
+      aspect: handAspect,
+    });
+
+    // Multi-hand tracker: 2-hand continuous zoom (#118, #119), 1-hand grab (#120), wave orbit (#121)
+    multi = multiHand.update({ hands: rawHands, now, aspect: handAspect });
+
     if (live) {
-      // While pinching (or about to), a fist or palm read from that hand shape is not a cast.
-      hold = finger.suppress ? casts.update('None', 0, now) : casts.update(gesture.name, gesture.score, now);
-      if (finger.aim) aimAtScreen(finger.aim);
-      if (finger.cast) castArmed(now);
-      else if (hold.cast) cast(hold.cast, 'gesture', now);
-    } else hold = casts.update('None', 0, now);
+      // 1. Two-hand continuous pinch zoom (#119)
+      if (multi.bothPinched && grabbed) {
+        tryGrabEnd(G, now, true);
+      }
+      if (multi.zoomDelta && Math.abs(multi.zoomDelta) > 0 && onZoomDelta) {
+        onZoomDelta(multi.zoomDelta, multi.zoomFactor);
+      }
+
+      // 2. One-hand pinch grab at head reticle (#120)
+      if (multi.grab.started) {
+        tryGrabStart(G, now);
+      } else if (multi.grab.active && grabbed) {
+        G.scene?.onGrabMove?.({ x: G.brain.aim.x, y: G.brain.aim.y });
+      } else if (multi.grab.released || multi.grab.cancelled) {
+        tryGrabEnd(G, now, !!multi.grab.cancelled);
+      }
+
+      // 3. Open-hand wave orbit (#121)
+      if (multi.wave && onWave) {
+        onWave(multi.wave, multi.waveVel);
+        coach?.flash(`👋 Wave ${multi.wave} · camera orbited`, 'ok', 1400);
+      }
+
+      // 4. Palm (Calm) & Fist (Strike) gesture holds (#122) — suppressed while pinching, grabbing, or waving
+      const suppressCast = multi.suppressCasts || finger.suppress;
+      hold = suppressCast ? casts.update('None', 0, now) : casts.update(gesture.name, gesture.score, now);
+      if (hold.cast) cast(hold.cast, 'gesture', now);
+    } else {
+      hold = casts.update('None', 0, now);
+    }
     drawHands();
   }
 
-  // r: { blendshapes: categories or {name: score} | null, box }
   function onFace(r) {
     if (!stream || status !== 'on') return;
     const at = r.at ?? performance.now();
@@ -487,42 +578,63 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
     mood = out.mood;
     faceBox = r.box || null;
     if (out.event === 'strong') strongPending = true;
+    if (out.surpriseTriggered) surprisePending = true;
   }
-
-  const handState = () => ({ held: !!hold.held, aiming: finger?.mode === 'point', pinching: !!finger?.pinching, nearPinch: finger?.ratio != null && finger.ratio < fingers.pinch.exit });
 
   function drawHands() {
     if (!castsEnabled) return;
     const w = video.videoWidth || 320, h = video.videoHeight || 240;
     if (hands.width !== w || hands.height !== h) { hands.width = w; hands.height = h; }
     handsCtx.clearRect(0, 0, w, h);
-    drawHand(handsCtx, hand, w, h, handState());
+    if (multi && (multi.left || multi.right)) {
+      if (multi.left?.visible) {
+        drawHand(handsCtx, multi.left.landmarks, w, h, {
+          held: !!hold.held,
+          pinching: !!multi.left.pinching,
+          nearPinch: multi.left.ratio != null && multi.left.ratio < fingers.pinch.exit,
+          side: 'left',
+        });
+      }
+      if (multi.right?.visible) {
+        drawHand(handsCtx, multi.right.landmarks, w, h, {
+          held: !!hold.held,
+          pinching: !!multi.right.pinching,
+          nearPinch: multi.right.ratio != null && multi.right.ratio < fingers.pinch.exit,
+          side: 'right',
+        });
+      }
+    } else if (hand) {
+      drawHand(handsCtx, hand, w, h, {
+        held: !!hold.held,
+        pinching: !!finger?.pinching,
+        nearPinch: finger?.ratio != null && finger.ratio < fingers.pinch.exit,
+      });
+    }
   }
 
   // ---------- UI ----------
   function nowText(now) {
     const fmt = (s) => `${s.glyph} ${s.name}`;
-    // A pinch let go on a cooling spell says when it's ready, even over the last cast's toast.
     if (miss && now - miss.at < MISS_MS && (!lastCast || miss.at > lastCast.at)) {
       const s = SPELL_BY_ID[miss.id];
       return `${fmt(s)} ready in ${(casts.cooldownLeft(s.id, now) / 1000).toFixed(1)} s`;
     }
-    const recent = lastCast && now - lastCast.at < 1400 ? SPELL_BY_ID[lastCast.id] : null;
-    if (recent) return `Cast: ${fmt(recent)}!`;
-    if (!(stream && engine)) return 'Press 1–7 or tap a spell to cast.';
-    const g = GESTURE_LABEL[gesture.name] || gesture.name;
-    if (finger?.pinching) {
-      const s = SPELL_BY_ID[armed];
-      const cd = casts.cooldownLeft(armed, now);
-      return cd > 0 ? `Pinch: aiming · ${s.name} ready in ${(cd / 1000).toFixed(1)} s` : `Pinch: aiming · let go for ${fmt(s)}`;
+    if (multi?.bothPinched) {
+      return `👐 Two-hand zoom (${Math.round((multi.zoomFactor || 1) * 100)}%) · unpinch to freeze`;
     }
+    if (grabbed) {
+      return `🤏 Holding ${grabbed.label} · move head cursor & release pinch to drop`;
+    }
+    const recent = lastCast && now - lastCast.at < 1400 ? SPELL_BY_ID[lastCast.id] : null;
+    if (recent) return `Move: ${fmt(recent)}!`;
+    if (!(stream && engine)) return 'Head aims cursor. Press 1 (Grab), 2 (Calm), or 3 (Strike).';
+    const g = GESTURE_LABEL[gesture.name] || gesture.name;
     if (hold.held) {
       const s = SPELL_BY_ID[hold.held];
       const cd = casts.cooldownLeft(s.id, now);
-      return cd > 0 ? `${g}: ${s.name} ready in ${(cd / 1000).toFixed(1)} s` : finger?.mode === 'point' ? `${g}: aiming` : `${g}: hold for ${s.name}…`;
+      return cd > 0 ? `${g}: ${s.name} ready in ${(cd / 1000).toFixed(1)} s` : `${g}: hold for ${s.name}…`;
     }
-    if (finger?.mode === 'point') return `${g}: aiming`;
-    return hand ? `Hand: ${g}` : 'Show a hand. Point to aim, pinch to aim precisely.';
+    return hand ? `Hand: ${g} · head cursor aims` : 'Show 1 hand to grab/calm/strike, or 2 hands to pinch-zoom.';
   }
 
   function fmtRate(r) {
@@ -557,24 +669,41 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
     if (ui.rateHands) ui.rateHands.textContent = stream && snap ? fmtRate(snap.gesture) : '--';
     if (ui.rateFace) ui.rateFace.textContent = stream && snap ? fmtRate(snap.face) : '--';
 
+    const handCount = (multi?.left?.visible ? 1 : 0) + (multi?.right?.visible ? 1 : 0);
     if (ui.gesture) {
-      ui.gesture.textContent = !stream ? 'camera off' : !hand ? 'no hand' : `${GESTURE_LABEL[gesture.name] || gesture.name} (${Math.round(gesture.score * 100)}%)${finger?.mode === 'point' ? ' · aiming' : ''}`;
+      if (!stream) {
+        ui.gesture.textContent = 'camera off';
+      } else if (handCount === 2) {
+        const l = multi.left?.name ? GESTURE_LABEL[multi.left.name] || multi.left.name : 'hand';
+        const r = multi.right?.name ? GESTURE_LABEL[multi.right.name] || multi.right.name : 'hand';
+        ui.gesture.textContent = `2H · L: ${l} · R: ${r}`;
+      } else if (handCount === 1) {
+        const h = multi.left?.visible ? multi.left : multi.right;
+        const name = h?.name ? GESTURE_LABEL[h.name] || h.name : GESTURE_LABEL[gesture.name] || gesture.name;
+        ui.gesture.textContent = `1H · ${name}`;
+      } else if (hand) {
+        ui.gesture.textContent = `1H · ${GESTURE_LABEL[gesture.name] || gesture.name}`;
+      } else {
+        ui.gesture.textContent = 'no hand';
+      }
     }
     if (ui.pinch) {
-      const armedSpell = SPELL_BY_ID[armed || 'fireball'];
-      ui.pinch.textContent = finger?.ratio == null
-        ? `casts ${armedSpell.glyph} ${armedSpell.name}`
-        : finger.pinching
-          ? `HELD (${finger.ratio.toFixed(2)}) -> ${armedSpell.glyph}`
-          : `open (${finger.ratio.toFixed(2)}) · ${armedSpell.glyph}`;
+      if (multi?.bothPinched) {
+        ui.pinch.textContent = `2H ZOOM ×${(multi.zoomFactor || 1).toFixed(2)}`;
+      } else if (grabbed) {
+        ui.pinch.textContent = `HOLDING ${grabbed.label}`;
+      } else if (finger?.ratio != null) {
+        ui.pinch.textContent = finger.pinching ? `PINCH (${finger.ratio.toFixed(2)})` : `open (${finger.ratio.toFixed(2)})`;
+      } else {
+        ui.pinch.textContent = '1H grab · 2H zoom';
+      }
     }
     if (ui.range) {
-      const rg = fingers.range.snapshot();
-      ui.range.textContent = `${rg.calibrated ? 'learned' : `learning ${Math.round((rg.progress || 0) * 100)}%`} · X:${rg.x[0].toFixed(2)}–${rg.x[1].toFixed(2)} Y:${rg.y[0].toFixed(2)}–${rg.y[1].toFixed(2)}`;
+      ui.range.textContent = grabbed ? `carrying ${grabbed.label}` : multi?.bothPinched ? 'two-hand zoom active' : 'head cursor sole aim';
     }
     if (ui.last) {
       const last = history[0];
-      ui.last.textContent = last ? `${SPELL_BY_ID[last.id].glyph} ${SPELL_BY_ID[last.id].name} (${((now - last.at) / 1000).toFixed(1)}s ago)` : 'Ready';
+      ui.last.textContent = last && SPELL_BY_ID[last.id] ? `${SPELL_BY_ID[last.id].glyph} ${SPELL_BY_ID[last.id].name} (${((now - last.at) / 1000).toFixed(1)}s ago)` : 'Ready';
     }
 
     if (!castsEnabled) return;
@@ -582,23 +711,23 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
     if (ui.now.textContent !== text) ui.now.textContent = text;
     for (const s of SPELLS) {
       const el = ui.spells[s.id];
+      if (!el) continue;
       const cd = casts.cooldownFrac(s.id, now);
+      const isHeld = hold.held === s.id || (s.id === 'pinch' && !!grabbed);
       el.style.setProperty('--cd', cd.toFixed(3));
-      el.style.setProperty('--hold', (hold.held === s.id ? hold.progress : 0).toFixed(3));
+      el.style.setProperty('--hold', (isHeld ? (grabbed ? 1 : hold.progress) : 0).toFixed(3));
       el.classList.toggle('is-cooling', cd > 0);
-      el.classList.toggle('is-held', hold.held === s.id);
+      el.classList.toggle('is-held', isHeld);
     }
   }
 
-  // The finger cursor, gesture-hold and pinch rings at the reticle, and cast markers.
   function drawFx(now) {
     while (pings.length && now - pings[0].at > PING_MS) pings.shift();
     const G = getG();
-    const tracking = !!(stream && hand && G?.brain && canCast());
-    const mode = tracking ? finger?.mode : null;
-    const cursor = mode === 'point' || mode === 'pinch';
-    const holding = tracking && hold.held && hold.held !== 'point' && hold.progress > 0;
-    if (!pings.length && !cursor && !holding) {
+    const tracking = !!(stream && (hand || multi?.left || multi?.right) && G?.brain && canCast());
+    const holding = tracking && hold.held && hold.progress > 0;
+    const carrying = !!grabbed && !!G?.brain;
+    if (!pings.length && !holding && !carrying) {
       if (fxDirty) { fxCtx.clearRect(0, 0, fx.width, fx.height); fxDirty = false; }
       return;
     }
@@ -608,7 +737,7 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
     if (fx.width !== cw || fx.height !== ch) { fx.width = cw; fx.height = ch; }
     fxCtx.clearRect(0, 0, cw, ch);
     fxDirty = true;
-    const u = Math.max(1, cw / 320);   // one world pixel
+    const u = Math.max(1, cw / 320);
     const ring = (x, y, r, frac, color, width = u) => {
       fxCtx.lineWidth = width;
       fxCtx.strokeStyle = color;
@@ -619,34 +748,23 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
       fxCtx.textAlign = 'center';
       fxCtx.fillText(glyph, x, y);
     };
-    if (cursor || holding) {
+    if ((holding || carrying) && G?.brain) {
       const r = reticleOnScreen(G);
       const x = r.x * cw, y = r.y * ch;
-      if (mode === 'pinch') {
-        // Precise aim: a small, tight cursor, the pinch's hold ring and the armed spell.
-        ring(x, y, 5 * u, 1, 'rgba(242,232,213,0.35)');
-        ring(x, y, 5 * u, finger.progress, '#ff8a3d', 1.5 * u);
-        fxCtx.fillStyle = '#ff8a3d';
-        fxCtx.fillRect(x - u / 2, y - u / 2, u, u);
-        fxCtx.globalAlpha = casts.cooldownLeft(armed, now) > 0 ? 0.45 : 1;
-        glyphAt(SPELL_BY_ID[armed].glyph, x + 9 * u, y - 6 * u, 7 * u);
-        fxCtx.globalAlpha = 1;
-      } else if (cursor) {
-        fxCtx.lineWidth = u;
-        fxCtx.strokeStyle = 'rgba(89,216,200,0.95)';
-        fxCtx.beginPath(); fxCtx.arc(x, y, 7 * u, 0, Math.PI * 2); fxCtx.stroke();
-        fxCtx.beginPath(); fxCtx.moveTo(x - 10 * u, y); fxCtx.lineTo(x - 4 * u, y); fxCtx.moveTo(x + 4 * u, y); fxCtx.lineTo(x + 10 * u, y);
-        fxCtx.moveTo(x, y - 10 * u); fxCtx.lineTo(x, y - 4 * u); fxCtx.moveTo(x, y + 4 * u); fxCtx.lineTo(x, y + 10 * u); fxCtx.stroke();
+      if (carrying) {
+        ring(x, y, 8 * u, 1, '#ff8a3d', 2 * u);
+        glyphAt('🤏', x, y - 11 * u, 8 * u);
       }
       if (holding) {
-        // Gesture hold: fills over ~300 ms, then the cast fires. A cooling spell shows a dim ring.
         const s = SPELL_BY_ID[hold.held];
-        const cooling = casts.cooldownLeft(s.id, now) > 0;
-        ring(x, y, 11 * u, 1, 'rgba(242,232,213,0.25)');
-        ring(x, y, 11 * u, cooling ? 1 - casts.cooldownFrac(s.id, now) : hold.progress, cooling ? 'rgba(255,207,74,0.5)' : '#59d8c8', 2 * u);
-        fxCtx.globalAlpha = cooling ? 0.5 : 1;
-        glyphAt(s.glyph, x, y - 14 * u, 8 * u);
-        fxCtx.globalAlpha = 1;
+        if (s) {
+          const cooling = casts.cooldownLeft(s.id, now) > 0;
+          ring(x, y, 11 * u, 1, 'rgba(242,232,213,0.25)');
+          ring(x, y, 11 * u, cooling ? 1 - casts.cooldownFrac(s.id, now) : hold.progress, cooling ? 'rgba(255,207,74,0.5)' : '#59d8c8', 2 * u);
+          fxCtx.globalAlpha = cooling ? 0.5 : 1;
+          glyphAt(s.glyph, x, y - 14 * u, 8 * u);
+          fxCtx.globalAlpha = 1;
+        }
       }
     }
     for (const p of pings) {
@@ -662,22 +780,35 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
   }
 
   // ---------- loop ----------
-  // rAF, with a timer fallback for embedded views that throttle it (same as the game loop).
   function tick() {
     const now = performance.now();
     if (now - lastTick < 8) return;
     lastTick = now;
     frames.frame(now);
     if (stream && engine?.alive && status === 'on' && video.readyState >= 2) {
-      engine.pump(video, now, { hands: castsEnabled, tracking: !!hand });
+      engine.pump(video, now, { hands: castsEnabled, tracking: !!(hand || multi?.left || multi?.right) });
       if (now >= guardAt) guardFrames(now);
     }
     const G = getG();
     if (G) {
       G.mood = { ...(stream ? mood : neutralMood()), active: !!stream };
+      if (grabbed && G.brain) {
+        G.scene?.onGrabMove?.({ x: G.brain.aim.x, y: G.brain.aim.y });
+      }
       syncMood(G);
     }
     if (!panel.hidden && now - uiAt > 60) { uiAt = now; updatePanel(now); }
+    coach?.update(now, {
+      live: !!stream && status === 'on',
+      leftVisible: !!multi?.left?.visible,
+      rightVisible: !!multi?.right?.visible,
+      bothPinched: !!multi?.bothPinched,
+      grabActive: !!grabbed || !!multi?.grab?.active,
+      heldMove: hold.held,
+      holdProgress: hold.progress,
+      pinchStrength: finger?.pinching ? 1 : 0,
+      statusText: nowText(now),
+    });
     drawFx(now);
   }
   function guardFrames(now) {
@@ -695,12 +826,22 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
 
   setStatus('off');
 
-  // Everything the debug tab shows, as plain data.
   function debugState(now = performance.now()) {
     return {
       status, live: !!stream, castsEnabled, video,
       engine: engine ? engine.snapshot(now) : null,
       gesture: { ...gesture }, hold: { ...hold }, hand, handAspect, faceBox,
+      hands: {
+        left: multi?.left || null,
+        right: multi?.right || null,
+        bothPinched: !!multi?.bothPinched,
+        zoomActive: !!multi?.zoomActive,
+        distance: multi?.distance ?? null,
+        pinchStart: multi?.pinchStart ?? null,
+        zoomFactor: multi?.zoomFactor ?? 1,
+        wave: multi?.wave || null,
+      },
+      grabbed: grabbed ? { ...grabbed } : null,
       finger: finger && { mode: finger.mode, ratio: finger.ratio, reach: finger.reach, pinching: finger.pinching, progress: finger.progress, suppress: finger.suppress, tip: finger.tip },
       pinch: { enter: fingers.pinch.enter, exit: fingers.pinch.exit },
       range: fingers.range.snapshot(),
@@ -711,19 +852,18 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
     };
   }
 
-  // Debug and test handle (window.__moc.camera).
   return {
     get status() { return status; },
+    get live() { return !!stream; },
     get mood() { return mood; },
     get engine() { return engine; },
     get vision() { return engine?.vision || null; },
     get armed() { return armed; },
+    get grabbed() { return grabbed; },
     start, stop, cast, togglePanel,
-    casts, tracker, fingers, video,
+    casts, tracker, fingers, multiHand, coach, video,
     debugState,
-    // Feed model results in directly, as the engine does (stubbed outputs for tests).
     simulate: { gesture: onGesture, face: onFace },
-    // Where inference runs: 0 main thread, 1 one worker, 2 a worker per model (default). For comparing.
     async setInferenceMode(mode) {
       prefer = mode;
       const old = engine;
@@ -732,7 +872,6 @@ export function initCamera({ getG, canCast = () => true, castsEnabled = CAMERA_C
       if (stream && status === 'on') { await ensureEngine(() => {}); engine.resetStats(); guardAt = performance.now() + GPU_GUARD.graceMs; }
       return engine?.snapshot().mode || null;
     },
-    // Download and initialise the main-thread models without a camera, e.g. to time them.
     async loadModels() { const v = await loadVision(undefined, { hands: castsEnabled }); return { timings: v.timings, delegates: v.delegates }; },
   };
 }

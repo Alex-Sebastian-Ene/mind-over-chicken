@@ -1,15 +1,17 @@
 // ERA II · INDUSTRY
 // The Goat Exchange. Prices come from trader agents, half fundamentalists (goats are worth
 // what the economy produces) and half chartists (goats are worth whatever they did yesterday,
-// plus vibes). Your heart rate above resting adds noise and herding, so bubbles and crashes
-// emerge from the agents instead of being scripted. Fear spreads between neighbours, unrest
-// turns into strikes at the factory gate and, if fear runs hot, riots.
-// Brain challenge: the Goat IPO, 8 s of steady pulse.
+// plus vibes). Your stress (brain.stress: EEG agitation, or an angry face on camera; about 0.15
+// at rest) adds noise and herding, so bubbles and crashes emerge from the agents instead of being
+// scripted. Fear spreads between neighbours, unrest turns into strikes at the factory gate and,
+// if fear runs hot, riots.
+// Brain challenge: the Goat IPO, 8 s of steady nerves (stress below STRESSED).
 
 import { W, H, Particles, clamp, dist, rand, chance, gauss, floater, pick } from '../sim/util.js';
 import { walk, animate, villagerLook, sail } from '../sim/agents.js';
 import { drawPerson, drawGoat, drawChicken, drawBoat } from '../render/sprites.js';
 import { label } from './stone.js';
+import { STRESSED } from '../brain/brain.js';
 
 const N = 38;
 const GDP_TARGET = 620;
@@ -24,9 +26,9 @@ export class Industry {
     this.intro = {
       title: 'Industry',
       goal: `Reach ${GDP_TARGET} goats of GDP and land the Goat IPO.`,
-      how: [['Heart rate', 'Your pulse drives market volatility. Stay steady or the goats stampede.'], ['Calm', 'A serene god calms the traders and cools the strikers.']],
+      how: [['Stress', 'Your stress drives market volatility. Stay steady or the goats stampede.'], ['Calm', 'A serene god calms the traders and cools the strikers.']],
     };
-    this.powers = ['heart', 'calm'];
+    this.powers = ['stress', 'calm'];
     this.darkness = 0.12;
   }
 
@@ -79,16 +81,11 @@ export class Industry {
     this.chicken = { x: ex.x + 6, y: ex.y + 2, frame: 0, ft: 0, facing: -1, side: 1 };
     G.brain.setCue('rest');
     G.advisor.setEra('industry');
-    G.advisor.say('intro', 'My lord! Bro. The Goat Exchange is open. Keep your mind steady and calm or the market goes full stampede.', { mood: 'happy', priority: 3, cooldown: 999 });
+    G.advisor.say('intro', 'My lord! Bro. The Goat Exchange is open. Keep your nerves steady or the market goes full stampede.', { mood: 'happy', priority: 3, cooldown: 999 });
   }
 
-  arousal() {
-    const b = this.G.brain;
-    const pulseArousal = (b.hr && b.hr > 0) ? clamp(b.hrDelta() / 22, 0, 1.6) : 0;
-    const panicArousal = (b.panic || 0) * 1.4;
-    const eegStress = b.calm < 0.45 ? (0.45 - b.calm) * 1.5 : 0;
-    return Math.max(pulseArousal, panicArousal, eegStress);
-  }
+  // The traders' arousal, 0..1: the god's stress (about 0.15 at rest, 1 when agitated).
+  arousal() { return clamp(this.G.brain.stress ?? 0); }
 
   marketTick() {
     const G = this.G, brain = G.brain;
@@ -134,9 +131,9 @@ export class Industry {
       G.source.addStartle(0.35);
       for (const a of this.agents) a.fear = clamp(a.fear + 0.3);
       this.confidence = Math.max(0.5, this.confidence - 0.15);
-      const cause = (brain.hr && brain.hr > 0) ? `GOD'S PULSE HITS ${Math.round(brain.hr)} BPM` : `GOD'S TENSION SPIKES`;
-      this.headlines.push(`GOAT INDEX -${Math.round((1 - this.price / this.peak) * 100)}% AS ${cause}`);
-      G.advisor.say('crash', (brain.hr && brain.hr > 0) ? 'My lord, your heart rate has caused a goat recession.' : 'My lord, your tension has caused a goat recession. Breathe!', { mood: 'panic', priority: 4, cooldown: 6 });
+      const stress = Math.round((brain.stress ?? 0) * 100);
+      this.headlines.push(`GOAT INDEX -${Math.round((1 - this.price / this.peak) * 100)}% AS GOD'S STRESS HITS ${stress}%`);
+      G.advisor.say('crash', 'My lord, your stress has caused a goat recession.', { mood: 'panic', priority: 4, cooldown: 6 });
       floater(this.particles, W / 2, 40, 'GOAT RECESSION', '#ff5a72', 12);
     }
     if (this.price > this.value * 1.45) {
@@ -171,7 +168,7 @@ export class Industry {
       let nf = 0, nn = 0;
       for (const b of this.agents) { if (b !== a && Math.abs(b.x - a.x) < 16 && Math.abs(b.y - a.y) < 16) { nf += b.fear; nn++; } }
       if (nn) a.fear += dt * 0.5 * (nf / nn - a.fear);
-      // The god's racing pulse frightens traders directly; the goats can smell fear.
+      // The god's stress frightens traders directly; the goats can smell fear.
       a.fear += dt * (0.25 * Math.min(1, Math.max(0, -this.momentum * 60)) + 0.3 * Math.max(0, ar - 0.3) - 0.06 - 0.4 * brain.calm * (ar < 0.3 ? 1 : 0.3));
       a.fear = clamp(a.fear);
       // Greed follows paper gains.
@@ -242,15 +239,14 @@ export class Industry {
       ipo.state = 'active'; ipo.progress = 0;
       brain.setCue('calm');
       G.audio.bell();
-      G.advisor.say('ipo', 'It is IPO time. Maintain your calm for eight seconds. Do not look at the ticker. Do NOT look at the ticker.', { mood: 'nervous', priority: 4, cooldown: 0 });
+      G.advisor.say('ipo', 'It is IPO time. Steady nerves for eight seconds. Do not look at the ticker. Do NOT look at the ticker.', { mood: 'nervous', priority: 4, cooldown: 0 });
       this.headlines.push('GOAT EXCHANGE ANNOUNCES IPO OF... THE GOAT EXCHANGE');
     }
     if (ipo.state === 'active') {
-      ipo.limit = 9 - 3 * brain.model.trust('calm');
-      const steady = brain.calm >= 0.45 && (brain.hr && brain.hr > 0 ? brain.hrDelta() <= ipo.limit : (brain.panic || 0) < 0.35);
-      if (steady) ipo.progress += dt;
+      ipo.limit = STRESSED;
+      if ((brain.stress ?? 1) <= ipo.limit) ipo.progress += dt;
       else {
-        if (ipo.progress > 2) { ipo.attempts++; G.advisor.say('ipofail', 'Composure dropped, IPO wobbled. The goats can smell fear.', { mood: 'panic', priority: 3, cooldown: 6 }); }
+        if (ipo.progress > 2) { ipo.attempts++; G.advisor.say('ipofail', 'Stress spiked, IPO wobbled. The goats can smell fear.', { mood: 'panic', priority: 3, cooldown: 6 }); }
         ipo.progress = Math.max(0, ipo.progress - dt * 2);
       }
       if (ipo.progress >= IPO_SECONDS) {
@@ -265,11 +261,7 @@ export class Industry {
       }
     }
 
-    // Heartbeat you can hear when pulse is running hot (if pulse hardware is present).
-    if (brain.hr && brain.hr > 0) {
-      G.audio.heartbeat(this.t, brain.hr, clamp((brain.hrDelta() - 6) / 20));
-    }
-    if (brain.calm > 0.75 && (!brain.hr || brain.hrDelta() < 4)) G.advisor.say('serene', 'Serene calm, serene markets. This is the alpha the analysts keep talking about. Literally alpha waves.', { mood: 'happy', priority: 1, cooldown: 30 });
+    if (brain.calm > 0.75 && (brain.stress ?? 1) < 0.25) G.advisor.say('serene', 'Serene god, serene markets. This is the alpha the analysts keep talking about. Literally alpha waves.', { mood: 'happy', priority: 1, cooldown: 30 });
 
     // Ticker tape
     this.tickerX -= dt * 40;
@@ -375,7 +367,8 @@ export class Industry {
 
   draw(ctx) {
     const G = this.G;
-    ctx.drawImage(this.layer, 0, 0);
+    const base = G.render3d ? (G.world?.layers3d?.industry || this.layer) : this.layer;
+    ctx.drawImage(base, 0, 0);
     if (!G.render3d) G.world.drawWater(ctx, this.t);
     // In 3D, draw3d stands workers, traders, goats and chicken up as billboards
     if (G.render3d) {
@@ -429,10 +422,7 @@ export class Industry {
       ctx.lineWidth = 1.4;
       ctx.strokeStyle = 'rgba(10,12,30,0.7)'; ctx.beginPath(); ctx.arc(ex.x, ex.y - 5, 12, 0, Math.PI * 2); ctx.stroke();
       ctx.strokeStyle = '#ff5a72'; ctx.beginPath(); ctx.arc(ex.x, ex.y - 5, 12, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2); ctx.stroke();
-      const ipoGoal = (G.brain.hr && G.brain.hr > 0)
-        ? `IPO · keep pulse under ${Math.round((G.brain.restHr || 70) + this.ipo.limit)} bpm`
-        : `IPO · maintain calm & low tension`;
-      label(ctx, ex.x, ex.y - 21, ipoGoal, '#ff8a9c', 6);
+      label(ctx, ex.x, ex.y - 21, `IPO · keep stress under ${Math.round((this.ipo.limit ?? STRESSED) * 100)}%`, '#ff8a9c', 6);
     }
     if (this.agents.some((a) => a.state === 'strike' || a.state === 'riot')) label(ctx, G.world.sites.picket.x, G.world.sites.picket.y + 12, 'picket line', '#f2e8d5', 5);
     // Ticker tape
@@ -453,6 +443,7 @@ export class Industry {
     const w = G.world, ex = w.sites.exchange, picket = w.sites.picket;
     const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
     switch (spell) {
+      case 'fist':
       case 'fireball': {
         // No lightning power in this era, so the fist throws a fireball. It frightens whoever it lands near.
         G.stats.lightning++;
@@ -464,6 +455,7 @@ export class Industry {
         floater(this.particles, x, y - 8, 'fireball', '#ff9a2e', 7);
         break;
       }
+      case 'palm':
       case 'spawn': {
         // Open palm: goats from heaven, straight into GDP.
         this.gdp += 30;

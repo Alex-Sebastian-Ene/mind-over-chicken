@@ -56,7 +56,11 @@ pub fn phase_tick(w: &mut World) {
     match phase {
         0 | 2 => village_tick(w),
         1 => contacts(w),
-        _ => politics_tick(w, (w.slow_n / 4) % 2 == 1),
+        _ => {
+            // Rebellion every other second; the land survey every fourth (on another second).
+            let n = w.slow_n / 4;
+            politics_tick(w, n % 2 == 1, n % 4 == 2)
+        }
     }
 }
 
@@ -64,7 +68,7 @@ pub fn phase_tick(w: &mut World) {
 pub fn slow_tick(w: &mut World) {
     village_tick(w);
     contacts(w);
-    politics_tick(w, true);
+    politics_tick(w, true, true);
 }
 
 fn village_tick(w: &mut World) {
@@ -83,20 +87,37 @@ fn village_tick(w: &mut World) {
     w.refresh_hostility();
 }
 
-fn politics_tick(w: &mut World, rebels: bool) {
+fn politics_tick(w: &mut World, rebels: bool, survey: bool) {
     let dt = 1.0;
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut t = std::time::Instant::now();
+    #[allow(unused_mut, unused_variables)]
+    let mut lap = |w: &mut World, k: usize| {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            w.prof2[k] += t.elapsed().as_secs_f64() * 1000.0;
+            t = std::time::Instant::now();
+        }
+    };
     w.recount();
-    scan_borders(w);
+    scan_borders(w, survey);
+    lap(w, 0);
     crate::ages::economy(w, dt);
+    lap(w, 1);
     crate::ages::update_metrics(w, dt);
     crate::ages::climb(w, dt);
+    lap(w, 2);
     diplomacy(w, dt);
     conflict::update_levels(w, dt);
+    lap(w, 3);
     conflict::strife_tick(w, dt);
     conflict::vassals(w, dt);
+    lap(w, 4);
     crate::ages::crises(w, dt);
     crate::life::spread_plague(w, dt);
+    lap(w, 5);
     jobs::rebalance(w);
+    lap(w, 6);
     w.refresh_hostility();
     plan_marches(w);
     // #100: a plugged-in policy may rewrite the marches (its army commanders) and act.
@@ -104,11 +125,14 @@ fn politics_tick(w: &mut World, rebels: bool) {
         p.command(w);
         w.policy = Some(p);
     }
+    lap(w, 7);
     trade(w);
+    lap(w, 8);
     if rebels {
         rebellion(w);
     }
     w.refresh_hostility();
+    lap(w, 9);
 }
 
 /// Days of food a village keeps in store before it feeds another mouth or sends settlers: the
@@ -628,7 +652,8 @@ fn contacts(w: &mut World) {
     // Coastal exploration (from the Toolmakers' rafts): a coastal village with a raft or a dock
     // may find a people across up to 70 tiles of water.
     let mut sea: Vec<(u8, u8, i32, i32)> = Vec::new();
-    for v in w.villages.iter().filter(|v| v.alive && v.coast) {
+    let lonely: Vec<bool> = (0..MAX_FACTIONS as u8).map(|a| alive.iter().any(|&b| b != a && !w.rel(a, b).met)).collect();
+    for v in w.villages.iter().filter(|v| v.alive && v.coast && lonely[v.owner as usize]) {
         let f = &w.factions[v.owner as usize];
         let boats = v.built & ((1u64 << Building::Raft as u8) | (1u64 << Building::Dock as u8) | (1u64 << Building::Port as u8)) != 0;
         if !boats || f.age < Building::Raft.unlock_age() {
@@ -650,8 +675,66 @@ fn contacts(w: &mut World) {
     }
 }
 
-/// Shared border lengths and the nearest village pair between every two civilisations.
-fn scan_borders(w: &mut World) {
+/// Shared border lengths and the nearest village pair between every two civilisations that
+/// have met. `survey`: also re-count owned land and borders tile by tile (every fourth second;
+/// borders move slowly and the survey is the costly part).
+fn scan_borders(w: &mut World, survey: bool) {
+    let d = w.d;
+    if survey {
+        survey_land(w);
+    }
+    // Villages by civilisation, with their landmass.
+    let mut lists: Vec<Vec<(i32, i32, u16, u16)>> = vec![Vec::new(); MAX_FACTIONS];
+    for (i, v) in w.villages.iter().enumerate() {
+        if v.alive {
+            lists[v.owner as usize].push((v.x, v.y, w.terrain.land(v.x, v.y), i as u16));
+        }
+    }
+    for a in 0..MAX_FACTIONS {
+        for b in 0..MAX_FACTIONS {
+            let k = a * MAX_FACTIONS + b;
+            w.near_pairs[k] = (f32::MAX, NO_V, NO_V);
+            let met = w.rel[k].met || w.rel[b * MAX_FACTIONS + a].met;
+            if a >= b || !met || lists[a].is_empty() || lists[b].is_empty() {
+                continue;
+            }
+            let mut best = (i32::MAX, NO_V, NO_V);
+            for &(ax, ay, la, va) in &lists[a] {
+                for &(bx, by, lb, vb) in &lists[b] {
+                    if la != lb {
+                        continue;
+                    }
+                    let (dx, dy) = (d.dxi(ax, bx), d.dyi(ay, by));
+                    let d2 = dx * dx + dy * dy;
+                    if d2 < best.0 {
+                        best = (d2, va, vb);
+                    }
+                }
+            }
+            let dist = if best.1 == NO_V { f32::MAX } else { (best.0 as f32).sqrt() };
+            w.near_pairs[k] = (dist, best.1, best.2);
+            w.near_pairs[b * MAX_FACTIONS + a] = (dist, best.2, best.1);
+        }
+    }
+    for a in 0..MAX_FACTIONS {
+        for b in 0..MAX_FACTIONS {
+            let k = a * MAX_FACTIONS + b;
+            w.rel[k].near = a != b && (w.rel[k].border > 0 || w.near_pairs[k].0 < NEAR_DIST);
+        }
+    }
+    // Touching borders means they have met, even if no one was looking.
+    for a in 0..MAX_FACTIONS as u8 {
+        for b in (a + 1)..MAX_FACTIONS as u8 {
+            if w.rel(a, b).border > 0 && !w.rel(a, b).met && w.factions[a as usize].alive && w.factions[b as usize].alive {
+                let (x, y) = lists[a as usize].first().map(|v| (v.0, v.1)).unwrap_or((0, 0));
+                meet(w, a, b, x, y);
+            }
+        }
+    }
+}
+
+/// Owned land per civilisation and shared border lengths, tile by tile.
+fn survey_land(w: &mut World) {
     // Only claimed land can be on a border, so walk each village's own tiles rather than the
     // whole planet (every owned tile is claimed by exactly one village).
     let mut border = [0u32; MAX_FACTIONS * MAX_FACTIONS];
@@ -690,54 +773,8 @@ fn scan_borders(w: &mut World) {
         }
     }
     w.owned_tiles.copy_from_slice(&owned);
-    let mut lists: Vec<Vec<u16>> = vec![Vec::new(); MAX_FACTIONS];
-    for (i, v) in w.villages.iter().enumerate() {
-        if v.alive {
-            lists[v.owner as usize].push(i as u16);
-        }
-    }
-    for a in 0..MAX_FACTIONS {
-        for b in 0..MAX_FACTIONS {
-            let k = a * MAX_FACTIONS + b;
-            w.rel[k].border = border[k];
-            w.near_pairs[k] = (f32::MAX, NO_V, NO_V);
-            if a >= b || lists[a].is_empty() || lists[b].is_empty() {
-                continue;
-            }
-            let mut best = (f32::MAX, NO_V, NO_V);
-            for &va in &lists[a] {
-                let (ax, ay) = (w.villages[va as usize].x, w.villages[va as usize].y);
-                let la = w.terrain.land(ax, ay);
-                for &vb in &lists[b] {
-                    let (bx, by) = (w.villages[vb as usize].x, w.villages[vb as usize].y);
-                    if w.terrain.land(bx, by) != la {
-                        continue;
-                    }
-                    let d = w.d.dist(ax as f32, ay as f32, bx as f32, by as f32);
-                    if d < best.0 {
-                        best = (d, va, vb);
-                    }
-                }
-            }
-            w.near_pairs[k] = best;
-            w.near_pairs[b * MAX_FACTIONS + a] = (best.0, best.2, best.1);
-        }
-    }
-    for a in 0..MAX_FACTIONS {
-        for b in 0..MAX_FACTIONS {
-            let k = a * MAX_FACTIONS + b;
-            w.rel[k].near = a != b && (w.rel[k].border > 0 || w.near_pairs[k].0 < NEAR_DIST);
-        }
-    }
-    // Touching borders means they have met, even if no one was looking.
-    for a in 0..MAX_FACTIONS as u8 {
-        for b in (a + 1)..MAX_FACTIONS as u8 {
-            if w.rel(a, b).border > 0 && !w.rel(a, b).met && w.factions[a as usize].alive && w.factions[b as usize].alive {
-                let p = w.near_pairs[a as usize * MAX_FACTIONS + b as usize];
-                let (x, y) = if p.1 != NO_V { (w.villages[p.1 as usize].x, w.villages[p.1 as usize].y) } else { (0, 0) };
-                meet(w, a, b, x, y);
-            }
-        }
+    for k in 0..MAX_FACTIONS * MAX_FACTIONS {
+        w.rel[k].border = border[k];
     }
 }
 

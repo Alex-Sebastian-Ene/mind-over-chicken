@@ -16,7 +16,6 @@ pub struct AudioSynth {
     #[cfg(target_arch = "wasm32")]
     master: Option<GainNode>,
     pub enabled: bool,
-    pub last_beat: f64,
 }
 
 impl AudioSynth {
@@ -27,7 +26,6 @@ impl AudioSynth {
             #[cfg(target_arch = "wasm32")]
             master: None,
             enabled: true,
-            last_beat: 0.0,
         }
     }
 
@@ -273,24 +271,6 @@ impl AudioSynth {
             for (i, &f) in [523.0f32, 659.0, 784.0, 1047.0, 784.0, 1047.0].iter().enumerate() {
                 self.play_tone(f, 0.22, OscillatorType::Triangle, 0.1, None, i as f64 * 0.14);
             }
-        }
-    }
-
-    pub fn heartbeat(&mut self, now: f64, bpm: f32, intensity: f32) {
-        if !self.enabled || bpm <= 0.0 || intensity <= 0.0 {
-            return;
-        }
-        let interval = 60.0 / bpm as f64;
-        if now - self.last_beat < interval {
-            return;
-        }
-        self.last_beat = now;
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            let g = (0.05 + intensity * 0.2).min(0.25);
-            self.play_tone(70.0, 0.12, OscillatorType::Sine, g, Some(40.0), 0.0);
-            self.play_tone(60.0, 0.10, OscillatorType::Sine, g * 0.7, Some(35.0), 0.16);
         }
     }
 }
