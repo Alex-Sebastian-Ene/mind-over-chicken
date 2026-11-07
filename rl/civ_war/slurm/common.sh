@@ -16,4 +16,6 @@ if command -v module >/dev/null 2>&1; then
   module load "$PY_MODULE" >/dev/null 2>&1 || echo "note: module $PY_MODULE not loaded"
   module load "$GCC_MODULE" >/dev/null 2>&1 || echo "note: module $GCC_MODULE not loaded"
 fi
+# The python module's PYTHONPATH would shadow the venv's own packages (pip included).
+unset PYTHONPATH
 if [ -f "$HOME/.cargo/env" ]; then . "$HOME/.cargo/env"; fi

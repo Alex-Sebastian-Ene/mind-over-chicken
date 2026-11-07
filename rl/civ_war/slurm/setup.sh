@@ -23,11 +23,11 @@ command -v python3.12 >/dev/null 2>&1 && PY=python3.12
 if [ ! -x "$VENV/bin/python" ]; then
   "$PY" -m venv "$VENV"
 fi
-"$VENV/bin/pip" install --quiet --upgrade pip
-"$VENV/bin/pip" install --quiet "torch==2.15.0" --index-url https://download.pytorch.org/whl/cpu \
-  || "$VENV/bin/pip" install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+"$VENV/bin/python" -m pip install --quiet --upgrade pip
+"$VENV/bin/python" -m pip install --quiet "torch==2.15.0" --index-url https://download.pytorch.org/whl/cpu \
+  || "$VENV/bin/python" -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
 grep -v '^torch' rl/civ_war/requirements.txt > "$CIV_WAR_WORK/requirements-notorch.txt"
-"$VENV/bin/pip" install --quiet -r "$CIV_WAR_WORK/requirements-notorch.txt"
+"$VENV/bin/python" -m pip install --quiet -r "$CIV_WAR_WORK/requirements-notorch.txt"
 "$VENV/bin/python" -c "import torch, stable_baselines3, sb3_contrib; print('torch', torch.__version__, 'sb3', stable_baselines3.__version__, 'contrib', sb3_contrib.__version__)"
 echo "{\"cmd\":\"spec\"}" | "$CIV_GYM" | head -c 200; echo
 echo "setup done: work dir $CIV_WAR_WORK"
