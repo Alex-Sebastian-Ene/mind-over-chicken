@@ -57,7 +57,7 @@ pub fn random_seed_traits(seed: u32) -> CivTraits {
 pub struct SensorFeatures {
     pub calm: f32,
     pub focus: f32,
-    pub hr_delta: f32,
+    pub stress: f32,
     pub blink_rate: f32,
     pub joy: f32,
     pub anger: f32,
@@ -66,9 +66,9 @@ pub struct SensorFeatures {
     pub face_seen: bool,
 }
 
-/// Sensor-to-trait formula (documented in docs/calibration.md and PR #63):
+/// Sensor-to-trait formula (documented in docs/calibration.md):
 pub fn traits_from_features(f: &SensorFeatures) -> CivTraits {
-    let pulse = clamp(f.hr_delta / 20.0, 0.0, 1.0);
+    let stress = clamp(f.stress, 0.0, 1.0);
     let blinks = clamp(f.blink_rate / 6.0, 0.0, 1.0);
     let calm = clamp(f.calm, 0.0, 1.0);
     let focus = clamp(f.focus, 0.0, 1.0);
@@ -77,9 +77,9 @@ pub fn traits_from_features(f: &SensorFeatures) -> CivTraits {
 
     CivTraits {
         friendliness: round3(clamp(0.55 * calm + 0.35 * joy + 0.1 * (1.0 - anger), 0.0, 1.0)),
-        aggressiveness: round3(clamp(0.5 * pulse + 0.35 * anger + 0.15 * focus, 0.0, 1.0)),
+        aggressiveness: round3(clamp(0.5 * stress + 0.35 * anger + 0.15 * focus, 0.0, 1.0)),
         violence: round3(clamp(
-            0.45 * anger + 0.35 * pulse * (1.0 - calm) + 0.2 * blinks,
+            0.45 * anger + 0.35 * stress * (1.0 - calm) + 0.2 * blinks,
             0.0,
             1.0,
         )),
@@ -109,7 +109,7 @@ pub struct CalibrationResult {
 struct Accumulators {
     calm: f32,
     focus: f32,
-    hr_delta: f32,
+    stress: f32,
     joy: f32,
     anger: f32,
     surprise: f32,
@@ -149,7 +149,7 @@ impl Calibration {
         dt: f32,
         calm: f32,
         focus: f32,
-        hr_delta: f32,
+        stress: f32,
         total_blinks: u32,
         mood: Option<MoodInput>,
     ) {
@@ -163,7 +163,7 @@ impl Calibration {
 
         self.acc.calm += calm * dt;
         self.acc.focus += focus * dt;
-        self.acc.hr_delta += hr_delta * dt;
+        self.acc.stress += stress * dt;
 
         if let Some(m) = mood {
             if m.active && m.face {
@@ -196,7 +196,7 @@ impl Calibration {
         let features = SensorFeatures {
             calm: round3(self.acc.calm / n),
             focus: round3(self.acc.focus / n),
-            hr_delta: round3(self.acc.hr_delta / n),
+            stress: round3(self.acc.stress / n),
             blink_rate: round3((blinks / n) * 10.0),
             joy: if face > 0.0 {
                 round3(self.acc.joy / face)
