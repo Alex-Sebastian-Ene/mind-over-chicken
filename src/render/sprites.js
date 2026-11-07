@@ -267,3 +267,25 @@ export function drawAdvisorPortrait(ctx, era, mood, t) {
     px(ctx, 3, 11, '#d9dde6', 10, 5); px(ctx, 5, 12, '#3e8ed0', 2, 2);
   }
 }
+
+// Boat: a raft in the Stone Age, a sailing ship later. Anchored at the waterline centre.
+export function drawBoat(ctx, x, y, o = {}) {
+  x = Math.round(x); y = Math.round(y);
+  const f = o.facing || 1;
+  if (o.kind === 'raft') {
+    px(ctx, x - 2, y, '#7a5530', 5, 1);
+    px(ctx, x - 2, y - 1, '#9a7040', 5, 1);
+    px(ctx, x, y - 4, '#6b4a2c', 1, 3);
+    px(ctx, x + f, y - 4, '#e8dcc0', 1, 2);
+  } else {
+    px(ctx, x - 3, y, '#5a3a22', 7, 1);
+    px(ctx, x - 2, y + 1, '#4a2f1b', 5, 1);
+    px(ctx, x - 3 + (f > 0 ? 6 : 0), y - 1, '#5a3a22');
+    px(ctx, x, y - 6, '#4a3a2a', 1, 6);
+    px(ctx, x - (f > 0 ? 2 : 0), y - 5, o.sail || '#f2ead8', 2, 3);
+    px(ctx, x + (f > 0 ? 1 : -2), y - 5, o.sail || '#f2ead8', 2, 3);
+    if (o.cargo) px(ctx, x - 2, y - 1, o.cargo, 2, 1);
+  }
+  // wake
+  if (o.moving) px(ctx, x - 4 * f, y + 1, 'rgba(220,235,255,0.6)', 2, 1);
+}
