@@ -1135,6 +1135,10 @@ impl Engine {
         self.advisor.say(key, text, mood, priority, cooldown)
     }
 
+    pub fn advisor_set_era(&mut self, era: &str) {
+        self.advisor.set_era(era);
+    }
+
     pub fn get_game_era_index(&self) -> usize {
         self.game.era_index
     }

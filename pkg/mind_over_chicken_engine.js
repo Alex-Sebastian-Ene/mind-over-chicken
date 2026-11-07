@@ -84,6 +84,14 @@ export class Engine {
         return ret !== 0;
     }
     /**
+     * @param {string} era
+     */
+    advisor_set_era(era) {
+        const ptr0 = passStringToWasm0(era, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.engine_advisor_set_era(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
      * @param {string} sound
      */
     audio_play(sound) {

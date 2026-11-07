@@ -19,6 +19,7 @@ export const engine_add_billboard: (a: number, b: number, c: number, d: number, 
 export const engine_add_custom_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
 export const engine_add_light: (a: number, b: number, c: number, d: number, e: number) => void;
 export const engine_advisor_say: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
+export const engine_advisor_set_era: (a: number, b: number, c: number) => void;
 export const engine_audio_play: (a: number, b: number, c: number) => void;
 export const engine_audio_toggle: (a: number) => number;
 export const engine_audio_unlock: (a: number) => void;
