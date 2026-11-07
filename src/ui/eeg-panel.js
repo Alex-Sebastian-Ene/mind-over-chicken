@@ -387,9 +387,9 @@ export class EegPanel {
         { x: 0.94, y: 0.94, short: 'BOT-RIGHT ↘',  holdReq: 1.4, prompt: '9/9 · Tilt DOWN-RIGHT to Corner & HOLD — DO NOT BLINK' },
       ],
     };
-    this.wiz.closeBtn.addEventListener('click', () => this.closeWizard());
-    this.wiz.skipBtn.addEventListener('click', () => this.advanceWizardPhase());
-    this.wiz.lockBtn.addEventListener('click', () => this.lockCurrentDotManually());
+    this.wiz.closeBtn?.addEventListener('click', () => this.closeWizard());
+    this.wiz.skipBtn?.addEventListener('click', () => this.advanceWizardPhase());
+    this.wiz.lockBtn?.addEventListener('click', () => this.lockCurrentDotManually());
     this.wiz.canvas.addEventListener('click', () => {
       if (this.wiz?.active && this.wiz.phase === 'motion') {
         this.lockCurrentDotManually();

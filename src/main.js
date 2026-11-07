@@ -164,7 +164,10 @@ function setGameSource(nextSource) {
   }
 }
 
-const eegPanel = new EegPanel(document, {
+// A side panel that fails to start must not take the whole game (and every button) down.
+let eegPanel = null;
+try {
+  eegPanel = new EegPanel(document, {
   getSource: () => G?.source || previewSource,
   getBrain: () => G?.brain || previewBrain,
   onConnectBridge: async (url) => {
@@ -176,6 +179,9 @@ const eegPanel = new EegPanel(document, {
     setGameSource(new SimSource());
   },
 });
+} catch (err) {
+  console.error('EEG panel failed to start; the game runs without it:', err);
+}
 let fade = 0;           // 0..1 black overlay for transitions
 let pendingScene = null;
 let pendingTimer = 0;
@@ -529,7 +535,7 @@ function frame(ts) {
     $('sourceStatus').textContent = previewSource.status;
     $('sourceStatus').dataset.ok = previewSource.connected ? '1' : '0';
   }
-  eegPanel.update();
+  eegPanel?.update();
   render();
 }
 function rafLoop() { frame(); requestAnimationFrame(rafLoop); }
@@ -732,9 +738,9 @@ const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'pa
 window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input')) return;
   if (e.code === 'KeyM') { toggleModel(); return; }
-  if (e.code === 'Escape' && eegPanel.wiz?.active) { eegPanel.closeWizard(); return; }
-  if (e.code === 'KeyE') { eegPanel.toggle(); return; }
-  if (e.code === 'KeyC') { eegPanel.calibrateCenter(); return; }
+  if (e.code === 'Escape' && eegPanel?.wiz?.active) { eegPanel?.closeWizard(); return; }
+  if (e.code === 'KeyE') { eegPanel?.toggle(); return; }
+  if (e.code === 'KeyC') { eegPanel?.calibrateCenter(); return; }
   if (e.code === 'KeyT') { toggle3D(); return; }
   if (e.code === 'KeyG') { toggleAIGod(); return; }
   if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { zoomOutFromSurface(); return; }
