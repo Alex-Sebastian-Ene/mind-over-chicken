@@ -1634,13 +1634,15 @@ impl RustGalaxy {
         v
     }
 
-    /// News from line `from` on: [seq, tone, about the player (0/1), text, …].
+    /// News from line `from` on: [seq, tone, about the player, about a civ sandbox
+    /// civilisation, text, …].
     pub fn war_news(&self, from: u32) -> js_sys::Array {
         let arr = js_sys::Array::new();
         for n in self.inner.war.news_since(from) {
             arr.push(&JsValue::from_f64(n.seq as f64));
             arr.push(&JsValue::from_f64(n.tone as f64));
             arr.push(&JsValue::from_bool(n.player));
+            arr.push(&JsValue::from_bool(n.civ));
             arr.push(&JsValue::from_str(&n.text));
         }
         arr
@@ -1660,6 +1662,40 @@ impl RustGalaxy {
     /// HUD rows for the player's power (or the galaxy's): "label\tvalue\tbad" lines.
     pub fn war_hud(&self) -> String {
         self.inner.war.hud_rows()
+    }
+
+    // ---- civ sandbox civilisations in space (#166 stage 4; moc-civ's space.rs) ----
+
+    /// Register or update a civilisation in space living on planet `home` (by the host's key).
+    /// Returns its power id (−1 if the galaxy has no room, or it was retired).
+    #[allow(clippy::too_many_arguments)]
+    pub fn war_upsert_civ(&mut self, key: u32, name: &str, r: u8, g: u8, b: u8, home: usize, production: f32, knowledge: f32, resources: f32, fleet: f32, shields: f32, defences: f32, garrison: f32, tier: u8, temper: f32, alive: bool) -> i32 {
+        let econ = moc_cosmos::war::Economy { production, knowledge, resources };
+        let defence = moc_cosmos::war::Defence { shields, defences, garrison };
+        match self.inner.war.upsert_external(key, name, [r, g, b], home, econ, fleet, defence, tier, temper, alive) {
+            Some(p) if alive => p as i32,
+            _ => -1,
+        }
+    }
+
+    /// The planets power `power` may strike (`moc_cosmos::host::TARGET_OUT` each).
+    pub fn war_targets_for(&self, power: u16) -> Vec<f32> {
+        let mut v = Vec::new();
+        self.inner.war.targets_for(power, &mut v);
+        v
+    }
+
+    /// A civilisation's fleet, already taken from its dock, flies at planet `target`. Returns
+    /// the fleet's id (−1: refused).
+    pub fn war_launch_external(&mut self, power: u16, target: usize, order: u8, strength: f32, motive: u8) -> i32 {
+        let Some(o) = moc_cosmos::war::Order::from_u8(order) else { return -1 };
+        let m = moc_cosmos::war::Motive::from_u8(motive);
+        self.inner.war.launch_external(power, target, o, strength, m).map(|id| id as i32).unwrap_or(-1)
+    }
+
+    /// What happened to a civilisation's power since the last call (`moc_cosmos::host::RESULT_OUT`).
+    pub fn war_take_results(&mut self, power: u16) -> Vec<f32> {
+        self.inner.war.take_results_packed(power).to_vec()
     }
 }
 

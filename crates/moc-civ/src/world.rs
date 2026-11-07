@@ -807,6 +807,8 @@ pub struct World {
     /// Agent and village limits for this planet: the defaults, more on a bigger one (#101).
     pub cap_agents: usize,
     pub cap_villages: usize,
+    /// The space age (#166): fleets of the civilisations at age 19+ (`space`).
+    pub space: crate::space::Space,
     #[cfg(not(target_arch = "wasm32"))]
     pub prof: [f64; 8],
     /// The politics tick's parts (native profiling only).
@@ -932,6 +934,7 @@ impl World {
             setup: crate::setup::Setup::default(),
             cap_agents: MAX_AGENTS,
             cap_villages: MAX_VILLAGES,
+            space: crate::space::Space::default(),
             #[cfg(not(target_arch = "wasm32"))]
             prof: [0.0; 8],
             #[cfg(not(target_arch = "wasm32"))]
@@ -1281,8 +1284,10 @@ impl World {
     /// Run `real_dt` seconds of real time at the world's speed (×1, ×4, ×16), in steps of at
     /// most `MAX_SUBSTEP`; refresh the buffers JS reads once at the end.
     pub fn advance(&mut self, real_dt: f32) {
-        // Seeding a civilisation from the mind runs on real time (#98).
+        // Seeding a civilisation from the mind runs on real time (#98), and so does space (#166),
+        // like the galaxy it flies in.
         self.setup_tick(real_dt.max(0.0));
+        crate::space::tick(self, real_dt.max(0.0));
         let total = (real_dt.max(0.0) * self.speed).min(MAX_SUBSTEP * MAX_STEPS_PER_ADVANCE as f32);
         if total <= 0.0 {
             self.refresh_info();
@@ -1304,6 +1309,7 @@ impl World {
     /// Advance the world by `dt` seconds (clamped to 0.1).
     pub fn step(&mut self, dt: f32) {
         self.step_core(dt);
+        crate::space::tick(self, dt);
         self.refresh_info();
     }
 

@@ -43,6 +43,7 @@ export class SpaceWarView {
     this.target = null;    // the world the player's orders go to
     this.hud = [];
     this.meta = [];
+    this.civNews = [];     // war news about civ sandbox civilisations, for the sandbox's ticker
   }
 
   // The civ sandbox's planet: its civilisations, not the player, live there (#166 stage 4).
@@ -122,14 +123,26 @@ export class SpaceWarView {
     }
   }
 
+  // [seq, tone, about the player, about a civ sandbox civilisation, text] per line.
   readNews() {
     const a = this.w.war_news(this.newsSeq), g = this.g;
-    for (let k = 0; k + 3 < a.length; k += 4) {
+    for (let k = 0; k + 4 < a.length; k += 5) {
       this.newsSeq = a[k] + 1;
-      g.note(null, a[k + 3]);
-      if (a[k + 2]) g.onEvent?.(g.home, a[k + 3], 'war', a[k + 1]);
+      g.note(null, a[k + 4]);
+      if (a[k + 2]) g.onEvent?.(g.home, a[k + 4], 'war', a[k + 1]);
+      if (a[k + 3]) { this.civNews.push({ text: a[k + 4], tone: a[k + 1] }); if (this.civNews.length > 8) this.civNews.shift(); }
     }
   }
+
+  // ---- civ sandbox civilisations in space (#166 stage 4; src/civ/space-link.js drives these) ----
+  // s: a civilisation's space program as civ.spaceInfo() reads it. Returns its power id (−1 none).
+  upsertCiv(key, name, color, home, s, alive = true) {
+    return this.w.war_upsert_civ(key >>> 0, name, color[0], color[1], color[2], home, s.production, s.knowledge, s.resources, s.fleet, s.shields, s.defences, s.garrison, s.tier, s.temper, alive);
+  }
+  targetsFor(id) { return this.w.war_targets_for(id); }
+  launchExternal(id, body, order, strength, motive) { return this.w.war_launch_external(id, body, order, strength, motive); }
+  takeResults(id) { return this.w.war_take_results(id); }
+  takeCivNews() { const q = this.civNews; this.civNews = []; return q; }
 
   powerName(p) { return this.powerNames[p] || (this.powerNames[p] = this.w.war_power_name(p)); }
 

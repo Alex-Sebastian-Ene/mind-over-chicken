@@ -1788,6 +1788,20 @@ export class RustGalaxy {
         }
     }
     /**
+     * A civilisation's fleet, already taken from its dock, flies at planet `target`. Returns
+     * the fleet's id (−1: refused).
+     * @param {number} power
+     * @param {number} target
+     * @param {number} order
+     * @param {number} strength
+     * @param {number} motive
+     * @returns {number}
+     */
+    war_launch_external(power, target, order, strength, motive) {
+        const ret = wasm.rustgalaxy_war_launch_external(this.__wbg_ptr, power, target, order, strength, motive);
+        return ret;
+    }
+    /**
      * @param {number} idx
      * @param {string} name
      */
@@ -1798,7 +1812,8 @@ export class RustGalaxy {
         wasm.rustgalaxy_war_name(this.__wbg_ptr, val2, ptr0, len0);
     }
     /**
-     * News from line `from` on: [seq, tone, about the player (0/1), text, …].
+     * News from line `from` on: [seq, tone, about the player, about a civ sandbox
+     * civilisation, text, …].
      * @param {number} from
      * @returns {Array<any>}
      */
@@ -1918,6 +1933,17 @@ export class RustGalaxy {
         return v1;
     }
     /**
+     * What happened to a civilisation's power since the last call (`moc_cosmos::host::RESULT_OUT`).
+     * @param {number} power
+     * @returns {Float32Array}
+     */
+    war_take_results(power) {
+        const ret = wasm.rustgalaxy_war_take_results(this.__wbg_ptr, power);
+        var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
      * @param {number} idx
      * @returns {string}
      */
@@ -1932,6 +1958,59 @@ export class RustGalaxy {
         } finally {
             wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
         }
+    }
+    /**
+     * The planets power `power` may strike (`moc_cosmos::host::TARGET_OUT` each).
+     * @param {number} power
+     * @returns {Float32Array}
+     */
+    war_targets_for(power) {
+        const ret = wasm.rustgalaxy_war_targets_for(this.__wbg_ptr, power);
+        var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * Register or update a civilisation in space living on planet `home` (by the host's key).
+     * Returns its power id (−1 if the galaxy has no room, or it was retired).
+     * @param {number} key
+     * @param {string} name
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     * @param {number} home
+     * @param {number} production
+     * @param {number} knowledge
+     * @param {number} resources
+     * @param {number} fleet
+     * @param {number} shields
+     * @param {number} defences
+     * @param {number} garrison
+     * @param {number} tier
+     * @param {number} temper
+     * @param {boolean} alive
+     * @returns {number}
+     */
+    war_upsert_civ(key, name, r, g, b, home, production, knowledge, resources, fleet, shields, defences, garrison, tier, temper, alive) {
+        const val2 = +key;
+        const val3 = +r;
+        const val4 = +g;
+        const val5 = +b;
+        const val6 = +home;
+        const val7 = +production;
+        const val8 = +knowledge;
+        const val9 = +resources;
+        const val10 = +fleet;
+        const val11 = +shields;
+        const val12 = +defences;
+        const val13 = +garrison;
+        const val14 = +tier;
+        const val15 = +temper;
+        const val16 = +alive;
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustgalaxy_war_upsert_civ(this.__wbg_ptr, val2, ptr0, len0, val3, val4, val5, val6, val7, val8, val9, val10, val11, val12, val13, val14, val15, val16);
+        return ret;
     }
 }
 if (Symbol.dispose) RustGalaxy.prototype[Symbol.dispose] = RustGalaxy.prototype.free;

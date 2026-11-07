@@ -9,6 +9,7 @@ pub mod host;
 pub mod math;
 pub mod planet_sim;
 pub mod war;
+#[cfg(feature = "ffi")]
 pub mod wasm_api;
 
 pub use galaxy::{Biome, Galaxy, Planet, Ship, MAX_PLANETS, STAR_X, STAR_Y};

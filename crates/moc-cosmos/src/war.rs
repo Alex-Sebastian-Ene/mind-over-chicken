@@ -388,6 +388,8 @@ pub struct PowerResults {
 pub struct External {
     pub fleet: f32,
     pub defence: Defence,
+    /// Its own economy (its colonies' share is added by the war).
+    pub econ: Economy,
 }
 
 /// A space-faring civilisation.
@@ -491,6 +493,8 @@ pub struct NewsItem {
     pub text: String,
     /// About the player's own world.
     pub player: bool,
+    /// About a civ sandbox civilisation (for the sandbox's own news).
+    pub civ: bool,
 }
 
 /// A space council: given the war, what power `p` launches this second. The rules ([`Rules`])
@@ -961,7 +965,7 @@ impl SpaceWar {
             if !self.powers[p].alive {
                 continue;
             }
-            let mut e = self.powers[p].external.map(|_| self.powers[p].econ).unwrap_or_default();
+            let mut e = self.powers[p].external.map(|x| x.econ).unwrap_or_default();
             let external = self.powers[p].external.is_some();
             let home = self.powers[p].home;
             // An empire overstretches: each colony is worth less the more it holds.
@@ -1417,6 +1421,47 @@ impl SpaceWar {
         self.powers.iter().find(|x| x.alive && x.kind != PowerKind::Civ && x.key == i as u32).map(|x| x.id)
     }
 
+    /// Register or update an external power, by the host's key: a civ sandbox civilisation in
+    /// space, living on the shared planet `home`. Its fleet and defences are the host's
+    /// (`moc-civ`'s `space.rs`); the war adds what its colonies bring. `alive: false` retires it
+    /// (its colonies go free). Returns its id.
+    #[allow(clippy::too_many_arguments)]
+    pub fn upsert_external(&mut self, key: u32, name: &str, color: [u8; 3], home: usize, econ: Economy, fleet: f32, defence: Defence, tier: u8, temper: f32, alive: bool) -> Option<u16> {
+        while self.bodies.len() <= home {
+            self.bodies.push(Body::new(""));
+        }
+        let found = self.powers.iter().position(|p| p.kind == PowerKind::Civ && p.key == key && p.alive);
+        let id = match found {
+            Some(i) => i as u16,
+            None if alive && self.powers.len() < MAX_POWERS => self.add_power(PowerKind::Civ, name.to_string(), color, home, key, temper, Some(External { fleet, defence, econ })),
+            None => return None,
+        };
+        if !alive {
+            let pw = &mut self.powers[id as usize];
+            pw.alive = false;
+            pw.fleet = 0.0;
+            for b in self.bodies.iter_mut() {
+                if b.owner == Some(id) {
+                    b.owner = None;
+                }
+            }
+            return Some(id);
+        }
+        let pw = &mut self.powers[id as usize];
+        if pw.name != name {
+            pw.name = name.to_string();
+        }
+        pw.color = color;
+        pw.home = home;
+        pw.space = true;
+        pw.fleet = fleet;
+        pw.fleet_cap = pw.fleet_cap.max(fleet);
+        pw.tier = tier;
+        pw.temper = clamp(temper, 0.0, 1.0);
+        pw.external = Some(External { fleet, defence, econ });
+        Some(id)
+    }
+
     pub fn is_player(&self, p: u16) -> bool {
         self.powers.get(p as usize).is_some_and(|x| x.kind == PowerKind::Player)
     }
@@ -1451,7 +1496,8 @@ impl SpaceWar {
     // ------------------------------------------------------------------ host output
 
     pub fn say(&mut self, tone: u8, player: bool, text: String) {
-        self.news.push(NewsItem { seq: self.next_news, t: self.time, tone, text, player });
+        let civ = self.powers.iter().any(|p| p.kind == PowerKind::Civ && !p.name.is_empty() && text.contains(p.name.as_str()));
+        self.news.push(NewsItem { seq: self.next_news, t: self.time, tone, text, player, civ });
         self.next_news += 1;
         if self.news.len() > NEWS_KEEP {
             let k = self.news.len() - NEWS_KEEP;

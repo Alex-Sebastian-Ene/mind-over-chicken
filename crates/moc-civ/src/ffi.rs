@@ -20,6 +20,8 @@
 //! - text: `civ_text_ptr(kind, i)` / `civ_text_len(kind, i)`, UTF-8 (see `civ_text_ptr`)
 //! - events: `civ_events_len` × 8 i32: kind, a, b, x, y, n, t_ms, extra (`civ_events_clear`)
 //! - stats: `civ_stats_len` f32 (see `World::refresh_info`)
+//! - space (#166): `civ_space_info_ptr`, slots × `civ_space_stride` f32 (see `space::INFO_STRIDE`);
+//!   launches `civ_space_launches_ptr` × `space::LAUNCH_STRIDE` (`civ_space_launches_clear`)
 
 use crate::powers;
 use crate::world::*;
@@ -532,4 +534,77 @@ pub extern "C" fn civ_found(p: *mut World, f: u32, x: i32, y: i32, friendliness:
 pub extern "C" fn civ_new_staged_with(seed: u32, w: u32, h: u32, players: u32, rivals: u32) -> *mut World {
     let d = if w == 0 || h == 0 { crate::planet::Dims::DEFAULT } else { crate::planet::Dims::new(w as usize, h as usize) };
     Box::into_raw(Box::new(World::new_staged_with(seed, d, players as usize, rivals as usize)))
+}
+
+// ---- the space age (#166): `space.rs`. The galaxy's war is the host's (moc-cosmos, through
+// RustGalaxy); these move its targets in and the civilisations' launches and losses out. ----
+
+/// Floats per civilisation in the space buffer (`space::INFO_STRIDE`; slots × stride).
+#[no_mangle]
+pub extern "C" fn civ_space_stride() -> usize {
+    crate::space::INFO_STRIDE
+}
+
+#[no_mangle]
+pub extern "C" fn civ_space_info_ptr(p: *mut World) -> *const f32 {
+    w(p).map(|w| w.space.info.as_ptr()).unwrap_or(std::ptr::null())
+}
+
+/// Launches since the last clear, `space::LAUNCH_STRIDE` floats each: civilisation, planet,
+/// order (0 raid, 1 bombard, 2 invade), strength, motive.
+#[no_mangle]
+pub extern "C" fn civ_space_launch_count(p: *mut World) -> usize {
+    w(p).map(|w| w.space.launches.len()).unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn civ_space_launches_ptr(p: *mut World) -> *const f32 {
+    w(p).map(|w| w.space.out.as_ptr()).unwrap_or(std::ptr::null())
+}
+
+#[no_mangle]
+pub extern "C" fn civ_space_launches_clear(p: *mut World) {
+    if let Some(w) = w(p) {
+        w.space.launches.clear();
+        w.space.out.clear();
+    }
+}
+
+/// Forget civilisation `f`'s targets (then add the galaxy's with `civ_space_target_add`).
+#[no_mangle]
+pub extern "C" fn civ_space_targets_clear(p: *mut World, f: u32) {
+    if let Some(t) = w(p).and_then(|w| w.space.targets.get_mut(f as usize)) {
+        t.clear();
+    }
+}
+
+/// A planet civilisation `f` may strike: its index in the galaxy, shields + defences, garrison,
+/// value, and who rules it (0 nobody, 1 a world, 2 a civilisation, 3 the player).
+#[no_mangle]
+pub extern "C" fn civ_space_target_add(p: *mut World, f: u32, body: u32, orbit: f32, garrison: f32, value: f32, kind: u32) {
+    if let Some(t) = w(p).and_then(|w| w.space.targets.get_mut(f as usize)) {
+        if t.len() < crate::space::MAX_TARGETS {
+            t.push(crate::space::Target { body: body.min(u16::MAX as u32) as u16, orbit, garrison, value, kind: kind.min(255) as u8 });
+        }
+    }
+}
+
+/// What the galaxy did to civilisation `f` (see `space::SpaceResult`).
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn civ_space_result(p: *mut World, f: u32, loot: f32, knowledge: f32, hits: f32, shield_loss: f32, colonies: i32, returned: f32, colony_econ: f32) {
+    if let Some(w) = w(p) {
+        let r = crate::space::SpaceResult { loot, knowledge, hits, shield_loss, colonies, returned, colony_econ };
+        crate::space::apply_result(w, f as usize, &r);
+    }
+}
+
+/// Test and `?debug` hook: put civilisation `f` in space whatever its age (on = 0 undoes it).
+/// Returns 1 if it is alive.
+#[no_mangle]
+pub extern "C" fn civ_debug_space(p: *mut World, f: u32, on: u32) -> i32 {
+    let Some(w) = w(p) else { return 0 };
+    let Some(prog) = w.space.programs.get_mut(f as usize) else { return 0 };
+    prog.forced = on != 0;
+    w.factions.get(f as usize).is_some_and(|x| x.alive) as i32
 }

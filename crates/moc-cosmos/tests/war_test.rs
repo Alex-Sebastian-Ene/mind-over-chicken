@@ -299,3 +299,59 @@ fn a_galaxy_step_stays_under_a_millisecond() {
     eprintln!("war step: {per:.4} ms ({} fleets, {} powers)", w.fleets.len(), w.powers.len());
     assert!(per < 1.0, "{per} ms per step");
 }
+
+#[test]
+fn civilisations_on_a_shared_planet_fight_in_space() {
+    let mut w = SpaceWar::new(15);
+    let mut home = world(40.0, 1, 0.5);
+    home.hand_played = true;
+    let worlds = [("Home", home), ("Thrum", world(12000.0, 3, 0.9)), ("Pecktopia", world(400.0, 1, 0.5))];
+    for (i, (n, s)) in worlds.iter().enumerate() {
+        w.sync_body(i, n, *s);
+    }
+    w.set_shared(0, true);
+    let econ = Economy { production: 8.0, knowledge: 9.0, resources: 6.0 };
+    let defence = Defence { shields: 20.0, defences: 12.0, garrison: 10.0 };
+    let a = w.upsert_external(1001, "Ashkai", [232, 70, 62], 0, econ, 120.0, defence, 0, 0.6, true).unwrap();
+    assert_eq!(w.upsert_external(1001, "Ashkai", [232, 70, 62], 0, econ, 120.0, defence, 0, 0.6, true), Some(a), "same key, same power");
+    for _ in 0..8 {
+        w.step(0.5, NEUTRAL);
+    }
+    assert_eq!(w.player(), None, "the civ sandbox's planet has no player power");
+    let mut t = Vec::new();
+    w.targets_for(a, &mut t);
+    let bodies: Vec<u32> = t.chunks(moc_cosmos::host::TARGET_OUT).map(|c| c[0] as u32).collect();
+    assert_eq!(bodies, vec![1, 2], "it may strike the other planets, never its own");
+    // It takes the farming world as a colony; the colony feeds it.
+    w.launch_external(a, 2, Order::Invade, 120.0, Motive::Expansion).unwrap();
+    for _ in 0..40 {
+        w.step(0.25, NEUTRAL);
+        for i in 0..3 {
+            w.sync_body(i, worlds[i].0, worlds[i].1);
+        }
+        w.upsert_external(1001, "Ashkai", [232, 70, 62], 0, econ, 0.0, defence, 0, 0.6, true);
+    }
+    assert_eq!(w.owner_of(2), Some(a));
+    let r = w.take_results_packed(a);
+    assert_eq!(r[4], 1.0, "one colony gained: {r:?}");
+    assert!(r[6] > 0.0, "and its economy: {r:?}");
+    // The galaxy strikes back at the civilisation on its shared planet.
+    let mut hit = false;
+    for _ in 0..(240 * 4) {
+        for i in 0..3 {
+            w.sync_body(i, worlds[i].0, worlds[i].1);
+        }
+        w.upsert_external(1001, "Ashkai", [232, 70, 62], 0, econ, 60.0, defence, 0, 0.6, true);
+        w.step(0.25, Mind { calm: 0.0, focus: 0.3, stress: 0.9 });
+        hit |= w.fleets.iter().any(|f| f.to_planet == 0 && f.mission.unwrap().target_power == Some(a));
+    }
+    assert!(hit, "Thrum came for Ashkai");
+    let r = w.take_results_packed(a);
+    assert!(r[2] > 0.0 || r[3] > 0.0 || r[0] < 0.0, "and it hurt: {r:?}");
+    assert!(w.news.iter().any(|n| n.civ && n.text.contains("Ashkai")), "the news knows the civilisation");
+    // Out of space: retired, and its colony goes free.
+    w.upsert_external(1001, "", [0, 0, 0], 0, econ, 0.0, defence, 0, 0.6, false);
+    assert!(!w.powers[a as usize].alive);
+    w.step(1.0, NEUTRAL);
+    assert_ne!(w.owner_of(2), Some(a));
+}

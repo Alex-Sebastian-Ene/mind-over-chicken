@@ -300,9 +300,15 @@ export class RustGalaxy {
      * HUD rows for the player's power (or the galaxy's): "label\tvalue\tbad" lines.
      */
     war_hud(): string;
+    /**
+     * A civilisation's fleet, already taken from its dock, flies at planet `target`. Returns
+     * the fleet's id (−1: refused).
+     */
+    war_launch_external(power: number, target: number, order: number, strength: number, motive: number): number;
     war_name(idx: number, name: string): void;
     /**
-     * News from line `from` on: [seq, tone, about the player (0/1), text, …].
+     * News from line `from` on: [seq, tone, about the player, about a civ sandbox
+     * civilisation, text, …].
      */
     war_news(from: number): Array<any>;
     /**
@@ -334,7 +340,20 @@ export class RustGalaxy {
      * The planets this galaxy also simulates take it here too, so their next sync agrees.
      */
     war_take_fx(): Float32Array;
+    /**
+     * What happened to a civilisation's power since the last call (`moc_cosmos::host::RESULT_OUT`).
+     */
+    war_take_results(power: number): Float32Array;
     war_target_line(idx: number): string;
+    /**
+     * The planets power `power` may strike (`moc_cosmos::host::TARGET_OUT` each).
+     */
+    war_targets_for(power: number): Float32Array;
+    /**
+     * Register or update a civilisation in space living on planet `home` (by the host's key).
+     * Returns its power id (−1 if the galaxy has no room, or it was retired).
+     */
+    war_upsert_civ(key: number, name: string, r: number, g: number, b: number, home: number, production: number, knowledge: number, resources: number, fleet: number, shields: number, defences: number, garrison: number, tier: number, temper: number, alive: boolean): number;
 }
 
 export class RustImuTracker {
@@ -613,6 +632,7 @@ export interface InitOutput {
     readonly rustgalaxy_war_body_stride: () => number;
     readonly rustgalaxy_war_fleets: (a: number) => [number, number];
     readonly rustgalaxy_war_hud: (a: number) => [number, number];
+    readonly rustgalaxy_war_launch_external: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly rustgalaxy_war_name: (a: number, b: number, c: number, d: number) => void;
     readonly rustgalaxy_war_news: (a: number, b: number) => any;
     readonly rustgalaxy_war_order: (a: number, b: number, c: number) => [number, number];
@@ -625,7 +645,10 @@ export interface InitOutput {
     readonly rustgalaxy_war_step: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly rustgalaxy_war_sync: (a: number, b: number, c: number) => void;
     readonly rustgalaxy_war_take_fx: (a: number) => [number, number];
+    readonly rustgalaxy_war_take_results: (a: number, b: number) => [number, number];
     readonly rustgalaxy_war_target_line: (a: number, b: number) => [number, number];
+    readonly rustgalaxy_war_targets_for: (a: number, b: number) => [number, number];
+    readonly rustgalaxy_war_upsert_civ: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number) => number;
     readonly rustimutracker_add_calib_point: (a: number, b: number, c: number) => void;
     readonly rustimutracker_aim_x: (a: number) => number;
     readonly rustimutracker_aim_y: (a: number) => number;

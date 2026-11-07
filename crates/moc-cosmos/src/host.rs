@@ -19,6 +19,11 @@ pub const BODY_OUT: usize = 8;
 pub const POWER_OUT: usize = 18;
 /// What the war did, per planet: population ×, progress −, stores ×, taken by (−1), settled.
 pub const FX_OUT: usize = 5;
+/// Targets for an external power, per planet: planet, orbit, garrison, value, ruler kind.
+pub const TARGET_OUT: usize = 5;
+/// An external power's results: loot, knowledge, hits, shields lost, colonies ±, ships home,
+/// its colonies' economy index.
+pub const RESULT_OUT: usize = 7;
 
 impl SpaceWar {
     /// Sync every planet from a flat buffer (`BODY_IN` per planet); names change only with
@@ -180,6 +185,38 @@ impl SpaceWar {
         }
         s.push_str(&crate::endgame::hud_rows(self, p));
         s
+    }
+
+    /// The planets power `p` may strike now (`TARGET_OUT` each): planet, orbit (shields +
+    /// defences), garrison, value (economy index), ruler kind (0 none, 1 world, 2 civ,
+    /// 3 player).
+    pub fn targets_for(&self, p: u16, out: &mut Vec<f32>) {
+        out.clear();
+        if self.powers.get(p as usize).is_none_or(|x| !x.alive) {
+            return;
+        }
+        for (i, b) in self.bodies.iter().enumerate() {
+            if !b.inhabited() || b.shared || b.owner == Some(p) || !self.can_target(p, i, b.owner) {
+                continue;
+            }
+            let d = self.defence(i, b.owner);
+            let kind = match b.owner.map(|o| self.powers[o as usize].kind) {
+                None => 0.0,
+                Some(PowerKind::World) => 1.0,
+                Some(PowerKind::Civ) => 2.0,
+                Some(PowerKind::Player) => 3.0,
+            };
+            out.extend_from_slice(&[i as f32, d.orbit(), d.garrison, b.econ.index(), kind]);
+        }
+    }
+
+    /// What happened to external power `p` since the last call (`RESULT_OUT`): loot,
+    /// knowledge, hits, shields lost, colonies gained (−lost), ships home, and the economy
+    /// index its colonies bring now.
+    pub fn take_results_packed(&mut self, p: u16) -> [f32; RESULT_OUT] {
+        let colony = self.powers.get(p as usize).map(|x| (x.econ.index() - x.external.map(|e| e.econ.index()).unwrap_or(0.0)).max(0.0)).unwrap_or(0.0);
+        let r = self.take_results(p);
+        [r.loot, r.knowledge, r.hits, r.shield_loss, r.colonies as f32, r.returned, colony]
     }
 
     /// The order a button sends, by its index (0 raid, 1 bombard, 2 invade).

@@ -13,3 +13,5 @@ crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 moc-planet = { path = "../moc-planet" }
+# The interplanetary war's rules (orders, economy scale, endgame tiers) for the space age (#166).
+moc-cosmos = { path = "../moc-cosmos", default-features = false }

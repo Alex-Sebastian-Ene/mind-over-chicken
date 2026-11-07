@@ -18,6 +18,7 @@
 import { W, H, clamp } from '../sim/util.js';
 import { makeBolt, drawBolt, drawReticle } from '../render/sprites.js';
 import { createCiv, EVENT, CAST, TONE, SETUP } from './civ.js';
+import { CivSpaceLink } from './space-link.js'; // space age (#166): fleets in the galaxy
 
 const DAY = 80;            // seconds per day–night cycle (DAY_SECONDS in the Rust sim)
 const PAN_SPEED = 140;     // planet pixels per second
@@ -136,6 +137,7 @@ export class CivSandbox {
     this.log = [];           // the age and conflict log (lines from Rust)
     this.newsSeq = 0;
     this.speedBtn = null;
+    this.space = new CivSpaceLink(this);   // #166: civilisations at age 19+ fly fleets in the galaxy
   }
 
   cycleSpeed() {
@@ -235,6 +237,7 @@ export class CivSandbox {
     // Real time (the 5 s seeding window is real seconds even in a slow tab); Rust caps the work.
     civ.advance(Math.min(dt, 0.25));
     const ms = performance.now() - t0;
+    this.space.tick(dt);
     const p = this.perf;
     p.stepMs = ms; p.sumStep += ms; p.samples++; p.worstStepMs = Math.max(p.worstStepMs, ms);
     p.per[p.n % p.per.length] = ms / Math.max(1, civ.lastSteps);
