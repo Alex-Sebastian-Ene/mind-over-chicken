@@ -1063,14 +1063,26 @@ $('playBridge').addEventListener('click', async () => {
 // Debug handle for the console (and for automated playtests).
 window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos, get engine() { return engine; } };
 
-// camera (#33): opt-in webcam. Hand gestures cast spells (keys 1-7 without a webcam), the face sets
-// the world's mood. It adds to the brain and keyboard inputs and never replaces them.
+// camera (#33, #116–#123): opt-in webcam. Hands perform actions (pinch-grab, 2-hand zoom, palm, fist, wave)
+// with coach visual demonstration. Face sets mood.
 window.__moc.camera = initCamera({
   getG: () => cosmos.castG(G), // planets (#68): casts and mood reach the world you're on
   canCast: () => !!G?.scene && !banner && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,
   // camera debug (#67): the fingertip aims on the panned surface like the mouse does.
   mapX: (x) => cosmos.mapX(x * W) / W,
   screenX: (x) => ((((x * W + cosmos.panX) % W) + W) % W) / W,
+  onZoomDelta: (delta) => {
+    // Two-hand continuous pinch zoom (#119)
+    try {
+      cosmos.onWheel?.({ deltaY: -delta * 120, preventDefault() {} });
+    } catch {}
+  },
+  onWave: (dir) => {
+    // Open-hand wave orbits camera (#121)
+    if (cosmos.mode === 'planet' || cosmos.mode === 'vast') {
+      cosmos.panX += dir * 40;
+    }
+  },
 });
 // camera debug (#67): Debug tab (button in the top bar, ` key; D pans the planet).
 window.__moc.debug = initDebug({ getG: () => G, camera: window.__moc.camera });

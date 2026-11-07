@@ -443,6 +443,7 @@ export class Industry {
     const w = G.world, ex = w.sites.exchange, picket = w.sites.picket;
     const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
     switch (spell) {
+      case 'fist':
       case 'fireball': {
         // No lightning power in this era, so the fist throws a fireball. It frightens whoever it lands near.
         G.stats.lightning++;
@@ -454,6 +455,7 @@ export class Industry {
         floater(this.particles, x, y - 8, 'fireball', '#ff9a2e', 7);
         break;
       }
+      case 'palm':
       case 'spawn': {
         // Open palm: goats from heaven, straight into GDP.
         this.gdp += 30;

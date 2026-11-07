@@ -36,7 +36,7 @@ const TEMPLATE = `
     <p class="dbg-row"><span>Pinch</span><b data-dbg="pinch">–</b></p>
     <p class="dbg-row"><span>Range</span><b data-dbg="range">–</b></p>
     <ul class="dbg-cds" data-dbg="cds" aria-label="Cooldowns"></ul>
-    <p class="dbg-row"><span>Last cast</span><b data-dbg="last">none yet · press 1–7</b></p>
+    <p class="dbg-row"><span>Last cast</span><b data-dbg="last">none yet · press 1–3</b></p>
   </section>
   <section class="dbg-sec" aria-label="Mood">
     <p class="dbg-row"><span>Mood</span><b data-dbg="mood">camera off</b></p>
@@ -105,7 +105,7 @@ export function initDebug({ getG, camera }) {
       tctx.font = '11px "Atkinson Hyperlegible", system-ui, sans-serif';
       tctx.textAlign = 'center';
       tctx.fillText(s?.status === 'starting' ? 'starting camera…' : 'no camera', w / 2, h / 2 - 4);
-      tctx.fillText('keys 1–7 still cast', w / 2, h / 2 + 12);
+      tctx.fillText('keys 1–3 still cast', w / 2, h / 2 + 12);
       return;
     }
     // Mirrored, like the camera panel, so it moves the way you do.
@@ -121,10 +121,23 @@ export function initDebug({ getG, camera }) {
       tctx.lineWidth = 1;
       tctx.strokeRect(b.x0 * dw, b.y0 * dh, (b.x1 - b.x0) * dw, (b.y1 - b.y0) * dh);
     }
-    drawHand(tctx, s.hand, dw, dh, {
-      held: !!s.hold?.held, aiming: s.finger?.mode === 'point', pinching: !!s.finger?.pinching,
-      nearPinch: s.finger?.ratio != null && s.finger.ratio < s.pinch.exit,
-    });
+    if (s.hands && (s.hands.left || s.hands.right)) {
+      if (s.hands.left?.visible) {
+        drawHand(tctx, s.hands.left.landmarks, dw, dh, {
+          held: !!s.hold?.held, pinching: !!s.hands.left.pinching, side: 'left',
+        });
+      }
+      if (s.hands.right?.visible) {
+        drawHand(tctx, s.hands.right.landmarks, dw, dh, {
+          held: !!s.hold?.held, pinching: !!s.hands.right.pinching, side: 'right',
+        });
+      }
+    } else {
+      drawHand(tctx, s.hand, dw, dh, {
+        held: !!s.hold?.held, aiming: s.finger?.mode === 'point', pinching: !!s.finger?.pinching,
+        nearPinch: s.finger?.ratio != null && s.finger.ratio < s.pinch.exit,
+      });
+    }
     tctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
@@ -160,19 +173,43 @@ export function initDebug({ getG, camera }) {
     // Hand
     const g = s?.gesture || { name: 'None', score: 0 };
     const f = s?.finger;
-    const handTxt = !s?.live ? 'no camera' : !s.hand ? 'no hand' : `${GESTURE_LABEL[g.name] || g.name} ${g.score.toFixed(2)}${f?.mode === 'point' ? ' · aiming' : ''}`;
+    let handTxt = 'no camera';
+    if (s?.live) {
+      const leftVis = s?.hands?.left?.visible;
+      const rightVis = s?.hands?.right?.visible;
+      if (leftVis && rightVis) {
+        const lName = GESTURE_LABEL[s.hands.left.name] || s.hands.left.name;
+        const rName = GESTURE_LABEL[s.hands.right.name] || s.hands.right.name;
+        handTxt = `2 hands: L [${lName}] · R [${rName}]`;
+      } else if (leftVis || rightVis) {
+        const act = leftVis ? s.hands.left : s.hands.right;
+        const side = leftVis ? 'L' : 'R';
+        const aName = GESTURE_LABEL[act.name] || act.name;
+        handTxt = `1 hand (${side}): ${aName} ${act.score.toFixed(2)}`;
+      } else if (s.hand) {
+        handTxt = `${GESTURE_LABEL[g.name] || g.name} ${g.score.toFixed(2)}${f?.mode === 'point' ? ' · aiming' : ''}`;
+      } else {
+        handTxt = 'no hand';
+      }
+    }
     set(el.gesture, handTxt);
     const held = s?.hold?.held ? SPELL_BY_ID[s.hold.held] : null;
     const heldCd = held ? s.cooldowns.find((c) => c.id === held.id) : null;
     el.hold.style.width = pct(held ? s.hold.progress : 0);
     set(el.holdText, held ? (heldCd.left > 0 ? `${held.glyph} ready in ${secs(heldCd.left)}` : `${held.glyph} ${held.name} ${pct(s.hold.progress)}`) : '–');
-    const armed = SPELL_BY_ID[s?.armed || 'fireball'];
-    const pinchTxt = f?.ratio == null ? `let go casts ${armed.glyph}` : f.pinching
-      ? `held ${f.ratio.toFixed(2)} · let go casts ${armed.glyph}`
-      : `open ${f.ratio.toFixed(2)} (< ${s.pinch.enter}) · ${armed.glyph}`;
+    const armed = SPELL_BY_ID[s?.armed || 'fist'] || SPELL_BY_ID.fist;
+    const pinchTxt = s?.hands?.bothPinched
+      ? `2H zoom ×${(s.hands.zoomFactor || 1).toFixed(2)} (dist ${(s.hands.distance || 0).toFixed(2)})`
+      : s?.grabbed
+        ? `holding ${s.grabbed.label}`
+        : f?.ratio == null
+          ? `1H grab · 2H zoom`
+          : f.pinching
+            ? `pinch ${f.ratio.toFixed(2)}`
+            : `open ${f.ratio.toFixed(2)} (< ${s.pinch.enter})`;
     set(el.pinch, pinchTxt);
     const rg = s?.range;
-    set(el.range, !rg ? '–' : `${rg.calibrated ? 'learned' : `learning ${pct(rg.progress)}`} · x ${rg.x[0].toFixed(2)}–${rg.x[1].toFixed(2)} y ${rg.y[0].toFixed(2)}–${rg.y[1].toFixed(2)}`);
+    set(el.range, !rg ? '–' : `head cursor sole aim · ${rg.calibrated ? 'learned' : `learning ${pct(rg.progress)}`}`);
 
     // Cooldowns: rebuild the chips only when the set of cooling spells changes; update widths always.
     const cds = s?.cooldowns || [];
@@ -200,7 +237,7 @@ export function initDebug({ getG, camera }) {
       li.querySelector('i').style.width = pct(c.frac);
     }
     const last = s?.history?.[0];
-    set(el.last, last ? `${SPELL_BY_ID[last.id].glyph} ${SPELL_BY_ID[last.id].name} · ${last.via} · ${secs(now - last.at)} ago` : 'none yet · press 1–7');
+    set(el.last, last ? `${SPELL_BY_ID[last.id].glyph} ${SPELL_BY_ID[last.id].name} · ${last.via} · ${secs(now - last.at)} ago` : 'none yet · press 1–3');
 
     // Mood
     const m = s?.mood;

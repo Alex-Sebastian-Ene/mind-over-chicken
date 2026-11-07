@@ -44,6 +44,7 @@ export class StoneAge {
     this.meat = [];
     this.done = false;
     this.strikes = 0;
+    this.grabbedEntity = null;
     this.boats = [];
     this.colonies = {};
     this.expTimer = 0;
@@ -612,6 +613,68 @@ export class StoneAge {
 
   // ---- camera (#33): hand casts and face mood. Extra inputs on top of the brain, never instead of it. ----
 
+  // Living-entity pinch-grab support (#120)
+  onGrabStart(aim) {
+    if (this.done) return null;
+    const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
+    // Reject non-living targets: fire pit, rocks, water
+    if (dist(x, y, this.fire.x, this.fire.y) < 14) {
+      return { ok: false, reason: 'Fire pit cannot be picked up' };
+    }
+    // Check sacred chicken
+    if (dist(x, y, this.chicken.x, this.chicken.y) < 8) {
+      this.grabbedEntity = { entity: this.chicken, kind: 'chicken', label: 'Sacred Chicken' };
+      floater(this.particles, this.chicken.x, this.chicken.y - 8, 'grabbed chicken!', '#ffe066', 6);
+      return { ok: true, label: 'Sacred Chicken', kind: 'chicken' };
+    }
+    // Check people
+    for (const p of this.living()) {
+      if (dist(x, y, p.x, p.y - 2) < 6) {
+        this.grabbedEntity = { entity: p, kind: 'person', label: p.name };
+        p.state = 'idle';
+        floater(this.particles, p.x, p.y - 8, `grabbed ${p.name}!`, '#ffd166', 6);
+        return { ok: true, label: p.name, kind: 'person' };
+      }
+    }
+    // Check alive mammoths
+    for (const m of this.mammoths) {
+      if (m.alive && dist(x, y, m.x, m.y - 2) < 10) {
+        this.grabbedEntity = { entity: m, kind: 'mammoth', label: 'Mammoth' };
+        m.pause = 999;
+        floater(this.particles, m.x, m.y - 8, 'grabbed mammoth!', '#ff9a2e', 6);
+        return { ok: true, label: 'Mammoth', kind: 'mammoth' };
+      }
+    }
+    return { ok: false, reason: 'Pinch over a villager, mammoth, or chicken to grab' };
+  }
+
+  onGrabMove(aim) {
+    if (!this.grabbedEntity) return;
+    const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
+    const e = this.grabbedEntity.entity;
+    e.x = x;
+    e.y = y;
+    if (e.tx !== undefined) { e.tx = x; e.ty = y; }
+  }
+
+  onGrabEnd({ x: aimX, y: aimY, cancelled = false }) {
+    if (!this.grabbedEntity) return;
+    const { entity, label: entLabel, kind } = this.grabbedEntity;
+    this.grabbedEntity = null;
+    if (cancelled) return;
+    const w = this.G.world;
+    const targetX = Math.round(aimX * (W - 1)), targetY = Math.round(aimY * (H - 1));
+    const safeLand = w.walkable(targetX, targetY) && w.reachable(targetX, targetY)
+      ? { x: targetX, y: targetY }
+      : w.randomLand(targetX, targetY, 1, 8);
+    entity.x = safeLand.x;
+    entity.y = safeLand.y;
+    entity.tx = safeLand.x;
+    entity.ty = safeLand.y;
+    if (kind === 'mammoth') entity.pause = rand(1, 3);
+    floater(this.particles, safeLand.x, safeLand.y - 8, `placed ${entLabel}`, '#9be38a', 6);
+  }
+
   // aim is 0..1 like the brain's. The fist (fireball) normally arrives through onBlink.
   onCast(spell, aim) {
     const G = this.G;
@@ -619,6 +682,18 @@ export class StoneAge {
     const w = G.world, f = this.fire;
     const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
     switch (spell) {
+      case 'palm': {
+        // Core move Palm (#122): calm fear, soothe people, feed fire a bit
+        for (const p of this.living()) {
+          p.fear = clamp(p.fear - 0.3);
+          p.faith = clamp(p.faith + 0.15);
+        }
+        if (f.lit) f.heat = Math.min(1, f.heat + 0.15);
+        floater(this.particles, f.x, f.y - 14, 'peace & calm', '#9be38a', 7);
+        G.advisor.say('cast-palm', 'Your open palm calms the tribe and soothes the fire.', { mood: 'happy', priority: 1, cooldown: 20 });
+        break;
+      }
+      case 'fist':
       case 'fireball': this.onBlink(aim); break;
       case 'spawn': {
         // Open palm: a cooked haunch drops where you aim and the tribe carries it to the fire.
