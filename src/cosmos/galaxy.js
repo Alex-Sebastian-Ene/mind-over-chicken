@@ -2,7 +2,7 @@
 // first ten seconds of play. Each of those worlds listens mainly to ONE brain channel, so you
 // steer different civilisations with different mental states:
 //   calm  → harvests and growth        focus → research and era progress
-//   pulse → its goat market's booms and crashes     blink → storms and lightning
+//   stress → its goat market's booms and crashes    blink → storms and lightning
 // Every world still feels a little of every channel. They run on their own in fast-forward
 // (Stone Age → Space Age in about a minute); space-faring worlds send ships to settle barren ones.
 //
@@ -13,19 +13,26 @@
 // (weights, any scale) and that policy chooses the world's effort split instead of its temperament.
 // It only adds the civilisation's own decisions: the player's brain still applies on top at every
 // level, and a god never reads or writes the player's input. See observe() in planet-sim.js.
+//
+// Surfaces (#68, completes #43): every non-home world also gets a vast surface (surface.js) with
+// its own SimPlanet tribe played by the PPO AI god (src/ai/). The god's moves fill the seam above.
+// The surface in view runs every frame; the others run in turns at a lower rate (SURFACE_*).
 
 import { rand, pick, chance } from '../sim/util.js';
 import { generateWorld } from './worldgen.js';
 import { label } from '../eras/stone.js';
-import { SIM, TEMPERAMENT, newPlanetState, brainEffects, stepPlanet, blinkPlanet, arriveShip, newMind, stepMind } from './planet-sim.js';
-import { SimPlanet } from '../ai/planet.js';
-import { AIGod } from '../ai/autopilot.js';
+import { SIM, TEMPERAMENT, ERAS, newPlanetState, brainEffects, stepPlanet, blinkPlanet, arriveShip, newMind, stepMind, logHistory, reachMilestone } from './planet-sim.js';
+import { PlanetSurface } from './surface.js';
 
 export const ERA_NAMES = ['stone', 'farming', 'industry', 'space'];
 export const ERA_LABEL = { stone: 'Stone Age', farming: 'Farming', industry: 'Industry', space: 'Space Age' };
-const MAX_PLANETS = 7;
+const MAX_PLANETS = 10;              // home + three mind worlds + six made ones (#68: was 7)
 const STAR = { x: 132, y: 92 };      // left of centre, so the galaxy panel doesn't hide the outer orbits
-const ORBIT_FIRST = 34, ORBIT_STEP = 15, ORBIT_SQUASH = 0.42;
+const ORBIT_FIRST = 30, ORBIT_MAX = 124, ORBIT_SQUASH = 0.42;
+const ORBIT_STEP = (ORBIT_MAX - ORBIT_FIRST) / (MAX_PLANETS - 1);   // the outermost orbit stays on screen
+// Surfaces off screen run in turns: at most SURFACE_PER_FRAME of them each frame, in steps of
+// SURFACE_DT, catching up at most SURFACE_MAX_LAG seconds (beyond that they simply run slower).
+const SURFACE_PER_FRAME = 2, SURFACE_DT = 0.125, SURFACE_MAX_LAG = 0.5, SURFACE_VIEW_DT = 1 / 30;
 // The mind-read window comes from the calibration config (#54); read it live, not once.
 const NAMES = ['Henhaven', 'Cluckturn', 'Roostia', 'Yolkos', 'Featherfall', 'Eggsodus', 'Pecktopia', 'Gizzardia', 'Coopernicus', 'Bok Prime', 'Omelettia', 'Wattle IV'];
 const BIOMES = ['desert', 'ice', 'jungle', 'alien', 'temperate'];
@@ -36,7 +43,7 @@ const ATMOS = { temperate: [110, 175, 255], desert: [255, 190, 120], ice: [190, 
 export const CHANNELS = {
   calm: { name: 'Stillwater', biome: 'temperate', born: 'Born from your calm', label: 'Calm', color: '#59d8c8' },
   focus: { name: 'Lumen', biome: 'alien', born: 'Born from your focus', label: 'Focus', color: '#ffcf4a' },
-  pulse: { name: 'Thrum', biome: 'desert', born: 'Born from your pulse', label: 'Pulse', color: '#ff5a72' },
+  stress: { name: 'Thrum', biome: 'desert', born: 'Born from your stress', label: 'Stress', color: '#ff5a72' },
   blink: { name: 'Flicker', biome: 'ice', born: 'Born from your blinks', label: 'Blinks', color: '#c9d7ff' },
   mixed: { label: 'Everything', color: '#a3a6c4' },
 };
@@ -58,17 +65,18 @@ export class Galaxy {
     this.revealQueue = [];
     this.recentBlinks = [];
     this.attended = null;  // the world the player is zoomed into: hears every channel, blinks strike it
+    this.viewing = null;   // the world whose surface is on screen (#68): its tribe runs every frame
+    this.surfaceTurn = 0;
     this.onEvent = null;   // (planet, text, kind) → main.js forwards to the advisor
   }
 
   addHome(world, { autonomous = false } = {}) {
-    const p = this.add({ name: 'Home', home: true, biome: world.biome || 'temperate', autonomous, world: autonomous ? world : null, homeWorld: world, eraIndex: 0, pop: autonomous ? 10 : 0, size: 12, channel: 'mixed', alive: true, seed: world.seed });
+    const p = this.add({ name: 'Home', home: true, biome: world.biome || 'temperate', autonomous, world: null, homeWorld: world, eraIndex: 0, pop: autonomous ? 10 : 0, size: 12, channel: 'mixed', alive: true, seed: world.seed });
+    // A sandbox home runs on its own, on a mirror of the same world (built off-thread with its
+    // vast surface), so the paused game's map is untouched.
     if (autonomous) {
-      try {
-        p.simPlanet = new SimPlanet({ seed: world.seed, biome: world.biome, brain: 'proxy' }).setGod(new AIGod());
-      } catch (e) {
-        console.warn('Could not initialize SimPlanet for autonomous home:', e);
-      }
+      p.forming = true; p.alive = false;
+      generateWorld(world.seed, p.biome, { vast: true }).then((w) => { p.world = w; p.forming = false; p.alive = true; this.attachSurface(p, w); });
     }
     return p;
   }
@@ -84,7 +92,7 @@ export class Galaxy {
     let name = opts.name;
     if (!name) { const free = NAMES.filter((n) => !this.usedNames.has(n)); name = pick(free.length ? free : NAMES); }
     const inhabited = opts.inhabited ?? chance(0.6);
-    const p = this.add({ name, biome: 'forming', size: opts.size ?? Math.round(rand(8, 11)), pop: 0, eraIndex: 0, channel: opts.channel || 'mixed', forming: true, alive: false });
+    const p = this.add({ name, biome: 'forming', size: opts.size ?? Math.round(rand(7, 10)), pop: 0, eraIndex: 0, channel: opts.channel || 'mixed', forming: true, alive: false });
     this.form(p, biome, { pop: inhabited ? (opts.pop ?? 10) : 0, eraIndex: opts.eraIndex ?? 0, born: inhabited ? 'new tribe' : 'barren' });
     return p;
   }
@@ -95,7 +103,7 @@ export class Galaxy {
     const p = {
       ...newPlanetState({ channel: o.channel || 'mixed', pop: o.pop || 0, eraIndex: o.eraIndex || 0 }),
       // presentation only
-      labels: [], layers: {}, structs: {}, flash: 0, effect: '',
+      labels: [], layers: {}, structs: {}, flash: 0, effect: '', surface: null, surfaceReady: false,
       orbit: ORBIT_FIRST + i * ORBIT_STEP, phase: rand(0, Math.PI * 2), speed: 0.2 / (1 + i * 0.45), spin: rand(0.25, 0.5),
       seed,
       ...o,
@@ -106,23 +114,67 @@ export class Galaxy {
     return p;
   }
 
-  // Generate the planet's world off-thread, then bring it to life.
+  // Generate the planet's world (and its vast surface) off-thread, then bring it to life.
   form(p, biome, { pop, eraIndex = 0, born }) {
     p.forming = true;
-    generateWorld(p.seed, biome).then((world) => {
+    generateWorld(p.seed ?? ((Math.random() * 1e9) | 0), biome, { vast: true }).then((world) => {
       p.world = world; p.biome = biome; p.atmosphere = ATMOS[biome] || ATMOS.temperate;
       p.forming = false; p.alive = true; p.pop = pop; p.eraIndex = eraIndex; p.progress = 0;
-      if (pop > 0 && !p.home) {
-        try {
-          p.simPlanet = new SimPlanet({ seed: p.seed, biome, brain: 'proxy' }).setGod(new AIGod());
-        } catch (e) {
-          console.warn('Could not initialize SimPlanet for galaxy world:', e);
-        }
-      }
       p.labels.push({ text: born, t: 4, color: CHANNELS[p.channel]?.color || '#9be38a' });
+      logHistory(p, pop > 0 ? `Born: ${born.toLowerCase()}` : 'Formed, barren', 'event');
+      this.attachSurface(p, world);
       this.note(p, pop > 0 ? `${p.name}: ${born.toLowerCase()}.` : `${p.name} formed. Nobody lives there yet.`);
       this.onEvent?.(p, born, 'born');
     });
+  }
+
+  // The world's surface up close, with its AI-god tribe once anyone lives there (#68).
+  attachSurface(p, world) {
+    if (!world?.vast || p.surface) return;
+    try { new PlanetSurface(p, world); } catch (err) { console.error('surface failed', err); }
+  }
+
+  // Run the surfaces: the one in view every frame, the rest in turns (cheap proxy brains,
+  // lower tick rate). The player's brain rides on top of whichever world they attend.
+  tickSurfaces(dt, brain) {
+    const list = this.planets.filter((p) => p.surface);
+    if (!list.length) return;
+    for (const p of list) {
+      const s = p.surface;
+      if (p.pop > 0 && !s.sim) s.ensureTribe();
+      s.setHuman(p === this.attended ? brain : null);
+      s.acc = Math.min(SURFACE_MAX_LAG, s.acc + dt);
+    }
+    const run = (p, step, inView) => {
+      const s = p.surface;
+      let left = s.acc;
+      s.acc = 0;
+      while (left > 1e-4) { const h = Math.min(step, left); left -= h; for (const ev of s.tick(h, inView)) this.surfaceEvent(p, ev); }
+    };
+    const view = this.viewing?.surface ? this.viewing : null;
+    if (view) run(view, SURFACE_VIEW_DT, true);
+    const others = list.filter((p) => p !== view);
+    let done = 0;
+    for (let k = 0; k < others.length && done < SURFACE_PER_FRAME; k++) {
+      const p = others[(this.surfaceTurn + k) % others.length];
+      if (p.surface.acc < SURFACE_DT) continue;
+      run(p, SURFACE_DT, false);
+      done++;
+    }
+    this.surfaceTurn = (this.surfaceTurn + Math.max(1, done)) % Math.max(1, others.length);
+    // Settlement rebakes (they also feed the globe textures): at most one per frame.
+    for (const p of list) if (p.surface.maybeRebake(dt)) break;
+  }
+
+  surfaceEvent(p, ev) {
+    const colour = ev.kind === 'good' || ev.kind === 'milestone' ? '#ffd166' : '#ff8a9c';
+    this.pushLabel(p, { text: ev.text, t: 3, color: colour });
+    if (ev.kind !== 'milestone') this.note(p, `${p.name}: ${ev.text}${ev.detail ? ` (${ev.detail})` : ''}.`);
+  }
+
+  pushLabel(p, l) {
+    p.labels.push(l);
+    if (p.labels.length > 4) p.labels.splice(0, p.labels.length - 4);
   }
 
   note(p, text) {
@@ -173,16 +225,17 @@ export class Galaxy {
 
   // home: { eraIndex, pop, canLaunch } read from the hand-played game each frame.
   // playDt: seconds of real play this frame (0 while paused), used for the mind snapshot.
-  update(dt, brain, home, playDt = dt) {
+  // opts.anger: the camera mood's anger (0..1), which unsettles the world you're looking at.
+  update(dt, brain, home, playDt = dt, opts = {}) {
     this.time += dt;
     this.humanBrain = brain;
     this.recentBlinks = this.recentBlinks.filter((t) => this.time - t < 10);
     const fx = brainEffects({
       calm: brain.calm,
       focus: brain.focus,
-      hrDelta: brain.hr ? (brain.hrDelta?.() ?? 0) : 0,
+      stress: brain.stress,           // max(1 - calm, face anger), from the brain
       blinksLast10s: this.recentBlinks.length,
-      panic: brain.panic,
+      anger: opts.anger ?? 0,
     });
     this.fx = fx;
     this.sampleMind(playDt, brain, fx);
@@ -192,6 +245,10 @@ export class Galaxy {
       p.flash = Math.max(0, p.flash - dt);
       if (p.home && !p.autonomous) {
         if (home) {
+          if (home.eraIndex > p.eraIndex) {   // the campaign's own history, for the panel
+            const era = ERAS[home.eraIndex];
+            if (era) { logHistory(p, `Reached ${era.name}`, 'event'); reachMilestone(p, era.key); }
+          }
           p.eraIndex = home.eraIndex; p.pop = home.pop;
           if (home.canLaunch && (p.launchT += dt * (0.6 + fx.focus)) >= SIM.LAUNCH_EVERY) { p.launchT = 0; this.launch(p); }
         }
@@ -201,6 +258,7 @@ export class Galaxy {
       if (!p.alive || p.pop <= 0) { p.effect = p.forming ? 'Forming…' : 'Waiting for settlers'; continue; }
       this.simulate(p, dt, fx);
     }
+    this.tickSurfaces(dt, brain);
 
     for (const s of this.ships) {
       s.t += dt / s.dur;
@@ -208,11 +266,7 @@ export class Galaxy {
         s.done = true;
         const to = s.to;
         if (arriveShip(to) === 'settled') {
-          if (!to.simPlanet) {
-            try {
-              to.simPlanet = new SimPlanet({ seed: to.seed, biome: to.biome, brain: 'proxy' }).setGod(new AIGod());
-            } catch {}
-          }
+          to.surface?.ensureTribe();
           to.labels.push({ text: 'settled!', t: 3.5, color: '#9be38a' });
           this.note(to, `Settlers from ${s.from.name} landed on ${to.name}.`);
           this.onEvent?.(to, 'settled', 'settled');
@@ -232,10 +286,7 @@ export class Galaxy {
       if (!ranked) return;
       this.planets.filter((p) => p.mindSlot).forEach((p, i) => this.revealQueue.push({ p, ch: ranked[i].ch }));
       this.revealT = 0;
-      const pulseStr = (brain.hr && brain.hr > 0)
-        ? `pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, `
-        : (m.stress ? `tension ${Math.round(m.stress * 100)}%, ` : '');
-      this.note(null, `Your first ${SIM.MIND_SECONDS} seconds: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, ${pulseStr}${m.blinks} blinks.`);
+      this.note(null, `Your first ${SIM.MIND_SECONDS} seconds: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, stress ${Math.round(m.stress * 100)}%, ${m.blinks} blinks.`);
       return;
     }
     // Staggered reveal so each world gets its moment.
@@ -258,22 +309,22 @@ export class Galaxy {
       p.simPlanet.update(dt);
     }
     const { events, growth, research } = stepPlanet(p, dt, fx, Math.random, p === this.attended);
-    const colour = { era: '#ffd166', good: '#59d8c8', bad: '#ff8a9c', flavour: '#f2e8d5' };
+    const colour = { era: '#ffd166', good: '#59d8c8', bad: '#ff8a9c', flavour: '#f2e8d5', tier: '#9be38a', setback: '#ff8a9c', milestone: '#ffd166', conflict: '#ff5a72', truce: '#9be38a' };
     for (const ev of events) {
       if (ev.kind === 'launch-ready') { this.launch(p); continue; }
       const goodColour = ev.text === 'goat boom' ? '#7ee08a' : ev.text === 'breakthrough' ? '#ffcf4a' : colour.good;
       const badColour = ev.text === 'goat crash' ? '#ff5a72' : colour.bad;
-      p.labels.push({ text: ev.text, t: ev.kind === 'flavour' ? 2.6 : 3, color: ev.kind === 'good' ? goodColour : ev.kind === 'bad' ? badColour : colour[ev.kind] });
+      this.pushLabel(p, { text: ev.text, t: ev.kind === 'flavour' ? 2.6 : 3, color: ev.kind === 'good' ? goodColour : ev.kind === 'bad' ? badColour : colour[ev.kind] || '#f2e8d5' });
       if (ev.kind === 'era') this.note(p, `${p.name} reached the ${ev.text}.`);
       if (ev.kind === 'good' || ev.kind === 'bad') { this.note(p, `${p.name}: ${ev.text}, thanks to ${ev.cause}.`); this.onEvent?.(p, ev.text, 'event'); }
+      if (ev.kind === 'tier') { this.note(p, `${p.name} grew into a ${ev.text}.`); this.onEvent?.(p, `grew into a ${ev.text}`, 'event'); }
+      if (ev.kind === 'setback' || ev.kind === 'conflict' || ev.kind === 'truce') { this.note(p, `${p.name}: ${ev.text}${ev.detail ? ` (${ev.detail})` : ''}.`); this.onEvent?.(p, ev.text, 'event'); }
     }
     // Live "what your brain is doing to this world" line for the panel.
     p.effect = {
       calm: `Calm ${pct(fx.calm)} → growth ${signed(growth * 100, 1)}%/s`,
       focus: `Focus ${pct(fx.focus)} → research ×${research.toFixed(1)}`,
-      pulse: (this.humanBrain?.hr && this.humanBrain.hr > 0)
-        ? `Pulse ${signed(fx.hrDelta, 0)} bpm → goat index ${p.market.toFixed(0)}`
-        : `Tension ${pct(fx.stress)} → goat index ${p.market.toFixed(0)}`,
+      stress: `Stress ${pct(fx.stress)} → goat index ${p.market.toFixed(0)}`,
       blink: `Blinks ${(fx.blinkRate * 10).toFixed(0)}/10s → ${p.storms} storms`,
       mixed: `Growth ${signed(growth * 100, 1)}%/s · research ×${research.toFixed(1)}`,
     }[p.channel || 'mixed'];
@@ -292,6 +343,7 @@ export class Galaxy {
   // Texture for a planet's globe: its current era layer plus the structures to light at night.
   textureFor(p, globe, homeLayer, homeStructures) {
     if (p.home && !p.autonomous) return globe.texture(homeLayer, homeStructures, ERA_NAMES[p.eraIndex]);
+    if (p.surface?.globeLayer) return globe.texture(p.surface.globeLayer, p.surface.structs, p.pop > 0 ? ERA_NAMES[p.eraIndex] : 'wild');
     if (!p.world) return null;
     const era = p.pop > 0 ? ERA_NAMES[p.eraIndex] : 'wild';
     if (!p.layers[era]) { p.layers[era] = p.world.paint(era); p.structs[era] = [...(p.world.structures || [])]; }
@@ -443,9 +495,9 @@ export function drawPlanetBolt(ctx, x, y, r, seed, alpha) {
 
 // Who is steering a world, for the panel.
 export function ownerLabel(p) {
-  if (p.home) return 'Your world';
+  if (p.home && !p.autonomous) return 'Your world';
   if (p.god) return 'AI god';
-  return 'Unattended';
+  return p.pop > 0 ? 'Unattended' : 'Nobody yet';
 }
 
 export function planetDot(p) {

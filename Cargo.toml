@@ -2,6 +2,7 @@
 members = [
     "crates/engine",
     "crates/moc-planet",
+    "crates/moc-civ",
     "crates/moc-ai",
     "crates/moc-bridge",
     "crates/moc-cosmos",

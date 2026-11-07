@@ -19,6 +19,8 @@ import { initCamera } from './camera/camera.js'; // camera (#33)
 import { initDebug } from './camera/debug.js'; // camera debug (#67)
 import { Calibration, readCalibrationConfig } from './brain/calibration.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
+import { CivSandbox } from './civ/sandbox.js'; // civ (#50)
+import { worldMeta, renderWorldDetail } from './cosmos/panel.js'; // planets (#68)
 import { SimPlanet } from './ai/planet.js';
 import { AIGod } from './ai/autopilot.js';
 
@@ -190,7 +192,8 @@ function newGame(source, startIndex = 0) {
     cosmos.galaxy?.onBlink();   // storms on the blink world; a strike on the world you're zoomed into
     if (cosmos.galaxy?.attended) audio.thunder();
     if (aiPlanet) aiPlanet.humanBlink(aim);
-    if (!banner && !cosmos.active && G.scene?.onBlink) G.scene.onBlink(aim);
+    const view = cosmos.viewScene(G); // planets (#68): another world's surface when you're on it
+    if (!banner && !cosmos.active && view?.onBlink) view.onBlink(aim);
   });
   // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
   cosmos.ensureGalaxy(G);
@@ -322,7 +325,7 @@ function showEnd() {
 
 // ---------- render ----------
 function render() {
-  const scene = aiPlanet ? aiPlanet.scene : G?.scene;
+  const scene = aiPlanet ? aiPlanet.scene : (G ? cosmos.viewScene(G) : null); // AI god autopilot, else the world in view (planets #68)
   textCtx.setTransform(1, 0, 0, 1, 0, 0);
   textCtx.clearRect(0, 0, textLayer.width, textLayer.height);
   if (!scene) {
@@ -459,10 +462,10 @@ function frame(ts) {
     G.shake = Math.max(0, (G.shake || 0) - dt * 2);
     cosmos.update(dt, G);
     advisor.update(dt);
-    const showGalaxyHud = cosmos.galaxy && (G.sandbox || cosmos.inGalaxy);
-    const wanted = showGalaxyHud ? galaxyHudScene : G.scene;
+    // planets (#68): the HUD names the world you're on: "your world" at home, "AI god" elsewhere.
+    const wanted = cosmos.hudScene(G, galaxyHudScene);
     if (wanted !== hudScene) { hudScene = wanted; hud.setScene(wanted); }
-    hud.update(dt, showGalaxyHud ? Object.assign(Object.create(G), { scene: galaxyHudScene }) : G);
+    hud.update(dt, wanted === G.scene ? G : Object.assign(Object.create(G), { scene: wanted }));
     updateCosmosUi(dt);
   } else if (previewBrain) {
     previewBrain.update(dt);
@@ -509,7 +512,8 @@ let orbitDrag = null;
 const CAM3D = { blendFrom: 300, topDown: 344, topPitch: 1.55 };
 let cam3dBase = null;   // the player's own angle when the tip-over began
 let cam3dTween = null;  // a keyboard/button zoom-out animates the tip-over, then hands over
-function in3dSurface() { return !!(engine && engine.is_3d_mode() && !cosmos.active && !((cosmos.z || 0) > 0)); }
+// 3D is the home world's relief; other worlds' surfaces (planets #68) stay 2D until they get their own mesh.
+function in3dSurface() { return !!(engine && engine.is_3d_mode() && !cosmos.active && !((cosmos.z || 0) > 0) && (!G || !cosmos.viewScene || cosmos.viewScene(G) === G.scene) && !(G?.scene instanceof CivSandbox)); } // civ (#50) runs on its own planet: 2D
 function applyCam3dBlend() {
   const d = engine.get_camera_distance();
   const t = clamp((d - CAM3D.blendFrom) / (CAM3D.topDown - CAM3D.blendFrom));
@@ -565,10 +569,10 @@ screen.addEventListener('pointermove', (e) => {
     return;
   }
   if (panDrag && panDrag.id === e.pointerId) {
-    const x = worldFromEvent(e).x;
-    const dx = x - panDrag.x;
-    panDrag.x = x;
-    cosmos.pan(dx);   // in 3D the camera follows this pan (see render)
+    // East–west, plus north–south on the vast worlds (planets #68). In 3D the camera follows the pan.
+    const q = worldFromEvent(e);
+    cosmos.pan(q.x - panDrag.x, q.y - (panDrag.y ?? q.y));
+    panDrag.x = q.x; panDrag.y = q.y;
     cam3dBase = null;
     return;
   }
@@ -597,14 +601,16 @@ screen.addEventListener('pointerdown', (e) => {
   if (G && e.button === 1) {
     e.preventDefault();
     screen.setPointerCapture?.(e.pointerId);
-    panDrag = { id: e.pointerId, x: worldFromEvent(e).x };
+    const q0 = worldFromEvent(e);
+    panDrag = { id: e.pointerId, x: q0.x, y: q0.y };
     return;
   }
   // Right drag in 2D mode pans surface
   if (G && e.button === 2) {
     e.preventDefault();
     screen.setPointerCapture?.(e.pointerId);
-    panDrag = { id: e.pointerId, x: worldFromEvent(e).x };
+    const q = worldFromEvent(e);
+    panDrag = { id: e.pointerId, x: q.x, y: q.y };
     return;
   }
   const s = sim(); if (!s) return;
@@ -653,6 +659,8 @@ window.addEventListener('keydown', (e) => {
   if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { zoomOutFromSurface(); return; }
   if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { zoomInOnSurface(); return; }
   if (G && !cosmos.active && (e.code === 'KeyA' || e.code === 'KeyD')) { cosmos.panVel = e.code === 'KeyA' ? 140 : -140; return; }
+  if (G && !cosmos.active && cosmos.surfaceInView && (e.code === 'KeyW' || e.code === 'KeyS')) { cosmos.panVelY = e.code === 'KeyW' ? 110 : -110; return; } // planets (#68)
+  if (G && e.code === 'KeyN' && !e.repeat) { if (cosmos.visitNextWorld(G)) audio.blip(); return; } // planets (#68, #43): visit the next AI world (G is the AI God toggle)
   if (e.code === 'Enter') {
     if (banner) dismissBanner();
     else if (!$('failScreen').hidden) retryEra();
@@ -756,8 +764,10 @@ function updateCosmosUi(dt) {
     const mirrored = p.home && !p.autonomous;
     const era = p.pop > 0 ? ERA_LABEL[ERA_NAMES[p.eraIndex]] : 'Barren';
     const owner = gal.attended === p ? `${ownerLabel(p)} · you're here` : ownerLabel(p);
-    return { p, era: p.forming ? 'Forming' : era, pop: `${mirrored ? `${p.pop} people` : fmtPop(p.pop)} · ${owner}`, prog: mirrored ? (p.eraIndex + 1) / 4 : p.pop > 0 ? p.progress : 0 };
+    const tier = worldMeta(p); // planets (#68): settlement tier and strife
+    return { p, era: p.forming ? 'Forming' : tier ? `${era} · ${tier}` : era, pop: `${mirrored ? `${p.pop} people` : fmtPop(p.pop)} · ${owner}`, prog: mirrored ? (p.eraIndex + 1) / 4 : p.pop > 0 ? p.progress : 0 };
   });
+  renderWorldDetail($('worldDetail'), cosmos.detailPlanet()); // planets (#68): milestones and history
   const key = rows.map((r) => `${r.p.name}|${r.era}|${r.pop}|${Math.round(r.prog * 20)}|${gal.attended === r.p}|${cosmos.target}|${r.p.effect}|${r.p.channel}`).join(';');
   if (key !== lastListKey) {
     lastListKey = key;
@@ -842,6 +852,17 @@ $('playSandbox').addEventListener('click', () => {
   advisor.setEra('space');
   advisor.say('sandbox', 'Galaxy sandbox, my lord. Three worlds are forming from your thoughts. Make more planets and let them run.', { mood: 'happy', priority: 3, cooldown: 999 });
 });
+// civ (#50): "Sandbox: four civilisations" runs its own scene (Rust sim in src/civ/) on the emulated headset.
+$('playCiv').addEventListener('click', () => {
+  begin(new SimSource());
+  const scene = new CivSandbox({ cosmos });
+  G.scene = scene;
+  advisor.setEra(scene.era);
+  scene.enter(G);
+  hud.setScene(scene);
+  document.body.dataset.era = scene.era;
+  showBanner(scene, -1);
+});
 $('playBridge').addEventListener('click', async () => {
   const url = $('bridgeUrl').value.trim() || 'ws://localhost:8765';
   const status = $('bridgeStatus');
@@ -862,7 +883,7 @@ window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos
 // camera (#33): opt-in webcam. Hand gestures cast spells (keys 1-7 without a webcam), the face sets
 // the world's mood. It adds to the brain and keyboard inputs and never replaces them.
 window.__moc.camera = initCamera({
-  getG: () => G,
+  getG: () => cosmos.castG(G), // planets (#68): casts and mood reach the world you're on
   canCast: () => !!G?.scene && !banner && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,
   // camera debug (#67): the fingertip aims on the panned surface like the mouse does.
   mapX: (x) => cosmos.mapX(x * W) / W,

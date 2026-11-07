@@ -1,14 +1,19 @@
-// Zoom controller: 0 = the playable surface, 1 = the planet as a spinning pixel globe,
+// Zoom controller: 0 = a world's surface, 1 = the planet as a spinning pixel globe,
 // 2 = the galaxy. The game keeps simulating underneath at every level, and made planets
 // keep running at every level too.
+//
+// planets (#68): every world can be landed on. The home world's surface is the hand-played
+// campaign; any other world's surface is its PlanetSurface (surface.js), shown and fed the
+// player's inputs through viewScene()/castG()/hudScene(). The level logic itself is the pure
+// ZoomState in zoom.js (tested in Node); this class adds drawing and pointer input.
 
 import { W, H, clamp, lerp } from '../sim/util.js';
-import { World } from '../world/terrain.js';
 import { Globe, drawStars } from './globe.js';
 import { Galaxy, ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, drawPlanetBolt } from './galaxy.js';
 import { label } from '../eras/stone.js';
+import { ZoomState } from './zoom.js';
+import { tierName } from './planet-sim.js';
 
-const LEVELS = ['Surface', 'Planet', 'Galaxy'];
 const CENTER = { x: W / 2, y: H / 2 };
 const BIG_R = 74;
 const SUN = [-0.55, -0.42, 0.72];
@@ -18,20 +23,17 @@ const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 const smoothstep = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
-export class Cosmos {
+export class Cosmos extends ZoomState {
   constructor() {
+    super();               // z, target, focus, sandbox (zoom.js)
     this.globe = new Globe();
     this.galaxy = null;
-    this.z = 0;            // animated zoom, 0..2
-    this.target = 0;       // requested level
     this.rot = 0;          // globe spin at level 1
     this.spinVel = 0.18;
     this.drag = null;
     this.pointers = new Map();
     this.pinch = null;
-    this.focus = null;     // planet shown at level 1 (null = home)
     this.hover = null;
-    this.sandbox = false;
     this.time = 0;
     this.flat = Object.assign(document.createElement('canvas'), { width: W, height: H });
     this.toast = null;
@@ -42,22 +44,27 @@ export class Cosmos {
     // East–west pan of the flat surface (world px). The map is a planet, so it wraps.
     this.panX = 0;
     this.panVel = 0;
+    this.panVelY = 0;      // north–south pan (other worlds' surfaces only)
     this.panned = Object.assign(document.createElement('canvas'), { width: W, height: H });
+    this.homeHuds = new WeakMap();
+    this.castProxies = new WeakMap();
   }
 
-  get active() { return this.z > 0.02 || this.target > 0; }
-  get inGalaxy() { return this.z > 1.5; }
-  minLevel() { return this.sandbox || (this.focus && !this.focus.home) ? 1 : 0; }
+  // ZoomState asks for the galaxy's home planet.
+  homePlanet() { return this.galaxy?.home || null; }
+
+  // The other world whose surface is on screen (or zooming), if any.
+  get surfaceInView() { return this.aiSurfaceInView ? this.world()?.surface || null : null; }
 
   reset() {
-    this.galaxy = null; this.z = 0; this.target = 0; this.focus = null; this.hover = null; this.sandbox = false; this.drag = null; this.lastRun = null; this.panX = 0; this.panVel = 0;
+    this.galaxy = null; this.z = 0; this.target = 0; this.focus = null; this.hover = null; this.sandbox = false; this.drag = null; this.lastRun = null; this.panX = 0; this.panVel = 0; this.panVelY = 0;
   }
 
   ensureGalaxy(G, { autonomousHome = false } = {}) {
     if (this.galaxy) return this.galaxy;
     this.galaxy = new Galaxy();
-    // A sandbox home runs on its own, on a mirror of the same world so the paused game's map is untouched.
-    this.galaxy.addHome(autonomousHome ? new World(G.world.seed) : G.world, { autonomous: autonomousHome });
+    // A sandbox home runs on its own, on a mirror of the same world (built off-thread), so the paused game's map is untouched.
+    this.galaxy.addHome(G.world, { autonomous: autonomousHome });
     // Three more worlds take shape from the player's first ten seconds of brain data.
     this.galaxy.addMindWorlds();
     this.galaxy.onEvent = (p, text, kind) => this.onEvent?.(p, text, kind);
@@ -65,11 +72,12 @@ export class Cosmos {
   }
 
   zoomTo(level, G) {
-    level = clamp(Math.round(level), this.minLevel(), 2);
-    if (level === 0 && this.focus && !this.focus.home) { this.say('Only home can be played up close. Pick Home in the galaxy.'); return; }
-    if (level >= 2) this.ensureGalaxy(G);
-    if (level === 1 && this.target === 0) this.rot = this.faceRot();
-    this.target = level;
+    if (Math.round(level) >= 2) this.ensureGalaxy(G);
+    const fromSurface = this.target === 0;
+    const r = super.zoomTo(level);
+    if (r.refused) this.say(r.refused);
+    if (r.level === 1 && fromSurface) this.rot = this.faceRot();
+    return r;
   }
   zoomOut(G) { this.zoomTo(this.target + 1, G); }
   zoomIn(G) { this.zoomTo(this.target - 1, G); }
@@ -78,14 +86,28 @@ export class Cosmos {
 
   // The globe at level 1 faces whatever map column is in the middle of the (panned) surface.
   faceRot() { return Globe.faceRot(this.centerColumn()); }
-  centerColumn() { return (((W / 2 - this.panX) % W) + W) % W; }
+  centerColumn() {
+    const s = this.surfaceKind() === 'ai' ? this.world()?.surface : null;
+    if (s) return s.centerColumn();
+    return (((W / 2 - this.panX) % W) + W) % W;
+  }
 
   // ---- planetary pan of the flat surface ----
-  pan(dx) { this.panX = (((this.panX + dx) % W) + W) % W; }
-  // Screen x (world px, 0..W) → map x, undoing the pan.
-  mapX(screenX) { return (((screenX - this.panX) % W) + W) % W; }
+  // Home: east–west only (the campaign map is 320 wide). Other worlds: their vast surface pans
+  // both ways (east–west wraps, north–south stops at the poles).
+  pan(dx, dy = 0) {
+    const s = this.surfaceInView;
+    if (s) { s.pan(dx, dy); return; }
+    this.panX = (((this.panX + dx) % W) + W) % W;
+  }
+  // Screen x (world px, 0..W) → map x, undoing the pan. Other worlds' surfaces take screen aims.
+  mapX(screenX) {
+    if (this.surfaceInView) return screenX;
+    return (((screenX - this.panX) % W) + W) % W;
+  }
   // Shift the finished surface frame by the pan, wrapping east–west.
   applyPan(low) {
+    if (this.surfaceInView) return;   // already drawn at its own pan
     const off = Math.round(this.panX);
     if (!off) return;
     const pctx = this.panned.getContext('2d');
@@ -97,7 +119,43 @@ export class Cosmos {
     lctx.drawImage(this.panned, off - W, 0);
   }
   // X offsets (world px) at which to repeat crisp overlays so they wrap with the map.
-  overlayOffsets() { const o = Math.round(this.panX); return o ? [o, o - W] : [0]; }
+  overlayOffsets() {
+    if (this.surfaceInView) return [0];
+    const o = Math.round(this.panX); return o ? [o, o - W] : [0];
+  }
+
+  // What the surface level shows and takes input: the home campaign's scene, or another world's surface.
+  viewScene(G) { return (this.z < 1 && this.surfaceInView) || G?.scene || null; }
+
+  // The game state the camera's casts and mood should reach (camera.js calls getG()): the real
+  // G, but with `scene` pointing at the other world's surface while you're on it.
+  castG(G) {
+    if (!G || !this.surfaceInView || this.z > 0.5) return G;
+    let px = this.castProxies.get(G);
+    if (!px) {
+      px = new Proxy(G, {
+        get: (t, k) => (k === 'scene' && this.surfaceInView && this.z <= 0.5 ? this.surfaceInView : Reflect.get(t, k)),
+        set: (t, k, v) => Reflect.set(t, k, v),
+      });
+      this.castProxies.set(G, px);
+    }
+    return px;
+  }
+
+  // What the HUD shows: another world you're on (AI god), the galaxy, or home (your world).
+  hudScene(G, galaxyHud) {
+    const w = this.world();
+    if (this.z < 1.5 && w?.surface && this.surfaceKind() === 'ai') return w.surface;
+    if (this.galaxy && (G.sandbox || this.inGalaxy)) return galaxyHud;
+    const scene = G.scene;
+    if (!scene) return galaxyHud;
+    let h = this.homeHuds.get(scene);
+    if (!h || h.base !== scene.label) {
+      h = { base: scene.label, label: `${scene.label} · your world`, powers: scene.powers, objectives: () => scene.objectives() };
+      this.homeHuds.set(scene, h);
+    }
+    return h;
+  }
 
   homeInfo(G) {
     const s = G.scene;
@@ -108,17 +166,20 @@ export class Cosmos {
 
   update(dt, G) {
     this.time += dt;
-    const speed = 1.5;
-    if (this.z < this.target) this.z = Math.min(this.target, this.z + dt * speed);
-    else if (this.z > this.target) this.z = Math.max(this.target, this.z - dt * speed);
+    super.update(dt);
     if (!this.drag) { this.rot += this.spinVel * dt; this.spinVel = lerp(this.spinVel, 0.18, 1 - Math.exp(-dt * 0.8)); }
     if (this.z <= 0.001 && this.target === 0) this.rot = this.faceRot();
     if (Math.abs(this.panVel) > 0.5) { this.pan(this.panVel * dt); this.panVel *= Math.exp(-dt * 6); } else this.panVel = 0;
-    // The world you're looking at hears every channel at full strength and takes your blinks.
-    if (this.galaxy) this.galaxy.attended = this.z > 0.5 && this.z < 1.5 ? (this.focus || this.galaxy.home) : null;
+    if (Math.abs(this.panVelY) > 0.5) { this.pan(0, this.panVelY * dt); this.panVelY *= Math.exp(-dt * 6); } else this.panVelY = 0;
+    // The world you're looking at hears every channel at full strength and takes your blinks;
+    // the one whose surface is on screen runs its tribe every frame.
+    if (this.galaxy) {
+      this.galaxy.attended = this.attended();
+      this.galaxy.viewing = this.aiSurfaceInView ? this.world() : null;
+    }
     const playDt = this.lastRun == null ? 0 : Math.max(0, G.runTime - this.lastRun);
     this.lastRun = G.runTime;
-    if (this.galaxy && G.brain) this.galaxy.update(dt, G.brain, this.homeInfo(G), playDt);
+    if (this.galaxy && G.brain) this.galaxy.update(dt, G.brain, this.homeInfo(G), playDt, { anger: G.mood?.active ? G.mood.anger || 0 : 0 });
     if (this.toast && (this.toast.t -= dt) <= 0) this.toast = null;
   }
 
@@ -193,17 +254,18 @@ export class Cosmos {
       const a = 1 - Math.abs(z - 1) / 0.4;
       const p = this.focus;
       const info = this.homeInfo(G);
-      const name = p && !p.home ? p.name : 'Home';
-      const era = p && !p.home ? (p.pop > 0 ? ERA_LABEL[ERA_NAMES[p.eraIndex]] : 'barren') : ERA_LABEL[ERA_NAMES[info?.eraIndex ?? 0]];
-      const pop = p && !p.home ? fmtPop(p.pop) : `${info?.pop ?? 0} people`;
+      const campaign = this.isCampaign(p) && !this.sandbox;
+      const w = this.world();
+      const name = campaign ? 'Home' : w?.name || 'Home';
+      const era = !campaign && w ? (w.pop > 0 ? `${tierName(w)} · ${ERA_LABEL[ERA_NAMES[w.eraIndex]]}` : 'barren') : ERA_LABEL[ERA_NAMES[info?.eraIndex ?? 0]];
+      const pop = !campaign && w ? fmtPop(w.pop) : `${info?.pop ?? 0} people`;
       ctx.globalAlpha = clamp(a);
       label(ctx, CENTER.x, 14, `${name} · ${era} · ${pop}`, '#f2e8d5', 7);
-      const ch = p && CHANNELS[p.channel];
+      const ch = !campaign && w ? CHANNELS[w.channel] : null;
       const lp = p || this.galaxy?.home;
-      const isHome = !p || p.home;
-      label(ctx, CENTER.x, 22, isHome ? 'your world · blink to strike it from orbit' : `you're here: every channel acts on it · ${p.effect || ''}`, ch && !isHome ? ch.color : '#a3a6c4', 5);
+      label(ctx, CENTER.x, 22, campaign ? 'your world · blink to strike it from orbit' : `AI god · you're here: every channel acts on it · ${w?.effect || ''}`, ch && w.channel !== 'mixed' ? ch.color : '#a3a6c4', 5);
       if (lp) lp.labels.forEach((l, i) => { ctx.globalAlpha = clamp(a) * Math.min(1, l.t); label(ctx, (CENTER.x - BIG_R) / 2, CENTER.y - 24 + i * 9, l.text, l.color, 7); ctx.globalAlpha = clamp(a); });
-      label(ctx, CENTER.x, H - 6, this.sandbox || (p && !p.home) ? 'drag to spin · scroll or Z to see the galaxy' : 'drag to spin · scroll or X to land · Z for the galaxy', '#a3a6c4', 5);
+      label(ctx, CENTER.x, H - 6, this.canLand() ? 'drag to spin · scroll or X to land · Z for the galaxy' : 'drag to spin · scroll or Z to see the galaxy', '#a3a6c4', 5);
       ctx.globalAlpha = 1;
     }
     if (this.galaxy && z > 1.2) this.galaxy.drawOverlay(ctx, { alpha: smoothstep(1.3, 1.9, z), hover: this.hover });
@@ -255,11 +317,9 @@ export class Cosmos {
   }
 
   focusPlanet(p, G) {
-    if (p.forming) { this.say('Still forming. Give it a second.'); return; }
-    this.focus = p.home && !p.autonomous ? null : p;
+    const r = super.focusPlanet(p);
+    if (r.refused) { this.say(r.refused); return; }
     this.rot = this.galaxy ? this.galaxy.time * p.spin + p.phase : this.rot;
-    this.target = 1;
-    if (this.z < 1) this.z = 1;
   }
 
   wheel(deltaY, G) {
@@ -270,8 +330,21 @@ export class Cosmos {
     else if (this.wheelAcc < -40) { this.zoomIn(G); this.wheelAt = now; this.wheelAcc = 0; }
   }
 
-  levelLabel() {
-    const l = LEVELS[this.target];
-    return this.target === 1 && this.focus && !this.focus.home ? `${this.focus.name}` : l;
+  levelLabel() { return this.label(); }
+
+  // G (#43): land on the next world's surface (AI worlds in turn, then home again).
+  visitNextWorld(G) {
+    const gal = this.ensureGalaxy(G);
+    const next = this.nextWorld(gal.planets);
+    if (!next) { this.say('No other world to visit yet. Make a planet.'); return null; }
+    this.focusPlanet(next, G);
+    this.zoomTo(0, G);
+    return next;
+  }
+
+  // The world the galaxy panel's details describe: the one hovered, else the one in view.
+  detailPlanet() {
+    if (!this.galaxy) return null;
+    return this.hover || this.galaxy.attended || this.focus || this.galaxy.home;
   }
 }
