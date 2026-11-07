@@ -1422,3 +1422,307 @@ impl RustEmotionTracker {
         arr
     }
 }
+
+/// Standalone WebAssembly Galaxy & Multi-World Simulator (#24, #108)
+#[wasm_bindgen]
+pub struct RustGalaxy {
+    inner: moc_cosmos::galaxy::Galaxy,
+}
+
+#[wasm_bindgen]
+impl RustGalaxy {
+    #[wasm_bindgen(constructor)]
+    pub fn new(seed: u32) -> Self {
+        Self {
+            inner: moc_cosmos::galaxy::Galaxy::new(seed),
+        }
+    }
+
+    pub fn step(
+        &mut self,
+        dt: f32,
+        calm: f32,
+        focus: f32,
+        stress: f32,
+        blinks_last_10s: u32,
+        blinks_total: u32,
+    ) {
+        let fx = moc_cosmos::planet_sim::BrainEffects::from_signals(calm, focus, stress, blinks_last_10s);
+        self.inner.step(dt, &fx, blinks_total);
+    }
+
+    pub fn on_blink(&mut self) {
+        self.inner.on_blink();
+    }
+
+    pub fn set_attended(&mut self, planet_idx: i32) {
+        self.inner.attended = if planet_idx >= 0 {
+            Some(planet_idx as usize)
+        } else {
+            None
+        };
+    }
+
+    pub fn get_attended(&self) -> i32 {
+        self.inner.attended.map(|idx| idx as i32).unwrap_or(-1)
+    }
+
+    pub fn planet_count(&self) -> usize {
+        self.inner.planets.len()
+    }
+
+    pub fn planet_pop(&self, idx: usize) -> f32 {
+        self.inner.planets.get(idx).map(|p| p.state.pop).unwrap_or(0.0)
+    }
+
+    pub fn planet_era(&self, idx: usize) -> usize {
+        self.inner.planets.get(idx).map(|p| p.state.era_index).unwrap_or(0)
+    }
+
+    pub fn planet_progress(&self, idx: usize) -> f32 {
+        self.inner.planets.get(idx).map(|p| p.state.progress).unwrap_or(0.0)
+    }
+
+    pub fn planet_market(&self, idx: usize) -> f32 {
+        self.inner.planets.get(idx).map(|p| p.state.market).unwrap_or(100.0)
+    }
+
+    pub fn planet_is_alive(&self, idx: usize) -> bool {
+        self.inner.planets.get(idx).map(|p| p.alive).unwrap_or(false)
+    }
+
+    pub fn planet_is_forming(&self, idx: usize) -> bool {
+        self.inner.planets.get(idx).map(|p| p.forming).unwrap_or(false)
+    }
+
+    pub fn planet_name(&self, idx: usize) -> String {
+        self.inner.planets.get(idx).map(|p| p.name.clone()).unwrap_or_default()
+    }
+
+    pub fn planet_biome(&self, idx: usize) -> String {
+        self.inner.planets.get(idx).map(|p| p.biome.name().to_string()).unwrap_or_else(|| "forming".to_string())
+    }
+
+    pub fn planet_channel(&self, idx: usize) -> String {
+        self.inner.planets.get(idx).map(|p| p.state.channel.name().to_string()).unwrap_or_else(|| "mixed".to_string())
+    }
+
+    pub fn planet_pos_x(&self, idx: usize) -> f32 {
+        self.inner.planets.get(idx).map(|p| p.position(self.inner.time).0).unwrap_or(0.0)
+    }
+
+    pub fn planet_pos_y(&self, idx: usize) -> f32 {
+        self.inner.planets.get(idx).map(|p| p.position(self.inner.time).1).unwrap_or(0.0)
+    }
+
+    pub fn is_mind_done(&self) -> bool {
+        self.inner.mind.done
+    }
+}
+
+/// Standalone WebAssembly MLP Policy AI God (#25, #108)
+#[wasm_bindgen]
+pub struct RustAiPolicy {
+    inner: moc_ai::policy::MLPPolicy,
+}
+
+#[wasm_bindgen]
+impl RustAiPolicy {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: moc_ai::policy::MLPPolicy::from_embedded(),
+        }
+    }
+
+    pub fn act(&self, obs: &[f32], greedy: bool, sample_val: f32) -> u32 {
+        if obs.len() < moc_ai::policy::NUM_INPUTS {
+            return 0;
+        }
+        self.inner.act(obs, greedy, sample_val) as u32
+    }
+
+    pub fn probs(&self, obs: &[f32]) -> js_sys::Float32Array {
+        if obs.len() < moc_ai::policy::NUM_INPUTS {
+            return js_sys::Float32Array::new_with_length(moc_ai::policy::NUM_ACTIONS as u32);
+        }
+        let probs = self.inner.probs(obs);
+        js_sys::Float32Array::from(&probs[..])
+    }
+
+    pub fn self_check(&self) -> f32 {
+        self.inner.self_check()
+    }
+}
+
+/// Standalone WebAssembly Brain signal processor and personal model (#20, #108)
+#[wasm_bindgen]
+pub struct RustBrain {
+    inner: moc_brain::brain::Brain,
+}
+
+#[wasm_bindgen]
+impl RustBrain {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: moc_brain::brain::Brain::new(),
+        }
+    }
+
+    pub fn update(&mut self, dt: f32) -> bool {
+        self.inner.update(dt)
+    }
+
+    pub fn set_cue(&mut self, cue_id: i32) {
+        let cue = match cue_id {
+            0 => Some(moc_brain::model::Class::Rest),
+            1 => Some(moc_brain::model::Class::Calm),
+            2 => Some(moc_brain::model::Class::Focus),
+            _ => None,
+        };
+        self.inner.set_cue(cue);
+    }
+
+    pub fn ingest(
+        &mut self,
+        delta: f32,
+        theta: f32,
+        alpha: f32,
+        beta: f32,
+        gamma: f32,
+        blink: bool,
+        hr: f32,
+        tilt_x: f32,
+        tilt_y: f32,
+        motion: f32,
+        quality: f32,
+    ) -> bool {
+        let frame = moc_brain::sim_source::BrainFrame {
+            bands: moc_brain::model::Bands {
+                delta,
+                theta,
+                alpha,
+                beta,
+                gamma,
+            },
+            blink,
+            hr: if hr > 0.0 { Some(hr) } else { None },
+            tilt: Some((tilt_x, tilt_y)),
+            motion,
+            quality,
+        };
+        self.inner.ingest(&frame)
+    }
+
+    pub fn calm(&self) -> f32 {
+        self.inner.calm
+    }
+
+    pub fn focus(&self) -> f32 {
+        self.inner.focus
+    }
+
+    pub fn stress(&self) -> f32 {
+        self.inner.stress
+    }
+
+    pub fn anger(&self) -> f32 {
+        self.inner.anger
+    }
+
+    pub fn blinks(&self) -> u32 {
+        self.inner.stats.blinks
+    }
+
+    pub fn retrain(&mut self) -> bool {
+        self.inner.model.maybe_train()
+    }
+
+    pub fn accuracy(&self) -> f32 {
+        self.inner.model.accuracy
+    }
+}
+
+/// Standalone WebAssembly Simulated Headset Source (#20, #108)
+#[wasm_bindgen]
+pub struct RustSimSource {
+    inner: moc_brain::sim_source::SimSource,
+}
+
+#[wasm_bindgen]
+impl RustSimSource {
+    #[wasm_bindgen(constructor)]
+    pub fn new(seed: u32) -> Self {
+        Self {
+            inner: moc_brain::sim_source::SimSource::new(seed),
+        }
+    }
+
+    pub fn set_input(&mut self, calm: bool, focus: bool, panic: bool) {
+        self.inner.input.calm = calm;
+        self.inner.input.focus = focus;
+        self.inner.input.panic = panic;
+    }
+
+    pub fn blink(&mut self) {
+        self.inner.blink();
+    }
+
+    pub fn step(&mut self, dt: f32) -> js_sys::Float32Array {
+        let mut out = [0.0f32; 11];
+        self.inner.update(dt, |f| {
+            out = [
+                f.bands.delta,
+                f.bands.theta,
+                f.bands.alpha,
+                f.bands.beta,
+                f.bands.gamma,
+                if f.blink { 1.0 } else { 0.0 },
+                f.hr.unwrap_or(0.0),
+                f.tilt.map(|t| t.0).unwrap_or(0.0),
+                f.tilt.map(|t| t.1).unwrap_or(0.0),
+                f.motion,
+                f.quality,
+            ];
+        });
+        js_sys::Float32Array::from(&out[..])
+    }
+}
+
+/// Standalone WebAssembly Calibration traits (#54, #108)
+#[wasm_bindgen]
+pub struct RustCalibration;
+
+#[wasm_bindgen]
+impl RustCalibration {
+    pub fn random_traits(seed: u32) -> js_sys::Float32Array {
+        let t = moc_brain::calibration::random_seed_traits(seed);
+        let out = [t.friendliness, t.aggressiveness, t.violence];
+        js_sys::Float32Array::from(&out[..])
+    }
+
+    pub fn traits_from_sensors(
+        calm: f32,
+        focus: f32,
+        stress: f32,
+        blink_rate: f32,
+        joy: f32,
+        anger: f32,
+    ) -> js_sys::Float32Array {
+        let features = moc_brain::calibration::SensorFeatures {
+            calm,
+            focus,
+            stress,
+            blink_rate,
+            joy,
+            anger,
+            surprise: 0.0,
+            sadness: 0.0,
+            face_seen: joy > 0.0 || anger > 0.0,
+        };
+        let t = moc_brain::calibration::traits_from_features(&features);
+        let out = [t.friendliness, t.aggressiveness, t.violence];
+        js_sys::Float32Array::from(&out[..])
+    }
+}

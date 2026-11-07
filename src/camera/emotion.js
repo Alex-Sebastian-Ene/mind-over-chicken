@@ -64,16 +64,30 @@ export function neutralMood() {
   return { joy: 0, anger: 0, surprise: 0, sadness: 0, neutral: 1, dominant: 'neutral', intensity: 1, face: false };
 }
 
+let RustEmotionTrackerClass = null;
+
+export function setRustEmotionTracker(cls) {
+  RustEmotionTrackerClass = cls;
+}
+
 // Smooths per-frame scores, picks a dominant mood with hysteresis and reports events:
 // 'change' when the dominant mood changes (including back to neutral), 'strong' every
 // `strongEvery` seconds while a non-neutral mood stays above `strong`.
 export class EmotionTracker {
   constructor({ rate = 5, enter = 0.45, exit = 0.3, switchMargin = 0.12, strong = 0.65, strongEvery = 6, calibrateSeconds = 1.5, maxBaseline = 0.2 } = {}) {
+    if (RustEmotionTrackerClass) {
+      try {
+        this.wasm = new RustEmotionTrackerClass(calibrateSeconds);
+      } catch (e) {
+        this.wasm = null;
+      }
+    }
     Object.assign(this, { rate, enter, exit, switchMargin, strong, strongEvery, calibrateSeconds, maxBaseline });
     this.reset();
   }
 
   reset() {
+    if (this.wasm) this.wasm.reset();
     this.scores = { ...ZERO };
     this.dominant = 'neutral';
     this.baseline = { ...ZERO };
@@ -86,6 +100,44 @@ export class EmotionTracker {
   // categories: blendshape list for the current face, or null when no face is in view.
   // Returns { mood, event: null | 'change' | 'strong' }.
   update(categories, dt) {
+    if (this.wasm) {
+      const b = blendshapeMap(categories);
+      const hasFace = !!categories;
+      const res = this.wasm.update_direct(
+        hasFace,
+        Number(b.mouthSmileLeft) || 0,
+        Number(b.mouthSmileRight) || 0,
+        Number(b.browDownLeft) || 0,
+        Number(b.browDownRight) || 0,
+        Number(b.mouthPressLeft) || 0,
+        Number(b.mouthPressRight) || 0,
+        Number(b.jawOpen) || 0,
+        Number(b.browInnerUp) || 0,
+        Number(b.eyeWideLeft) || 0,
+        Number(b.eyeWideRight) || 0,
+        Number(b.mouthFrownLeft) || 0,
+        Number(b.mouthFrownRight) || 0,
+        dt,
+      );
+      const dominant = res[0];
+      const joy = res[1];
+      const anger = res[2];
+      const surprise = res[3];
+      const sadness = res[4];
+      const neutral = res[5];
+      const intensity = res[6];
+      const face = res[7];
+      const ev = res[8] || null;
+      return {
+        mood: {
+          joy, anger, surprise, sadness, neutral,
+          dominant, intensity, face,
+          calibrating: face && !this.calibrated,
+        },
+        event: ev,
+      };
+    }
+
     this.face = !!categories;
     let target = ZERO;
     // While calibrating, the resting face is being measured: report neutral until it's known.
