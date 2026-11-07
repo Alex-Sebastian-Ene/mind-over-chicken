@@ -44,6 +44,27 @@ let gesture = null; // Rust (input.rs): with the main button or a finger, a tap 
 // Pan the map by a drag (world units), both axes, wherever you are: a scene with its own camera
 // (the civ sandbox's big planet) takes it directly; otherwise the planet pans east–west (and
 // north–south on vast worlds), and in 3D the camera also moves north–south over the map.
+// 3D: the ground point you pressed on stays under the cursor (raycast in Rust), at any zoom/orbit.
+let grab3d = null;
+function groundAt(e) {
+  const r = screen.getBoundingClientRect();
+  const h = engine.screen_to_ground(e.clientX - r.left, e.clientY - r.top, r.width, r.height);
+  return h && h[0] >= 0 ? { x: h[0], z: h[1] } : null;
+}
+function grabPan3d(e) {
+  if (!grab3d) return false;
+  const g = groundAt(e);
+  if (!g) return true;
+  // Wrap-aware east–west difference, then move the camera by it (x is owned by the planet pan).
+  let dx = grab3d.x - g.x; dx = ((dx + W * 1.5) % W) - W / 2;
+  const dz = grab3d.z - g.z;
+  if (dx) cosmos.pan(-dx);
+  // Apply now, not at the next frame: a fast mouse sends several moves per frame, and each one
+  // must raycast against the camera it already moved.
+  engine.set_camera_target(cosmos.mapX(W / 2), clamp(engine.get_camera_target_z() + dz, 0, H - 1));
+  cam3dBase = null;
+  return true;
+}
 function panMap(dx, dy) {
   if (G?.scene?.panBy) { G.scene.panBy(dx, dy); return; }
   cosmos.pan(dx, dy);
@@ -593,7 +614,7 @@ screen.addEventListener('pointermove', (e) => {
   if (gesture?.owns(e.pointerId)) {
     const q = worldFromEvent(e);
     if (gesture.moved(e.pointerId, e.clientX, e.clientY, q.x, q.y)) {
-      panMap(gesture.pan_dx(), gesture.pan_dy());
+      if (!grabPan3d(e)) panMap(gesture.pan_dx(), gesture.pan_dy());
       return;
     }
   }
@@ -646,6 +667,7 @@ screen.addEventListener('pointerdown', (e) => {
     try { screen.setPointerCapture?.(e.pointerId); } catch {}
     const q0 = worldFromEvent(e);
     gesture.down(e.pointerId, e.clientX, e.clientY, q0.x, q0.y);
+    grab3d = in3dSurface() ? groundAt(e) : null;
     if (s) { const a = surfaceAim(e); s.setAim(a.x, a.y); G.brain.aim.x = a.x; G.brain.aim.y = a.y; }
     return; // the blink happens on release, if Rust says it was a tap
   }
