@@ -17,6 +17,8 @@ import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel } from '.
 import { initCamera } from './camera/camera.js'; // camera (#33)
 import { Calibration, readCalibrationConfig } from './brain/calibration.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
+import { SimPlanet } from './ai/planet.js';
+import { AIGod } from './ai/autopilot.js';
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
 // mind read uses the same window.
@@ -86,9 +88,34 @@ let pendingTimer = 0;
 let banner = null;      // {t}
 let lastTs = 0;
 
+// ---------- AI god (PPO) ----------
+let aiPlanet = null;
+function toggleAIGod() {
+  if (aiPlanet) {
+    aiPlanet.attachHuman(null);
+    aiPlanet = null;
+    const btn = $('aiGodBtn');
+    if (btn) {
+      btn.textContent = 'AI God: OFF';
+      btn.setAttribute('aria-pressed', 'false');
+    }
+    advisor.say('ai-off', 'AI god disengaged. You have full command.', { mood: 'happy', priority: 2, cooldown: 1 });
+  } else {
+    aiPlanet = new SimPlanet({ seed: G?.world?.seed || 42, brain: 'proxy' }).setGod(new AIGod());
+    if (G?.brain) aiPlanet.attachHuman(G.brain);
+    const btn = $('aiGodBtn');
+    if (btn) {
+      btn.textContent = 'AI God: ON';
+      btn.setAttribute('aria-pressed', 'true');
+    }
+    advisor.say('ai-on', 'AI god engaged! The PPO autopilot is steering this world. Stay calm to help it.', { mood: 'nervous', priority: 2, cooldown: 1 });
+  }
+}
+
 function newGame(source, startIndex = 0) {
   if (G?.source && G.source !== source) G.source.disconnect();
   const brain = new Brain(source);
+  if (aiPlanet) aiPlanet.attachHuman(brain);
   cosmos.reset();
   G = {
     world: new World(),
@@ -106,6 +133,7 @@ function newGame(source, startIndex = 0) {
     if (engine) engine.game_on_blink(aim.x * W, aim.y * H);
     cosmos.galaxy?.onBlink();   // storms on the blink world; a strike on the world you're zoomed into
     if (cosmos.galaxy?.attended) audio.thunder();
+    if (aiPlanet) aiPlanet.humanBlink(aim);
     if (!banner && !cosmos.active && G.scene?.onBlink) G.scene.onBlink(aim);
   });
   // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
@@ -230,7 +258,7 @@ function showEnd() {
 
 // ---------- render ----------
 function render() {
-  const scene = G?.scene;
+  const scene = aiPlanet ? aiPlanet.scene : G?.scene;
   textCtx.setTransform(1, 0, 0, 1, 0, 0);
   textCtx.clearRect(0, 0, textLayer.width, textLayer.height);
   if (!scene) {
@@ -351,8 +379,10 @@ function frame(ts) {
     } else if ($('failScreen').hidden && $('endScreen').hidden) {
       G.runTime += dt;
       G.calibration?.update(dt, G.brain, G.mood);
+      if (aiPlanet) aiPlanet.update(dt);
       G.scene.update(dt);
     } else if (!$('endScreen').hidden) {
+      if (aiPlanet) aiPlanet.update(dt);
       G.scene.update(dt);
     }
     if (pendingScene != null) {
@@ -503,6 +533,7 @@ window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input')) return;
   if (e.code === 'KeyM') { toggleModel(); return; }
   if (e.code === 'KeyT' || e.code === 'Digit3') { toggle3D(); return; }
+  if (e.code === 'KeyG') { toggleAIGod(); return; }
   if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { cosmos.zoomOut(G); return; }
   if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { cosmos.zoomIn(G); return; }
   if (G && !cosmos.active && (e.code === 'KeyA' || e.code === 'KeyD')) { cosmos.panVel = e.code === 'KeyA' ? 140 : -140; return; }
@@ -569,6 +600,7 @@ function toggle3D() {
   advisor.say('3d-toggle', next ? '3D View: right-drag to orbit, wheel to zoom.' : '2D Classic Mode.', { mood: 'happy', priority: 2, cooldown: 1 });
 }
 $('mode3dBtn')?.addEventListener('click', toggle3D);
+$('aiGodBtn')?.addEventListener('click', toggleAIGod);
 $('soundBtn').addEventListener('click', () => {
   audio.unlock();
   const on = audio.toggle();
