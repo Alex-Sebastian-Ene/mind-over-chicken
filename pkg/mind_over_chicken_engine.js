@@ -332,6 +332,30 @@ export class Engine {
         wasm.engine_game_tick(this.__wbg_ptr, dt, calm, focus, stress, blinks);
     }
     /**
+     * Standalone helper to generate a civ planet RGBA texture (#109).
+     * @param {number} seed
+     * @param {number} width
+     * @param {number} height
+     * @returns {Uint8Array}
+     */
+    static generate_civ_terrain(seed, width, height) {
+        const ret = wasm.engine_generate_civ_terrain(seed, width, height);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * Generate realistic procedural terrain using moc-terrain (#109).
+     * Updates the engine's internal heightmap, 3D relief mesh, and base pixel texture.
+     * @param {number} seed
+     */
+    generate_terrain(seed) {
+        const ret = wasm.engine_generate_terrain(this.__wbg_ptr, seed);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @returns {number}
      */
     get_camera_distance() {
@@ -715,9 +739,7 @@ export class Engine {
     }
     /**
      * Use the JS world's heights (row-major W×H, 0..1, sea level 0.33) for the 3D mesh, the
-     * raycast and where billboards stand. The engine's own `Terrain` is still the old single
-     * island, so without this the relief doesn't match the map the simulation runs on.
-     * Call after `init_world`.
+     * raycast and where billboards stand.
      * @param {Float32Array | number[]} heights
      */
     set_heightmap(heights) {
@@ -1240,6 +1262,83 @@ export class RustImuTracker {
     }
 }
 if (Symbol.dispose) RustImuTracker.prototype[Symbol.dispose] = RustImuTracker.prototype.free;
+
+/**
+ * Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109)
+ */
+export class RustWorldGen {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustWorldGenFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustworldgen_free(ptr, 0);
+    }
+    /**
+     * @returns {string}
+     */
+    continents_json() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.rustworldgen_continents_json(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {Float32Array}
+     */
+    heights() {
+        const ret = wasm.rustworldgen_heights(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {number} seed
+     */
+    constructor(seed) {
+        const ret = wasm.rustworldgen_new(seed);
+        this.__wbg_ptr = ret;
+        RustWorldGenFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    rgba() {
+        const ret = wasm.rustworldgen_rgba(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {string}
+     */
+    sites_json() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.rustworldgen_sites_json(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    types() {
+        const ret = wasm.rustworldgen_types(this.__wbg_ptr);
+        return ret;
+    }
+}
+if (Symbol.dispose) RustWorldGen.prototype[Symbol.dispose] = RustWorldGen.prototype.free;
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -1548,6 +1647,14 @@ function __wbg_get_imports() {
             const ret = new Error();
             return ret;
         },
+        __wbg_new_from_slice_355c10c5d8f2addb: function(arg0, arg1) {
+            const ret = new Float32Array(getArrayF32FromWasm0(arg0, arg1));
+            return ret;
+        },
+        __wbg_new_from_slice_b8daf545a41c6aa0: function(arg0, arg1) {
+            const ret = new Uint8Array(getArrayU8FromWasm0(arg0, arg1));
+            return ret;
+        },
         __wbg_new_with_length_5c0c9043ebd9ec32: function(arg0) {
             const ret = new Float32Array(arg0 >>> 0);
             return ret;
@@ -1747,6 +1854,9 @@ const RustBlinkClassifierFinalization = (typeof FinalizationRegistry === 'undefi
 const RustImuTrackerFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_rustimutracker_free(ptr, 1));
+const RustWorldGenFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustworldgen_free(ptr, 1));
 
 function addToExternrefTable0(obj) {
     const idx = wasm.__externref_table_alloc();

@@ -38,6 +38,15 @@ export class Engine {
      * (EEG agitation or face anger, 0..1, about 0.15 at rest).
      */
     game_tick(dt: number, calm: number, focus: number, stress: number, blinks: number): void;
+    /**
+     * Standalone helper to generate a civ planet RGBA texture (#109).
+     */
+    static generate_civ_terrain(seed: number, width: number, height: number): Uint8Array;
+    /**
+     * Generate realistic procedural terrain using moc-terrain (#109).
+     * Updates the engine's internal heightmap, 3D relief mesh, and base pixel texture.
+     */
+    generate_terrain(seed: number): void;
     get_camera_distance(): number;
     get_camera_pitch(): number;
     get_camera_target_x(): number;
@@ -91,9 +100,7 @@ export class Engine {
     set_era(era: number): void;
     /**
      * Use the JS world's heights (row-major W×H, 0..1, sea level 0.33) for the 3D mesh, the
-     * raycast and where billboards stand. The engine's own `Terrain` is still the old single
-     * island, so without this the relief doesn't match the map the simulation runs on.
-     * Call after `init_world`.
+     * raycast and where billboards stand.
      */
     set_heightmap(heights: Float32Array | number[]): void;
     upload_canvas(canvas: HTMLCanvasElement): void;
@@ -216,6 +223,20 @@ export class RustImuTracker {
     update(ax: number, ay: number, az: number, gx: number, gy: number, gz: number, bridge_yaw: number, has_bridge_yaw: boolean, dt: number): void;
 }
 
+/**
+ * Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109)
+ */
+export class RustWorldGen {
+    free(): void;
+    [Symbol.dispose](): void;
+    continents_json(): string;
+    heights(): Float32Array;
+    constructor(seed: number);
+    rgba(): Uint8Array;
+    sites_json(): string;
+    types(): Uint8Array;
+}
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -224,6 +245,7 @@ export interface InitOutput {
     readonly __wbg_pointergesture_free: (a: number, b: number) => void;
     readonly __wbg_rustblinkclassifier_free: (a: number, b: number) => void;
     readonly __wbg_rustimutracker_free: (a: number, b: number) => void;
+    readonly __wbg_rustworldgen_free: (a: number, b: number) => void;
     readonly engine_add_3d_light: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly engine_add_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly engine_add_custom_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
@@ -254,6 +276,8 @@ export interface InitOutput {
     readonly engine_game_restart_era: (a: number) => void;
     readonly engine_game_start_era: (a: number, b: number) => void;
     readonly engine_game_tick: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly engine_generate_civ_terrain: (a: number, b: number, c: number) => [number, number];
+    readonly engine_generate_terrain: (a: number, b: number) => [number, number];
     readonly engine_get_camera_distance: (a: number) => number;
     readonly engine_get_camera_pitch: (a: number) => number;
     readonly engine_get_camera_target_x: (a: number) => number;
@@ -362,6 +386,12 @@ export interface InitOutput {
     readonly rustimutracker_tilt_x: (a: number) => number;
     readonly rustimutracker_tilt_y: (a: number) => number;
     readonly rustimutracker_update: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
+    readonly rustworldgen_continents_json: (a: number) => [number, number];
+    readonly rustworldgen_heights: (a: number) => any;
+    readonly rustworldgen_new: (a: number) => number;
+    readonly rustworldgen_rgba: (a: number) => any;
+    readonly rustworldgen_sites_json: (a: number) => [number, number];
+    readonly rustworldgen_types: (a: number) => any;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

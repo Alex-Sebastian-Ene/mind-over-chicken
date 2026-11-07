@@ -1,7 +1,7 @@
 // Mind over Chicken: boot, scene flow, render pipeline and input.
 
 import { W, H, clamp } from './sim/util.js';
-import { World } from './world/terrain.js';
+import { World, setRustWorldGen } from './world/terrain.js';
 import { SimSource, BridgeSource } from './brain/sources.js';
 import { Brain } from './brain/brain.js';
 import { Advisor } from './ui/advisor.js';
@@ -12,7 +12,7 @@ import { StoneAge } from './eras/stone.js';
 import { FarmingToKingdoms, InfoAge } from './eras/timeskip.js';
 import { Industry } from './eras/industry.js';
 import { SpaceAge } from './eras/space.js';
-import initEngine, { Engine, RustImuTracker, RustBlinkClassifier, PointerGesture } from '../pkg/mind_over_chicken_engine.js';
+import initEngine, { Engine, RustImuTracker, RustBlinkClassifier, PointerGesture, RustWorldGen } from '../pkg/mind_over_chicken_engine.js';
 import { Cosmos } from './cosmos/cosmos.js';
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
@@ -81,6 +81,7 @@ function panMap(dx, dy) {
 
 try {
   await initEngine();
+  setRustWorldGen(RustWorldGen);
   gesture = new PointerGesture(6);
   BridgeSource.setWasmClasses(RustImuTracker, RustBlinkClassifier);
   engine = new Engine('screen');
