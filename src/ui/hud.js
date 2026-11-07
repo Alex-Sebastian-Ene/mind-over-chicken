@@ -89,10 +89,10 @@ export class Hud {
     this.source.textContent = G.source.status;
     this.source.dataset.ok = G.source.connected ? '1' : '0';
 
-    if (!this.modelPanel.hidden) this.renderModel(b);
+    if (!this.modelPanel.hidden) this.renderModel(b, G);
   }
 
-  renderModel(b) {
+  renderModel(b, G) {
     const m = b.model;
     const pct = (x) => `${Math.round(x * 100)}%`;
     const p = b.personal || {};
@@ -109,6 +109,7 @@ export class Hud {
         <div><dt>Trust in personal model</dt><dd>calm ${pct(m.trust('calm'))} · focus ${pct(m.trust('focus'))}</dd></div>
         <div><dt>Retrains</dt><dd>${m.trainCount}${m.trained ? ` · last took ${m.lastTrainMs.toFixed(0)} ms` : ''}</dd></div>
         <div><dt>Recording now</dt><dd>${b.cue || 'nothing'}</dd></div>
+        <div><dt>Calibration seed</dt><dd>${calibrationText(G?.calibration)}</dd></div>
       </dl>
       <div class="model-live">
         <div><span>generic calm</span>${bar(b.genericCalm, 'calm')}</div>
@@ -121,3 +122,11 @@ export class Hud {
 }
 
 export { POWER_UNLOCK };
+
+// calibration (#54): the player's civilisation seed, shown in the model panel.
+function calibrationText(c) {
+  if (!c) return 'n/a';
+  if (!c.done) return `${c.config.mode}, ${Math.ceil(c.remaining)} s of ${c.seconds} s left`;
+  const r = c.result;
+  return `${r.source} · friendliness ${r.friendliness} · aggressiveness ${r.aggressiveness} · violence ${r.violence} · seed ${r.seed}`;
+}
