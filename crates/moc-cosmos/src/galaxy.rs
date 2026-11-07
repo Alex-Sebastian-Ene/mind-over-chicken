@@ -209,7 +209,7 @@ impl Galaxy {
 
         // 1. Advance the 10-second mind snapshot
         if !self.mind.done {
-            if let Some(ranked) = self.mind.update(dt, fx.calm, fx.focus, fx.hr_delta, blinks_total) {
+            if let Some(ranked) = self.mind.update(dt, fx.calm, fx.focus, fx.stress, blinks_total) {
                 // Form the 3 mind worlds from the top 3 channels!
                 let top_3: Vec<Channel> = ranked.iter().take(3).map(|&(ch, _)| ch).collect();
                 let mut mind_slot_indices = Vec::new();
@@ -226,7 +226,7 @@ impl Galaxy {
                         let (name, biome) = match ch {
                             Channel::Calm => ("Stillwater", Biome::Temperate),
                             Channel::Focus => ("Lumen", Biome::Alien),
-                            Channel::Pulse => ("Thrum", Biome::Desert),
+                            Channel::Stress => ("Thrum", Biome::Desert),
                             Channel::Blink => ("Flicker", Biome::Ice),
                             Channel::Mixed => ("Roostia", Biome::Jungle),
                         };

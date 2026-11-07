@@ -12,7 +12,6 @@ fn test_calm_world_grows_with_calm_input() {
     let fx_calm = BrainEffects {
         calm: 0.9,
         focus: 0.1,
-        hr_delta: 0.0,
         stress: 0.0,
         blink_rate: 0.0,
     };
@@ -38,7 +37,6 @@ fn test_focus_world_advances_eras() {
     let fx_focus = BrainEffects {
         calm: 0.1,
         focus: 0.95,
-        hr_delta: 0.0,
         stress: 0.0,
         blink_rate: 0.0,
     };
@@ -55,15 +53,14 @@ fn test_focus_world_advances_eras() {
 }
 
 #[test]
-fn test_pulse_world_goat_market_volatility() {
+fn test_stress_world_goat_market_volatility() {
     let mut rng = Mulberry32::new(777);
-    let mut planet = PlanetState::new(Channel::Pulse, 30.0, 1, &mut rng);
+    let mut planet = PlanetState::new(Channel::Stress, 30.0, 1, &mut rng);
 
     let fx_stress = BrainEffects {
         calm: 0.0,
         focus: 0.0,
-        hr_delta: 35.0,
-        stress: 1.5,
+        stress: 1.0,
         blink_rate: 0.0,
     };
 
@@ -77,7 +74,7 @@ fn test_pulse_world_goat_market_volatility() {
 
     assert!(
         market_shifted,
-        "Goat market should fluctuate significantly under high pulse"
+        "Goat market should fluctuate significantly under high stress"
     );
 }
 
@@ -104,7 +101,7 @@ fn test_mind_snapshot_ranking() {
     let mut mind = MindSnapshot::new();
     // Simulate 10 seconds of high calm and moderate focus
     for _ in 0..55 {
-        let finished = mind.update(0.2, 0.85, 0.40, 2.0, 1);
+        let finished = mind.update(0.2, 0.85, 0.40, 0.15, 1);
         if finished.is_some() {
             break;
         }
@@ -127,7 +124,6 @@ fn test_galaxy_orchestration_and_ships() {
     let fx = BrainEffects {
         calm: 0.9,
         focus: 0.5,
-        hr_delta: 0.0,
         stress: 0.0,
         blink_rate: 0.0,
     };
