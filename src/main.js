@@ -375,6 +375,7 @@ function render() {
   }
   lowCtx.imageSmoothingEnabled = false;
   lowCtx.setTransform(1, 0, 0, 1, 0, 0);
+  lowCtx.clearRect(0, 0, W, H);
   // 3D only on the surface itself: once the globe zoom starts, the flat 2D map takes over (the
   // 3D camera has already tipped over to that exact frame, so the hand-over is seamless).
   G.render3d = in3dSurface();
