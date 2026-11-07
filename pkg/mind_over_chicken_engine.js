@@ -681,6 +681,25 @@ export class Engine {
         return ret !== 0;
     }
     /**
+     * @returns {boolean}
+     */
+    is_game_era_complete() {
+        const ret = wasm.engine_is_game_era_complete(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {string | undefined}
+     */
+    is_game_era_failed() {
+        const ret = wasm.engine_is_game_era_failed(this.__wbg_ptr);
+        let v1;
+        if (ret[0] !== 0) {
+            v1 = getStringFromWasm0(ret[0], ret[1]);
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v1;
+    }
+    /**
      * @returns {string | undefined}
      */
     is_game_failed() {
@@ -2504,6 +2523,30 @@ export function paint_land_use(base, types, base_types, width, biome) {
     var v6 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v6;
+}
+
+/**
+ * @param {number} clock
+ * @param {number} dt
+ * @param {number} rate
+ * @returns {Float32Array}
+ */
+export function rust_animate_agent(clock, dt, rate) {
+    const ret = wasm.rust_animate_agent(clock, dt, rate);
+    return ret;
+}
+
+/**
+ * @param {string} era
+ * @param {number} seed
+ * @returns {Array<any>}
+ */
+export function rust_villager_look(era, seed) {
+    const val2 = +seed;
+    const ptr0 = passStringToWasm0(era, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.rust_villager_look(ptr0, len0, val2);
+    return ret;
 }
 
 /**

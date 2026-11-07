@@ -9,7 +9,7 @@
 
 import { W, H, Particles, clamp, dist, rand, chance, gauss, floater, pick } from '../sim/util.js';
 import { walk, animate, villagerLook, sail } from '../sim/agents.js';
-import { drawPerson, drawGoat, drawChicken, drawBoat } from '../render/sprites.js';
+import { drawPerson, drawGoat, drawChicken, drawBoat, drawReticle } from '../render/sprites.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
 
@@ -439,6 +439,9 @@ export class Industry {
       label(ctx, ex.x, ex.y - 21, `IPO · keep stress under ${Math.round((this.ipo.limit ?? STRESSED) * 100)}%`, '#ff8a9c', 6);
     }
     if (this.agents.some((a) => a.state === 'strike' || a.state === 'riot')) label(ctx, G.world.sites.picket.x, G.world.sites.picket.y + 12, 'picket line', '#f2e8d5', 5);
+    // The aim reticle, on the map at the world point aimed at (3D stands it up as a sprite).
+    const aim = G.brain?.aim;
+    if (aim && !ctx.__project3d) { const p = G.world.aimPoint(aim); drawReticle(ctx, p.x, p.y, this.t, '#ffe066'); }
   }
 
   // ---- camera (#33): hand casts and face mood. Extra inputs on top of the brain, never instead of it. ----

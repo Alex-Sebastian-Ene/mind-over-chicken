@@ -1168,6 +1168,36 @@ impl Engine {
     pub fn get_game_restarts_stat(&self) -> u32 {
         self.game.stats.restarts
     }
+
+    pub fn is_game_era_complete(&self) -> bool {
+        self.game.era.is_complete()
+    }
+
+    pub fn is_game_era_failed(&self) -> Option<String> {
+        self.game.era.is_failed()
+    }
+}
+
+#[wasm_bindgen]
+pub fn rust_villager_look(era: &str, seed: u32) -> js_sys::Array {
+    let mut rng = crate::terrain::Mulberry32::new(seed);
+    let look = crate::agents::villager_look(era, &mut rng);
+    let arr = js_sys::Array::new();
+    let to_hex = |c: (u8, u8, u8)| format!("#{:02x}{:02x}{:02x}", c.0, c.1, c.2);
+    arr.push(&JsValue::from_str(&to_hex(look.shirt)));
+    arr.push(&JsValue::from_str(&to_hex(look.hair)));
+    arr.push(&JsValue::from_str(&to_hex(look.skin)));
+    arr
+}
+
+#[wasm_bindgen]
+pub fn rust_animate_agent(clock: f32, dt: f32, rate: f32) -> js_sys::Float32Array {
+    let arr = js_sys::Float32Array::new_with_length(2);
+    let new_clock = clock + dt * rate;
+    let frame = new_clock.floor();
+    arr.set_index(0, new_clock);
+    arr.set_index(1, frame);
+    arr
 }
 
 /// A generated world for JS (#109, from #112): the JS `World` is a thin wrapper that fills its

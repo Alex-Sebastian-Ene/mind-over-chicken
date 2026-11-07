@@ -20,6 +20,7 @@
 
 import { rand, pick, chance } from '../sim/util.js';
 import { generateWorld } from './worldgen.js';
+import { loading } from '../ui/loading.js';
 import { label } from '../eras/stone.js';
 import { SIM, TEMPERAMENT, ERAS, newPlanetState, brainEffects, stepPlanet, blinkPlanet, arriveShip, newMind, stepMind, logHistory, reachMilestone, trackCampaignPop } from './planet-sim.js';
 import { PlanetSurface } from './surface.js';
@@ -29,6 +30,9 @@ export const ERA_LABEL = { stone: 'Stone Age', farming: 'Farming', industry: 'In
 const MAX_PLANETS = 10;              // home + three mind worlds + six made ones (#68: was 7)
 const STAR = { x: 132, y: 92 };      // left of centre, so the galaxy panel doesn't hide the outer orbits
 const ORBIT_FIRST = 30, ORBIT_MAX = 124, ORBIT_SQUASH = 0.42;
+// New worlds' maps are set up one at a time, each taking at least this long, so every world
+// gets its own moment (and the generator never builds several vast surfaces at once).
+export const FORM_SECONDS = 4;
 const ORBIT_STEP = (ORBIT_MAX - ORBIT_FIRST) / (MAX_PLANETS - 1);   // the outermost orbit stays on screen
 // Surfaces off screen run in turns: at most SURFACE_PER_FRAME of them each frame, in steps of
 // SURFACE_DT, catching up at most SURFACE_MAX_LAG seconds (beyond that they simply run slower).
@@ -76,6 +80,9 @@ export class Galaxy {
     this.usedNames = new Set();
     this.mind = newMind();
     this.revealQueue = [];
+    this.formQueue = [];   // worlds waiting for their turn to form: { p, biome, opts }
+    this.formSlot = null;  // the one forming now: { p, biome, opts, world, failed }
+    this.formBatch = { done: 0, total: 0 };
     this.recentBlinks = [];
     this.attended = null;  // the world the player is zoomed into: hears every channel, blinks strike it
     this.viewing = null;   // the world whose surface is on screen (#68): its tribe runs every frame
@@ -117,7 +124,10 @@ export class Galaxy {
       ...newPlanetState({ channel: o.channel || 'mixed', pop: o.pop || 0, eraIndex: o.eraIndex || 0 }),
       // presentation only
       labels: [], layers: {}, structs: {}, flash: 0, effect: '', surface: null, surfaceReady: false,
-      orbit: ORBIT_FIRST + i * ORBIT_STEP, phase: rand(0, Math.PI * 2), speed: 0.2 / (1 + i * 0.45), spin: rand(0.25, 0.5),
+      // #138: neighbouring orbits are ~10 px apart and planets ~20 px across, so random phases
+      // often started worlds in an overlapping clump. Spread them by the golden angle from the
+      // previous world's current position instead (plus a little jitter).
+      orbit: ORBIT_FIRST + i * ORBIT_STEP, phase: this.spreadPhase(i), speed: 0.2 / (1 + i * 0.45), spin: rand(0.25, 0.5),
       seed,
       ...o,
     };
@@ -127,18 +137,61 @@ export class Galaxy {
     return p;
   }
 
-  // Generate the planet's world (and its vast surface) off-thread, then bring it to life.
+  // Queue the planet's world to form. Worlds form one at a time (stepForming): each one's map
+  // (its world and vast surface) is generated off-thread when its turn comes, and it comes to
+  // life after FORM_SECONDS or when the map is ready, whichever is later.
   form(p, biome, { pop, eraIndex = 0, born }) {
     p.forming = true;
-    generateWorld(p.seed ?? ((Math.random() * 1e9) | 0), biome, { vast: true }).then((world) => {
-      p.world = world; p.biome = biome; p.atmosphere = ATMOS[biome] || ATMOS.temperate;
-      p.forming = false; p.alive = true; p.pop = pop; p.eraIndex = eraIndex; p.progress = 0;
-      p.labels.push({ text: born, t: 4, color: CHANNELS[p.channel]?.color || '#9be38a' });
-      logHistory(p, pop > 0 ? `Born: ${born.toLowerCase()}` : 'Formed, barren', 'event');
-      this.attachSurface(p, world);
-      this.note(p, pop > 0 ? `${p.name}: ${born.toLowerCase()}.` : `${p.name} formed. Nobody lives there yet.`);
-      this.onEvent?.(p, born, 'born');
-    });
+    p.formPending = true;
+    p.formQueued = true;
+    p.formT = 0;
+    this.formQueue.push({ p, biome, opts: { pop, eraIndex, born } });
+    this.formBatch.total++;
+    this.showFormPill();
+  }
+
+  stepForming(dt) {
+    let job = this.formSlot;
+    if (!job) {
+      job = this.formSlot = this.formQueue.shift() || null;
+      if (!job) return;
+      job.p.formQueued = false;
+      job.p.formT = 0;
+      generateWorld(job.p.seed ?? ((Math.random() * 1e9) | 0), job.biome, { vast: true, track: false })
+        .then((w) => { job.world = w; }, (err) => { job.failed = err || new Error('world generation failed'); });
+      this.showFormPill();
+    }
+    const p = job.p;
+    p.formT = Math.min(FORM_SECONDS, (p.formT || 0) + Math.max(0, dt || 0));
+    if (p.formT < FORM_SECONDS || !(job.world || job.failed)) return;
+    this.formSlot = null;
+    this.formBatch.done++;
+    p.formPending = false;
+    if (job.world) this.finishForm(p, job.biome, job.opts, job.world);
+    else { p.forming = false; console.error('planet failed to form', job.failed); }
+    this.showFormPill();
+  }
+
+  // Forming progress, 0..1 (0 while still waiting its turn).
+  formProgress(p) { return p.forming && p.formPending && !p.formQueued ? (p.formT || 0) / FORM_SECONDS : 0; }
+
+  // The corner pill: "Forming Thrum · 2 of 3", then "3 planets formed".
+  showFormPill() {
+    const b = this.formBatch;
+    const cur = this.formSlot?.p;
+    if (cur) loading.start('planets-forming', `Forming ${cur.name} · ${b.done + 1} of ${b.total}`, { doneText: b.total > 1 ? `${b.total} planets formed` : 'Planet formed' });
+    else if (!this.formQueue.length && b.total) { loading.done('planets-forming'); this.formBatch = { done: 0, total: 0 }; }
+  }
+
+  // The world's map is ready and its turn is up: bring it to life.
+  finishForm(p, biome, { pop, eraIndex = 0, born }, world) {
+    p.world = world; p.biome = biome; p.atmosphere = ATMOS[biome] || ATMOS.temperate;
+    p.forming = false; p.alive = true; p.pop = pop; p.eraIndex = eraIndex; p.progress = 0;
+    p.labels.push({ text: born, t: 4, color: CHANNELS[p.channel]?.color || '#9be38a' });
+    logHistory(p, pop > 0 ? `Born: ${born.toLowerCase()}` : 'Formed, barren', 'event');
+    this.attachSurface(p, world);
+    this.note(p, pop > 0 ? `${p.name}: ${born.toLowerCase()}.` : `${p.name} formed. Nobody lives there yet.`);
+    this.onEvent?.(p, born, 'born');
   }
 
   // The world's surface up close, with its AI-god tribe once anyone lives there (#68).
@@ -198,6 +251,15 @@ export class Galaxy {
   get home() { return this.planets.find((p) => p.home); }
   get full() { return this.planets.length >= MAX_PLANETS; }
   get mindReady() { return this.mind.done; }
+
+  // Start angle for the i-th world: the golden angle (~137.5 degrees) past the previous one's
+  // current angle, so a batch of new worlds fans out around the star.
+  spreadPhase(i) {
+    const prev = this.planets[i - 1];
+    const base = prev ? prev.phase + this.time * prev.speed : rand(0, Math.PI * 2);
+    const speed = 0.2 / (1 + i * 0.45);
+    return base + 2.39996 + rand(-0.25, 0.25) - this.time * speed;
+  }
 
   pos(p) {
     const a = p.phase + this.time * p.speed;
@@ -259,7 +321,7 @@ export class Galaxy {
       const count = this.wasm.planet_count();
       for (let i = 0; i < count && i < this.planets.length; i++) {
         const p = this.planets[i];
-        if (p.mindSlot && p.forming && !this.wasm.planet_is_forming(i)) {
+        if (p.mindSlot && p.forming && !p.formPending && !this.wasm.planet_is_forming(i)) {
           p.forming = false;
           p.alive = true;
           p.name = this.wasm.planet_name(i);
@@ -276,6 +338,7 @@ export class Galaxy {
       }
     }
     this.sampleMind(playDt, brain, fx);
+    this.stepForming(dt);
 
     for (const p of this.planets) {
       p.labels = p.labels.filter((l) => (l.t -= dt) > 0);
@@ -408,7 +471,8 @@ export class Galaxy {
       }
     }
     ctx.globalAlpha = 1;
-    const items = this.planets.map((p) => ({ p, q: this.pos(p) }));
+    // Back to front (#138): within each half of the orbit plane, nearer planets (lower on screen) draw last.
+    const items = this.planets.map((p) => ({ p, q: this.pos(p) })).sort((a, b) => a.q.y - b.q.y);
     const drawPlanet = ({ p, q }) => {
       if (p === skip) return;
       this.drawPlanet(ctx, globe, p, q.x, q.y, p.size, homeLayer, homeStructures, alpha);
@@ -437,7 +501,7 @@ export class Galaxy {
   // One planet at any size: a globe, or a swirling protoplanet while it forms.
   drawPlanet(ctx, globe, p, x, y, r, homeLayer, homeStructures, alpha = 1, opts = {}) {
     const tex = this.textureFor(p, globe, homeLayer, homeStructures);
-    if (!tex) { drawProto(ctx, x, y, r, this.time, alpha); return; }
+    if (!tex) { drawProto(ctx, x, y, r, this.time, alpha * (p.formQueued ? 0.55 : 1), this.formProgress(p)); return; }
     const L = opts.light || [STAR.x - x, STAR.y - y, 26];
     globe.draw(ctx, tex, x, y, r, { rot: opts.rot ?? this.time * p.spin + p.phase, light: L, alpha, tilt: opts.tilt ?? 0.3, atmosphere: p.atmosphere });
     if (p.flash > 0) drawPlanetBolt(ctx, x, y, r, p.storms, alpha * Math.min(1, p.flash * 2));
@@ -467,7 +531,8 @@ export class Galaxy {
       const q = this.pos(p);
       const ch = CHANNELS[p.channel];
       label(ctx, q.x, q.y + p.size + 7, p.name, p === hover ? '#ffe066' : '#f2e8d5', 5);
-      const sub = p.forming ? (p.mindSlot && !this.mind.done ? `reading your mind ${Math.max(0, Math.ceil(SIM.MIND_SECONDS - this.mind.t))}s` : 'forming…')
+      const sub = p.forming ? (p.mindSlot && !this.mind.done ? `reading your mind ${Math.max(0, Math.ceil(SIM.MIND_SECONDS - this.mind.t))}s`
+        : p.formQueued ? 'waiting to form' : p.formPending ? `forming ${Math.max(1, Math.ceil(FORM_SECONDS - (p.formT || 0)))}s` : 'forming…')
         : p.pop > 0 ? `${ERA_LABEL[ERA_NAMES[p.eraIndex]]} · ${p.home && !p.autonomous ? `${p.pop} people` : fmtPop(p.pop)}` : 'barren';
       label(ctx, q.x, q.y + p.size + 12.5, sub, p.pop > 0 ? '#a3a6c4' : '#6f7394', 4);
       if (ch && !p.home && p.channel !== 'mixed' && p.alive) label(ctx, q.x, q.y + p.size + 17.5, `listens to ${ch.label.toLowerCase()}`, ch.color, 4);
@@ -502,15 +567,26 @@ const pct = (v) => `${Math.round(v * 100)}%`;
 const signed = (v, d) => `${v >= 0 ? '+' : ''}${v.toFixed(d)}`;
 
 // Swirling dust disc for a world that is still forming.
-function drawProto(ctx, x, y, r, t, alpha) {
+// `done` (0..1) is how far it has formed: the dust pulls in and spins faster while the core
+// grows and warms, so the planet visibly condenses over its FORM_SECONDS.
+function drawProto(ctx, x, y, r, t, alpha, done = 0) {
+  const core = Math.max(2, r * (0.55 + 0.35 * done));
   ctx.globalAlpha = alpha * 0.9;
-  ctx.fillStyle = '#3a3440';
-  ctx.beginPath(); ctx.arc(Math.round(x), Math.round(y), Math.max(2, r * 0.55), 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = done > 0.66 ? '#5a4a52' : done > 0.33 ? '#463c4a' : '#3a3440';
+  ctx.beginPath(); ctx.arc(Math.round(x), Math.round(y), core, 0, Math.PI * 2); ctx.fill();
+  if (done > 0) {   // a warm rim where the dust lands
+    ctx.globalAlpha = alpha * 0.55 * done;
+    ctx.strokeStyle = '#ffcf8a';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(Math.round(x), Math.round(y), core, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = alpha * 0.9;
+  }
   const n = Math.round(r * 5);
+  const spread = 1.35 - 0.45 * done, spin = 1 + 1.5 * done;
   for (let k = 0; k < n; k++) {
     const h1 = ((k * 2654435761) >>> 0) / 4294967296, h2 = ((k * 40503 + 17) % 997) / 997;
-    const rr = r * Math.sqrt(h1);
-    const a = h2 * Math.PI * 2 + t * (0.6 + (1 - h1) * 1.4);
+    const rr = r * spread * Math.sqrt(h1);
+    const a = h2 * Math.PI * 2 + t * spin * (0.6 + (1 - h1) * 1.4);
     ctx.fillStyle = k % 5 === 0 ? '#c9a27a' : k % 3 === 0 ? '#8a7f8f' : '#5f5666';
     ctx.fillRect(Math.round(x + Math.cos(a) * rr), Math.round(y + Math.sin(a) * rr * 0.8), 1, 1);
   }

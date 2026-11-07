@@ -11,7 +11,21 @@ const SHIRTS = ['#c0703a', '#d68c45', '#b5523a', '#d9a85b', '#a8613a'];
 const HAIR = ['#2b1d14', '#3b2a1e', '#5a3b22', '#1c1410', '#8a5a32'];
 const SKIN = ['#e0b48a', '#c99470', '#a8754f', '#f0c9a0', '#8d5a3b'];
 
+let rustVillagerLookFn = null;
+let rustAnimateAgentFn = null;
+
+export function setRustAgentHelpers(villagerLookFn, animateAgentFn) {
+  rustVillagerLookFn = villagerLookFn;
+  rustAnimateAgentFn = animateAgentFn;
+}
+
 export function villagerLook(era = 'stone') {
+  if (rustVillagerLookFn) {
+    try {
+      const arr = rustVillagerLookFn(era, Math.floor(Math.random() * 100000));
+      return { shirt: arr[0], hair: arr[1], skin: arr[2] };
+    } catch {}
+  }
   const shirts = era === 'industry' ? ['#5a74a8', '#9a5a40', '#4f8a66', '#a8473f', '#7a8296']
     : era === 'space' ? ['#d9dde6', '#3e8ed0', '#e0a43a', '#c0392b', '#6c7a92'] : SHIRTS;
   return { shirt: pick(shirts), hair: pick(HAIR), skin: pick(SKIN) };
@@ -84,6 +98,14 @@ export function walk(a, tx, ty, speed, dt, world) {
 }
 
 export function animate(a, dt, rate = 6) {
+  if (rustAnimateAgentFn) {
+    try {
+      const res = rustAnimateAgentFn(a.ft || 0, dt, rate);
+      a.ft = res[0];
+      a.frame = Math.floor(res[1]);
+      return;
+    } catch {}
+  }
   a.ft = (a.ft || 0) + dt * rate;
   a.frame = Math.floor(a.ft);
 }

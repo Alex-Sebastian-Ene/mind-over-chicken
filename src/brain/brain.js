@@ -161,12 +161,17 @@ export class Brain {
     }
 
     if (this.wasm) {
-      this.wasm.update(dt);
-      this.calm = this.wasm.calm();
-      this.focus = this.wasm.focus();
-      this.stress = this.wasm.stress();
-      this.anger = this.wasm.anger();
-      this.stats.blinks = this.wasm.blinks();
+      try {
+        this.wasm.update(dt);
+        this.calm = this.wasm.calm();
+        this.focus = this.wasm.focus();
+        this.stress = this.wasm.stress();
+        this.anger = this.wasm.anger();
+        this.stats.blinks = this.wasm.blinks();
+      } catch (err) {
+        console.warn('RustBrain update failed, falling back to JS brain simulation:', err);
+        this.wasm = null;
+      }
     }
   }
 
@@ -174,12 +179,17 @@ export class Brain {
     this.stats.framesSeen++;
     if (this.wasm && frame.bands) {
       const b = frame.bands;
-      this.wasm.ingest(
-        b.delta || 0, b.theta || 0, b.alpha || 0, b.beta || 0, b.gamma || 0,
-        !!frame.blink, frame.hr || 0,
-        frame.tilt ? frame.tilt[0] : 0, frame.tilt ? frame.tilt[1] : 0,
-        frame.motion || 0, frame.quality || 1
-      );
+      try {
+        this.wasm.ingest(
+          b.delta || 0, b.theta || 0, b.alpha || 0, b.beta || 0, b.gamma || 0,
+          !!frame.blink, frame.hr || 0,
+          frame.tilt ? frame.tilt[0] : 0, frame.tilt ? frame.tilt[1] : 0,
+          frame.motion || 0, frame.quality || 1
+        );
+      } catch (err) {
+        console.warn('RustBrain ingest failed, disabling wasm brain:', err);
+        this.wasm = null;
+      }
     }
     this.quality = frame.quality;
     if (frame.bands) this.bands = { ...frame.bands };
@@ -213,8 +223,18 @@ export class Brain {
       }
     }
     if (frame.tilt) {
-      this.aim.x = smooth(this.aim.x, clamp(0.5 + frame.tilt.x * 0.5), 10, 0.1);
-      this.aim.y = smooth(this.aim.y, clamp(0.5 + frame.tilt.y * 0.5), 10, 0.1);
+      if (frame.isSim) {
+        this.aim.x = clamp(0.5 + frame.tilt.x * 0.5);
+        this.aim.y = clamp(0.5 + frame.tilt.y * 0.5);
+      } else {
+        // A headset aims at the screen. On a world bigger than the screen (#129) the game maps
+        // that through its camera (screenToAim); the smoothing stays in screen space.
+        const s = (this.screenAim ||= { x: this.aim.x, y: this.aim.y });
+        s.x = smooth(s.x, clamp(0.5 + frame.tilt.x * 0.5), 10, 0.1);
+        s.y = smooth(s.y, clamp(0.5 + frame.tilt.y * 0.5), 10, 0.1);
+        const a = this.screenToAim ? this.screenToAim(s.x, s.y) : s;
+        this.aim.x = a.x; this.aim.y = a.y;
+      }
     }
     this.motion = frame.motion;
 

@@ -139,6 +139,7 @@ export function initCamera({
   screenY = (y) => y,   // the home world is bigger than the screen (#129): aims map back through the camera
   onZoomDelta = null,
   onWave = null,
+  onGrabMove = null,
   getContext = () => 'surface',
   onStatusChange = null,
 } = {}) {
@@ -444,6 +445,9 @@ export function initCamera({
       } else {
         scene.onCast?.(id, aim);
       }
+      if (G.engine?.game_on_cast) {
+        G.engine.game_on_cast(id, aim.x * 320, aim.y * 180);
+      }
     } catch (err) { console.error('[camera] cast failed:', err); }
     G.stats.casts = (G.stats.casts || 0) + 1;
     if (SPELL_BY_ID[id].aimed) armed = id;
@@ -545,13 +549,24 @@ export function initCamera({
         onZoomDelta(multi.zoomDelta, multi.zoomFactor);
       }
 
-      // 2. One-hand pinch grab at head reticle (#120)
+      // 2. One-hand pinch grab at head reticle (#120) & Globe/World movement
       if (multi.grab.started) {
         tryGrabStart(G, now);
-      } else if (multi.grab.active && grabbed) {
-        G.scene?.onGrabMove?.({ x: G.brain.aim.x, y: G.brain.aim.y });
+        if (!grabbed && onGrabMove) {
+          onGrabMove({ dx: 0, dy: 0, started: true, active: true, aim: G.brain.aim, grab: multi.grab });
+        }
+      } else if (multi.grab.active) {
+        if (grabbed) {
+          G.scene?.onGrabMove?.({ x: G.brain.aim.x, y: G.brain.aim.y });
+        } else if (onGrabMove) {
+          onGrabMove({ dx: multi.grab.dx, dy: multi.grab.dy, started: false, active: true, aim: G.brain.aim, grab: multi.grab });
+        }
       } else if (multi.grab.released || multi.grab.cancelled) {
-        tryGrabEnd(G, now, !!multi.grab.cancelled);
+        if (grabbed) {
+          tryGrabEnd(G, now, !!multi.grab.cancelled);
+        } else if (onGrabMove) {
+          onGrabMove({ dx: 0, dy: 0, released: true, cancelled: !!multi.grab.cancelled, active: false, aim: G.brain.aim, grab: multi.grab });
+        }
       }
 
       // 3. Open-hand wave orbit (#121)

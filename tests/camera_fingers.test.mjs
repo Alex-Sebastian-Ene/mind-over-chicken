@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { OneEuroFilter, PointFilter, softDeadZone, HandRange, FIXED_RANGE, pinchMetrics, PinchDetector, PINCH, FingerController, WaveDetector, MultiHandTracker } from '../src/camera/fingers.js';
 import { RateMeter, Ema, FrameMeter } from '../src/camera/meter.js';
 import { workerPreference, workerSupport } from '../src/camera/engine.js';
-import { COACH_MOVES, buildGhostHand } from '../src/camera/coach.js';
+import { COACH_MOVES, COACH_CARDS, buildGhostHand } from '../src/camera/coach.js';
 
 // ---------- helpers ----------
 // Deterministic noise in [-1, 1].
@@ -417,6 +417,8 @@ test('WaveDetector: horizontal open-hand wave triggers with cooldown', () => {
 // ---------- Coach ghost hand keyframes (#123) ----------
 test('Coach: procedural 21-landmark ghost hands and keyframes exist for all moves', () => {
   assert.ok(COACH_MOVES.length >= 5);
+  assert.equal(COACH_CARDS.length, COACH_MOVES.length - 1);
+  assert.ok(!COACH_CARDS.some((m) => m.id === 'palm_calm'));
   for (const move of COACH_MOVES) {
     const ghosts = move.sample(0.5);
     assert.ok(ghosts.length >= 1 && ghosts.length <= 2);

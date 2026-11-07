@@ -3,6 +3,7 @@
 // if workers aren't available.
 
 import { World, BIOMES } from '../world/terrain.js';
+import { loading } from '../ui/loading.js'; // loading screen
 
 let worker = null;
 let workerBroken = false;
@@ -52,12 +53,16 @@ function rehydrate(d) {
 // opts.vast: a galaxy planet (its 640×360 surface as world.vast, the capital as the World);
 // otherwise a home world of opts.width × opts.height (the game's size by default). Off the main
 // thread, so even a big world never stalls a frame.
-export function generateWorld(seed, biome, { vast = false, width, height } = {}) {
+// opts.track: show it in the loading pill (the galaxy's forming queue shows its own step instead).
+export function generateWorld(seed, biome, { vast = false, width, height, track = true } = {}) {
   const wk = getWorker();
   if (!wk) return Promise.resolve(buildHere(seed, biome, vast, width, height));
-  return new Promise((resolve) => {
-    const id = nextId++;
+  const id = nextId++;
+  const job = new Promise((resolve) => {
     pending.set(id, { resolve, seed, biome, vast, width, height });
     wk.postMessage({ id, seed, biome, vast, width, height });
   });
+  if (!track) return job;
+  // loading screen: the corner pill counts planets forming ("Forming 3 planets").
+  return loading.track(`world-${id}`, 'Forming a planet', job, { group: 'worlds', plural: 'Forming {n} planets', doneText: 'Planet formed' });
 }
