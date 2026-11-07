@@ -367,7 +367,8 @@ export class Industry {
 
   draw(ctx) {
     const G = this.G;
-    ctx.drawImage(this.layer, 0, 0);
+    const base = G.render3d ? (G.world?.layers3d?.industry || this.layer) : this.layer;
+    ctx.drawImage(base, 0, 0);
     if (!G.render3d) G.world.drawWater(ctx, this.t);
     // In 3D, draw3d stands workers, traders, goats and chicken up as billboards
     if (G.render3d) {

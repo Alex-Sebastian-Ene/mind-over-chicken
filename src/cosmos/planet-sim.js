@@ -256,6 +256,16 @@ export function freshSettlement() {
   };
 }
 
+// The hand-played home on the galaxy map shows the civilisation, not one scene's cast (#105): the
+// most people it has had this run. A scene without people (a time-skip montage) reports
+// pop: null and keeps the count; going back to an earlier era (a new run) starts it again.
+export function trackCampaignPop(p, home) {
+  if (home.eraIndex < (p.eraIndex ?? 0)) p.peakPop = 0;
+  if (home.pop != null) p.peakPop = Math.max(p.peakPop || 0, home.pop);
+  p.pop = p.peakPop || 0;
+  return p.pop;
+}
+
 // Brain readings every world sees this frame. `stress` is brain.stress (src/brain/brain.js):
 // EEG agitation or face anger, about 0.15 at rest, 0..1. Without it, it is worked out from calm
 // and anger with stressFrom. `anger` is the camera mood (0..1).

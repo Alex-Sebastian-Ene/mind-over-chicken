@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import {
   SIM, TIERS, ERAS, CONFLICT, newPlanetState, brainEffects, stepPlanet, stepSettlement, stepConflict, stabilityTarget,
   tierReady, eraReady, metrics, meets, castPlanet, tribeOutcome, arriveShip, easeSplit, ACTION_SPLIT, popCap,
+  trackCampaignPop,
 } from '../src/cosmos/planet-sim.js';
 import { ZoomState } from '../src/cosmos/zoom.js';
 import { World } from '../src/world/terrain.js';
@@ -385,4 +386,23 @@ test('the G key visits every AI world in turn, then home', () => {
   assert.equal(z.target, 0);
   assert.equal(z.surfaceKind(), 'ai');
   assert.equal(new ZoomState().nextWorld([home]).name, 'Home');
+});
+
+// #105: the campaign home never reads "barren" through a time-skip, and the Space Age's small
+// local cast doesn't erase the civilisation's size.
+test('campaign home keeps its population through time-skips and the Space Age', () => {
+  const p = { home: true, eraIndex: 0, pop: 0 };
+  const step = (eraIndex, pop) => { trackCampaignPop(p, { eraIndex, pop }); p.eraIndex = eraIndex; return p.pop; };
+  assert.equal(step(0, 16), 16);      // Stone Age tribe
+  assert.equal(step(1, null), 16);    // Farming → Kingdoms montage: no people in the scene
+  assert.equal(step(2, 120), 120);    // Industry town
+  assert.equal(step(3, null), 120);   // Information Age montage: was 0, i.e. "barren"
+  assert.equal(step(3, 38), 120);     // Space Age: 28 citizens + 10 engineers on screen
+  assert.ok(p.pop > 0);
+});
+
+test('a new campaign run starts the home population again', () => {
+  const p = { home: true, eraIndex: 3, pop: 120, peakPop: 120 };
+  trackCampaignPop(p, { eraIndex: 0, pop: 12 }); p.eraIndex = 0;
+  assert.equal(p.pop, 12);
 });
