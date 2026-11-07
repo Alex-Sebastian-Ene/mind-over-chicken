@@ -14,6 +14,7 @@ import { Industry } from './eras/industry.js';
 import { SpaceAge } from './eras/space.js';
 import initEngine, {
   Engine,
+  RustApp,
   RustImuTracker,
   RustBlinkClassifier,
   PointerGesture,
@@ -32,6 +33,7 @@ import initEngine, {
 import { Cosmos } from './cosmos/cosmos.js';
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel, setRustGalaxy } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
+import { initCameraAdapter } from './camera/adapter.js';
 import { setRustCastController } from './camera/casts.js';
 import { setRustFingerController } from './camera/fingers.js';
 import { setRustEmotionTracker } from './camera/emotion.js';
@@ -748,7 +750,9 @@ function sync3dWorldMesh(scene) {
   const isOther = scene && scene !== G?.scene && typeof scene.getVisibleHeightmap === 'function';
   const world = isOther ? scene.world : G?.world;
   if (!world) return;
-  const key = isOther ? `${world.seed}_${scene.sx}_${scene.sy}` : `${world.seed}`;
+  const qx = Math.round((scene.sx || 0) / 2) * 2;
+  const qy = Math.round((scene.sy || 0) / 2) * 2;
+  const key = isOther ? `${world.seed}_${qx}_${qy}` : `${world.seed}`;
   if (key === current3dWorldKey) return;
   current3dWorldKey = key;
 
