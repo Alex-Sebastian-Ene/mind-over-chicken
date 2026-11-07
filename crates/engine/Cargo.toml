@@ -25,6 +25,7 @@ features = [
     "HtmlCanvasElement",
     "CssStyleDeclaration",
     "DomTokenList",
+    "HtmlCollection",
     "Node",
     "NodeList",
     "WebGlRenderingContext",
