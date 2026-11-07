@@ -201,6 +201,7 @@ fn main() {
         render_total / (frames / 4).max(1) as f64
     );
     println!("profile ms total: agents {:.0}, grid+combat {:.0}, village phases {:.0}+{:.0}, contacts {:.0}, politics {:.0}; field builds {}", w.prof[0], w.prof[1], w.prof[3], w.prof[5], w.prof[4], w.prof[6], w.paths.builds);
+    println!("politics parts ms: borders {:.0}, economy {:.0}, metrics+ages {:.0}, diplomacy {:.0}, strife {:.0}, crises {:.0}, jobs {:.0}, marches {:.0}, trade {:.0}, rebellion {:.0}", w.prof2[0], w.prof2[1], w.prof2[2], w.prof2[3], w.prof2[4], w.prof2[5], w.prof2[6], w.prof2[7], w.prof2[8], w.prof2[9]);
     if duel {
         duels();
     }

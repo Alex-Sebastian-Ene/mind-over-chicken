@@ -257,6 +257,9 @@ pub const DAY_SECONDS: f32 = 80.0;
 pub const SLEEP_NIGHT: f32 = 0.82;
 /// The longest single step `World::advance` takes when the speed control runs it faster.
 pub const MAX_SUBSTEP: f32 = 0.1;
+/// At most this many steps per `advance` (a frame): ×16 at 60 fps needs 3; a slow frame lets the
+/// world fall a little behind rather than pile up work.
+pub const MAX_STEPS_PER_ADVANCE: usize = 4;
 
 #[derive(Clone, Debug)]
 pub struct Faction {
@@ -806,6 +809,9 @@ pub struct World {
     pub cap_villages: usize,
     #[cfg(not(target_arch = "wasm32"))]
     pub prof: [f64; 8],
+    /// The politics tick's parts (native profiling only).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub prof2: [f64; 10],
 }
 
 pub const FSTRIDE: usize = 46;
@@ -928,6 +934,8 @@ impl World {
             cap_villages: MAX_VILLAGES,
             #[cfg(not(target_arch = "wasm32"))]
             prof: [0.0; 8],
+            #[cfg(not(target_arch = "wasm32"))]
+            prof2: [0.0; 10],
             terrain,
         };
         // More land, more people: the limits grow with the land (about 50 tiles a person).
@@ -1275,7 +1283,7 @@ impl World {
     pub fn advance(&mut self, real_dt: f32) {
         // Seeding a civilisation from the mind runs on real time (#98).
         self.setup_tick(real_dt.max(0.0));
-        let total = (real_dt.max(0.0) * self.speed).min(2.0);
+        let total = (real_dt.max(0.0) * self.speed).min(MAX_SUBSTEP * MAX_STEPS_PER_ADVANCE as f32);
         if total <= 0.0 {
             self.refresh_info();
             return;
