@@ -3,11 +3,12 @@
 #   ssh iridis 'bash -lc "bash /scratch/ase1g23/moc_diffusion/repo/rl/terrain_diffusion/slurm/setup.sh"'
 # (the first time, clone the repo by hand: see README.md "Iridis".)
 #
-# Installs into $TD_VENV:
-#   torch 2.9.1 + CUDA 12.8 wheels from download.pytorch.org (the same build the existing
-#   /scratch/ase1g23/envs/argus env runs on these L4 nodes): ~0.9 GB torch wheel plus ~2.5 GB
-#   of nvidia-* runtime wheels from PyPI, ~3.4 GB download, ~7 GB installed;
-#   numpy, tifffile, imagecodecs (GeoTIFF decoding): ~60 MB.
+# Installs into $TD_VENV (sizes checked against the indexes on 2026-11-07):
+#   torch 2.9.1+cu128 from download.pytorch.org, the build the existing
+#   /scratch/ase1g23/envs/argus env already runs on these L4 nodes: 900.9 MB wheel, plus
+#   3,158 MB of nvidia-*-cu12 runtime wheels and triton 3.5.1 from PyPI (cuDNN 707 MB,
+#   cuBLAS 594 MB, NCCL 322 MB, ...): about 4.1 GB downloaded, about 7 GB installed;
+#   numpy, tifffile, imagecodecs (GeoTIFF decoding): about 60 MB.
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 
