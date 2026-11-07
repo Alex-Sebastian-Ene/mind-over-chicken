@@ -137,11 +137,16 @@ export class FarmingToKingdoms {
     actors.push({ y: this.chicken.y, d: () => drawChicken(ctx, this.chicken.x, this.chicken.y, this.chicken) });
     actors.sort((a, b) => a.y - b.y).forEach((a) => a.d());
     this.particles.draw(ctx);
-    if (this.phase !== 'farming') { ctx.fillStyle = 'rgba(30,18,40,0.45)'; ctx.fillRect(0, 0, W, H); }
+    if (this.phase !== 'farming') { ctx.fillStyle = 'rgba(30,18,40,0.45)'; ctx.fillRect(0, 0, this.G.world.width, this.G.world.height); }
   }
 
+  // On the map, in world units (repeated at the map's wrap copies).
   drawOverlay(ctx) {
     this.particles.drawText(ctx);
+  }
+
+  // The montage's captions and the scholars' scroll, fixed to the screen (#129).
+  drawScreenOverlay(ctx) {
     if (this.phase === 'farming') {
       const yrs = Math.floor(clamp(this.t / 5.5) * 8000);
       label(ctx, W / 2, 26, `${yrs.toLocaleString('en-GB')} years later`, '#f2e8d5', 13);
@@ -177,12 +182,16 @@ export class FarmingToKingdoms {
   // ---- camera (#33): the montage has no gameplay to change, so casts and moods show a label. ----
   onCast(spell, aim) {
     const text = MONTAGE_CASTS[spell];
-    if (text) floater(this.particles, aim.x * (W - 1), aim.y * (H - 1) - 6, text, '#ffd166', 6);
+    if (!text || !this.G) return;
+    const p = this.G.world.aimPoint(aim);   // aims are 0..1 of the world (#129)
+    floater(this.particles, p.x, p.y - 6, text, '#ffd166', 6);
   }
 
   onMood(mood) {
     const text = MONTAGE_MOODS[mood.dominant];
-    if (text && mood.reason === 'change') floater(this.particles, W / 2, 52, text, '#9ec9ff', 6);
+    if (!text || mood.reason !== 'change' || !this.G) return;
+    const c = this.G.camera?.viewCenter?.() || this.G.world.sites.village;   // mid-screen
+    floater(this.particles, c.x, c.y - 38, text, '#9ec9ff', 6);
   }
 }
 
@@ -224,7 +233,8 @@ export class InfoAge {
 
   draw(ctx) { ctx.drawImage(this.layer, 0, 0); this.G.world.drawWater(ctx, this.t); }
 
-  drawOverlay(ctx) {
+  // Captions fixed to the screen (#129).
+  drawScreenOverlay(ctx) {
     label(ctx, W / 2, 26, `${Math.floor(clamp(this.t / 6) * 300)} years later`, '#f2e8d5', 13);
     label(ctx, W / 2, 38, this.t < 3 ? 'The goats went digital.' : 'Everyone looks up.', '#9ec9ff', 7);
   }

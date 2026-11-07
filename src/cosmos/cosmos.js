@@ -78,6 +78,8 @@ export class Cosmos extends ZoomState {
     if (!this.view || this.surfaceInView) return { x: sx, y: sy };
     return { x: this.view.to_world_x(sx), y: this.view.to_world_y(sy) };
   }
+  // Point the home camera at a map spot (an era starts looking at its own stage).
+  lookAt(x, y) { this.view?.set_center(x, y); }
   // The world point in the middle of the screen (scenes put screen-wide effects around it).
   viewCenter() { return this.view ? { x: this.view.center_x(), y: this.view.center_y() } : { x: W / 2, y: H / 2 }; }
   // Home world px → screen (view px) of the copy nearest the middle of the screen.

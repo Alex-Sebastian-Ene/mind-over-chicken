@@ -243,12 +243,13 @@ export class SpaceAge {
     // Aim reticle (SPRITE_RETICLE = 13)
     const aim = this.G.brain?.aim;
     if (aim) {
-      engine.add_billboard(13, aim.x * (W - 1), aim.y * (H - 1), 1, 0, 0);
+      const p = this.G.world.aimPoint(aim);
+      engine.add_billboard(13, p.x, p.y, 1, 0, 0);
     }
   }
 
   draw(ctx) {
-    if (this.phase === 'voyage') return this.drawVoyage(ctx);
+    if (this.phase === 'voyage') return;   // the voyage fills the screen: drawScreen
     const G = this.G;
     const base = G.render3d ? (G.world?.layers3d?.space || this.layer) : this.layer;
     ctx.drawImage(base, 0, 0);
@@ -267,6 +268,11 @@ export class SpaceAge {
     if (this.chicken.state !== 'aboard') actors.push({ y: this.chicken.y, d: () => drawChicken(ctx, this.chicken.x, this.chicken.y, this.chicken) });
     actors.sort((a, b) => a.y - b.y).forEach((a) => a.d());
     this.particles.draw(ctx);
+  }
+
+  // Fixed to the screen, not the map (#129).
+  drawScreen(ctx) {
+    if (this.phase === 'voyage') this.drawVoyage(ctx);
   }
 
   drawVoyage(ctx) {
@@ -306,8 +312,13 @@ export class SpaceAge {
       ctx.fillStyle = 'rgba(14,15,26,0.8)'; ctx.fillRect(pad.x - bw / 2, pad.y - 34, bw, 3);
       ctx.fillStyle = '#ffcf4a'; ctx.fillRect(pad.x - bw / 2, pad.y - 34, bw * this.progress, 3);
       label(ctx, pad.x, pad.y - 37, `rocket ${Math.floor(this.progress * 100)}%`, '#f2e8d5', 5);
-      if (this.progress >= 1 && this.passengers < MIN_PASSENGERS) label(ctx, W / 2, 24, `Need ${MIN_PASSENGERS - this.passengers} more passengers. Stay calm so they dare to board.`, '#59d8c8', 6);
     }
+  }
+
+  // Captions and the countdown, fixed to the screen (#129: the map pans under them).
+  drawScreenOverlay(ctx) {
+    const brain = this.G.brain;
+    if (this.phase === 'build' && this.progress >= 1 && this.passengers < MIN_PASSENGERS) label(ctx, W / 2, 24, `Need ${MIN_PASSENGERS - this.passengers} more passengers. Stay calm so they dare to board.`, '#59d8c8', 6);
     if (this.phase === 'countdown') {
       const n = Math.max(0, Math.ceil(this.count));
       const ok = this.focusOk() && !this.stressed();
@@ -334,7 +345,7 @@ export class SpaceAge {
     const G = this.G;
     if (!G || this.done || this.phase === 'launch' || this.phase === 'voyage') return;
     const pad = this.pad, crowd = G.world.sites.crowd;
-    const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
+    const { x, y } = G.world.aimPoint(aim);   // aims are 0..1 of the world (#129)
     const watching = this.citizens.filter((c) => c.state !== 'aboard');
     switch (spell) {
       case 'fist':
@@ -359,7 +370,7 @@ export class SpaceAge {
       }
       case 'rain': {
         for (const c of watching) c.courage = clamp(c.courage + 0.12);
-        this.castRain(x);
+        this.castRain(x, y);
         floater(this.particles, x, 24, 'cool rain', '#9ec9ff', 7);
         break;
       }
@@ -375,7 +386,7 @@ export class SpaceAge {
       case 'disaster': {
         G.audio.thunder();
         G.shake = Math.max(G.shake || 0, 2);
-        this.castRain(x);
+        this.castRain(x, y);
         this.particles.burst(16, () => ({ x: x + rand(-8, 8), y: y - rand(0, 30), vx: 0, vy: 0, life: 0.25, maxLife: 0.25, size: 1, color: '#ffffff' }));
         for (const c of watching) if (dist(x, y, c.x, c.y) < 40) c.courage = clamp(c.courage - 0.35);
         if (this.phase === 'build' && dist(x, y, pad.x, pad.y) < 24 && this.progress > 0) {
@@ -393,8 +404,9 @@ export class SpaceAge {
     }
   }
 
-  castRain(cx) {
-    this.particles.burst(60, () => ({ x: cx + rand(-60, 60), y: rand(-10, H * 0.7), vx: -4, vy: rand(70, 100), life: rand(0.5, 1), maxLife: 1, size: 1, color: 'rgba(158,201,255,0.75)' }));
+  // Rain over a screen-sized patch of sky around (cx, cy) (the world is bigger than the view, #129).
+  castRain(cx, cy = this.G?.camera?.viewCenter?.().y ?? this.pad.y) {
+    this.particles.burst(60, () => ({ x: cx + rand(-60, 60), y: cy + rand(-100, 26), vx: -4, vy: rand(70, 100), life: rand(0.5, 1), maxLife: 1, size: 1, color: 'rgba(158,201,255,0.75)' }));
   }
 
   // Face mood. Joy and anger push the crowd's courage up or down, surprise flashes the sky,
@@ -416,8 +428,9 @@ export class SpaceAge {
     } else if (mood.dominant === 'surprise') {
       G.audio.thunder();
       G.shake = Math.max(G.shake || 0, 1);
-      const sx = rand(30, W - 30);
-      this.particles.burst(18, () => ({ x: sx + rand(-4, 4), y: rand(0, 50), vx: 0, vy: 0, life: 0.3, maxLife: 0.3, size: 1, color: '#ffffff' }));
+      const c = G.camera?.viewCenter?.() || this.pad;   // a flash somewhere in the sky on screen
+      const sx = c.x + rand(-130, 130);
+      this.particles.burst(18, () => ({ x: sx + rand(-4, 4), y: c.y - 90 + rand(0, 50), vx: 0, vy: 0, life: 0.3, maxLife: 0.3, size: 1, color: '#ffffff' }));
     }
   }
 }

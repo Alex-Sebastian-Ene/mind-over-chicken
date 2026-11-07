@@ -212,7 +212,8 @@ function toggleAIGod() {
     }
     advisor.say('ai-off', 'AI god disengaged. You have full command.', { mood: 'happy', priority: 2, cooldown: 1 });
   } else {
-    aiPlanet = new SimPlanet({ seed: G?.world?.seed || 42, brain: 'proxy' }).setGod(new AIGod());
+    // The AI god plays its own copy of the home world, at the same size (#129).
+    aiPlanet = new SimPlanet({ seed: G?.world?.seed || 42, brain: 'proxy', width: G?.world?.width, height: G?.world?.height }).setGod(new AIGod());
     if (G?.brain) aiPlanet.attachHuman(G.brain);
     const btn = $('aiGodBtn');
     if (btn) {
@@ -232,7 +233,7 @@ function newGame(source, startIndex = 0) {
   if (aiPlanet) aiPlanet.attachHuman(brain);
   cosmos.reset();
   G = {
-    world: new World(),
+    world: new World(undefined, { width: HOME_W, height: HOME_H }), // the bigger home world (#129)
     brain, source, advisor, hud, audio,
     calibration: new Calibration(calibConfig), // calibration (#54)
     scene: null, sceneIndex: startIndex, runTime: 0, shake: 0,
@@ -287,11 +288,20 @@ function startScene(i) {
   }
   advisor.setEra(scene.era);
   scene.enter(G);
+  lookAtStage(scene);
   hud.setScene(scene);
   document.body.dataset.era = scene.era;
   fade = 1;
   if (scene.intro) showBanner(scene, i);
   else banner = null;
+}
+
+// Each era opens with the camera on its stage: the village, the exchange, the launch crowd (#129).
+function lookAtStage(scene) {
+  const s = G?.world?.sites;
+  if (!s || !WORLD_SCENES.some((c) => scene instanceof c)) return;
+  const f = scene.era === 'industry' ? s.exchange : scene.era === 'space' ? s.crowd : s.village;
+  if (f) cosmos.lookAt(f.x, f.y);
 }
 
 function restartScene() {
@@ -305,6 +315,7 @@ function restartScene() {
   }
   advisor.setEra(scene.era);
   scene.enter(G);
+  lookAtStage(scene);
   hud.setScene(scene);
   fade = 1;
   if (scene.intro) showBanner(scene, i);
@@ -479,7 +490,7 @@ function drawMinimap(ctx, scene) {
     cx.drawImage(layer, 0, 0, MINI.w, MINI.h);
     miniCache.layer = layer; miniCache.canvas = c;
   }
-  const x0 = W - MINI.w - MINI.pad, y0 = MINI.pad;   // top-right: the bottom is the coach's and the HUD's
+  const x0 = MINI.pad, y0 = MINI.pad;   // top-left: the goat chart is top-right, the coach and HUD at the bottom
   ctx.globalAlpha = 0.9;
   ctx.fillStyle = 'rgba(8,10,24,0.85)';
   ctx.fillRect(x0 - 1, y0 - 1, MINI.w + 2, MINI.h + 2);
