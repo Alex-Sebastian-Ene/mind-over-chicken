@@ -259,7 +259,7 @@ function newGame(source, startIndex = 0) {
     engine.init_world(G.world.seed);
     // The 3D relief must be the world the simulation runs on (#71). Older pkg builds lack this.
     if (engine.set_heightmap) {
-      try { engine.set_heightmap(G.world.h); } catch (err) { console.warn('set_heightmap failed:', err); }
+      try { engine.set_heightmap(G.world.h, G.world.width || 0, G.world.height || 0); } catch (err) { console.warn('set_heightmap failed:', err); }
     }
     // Around the 3D map: this world's deep sea, so the edges read as open ocean.
     const deep = G.world.palette?.[0]?.[0];
@@ -486,7 +486,7 @@ function render() {
   if (engine) {
     try {
       if (surface && G.render3d) {
-        engine.upload_canvas(low);
+        engine.upload_terrain_canvas(low); // the 3D terrain texture (#129)
         G.world?.draw3d?.(engine);
         if (scene.draw3d) {
           scene.draw3d(engine, 0.016);

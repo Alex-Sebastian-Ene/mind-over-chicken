@@ -171,9 +171,52 @@ impl Mat4 {
     }
 }
 
+/// The six clip planes of a view-projection matrix (Gribb-Hartmann), for culling the parts of a
+/// world bigger than the view (#129): only the terrain chunks and wrap copies in sight are drawn.
+#[derive(Clone, Copy, Debug)]
+pub struct Frustum {
+    planes: [[f32; 4]; 6],
+}
+
+impl Frustum {
+    pub fn from_view_proj(vp: &Mat4) -> Self {
+        let m = &vp.m;
+        // Row i of the column-major matrix.
+        let row = |i: usize| [m[i], m[4 + i], m[8 + i], m[12 + i]];
+        let (r0, r1, r2, r3) = (row(0), row(1), row(2), row(3));
+        let add = |a: [f32; 4], b: [f32; 4]| [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]];
+        let sub = |a: [f32; 4], b: [f32; 4]| [a[0] - b[0], a[1] - b[1], a[2] - b[2], a[3] - b[3]];
+        Frustum { planes: [add(r3, r0), sub(r3, r0), add(r3, r1), sub(r3, r1), add(r3, r2), sub(r3, r2)] }
+    }
+
+    /// False only when the box is certainly outside (conservative: may keep a box just outside).
+    pub fn intersects_aabb(&self, min: [f32; 3], max: [f32; 3]) -> bool {
+        for p in &self.planes {
+            let x = if p[0] >= 0.0 { max[0] } else { min[0] };
+            let y = if p[1] >= 0.0 { max[1] } else { min[1] };
+            let z = if p[2] >= 0.0 { max[2] } else { min[2] };
+            if p[0] * x + p[1] * y + p[2] * z + p[3] < 0.0 {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frustum_keeps_what_is_in_front_and_drops_what_is_behind() {
+        let view = Mat4::look_at(Vec3::new(0.0, 10.0, 50.0), Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+        let proj = Mat4::perspective(0.5, 16.0 / 9.0, 1.0, 500.0);
+        let f = Frustum::from_view_proj(&proj.mul(&view));
+        assert!(f.intersects_aabb([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]));
+        assert!(!f.intersects_aabb([-1.0, -1.0, 80.0], [1.0, 1.0, 90.0]), "behind the camera");
+        assert!(!f.intersects_aabb([300.0, -1.0, -1.0], [310.0, 1.0, 1.0]), "far off to the side");
+        assert!(f.intersects_aabb([-1000.0, -1.0, -10.0], [1000.0, 1.0, 10.0]), "a long box crossing the view");
+    }
 
     #[test]
     fn test_identity_and_mul() {

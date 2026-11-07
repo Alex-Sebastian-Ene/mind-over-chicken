@@ -109,12 +109,26 @@ export class Engine {
     set_camera_target(tx: number, tz: number): void;
     set_era(era: number): void;
     /**
-     * Use the JS world's heights (row-major W×H, 0..1, sea level 0.33) for the 3D mesh, the
-     * raycast and where billboards stand.
+     * Use the JS world's heights (row-major `width × height`, 0..1, sea level 0.33) for the 3D
+     * mesh, the raycast and where billboards stand. The world may be bigger than the view
+     * (#129: 640×360 under a 320×180 screen); width 0 means the classic 320×180.
      */
-    set_heightmap(heights: Float32Array | number[]): void;
+    set_heightmap(heights: Float32Array | number[], width: number, height: number): void;
     set_terrain_biome(biome_name: string): void;
+    /**
+     * The 2D frame: the low-res view canvas (320×180) the 2D renderer scales up and lights.
+     */
     upload_canvas(canvas: HTMLCanvasElement): void;
+    /**
+     * The 3D terrain's colour map: a canvas the size of the world (#129), not the screen. The
+     * mesh's texture coordinates span the whole world, so this is what drapes over the relief.
+     */
+    upload_terrain_canvas(canvas: HTMLCanvasElement): void;
+    world_h(): number;
+    /**
+     * The world's size in map pixels (= 3D units), as last set by `set_heightmap` (#129).
+     */
+    world_w(): number;
     zoom_camera(factor: number): void;
 }
 
@@ -366,6 +380,77 @@ export class RustWorldGen {
     types(): Uint8Array;
 }
 
+/**
+ * The 2D camera over the home world. `pan(dx, dy)` moves the map under the window like a drag
+ * (the content follows the pointer); everything wraps both ways (a torus, #111).
+ */
+export class ViewCamera {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * The rectangles that paint the window from a world-sized canvas, cut at the seams:
+     * `[sx, sy, w, h, dx, dy]` per rectangle (1 to 4 of them, more only if the world is
+     * smaller than the view). Draw each with `drawImage(world, sx, sy, w, h, dx, dy, w, h)`.
+     */
+    blits(): Float32Array;
+    center_x(): number;
+    center_y(): number;
+    /**
+     * Translations `[ox, oy]` (pairs) that take world coordinates to screen coordinates, one per
+     * copy of the world that reaches the window (widened by `margin` pixels on every side).
+     * Overlays drawn in world units repeat at each, so labels and lights wrap with the map.
+     */
+    copies(margin: number): Float32Array;
+    /**
+     * The shorter signed east-west way from b to a.
+     */
+    delta_x(a: number, b: number): number;
+    /**
+     * The shorter signed north-south way from b to a.
+     */
+    delta_y(a: number, b: number): number;
+    /**
+     * World x at the window's left edge, snapped to whole pixels so the 2D map stays crisp.
+     * Every 2D conversion uses the snapped edge, so what is drawn and what is clicked agree.
+     */
+    left(): number;
+    constructor(world_w: number, world_h: number, view_w: number, view_h: number);
+    /**
+     * Drag the map by (dx, dy) world pixels: the content moves with the pointer, so the window
+     * moves the other way.
+     */
+    pan(dx: number, dy: number): void;
+    set_center(x: number, y: number): void;
+    /**
+     * A new world size (another map was loaded). The centre stays put, wrapped into it.
+     */
+    set_world(world_w: number, world_h: number): void;
+    /**
+     * World x → screen x of its copy nearest the window's centre (may fall off screen).
+     */
+    to_screen_x(wx: number): number;
+    /**
+     * World y → screen y of its copy nearest the window's centre.
+     */
+    to_screen_y(wy: number): number;
+    /**
+     * Screen x (view pixels, 0..view_w) → world x.
+     */
+    to_world_x(sx: number): number;
+    /**
+     * Screen y (view pixels, 0..view_h) → world y.
+     */
+    to_world_y(sy: number): number;
+    /**
+     * World y at the window's top edge (snapped, like `left`).
+     */
+    top(): number;
+    view_h(): number;
+    view_w(): number;
+    world_h(): number;
+    world_w(): number;
+}
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -383,6 +468,7 @@ export interface InitOutput {
     readonly __wbg_rustimutracker_free: (a: number, b: number) => void;
     readonly __wbg_rustsimsource_free: (a: number, b: number) => void;
     readonly __wbg_rustworldgen_free: (a: number, b: number) => void;
+    readonly __wbg_viewcamera_free: (a: number, b: number) => void;
     readonly engine_add_3d_light: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly engine_add_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly engine_add_custom_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
@@ -472,9 +558,12 @@ export interface InitOutput {
     readonly engine_set_backdrop: (a: number, b: number, c: number, d: number) => void;
     readonly engine_set_camera_target: (a: number, b: number, c: number) => void;
     readonly engine_set_era: (a: number, b: number) => void;
-    readonly engine_set_heightmap: (a: number, b: number, c: number) => [number, number];
+    readonly engine_set_heightmap: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly engine_set_terrain_biome: (a: number, b: number, c: number) => void;
     readonly engine_upload_canvas: (a: number, b: any) => [number, number];
+    readonly engine_upload_terrain_canvas: (a: number, b: any) => [number, number];
+    readonly engine_world_h: (a: number) => number;
+    readonly engine_world_w: (a: number) => number;
     readonly engine_zoom_camera: (a: number, b: number) => void;
     readonly pointergesture_down: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly pointergesture_is_panning: (a: number) => number;
@@ -593,6 +682,26 @@ export interface InitOutput {
     readonly rustworldgen_rgba: (a: number) => any;
     readonly rustworldgen_sites_json: (a: number) => [number, number];
     readonly rustworldgen_types: (a: number) => any;
+    readonly viewcamera_blits: (a: number) => [number, number];
+    readonly viewcamera_center_x: (a: number) => number;
+    readonly viewcamera_center_y: (a: number) => number;
+    readonly viewcamera_copies: (a: number, b: number) => [number, number];
+    readonly viewcamera_delta_x: (a: number, b: number, c: number) => number;
+    readonly viewcamera_delta_y: (a: number, b: number, c: number) => number;
+    readonly viewcamera_left: (a: number) => number;
+    readonly viewcamera_new: (a: number, b: number, c: number, d: number) => number;
+    readonly viewcamera_pan: (a: number, b: number, c: number) => void;
+    readonly viewcamera_set_center: (a: number, b: number, c: number) => void;
+    readonly viewcamera_set_world: (a: number, b: number, c: number) => void;
+    readonly viewcamera_to_screen_x: (a: number, b: number) => number;
+    readonly viewcamera_to_screen_y: (a: number, b: number) => number;
+    readonly viewcamera_to_world_x: (a: number, b: number) => number;
+    readonly viewcamera_to_world_y: (a: number, b: number) => number;
+    readonly viewcamera_top: (a: number) => number;
+    readonly viewcamera_view_h: (a: number) => number;
+    readonly viewcamera_view_w: (a: number) => number;
+    readonly viewcamera_world_h: (a: number) => number;
+    readonly viewcamera_world_w: (a: number) => number;
     readonly moc_brain_free: (a: number) => void;
     readonly moc_brain_get_agitation: (a: number) => number;
     readonly moc_brain_get_calm: (a: number) => number;
