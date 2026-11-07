@@ -341,6 +341,30 @@ export class Engine {
         wasm.engine_game_tick(this.__wbg_ptr, dt, calm, focus, panic, hr, rest_hr, hr_delta, blinks);
     }
     /**
+     * Standalone helper to generate a civ planet RGBA texture (#109).
+     * @param {number} seed
+     * @param {number} width
+     * @param {number} height
+     * @returns {Uint8Array}
+     */
+    static generate_civ_terrain(seed, width, height) {
+        const ret = wasm.engine_generate_civ_terrain(seed, width, height);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * Generate realistic procedural terrain using moc-terrain (#109).
+     * Updates the engine's internal heightmap, 3D relief mesh, and base pixel texture.
+     * @param {number} seed
+     */
+    generate_terrain(seed) {
+        const ret = wasm.engine_generate_terrain(this.__wbg_ptr, seed);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @returns {number}
      */
     get_camera_distance() {
@@ -713,9 +737,7 @@ export class Engine {
     }
     /**
      * Use the JS world's heights (row-major W×H, 0..1, sea level 0.33) for the 3D mesh, the
-     * raycast and where billboards stand. The engine's own `Terrain` is still the old single
-     * island, so without this the relief doesn't match the map the simulation runs on.
-     * Call after `init_world`.
+     * raycast and where billboards stand.
      * @param {Float32Array | number[]} heights
      */
     set_heightmap(heights) {

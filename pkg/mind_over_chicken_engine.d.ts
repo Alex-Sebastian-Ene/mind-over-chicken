@@ -35,6 +35,15 @@ export class Engine {
     game_restart_era(): void;
     game_start_era(index: number): void;
     game_tick(dt: number, calm: number, focus: number, panic: number, hr: number, rest_hr: number, hr_delta: number, blinks: number): void;
+    /**
+     * Standalone helper to generate a civ planet RGBA texture (#109).
+     */
+    static generate_civ_terrain(seed: number, width: number, height: number): Uint8Array;
+    /**
+     * Generate realistic procedural terrain using moc-terrain (#109).
+     * Updates the engine's internal heightmap, 3D relief mesh, and base pixel texture.
+     */
+    generate_terrain(seed: number): void;
     get_camera_distance(): number;
     get_camera_pitch(): number;
     get_camera_target_x(): number;
@@ -87,9 +96,7 @@ export class Engine {
     set_era(era: number): void;
     /**
      * Use the JS world's heights (row-major W×H, 0..1, sea level 0.33) for the 3D mesh, the
-     * raycast and where billboards stand. The engine's own `Terrain` is still the old single
-     * island, so without this the relief doesn't match the map the simulation runs on.
-     * Call after `init_world`.
+     * raycast and where billboards stand.
      */
     set_heightmap(heights: Float32Array | number[]): void;
     upload_canvas(canvas: HTMLCanvasElement): void;
@@ -215,6 +222,8 @@ export interface InitOutput {
     readonly engine_game_restart_era: (a: number) => void;
     readonly engine_game_start_era: (a: number, b: number) => void;
     readonly engine_game_tick: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+    readonly engine_generate_civ_terrain: (a: number, b: number, c: number) => [number, number];
+    readonly engine_generate_terrain: (a: number, b: number) => [number, number];
     readonly engine_get_camera_distance: (a: number) => number;
     readonly engine_get_camera_pitch: (a: number) => number;
     readonly engine_get_camera_target_x: (a: number) => number;

@@ -202,6 +202,7 @@ dependencies = [
  "console_error_panic_hook",
  "js-sys",
  "moc-planet",
+ "moc-terrain",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -261,6 +262,13 @@ dependencies = [
 [[package]]
 name = "moc-planet"
 version = "0.1.0"
+
+[[package]]
+name = "moc-terrain"
+version = "0.1.0"
+dependencies = [
+ "moc-planet",
+]
 
 [[package]]
 name = "pin-project-lite"

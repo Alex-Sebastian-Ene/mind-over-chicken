@@ -35,6 +35,8 @@ export const engine_game_on_cast: (a: number, b: number, c: number, d: number, e
 export const engine_game_restart_era: (a: number) => void;
 export const engine_game_start_era: (a: number, b: number) => void;
 export const engine_game_tick: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+export const engine_generate_civ_terrain: (a: number, b: number, c: number) => [number, number];
+export const engine_generate_terrain: (a: number, b: number) => [number, number];
 export const engine_get_camera_distance: (a: number) => number;
 export const engine_get_camera_pitch: (a: number) => number;
 export const engine_get_camera_target_x: (a: number) => number;

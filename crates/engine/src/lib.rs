@@ -233,9 +233,7 @@ impl Engine {
     }
 
     /// Use the JS world's heights (row-major W×H, 0..1, sea level 0.33) for the 3D mesh, the
-    /// raycast and where billboards stand. The engine's own `Terrain` is still the old single
-    /// island, so without this the relief doesn't match the map the simulation runs on.
-    /// Call after `init_world`.
+    /// raycast and where billboards stand.
     pub fn set_heightmap(&mut self, heights: &[f32]) -> Result<(), JsValue> {
         if heights.len() != W * H {
             return Err(JsValue::from_str(&format!(
@@ -251,6 +249,28 @@ impl Engine {
             r3d.upload_mesh(&mesh);
         }
         Ok(())
+    }
+
+    /// Generate realistic procedural terrain using moc-terrain (#109).
+    /// Updates the engine's internal heightmap, 3D relief mesh, and base pixel texture.
+    pub fn generate_terrain(&mut self, seed: u32) -> Result<(), JsValue> {
+        let map = moc_terrain::TerrainMap::generate_home_world(seed);
+        if let Some(t) = &mut self.terrain {
+            t.h.copy_from_slice(&map.heights);
+            t.tile_type.copy_from_slice(&map.types);
+            t.pixels.copy_from_slice(&map.rgba);
+        }
+        if let Some(r3d) = &mut self.renderer_3d {
+            let mesh = TerrainMesh::build(&map.heights, W, H, W as f32, H as f32, 24.0, 0.33);
+            r3d.upload_mesh(&mesh);
+        }
+        Ok(())
+    }
+
+    /// Standalone helper to generate a civ planet RGBA texture (#109).
+    pub fn generate_civ_terrain(seed: u32, width: usize, height: usize) -> Vec<u8> {
+        let map = moc_terrain::TerrainMap::generate_civ_planet(seed, width, height);
+        map.rgba
     }
 
     fn get_terrain_height_at(&self, x: f32, z: f32) -> f32 {
