@@ -376,9 +376,9 @@ export class BridgeSource {
       };
     }
 
-    const blink = (blinkModel && blinkModel.trained)
+    const blink = blinkModel
       ? (rustBlinkFired || this.manualBlinkPending)
-      : (!!msg.blink || rustBlinkFired || this.manualBlinkPending);
+      : (!!msg.blink || this.manualBlinkPending);
     this.manualBlinkPending = false;
 
     const neutralProgress = this.rustImu
