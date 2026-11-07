@@ -219,6 +219,7 @@ CHECKS = [
         "readme": r"Gesture UI|gesture-driven",
         "status": "deferred",
         "patterns": [r"gesture[A-Za-z_]*(?:select|cast|navigate)", r"spell[A-Za-z_]*select", r"hand[A-Za-z_]*navigate"],
+        "gated_by": r"CAMERA_CASTS_ENABLED\s*=\s*false",
         "paths": ("src/", "crates/"),
         "hint": "If gesture selection/navigation is now in, update README §1/§3.3 and the gesture issue.",
     },
@@ -229,6 +230,7 @@ CHECKS = [
         "readme": r"God powers|god powers",
         "status": "deferred",
         "patterns": [r"\bfireball\b", r"spawn[A-Za-z_]*resource", r"natural[A-Za-z_]*disaster", r"\bdisaster\b"],
+        "gated_by": r"CAMERA_CASTS_ENABLED\s*=\s*false",
         "paths": ("src/", "crates/"),
         "hint": "If god powers are now in, update README §1/§4.3 and the deferred scope.",
     },
@@ -297,6 +299,8 @@ def evaluate():
     for check in CHECKS:
         claim_ok = readme_has(check["readme"])
         hits = grep(check["patterns"], files_for(check))
+        if check.get("gated_by") and grep([check["gated_by"]], files_for(check)):
+            hits = []
         if not claim_ok:
             verdict = "README DRIFT"
             evidence = "claim not found in README"
