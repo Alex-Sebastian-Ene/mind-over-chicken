@@ -342,8 +342,10 @@ impl Engine {
             );
 
             // Blit 320x180 low-res target to screen canvas with nearest-neighbor upscale
+            // The FBO's first row is the bottom of the image, so flip it on the way out.
             self.renderer.render_scene_texture(
                 &r3d.fbo_texture,
+                true,
                 0.0,
                 flash,
                 fade,

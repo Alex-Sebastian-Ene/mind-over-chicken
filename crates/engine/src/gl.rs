@@ -22,6 +22,7 @@ pub struct WebGlRenderer {
     pub u_flash: WebGlUniformLocation,
     pub u_fade: WebGlUniformLocation,
     pub u_shake: WebGlUniformLocation,
+    pub u_flip_y: WebGlUniformLocation,
     pub u_light_count: WebGlUniformLocation,
     pub u_lights: WebGlUniformLocation,
 }
@@ -31,10 +32,11 @@ attribute vec2 a_position;
 attribute vec2 a_texCoord;
 
 uniform vec2 u_shake;
+uniform float u_flipY; // 1.0 for render-target textures (row 0 = bottom), 0.0 for uploads
 varying vec2 v_texCoord;
 
 void main() {
-    v_texCoord = a_texCoord;
+    v_texCoord = vec2(a_texCoord.x, mix(a_texCoord.y, 1.0 - a_texCoord.y, u_flipY));
     gl_Position = vec4(a_position + u_shake, 0.0, 1.0);
 }
 "#;
@@ -181,6 +183,7 @@ impl WebGlRenderer {
         let u_flash = gl.get_uniform_location(&program, "u_flash").ok_or("u_flash uniform missing")?;
         let u_fade = gl.get_uniform_location(&program, "u_fade").ok_or("u_fade uniform missing")?;
         let u_shake = gl.get_uniform_location(&program, "u_shake").ok_or("u_shake uniform missing")?;
+        let u_flip_y = gl.get_uniform_location(&program, "u_flipY").ok_or("u_flipY uniform missing")?;
         let u_light_count = gl.get_uniform_location(&program, "u_light_count").ok_or("u_light_count missing")?;
         let u_lights = gl.get_uniform_location(&program, "u_lights").ok_or("u_lights missing")?;
 
@@ -195,6 +198,7 @@ impl WebGlRenderer {
             u_flash,
             u_fade,
             u_shake,
+            u_flip_y,
             u_light_count,
             u_lights,
         })
@@ -242,6 +246,7 @@ impl WebGlRenderer {
     ) {
         self.render_scene_texture(
             &self.texture,
+            false,
             night,
             flash,
             fade,
@@ -253,9 +258,12 @@ impl WebGlRenderer {
         );
     }
 
+    /// Blit `texture` to the canvas. `flip_y` is true for a render-target (FBO) texture, whose
+    /// first row is the bottom of the image; false for textures uploaded from pixels/canvas.
     pub fn render_scene_texture(
         &self,
         texture: &WebGlTexture,
+        flip_y: bool,
         night: f32,
         flash: f32,
         fade: f32,
@@ -286,6 +294,7 @@ impl WebGlRenderer {
         self.gl.uniform1f(Some(&self.u_flash), flash);
         self.gl.uniform1f(Some(&self.u_fade), fade);
         self.gl.uniform2f(Some(&self.u_shake), shake_x, shake_y);
+        self.gl.uniform1f(Some(&self.u_flip_y), if flip_y { 1.0 } else { 0.0 });
 
         let count = lights.len().min(16);
         self.gl.uniform1i(Some(&self.u_light_count), count as i32);
