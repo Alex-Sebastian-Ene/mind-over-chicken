@@ -177,7 +177,13 @@ export class Galaxy {
     this.time += dt;
     this.humanBrain = brain;
     this.recentBlinks = this.recentBlinks.filter((t) => this.time - t < 10);
-    const fx = brainEffects({ calm: brain.calm, focus: brain.focus, hrDelta: brain.hrDelta?.() ?? 0, blinksLast10s: this.recentBlinks.length });
+    const fx = brainEffects({
+      calm: brain.calm,
+      focus: brain.focus,
+      hrDelta: brain.hr ? (brain.hrDelta?.() ?? 0) : 0,
+      blinksLast10s: this.recentBlinks.length,
+      panic: brain.panic,
+    });
     this.fx = fx;
     this.sampleMind(playDt, brain, fx);
 
@@ -226,7 +232,10 @@ export class Galaxy {
       if (!ranked) return;
       this.planets.filter((p) => p.mindSlot).forEach((p, i) => this.revealQueue.push({ p, ch: ranked[i].ch }));
       this.revealT = 0;
-      this.note(null, `Your first ${SIM.MIND_SECONDS} seconds: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, ${m.blinks} blinks.`);
+      const pulseStr = (brain.hr && brain.hr > 0)
+        ? `pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, `
+        : (m.stress ? `tension ${Math.round(m.stress * 100)}%, ` : '');
+      this.note(null, `Your first ${SIM.MIND_SECONDS} seconds: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, ${pulseStr}${m.blinks} blinks.`);
       return;
     }
     // Staggered reveal so each world gets its moment.
@@ -262,7 +271,9 @@ export class Galaxy {
     p.effect = {
       calm: `Calm ${pct(fx.calm)} → growth ${signed(growth * 100, 1)}%/s`,
       focus: `Focus ${pct(fx.focus)} → research ×${research.toFixed(1)}`,
-      pulse: `Pulse ${signed(fx.hrDelta, 0)} bpm → goat index ${p.market.toFixed(0)}`,
+      pulse: (this.humanBrain?.hr && this.humanBrain.hr > 0)
+        ? `Pulse ${signed(fx.hrDelta, 0)} bpm → goat index ${p.market.toFixed(0)}`
+        : `Tension ${pct(fx.stress)} → goat index ${p.market.toFixed(0)}`,
       blink: `Blinks ${(fx.blinkRate * 10).toFixed(0)}/10s → ${p.storms} storms`,
       mixed: `Growth ${signed(growth * 100, 1)}%/s · research ×${research.toFixed(1)}`,
     }[p.channel || 'mixed'];

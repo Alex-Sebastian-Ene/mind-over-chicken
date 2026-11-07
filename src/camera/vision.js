@@ -3,6 +3,10 @@
 // Only downloads happen here: the runtime from jsDelivr (pinned version) and two model files
 // from Google's model bucket. Inference runs in this tab (WebGL, or WebAssembly on the CPU);
 // no camera frame, landmark or score is ever sent anywhere.
+//
+// camera debug (#67): this is now the main-thread fallback. By default the same tasks run in
+// module Web Workers (vision.worker.js, started by engine.js), which import OPTIONS,
+// withDelegate and quietInfoLogs from here so both paths load identical models.
 
 const VERSION = '0.10.14';
 const CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VERSION}`;
@@ -13,7 +17,7 @@ export const VISION_URLS = {
   face: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
 };
 
-const OPTIONS = {
+export const OPTIONS = {
   gesture: { baseOptions: { modelAssetPath: VISION_URLS.gesture }, runningMode: 'VIDEO', numHands: 1 },
   face: { baseOptions: { modelAssetPath: VISION_URLS.face }, runningMode: 'VIDEO', numFaces: 1, outputFaceBlendshapes: true },
 };
@@ -30,7 +34,7 @@ export function loadVision(onStatus = () => {}, { hands = true } = {}) {
 // MediaPipe's WebAssembly prints TensorFlow Lite INFO lines on stderr, which the browser shows as
 // console errors ("INFO: Created TensorFlow Lite XNNPACK delegate for CPU."). Re-route only lines
 // starting with "INFO: " to console.info; every real error still goes to console.error.
-function quietInfoLogs() {
+export function quietInfoLogs() {
   if (console.error.camQuiet) return;
   const error = console.error;
   const quiet = function (...args) {
@@ -85,7 +89,7 @@ async function load(onStatus, hands) {
   return vision;
 }
 
-function withDelegate(options, delegate) {
+export function withDelegate(options, delegate) {
   return { ...options, baseOptions: { ...options.baseOptions, delegate } };
 }
 
