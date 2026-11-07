@@ -126,7 +126,7 @@ Tracked in #55.
 
 ## 7. Current build status
 
-The Rust/Wasm engine and WebGL renderer are landing under #17; the JavaScript game shell remains playable while the port reaches parity. The current build runs one hand-played civilization on the home world plus three autonomous brain-seeded worlds, one civilization each — not four civilizations sharing one circular world. Camera face mood and hand-gesture casts (god powers) are active; `CAMERA_CASTS_ENABLED` can switch the casts off. It uses accelerometer tilt without gyroscope fusion, and trains a hidden calm/focus classifier instead of producing civilization traits. Treat the build as a reference implementation, not as the specification.
+The Rust/Wasm engine and WebGL renderer are landing under #17; the JavaScript game shell remains playable while the port reaches parity. The current build has three entry points: the five-scene campaign, the galaxy sandbox (home world plus three brain-seeded worlds), and the four-civilisation sandbox on one planet (`src/civ/`). The four-civ sandbox implements the canonical world model; the campaign is still the default button. Camera face mood and hand-gesture casts are active; gyroscope fusion and the configurable calibration seed are in. Treat the build as a reference implementation, not as the specification.
 
 ---
 
