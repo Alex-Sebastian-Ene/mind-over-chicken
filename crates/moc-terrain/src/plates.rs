@@ -187,7 +187,7 @@ pub fn build(map_w: usize, map_h: usize, gd: Dims, plan: &ContinentPlan, plates:
             let gx = rng.range(0.0, gd.w as f32);
             let gy = rng.range(0.0, gd.h as f32);
             let i = (gy as usize).min(gd.h - 1) * gd.w + (gx as usize).min(gd.w - 1);
-            if !allowed(i) || lat_of(gy as usize) > plan.cold_limit * 0.8 {
+            if !allowed(i) || lat_of(gy as usize) > plan.cold_limit * 0.9 {
                 continue;
             }
             let mut score = f32::INFINITY;
@@ -279,7 +279,7 @@ pub fn build(map_w: usize, map_h: usize, gd: Dims, plan: &ContinentPlan, plates:
                 let aniso = (u * u / elong + v * v * elong).sqrt();
                 let (_, jy) = gd.xy(j);
                 let lat = lat_of(jy as usize);
-                let lat_pen = 1.0 + 30.0 * (lat - plan.cold_limit * 0.6).max(0.0).powi(2);
+                let lat_pen = 1.0 + 30.0 * (lat - plan.cold_limit * 0.8).max(0.0).powi(2);
                 let cn = cost_noise[j];
                 let rough_mul = 1.0 + plan.roughness * 5.0 * cn * cn;
                 let nc = cost + step * aniso * rough_mul * lat_pen;

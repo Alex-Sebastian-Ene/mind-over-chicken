@@ -128,6 +128,8 @@ pub struct TerrainParams {
     pub min_island: f32,
     /// Lay out the main game's campaign (village, pad, cave, harbours) on this map.
     pub campaign: bool,
+    /// Continents stay out of the middle of the cold belt beyond this coldness (0..1).
+    pub cold_limit: f32,
 }
 
 impl TerrainParams {
@@ -160,6 +162,7 @@ impl TerrainParams {
             bands: Bands::default(),
             min_island: 0.005,
             campaign: false,
+            cold_limit: 0.86,
         }
     }
 
@@ -176,13 +179,17 @@ impl TerrainParams {
         let k = ((w * h) as f32 / (320.0 * 180.0)).sqrt();
         let mut r = Rng::stream(seed, 0x40E);
         let mut p = TerrainParams::base(w, h, seed);
-        p.continents = 5 + (r.f32() < 0.4) as usize;
-        p.land_fraction = 0.40;
-        p.size_spread = 0.35;
+        // Six or seven planned, so at least five major ones survive the crowding (#129).
+        p.continents = 6 + (r.f32() < 0.4) as usize;
+        p.land_fraction = r.range(0.34, 0.44);
+        p.size_spread = 0.2;
         let m = 14.0 * k;
-        p.anchor = Some(Anchor { x: w as f32 * r.range(0.36, 0.5), y: h as f32 * r.range(0.45, 0.55), share: 2.0, bounds: Some([m, m * 1.1, w as f32 - m, h as f32 - m * 1.1]) });
+        // Home lands anywhere away from the seams, so every run's map is laid out differently.
+        p.anchor = Some(Anchor { x: w as f32 * r.range(0.2, 0.8), y: h as f32 * r.range(0.3, 0.7), share: r.range(1.3, 1.9), bounds: Some([m, m * 1.1, w as f32 - m, h as f32 - m * 1.1]) });
         p.gap = 8.0 * k;
-        p.seam_margin = 8.0 * k;
+        p.seam_margin = 5.0 * k;
+        // A mild world: land may reach well into the cool belt along the top and bottom.
+        p.cold_limit = 0.97;
         p.islands = 0.4;
         p.plates = (9.0 * k * k.sqrt()).round() as usize;
         p.climate = ClimateParams { warm: 25.0, cold: -5.0, bands: 1.0, moisture: 1.0, lapse: 30.0 };
@@ -192,6 +199,19 @@ impl TerrainParams {
         p.sim_cell = 2;
         p.campaign = true;
         p
+    }
+
+    /// A planet biome's colours and climate (temperate, desert, ice, jungle, alien).
+    pub fn set_biome(&mut self, biome: &str) {
+        self.palette = BiomePalette::named(biome);
+        let base = ClimateParams { bands: self.climate.bands, ..ClimateParams::default() };
+        self.climate = match biome {
+            "desert" => ClimateParams { warm: 34.0, cold: -8.0, moisture: 0.45, ..base },
+            "ice" => ClimateParams { warm: 6.0, cold: -40.0, moisture: 0.8, ..base },
+            "jungle" => ClimateParams { warm: 32.0, cold: -4.0, moisture: 1.5, ..base },
+            "alien" => ClimateParams { warm: self.climate.warm, cold: self.climate.cold, ..base },
+            _ => self.climate.clone(),
+        };
     }
 
     /// A galaxy planet's surface: 640×360. Continent 0 is the capital's, kept inside the
@@ -207,13 +227,7 @@ impl TerrainParams {
         p.gap = 10.0;
         p.islands = 0.6;
         p.plates = 14;
-        p.palette = BiomePalette::named(biome);
-        p.climate = match biome {
-            "desert" => ClimateParams { warm: 34.0, cold: -8.0, moisture: 0.45, ..ClimateParams::default() },
-            "ice" => ClimateParams { warm: 6.0, cold: -40.0, moisture: 0.8, ..ClimateParams::default() },
-            "jungle" => ClimateParams { warm: 32.0, cold: -4.0, moisture: 1.5, ..ClimateParams::default() },
-            _ => ClimateParams::default(),
-        };
+        p.set_biome(biome);
         p.max_sites = 40;
         p.sim_cell = 2;
         p
@@ -683,7 +697,7 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
         anchor: p.anchor.as_ref().map(|a| (a.x, a.y, a.bounds)),
         gap,
         seam_margin: p.seam_margin,
-        cold_limit: 0.86,
+        cold_limit: p.cold_limit,
         bands: p.climate.bands,
         roughness: p.roughness,
     };
@@ -1153,7 +1167,7 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
     clock.lap("paint");
 
     // ---- 10. continents and sites ----
-    let major_min = (0.5 * areas.iter().cloned().fold(f32::INFINITY, f32::min)) as usize;
+    let major_min = (0.35 * areas.iter().cloned().fold(f32::INFINITY, f32::min)) as usize;
     let (cont_id, continents) = sites::continents(full, &biome_map, major_min);
     let fresh_s: Vec<bool> = (0..n).map(|i| river_s[i] || lake_s[i]).collect();
     let fresh_d: Vec<f32> = grid::distance(sd, &fresh_s).iter().map(|v| v * csf).collect();

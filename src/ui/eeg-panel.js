@@ -1,6 +1,6 @@
 // EEG & Biosensing Side Panel: connect/disconnect Muse 2 bridge at any time,
 // inspect electrode contact (TP9, AF7, AF8, TP10), 4-channel oscilloscope,
-// 5-band frequency spectrum, mental indices, PPG cardiac pulse waveform + BPM,
+// 5-band frequency spectrum, mental state (calm, focus, stress: EEG agitation or face anger),
 // and 3-axis Accelerometer & Gyroscope waveforms + head pose calibration & cursor pad.
 
 const BANDS = [
@@ -151,11 +151,7 @@ const TEMPLATE = `
   </section>
 
   <section class="eeg-sec">
-    <div class="eeg-sec-head">
-      <h3>PPG Optical Cardiac Monitor</h3>
-      <strong class="eeg-bpm-readout" data-eeg-hr>❤️ -- BPM</strong>
-    </div>
-    <canvas class="eeg-ppg-scope" width="356" height="50" aria-label="PPG optical cardiac pulse wave"></canvas>
+    <h3>Mental State</h3>
     <div class="eeg-bands">
       <div class="eeg-band-row" data-metric="calm">
         <span class="eeg-band-lbl">Calm (Alpha/Beta)</span>
@@ -167,9 +163,14 @@ const TEMPLATE = `
         <span class="eeg-bar"><span style="background:var(--focus)"></span></span>
         <span class="eeg-band-val">--</span>
       </div>
+      <div class="eeg-band-row" data-metric="stress">
+        <span class="eeg-band-lbl">Stress (agitation, anger)</span>
+        <span class="eeg-bar"><span style="background:var(--alarm)"></span></span>
+        <span class="eeg-band-val">--</span>
+      </div>
     </div>
     <div class="eeg-vitals">
-      <div><span>❤️ Resting Δ</span><b data-eeg-hr-delta>--</b></div>
+      <div><span>😠 Face anger</span><b data-eeg-anger>--</b></div>
       <div><span>⚡ Blinks</span><b data-eeg-blinks>--</b></div>
       <div><span>🎯 Motion</span><b data-eeg-motion>--</b></div>
     </div>
@@ -222,7 +223,6 @@ export class EegPanel {
       invYaw: $('[data-imu-inv-yaw]'),
       invPitch: $('[data-imu-inv-pitch]'),
       scope: $('.eeg-scope'),
-      ppgScope: $('.eeg-ppg-scope'),
       accelScope: $('[data-scope-accel]'),
       gyroScope: $('[data-scope-gyro]'),
       contacts: Object.fromEntries(CHANNELS.map((c) => [c.key, $(`[data-contact="${c.key}"]`)])),
@@ -238,8 +238,11 @@ export class EegPanel {
         fill: $('[data-metric="focus"] .eeg-bar > span'),
         val: $('[data-metric="focus"] .eeg-band-val'),
       },
-      hr: $('[data-eeg-hr]'),
-      hrDelta: $('[data-eeg-hr-delta]'),
+      stress: {
+        fill: $('[data-metric="stress"] .eeg-bar > span'),
+        val: $('[data-metric="stress"] .eeg-band-val'),
+      },
+      anger: $('[data-eeg-anger]'),
       blinks: $('[data-eeg-blinks]'),
       motion: $('[data-eeg-motion]'),
       accelText: $('[data-imu-accel]'),
@@ -250,7 +253,6 @@ export class EegPanel {
     };
     this.padCtx = this.ui.pad.getContext('2d');
     this.scopeCtx = this.ui.scope.getContext('2d');
-    this.ppgCtx = this.ui.ppgScope.getContext('2d');
     this.accelCtx = this.ui.accelScope.getContext('2d');
     this.gyroCtx = this.ui.gyroScope.getContext('2d');
     this.connecting = false;
@@ -681,14 +683,14 @@ export class EegPanel {
 
       const dx = dotX * w;
       const dy = dotY * h;
-      const pulse = 1 + 0.14 * Math.sin(now * 0.012);
-      const grad = ctx.createRadialGradient(dx, dy, 4, dx, dy, 42 * pulse);
+      const glow = 1 + 0.14 * Math.sin(now * 0.012);
+      const grad = ctx.createRadialGradient(dx, dy, 4, dx, dy, 42 * glow);
       grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
       grad.addColorStop(0.45, isHold ? 'rgba(126, 224, 138, 0.88)' : 'rgba(255, 230, 150, 0.88)');
       grad.addColorStop(1, 'rgba(255, 207, 74, 0)');
       ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.arc(dx, dy, 42 * pulse, 0, Math.PI * 2);
+      ctx.arc(dx, dy, 42 * glow, 0, Math.PI * 2);
       ctx.fill();
 
       if (isHold) {
@@ -1068,8 +1070,9 @@ export class EegPanel {
     this.ui.calm.val.textContent = '--';
     this.ui.focus.fill.style.width = '0%';
     this.ui.focus.val.textContent = '--';
-    this.ui.hr.textContent = '❤️ -- BPM';
-    this.ui.hrDelta.textContent = '--';
+    this.ui.stress.fill.style.width = '0%';
+    this.ui.stress.val.textContent = '--';
+    this.ui.anger.textContent = '--';
     this.ui.blinks.textContent = '--';
     this.ui.motion.textContent = '--';
     this.ui.accelText.textContent = '--';
@@ -1079,7 +1082,6 @@ export class EegPanel {
     this.ui.yaw.textContent = '--°';
     this.drawPad(null, false);
     this.drawScope(null, reasonText);
-    this.drawPpg(null, 'No PPG optical signal');
     this.drawImu(this.accelCtx, this.ui.accelScope, null, 1.5, 'Accel (g) — waiting');
     this.drawImu(this.gyroCtx, this.ui.gyroScope, null, 90, 'Gyro (°/s) — waiting');
   }
@@ -1121,7 +1123,7 @@ export class EegPanel {
       this.ui.dot.dataset.ok = wsConnected ? 'wait' : '0';
       this.ui.state.textContent = src.status || 'Waiting for Muse 2…';
       if (/not found|Waiting for headset/i.test(src.status || '')) {
-        this.ui.msg.textContent = 'Tip: Do NOT use pairing mode (flashing lights) or pair in OS Bluetooth. Turn Muse 2 off, then press power once so lights softly pulse.';
+        this.ui.msg.textContent = 'Tip: Do NOT use pairing mode (flashing lights) or pair in OS Bluetooth. Turn Muse 2 off, then press power once so its lights fade softly in and out.';
       }
       this.clearDisplays(src.status || 'Waiting for Muse 2 stream…');
       return;
@@ -1206,20 +1208,20 @@ export class EegPanel {
       this.ui.bands[band.key].val.textContent = pct;
     }
 
-    // PPG Cardiac + Mental state
+    // Mental state: calm, focus and stress (brain.stress: EEG agitation or face anger)
     const calmPct = `${Math.round((b.calm || 0) * 100)}%`;
     const focusPct = `${Math.round((b.focus || 0) * 100)}%`;
+    const stressPct = `${Math.round((b.stress ?? 0) * 100)}%`;
     this.ui.calm.fill.style.width = calmPct;
     this.ui.calm.val.textContent = calmPct;
     this.ui.focus.fill.style.width = focusPct;
     this.ui.focus.val.textContent = focusPct;
+    this.ui.stress.fill.style.width = stressPct;
+    this.ui.stress.val.textContent = stressPct;
 
-    this.ui.hr.textContent = b.hr ? `❤️ ${Math.round(b.hr)} BPM` : '❤️ calibrating…';
-    const d = b.hrDelta ? b.hrDelta() : 0;
-    this.ui.hrDelta.textContent = b.hr && b.restHr ? `${d >= 0 ? '+' : ''}${Math.round(d)} bpm` : '--';
+    this.ui.anger.textContent = `${Math.round((b.anger || 0) * 100)}%`;
     this.ui.blinks.textContent = `${b.stats?.blinks ?? 0}`;
     this.ui.motion.textContent = `${Math.round((b.motion || 0) * 100)}%`;
-    this.drawPpg(b.ppgWave, null);
 
     // IMU Accelerometer & Gyroscope
     if (Array.isArray(b.accel) && b.accel.length === 3) {
@@ -1324,42 +1326,6 @@ export class EegPanel {
       }
       ctx.stroke();
     });
-  }
-
-  drawPpg(ppgWave, emptyMessage) {
-    const ctx = this.ppgCtx;
-    const w = this.ui.ppgScope.width;
-    const h = this.ui.ppgScope.height;
-    ctx.clearRect(0, 0, w, h);
-
-    const yMid = h / 2;
-    ctx.strokeStyle = 'rgba(44, 49, 82, 0.55)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, yMid);
-    ctx.lineTo(w, yMid);
-    ctx.stroke();
-
-    if (!ppgWave || ppgWave.length < 2 || emptyMessage) {
-      ctx.fillStyle = 'rgba(163, 166, 196, 0.7)';
-      ctx.font = '11px "Atkinson Hyperlegible", system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(emptyMessage || 'Waiting for optical PPG pulse…', w / 2, yMid + 4);
-      return;
-    }
-
-    ctx.strokeStyle = '#ff5a72';
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    const n = ppgWave.length;
-    for (let i = 0; i < n; i++) {
-      const x = (i / (180 - 1)) * w;
-      const clamped = Math.max(-1.2, Math.min(1.2, ppgWave[i]));
-      const y = yMid - (clamped / 1.2) * (h * 0.42);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
   }
 
   drawImu(ctx, canvas, history, scale, label) {

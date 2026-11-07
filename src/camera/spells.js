@@ -1,16 +1,24 @@
-// camera (#33): the seven hand casts. One row per canned MediaPipe gesture.
-// `gesture` is the Gesture Recognizer's category name, `key` the keyboard fallback (1–7),
-// `cooldown` is per spell, in milliseconds. `aimed` spells land where the reticle is; releasing a
-// pinch re-casts the last aimed spell at the precisely placed reticle (camera debug, #67).
+// camera (#33, #116, #122): the three core hand moves replace the old seven-cast bar.
+//   1. Pinch       — grab / pick up a living entity under the head cursor (or confirm selection)
+//   2. Open Palm   — calm / peace / bless / bounty
+//   3. Closed Fist — strike / lightning / fireball at the head reticle
 //
-// Hand-gesture casts (god powers) are in scope: decided by Alex on #55 (README §1/§4.3).
-// Gesture-driven UI navigation is still deferred. Set this to false to hide the hand model
-// and the casts again; face mood keeps working either way.
+// Legacy spell IDs remain in SPELL_BY_ID and ADVANCED_SPELLS so scenes and ?advanced_casts=1
+// continue to resolve without breaking.
 export const CAMERA_CASTS_ENABLED = true;
 
 export const SPELLS = [
+  { id: 'pinch', key: 1, gesture: 'Pinch', glyph: '🤏', name: 'Grab', cooldown: 400,
+    hint: 'Pinch thumb and index: pick up a living creature under your head cursor, move your head, release to drop.' },
+  { id: 'palm', aimed: true, key: 2, gesture: 'Open_Palm', glyph: '🖐️', name: 'Calm', cooldown: 5000,
+    hint: 'Open palm: calm fear, broker peace and bless the land.' },
+  { id: 'fist', aimed: true, key: 3, gesture: 'Closed_Fist', glyph: '✊', name: 'Strike', cooldown: 1500,
+    hint: 'Closed fist: strike lightning or a fireball at your head cursor.' },
+];
+
+export const ADVANCED_SPELLS = [
   { id: 'point', key: 1, gesture: 'Pointing_Up', glyph: '☝️', name: 'Aim', cooldown: 0,
-    hint: 'Point up: your index fingertip moves the reticle. Key 1 jumps to the next landmark.' },
+    hint: 'Legacy aim: jump to the next landmark.' },
   { id: 'fireball', aimed: true, key: 2, gesture: 'Closed_Fist', glyph: '✊', name: 'Fireball', cooldown: 1500,
     hint: 'Closed fist: lightning strikes the reticle.' },
   { id: 'spawn', aimed: true, key: 3, gesture: 'Open_Palm', glyph: '🖐️', name: 'Bounty', cooldown: 6000,
@@ -25,11 +33,15 @@ export const SPELLS = [
     hint: 'I-love-you: ends strikes, riots and panics.' },
 ];
 
-export const SPELL_BY_ID = Object.fromEntries(SPELLS.map((s) => [s.id, s]));
+export const SPELL_BY_ID = Object.fromEntries([
+  ...ADVANCED_SPELLS.map((s) => [s.id, s]),
+  ...SPELLS.map((s) => [s.id, s]),
+]);
 
 // Short readable names for the gesture readout.
 export const GESTURE_LABEL = {
   None: 'no gesture',
+  Pinch: 'pinch',
   Pointing_Up: 'pointing',
   Closed_Fist: 'fist',
   Open_Palm: 'open palm',
@@ -39,8 +51,10 @@ export const GESTURE_LABEL = {
   ILoveYou: 'I-love-you',
 };
 
-// Digit1..Digit7 and Numpad1..Numpad7 map to the spell with that key.
-export function spellForKeyCode(code) {
-  const m = /^(?:Digit|Numpad)([1-7])$/.exec(code || '');
-  return m ? SPELLS.find((s) => s.key === Number(m[1])) || null : null;
+// Digit1..Digit3 and Numpad1..Numpad3 map to the three core moves.
+export function spellForKeyCode(code, spells = SPELLS) {
+  const m = /^(?:Digit|Numpad)([1-9])$/.exec(code || '');
+  if (!m) return null;
+  const k = Number(m[1]);
+  return spells.find((s) => s.key === k) || null;
 }

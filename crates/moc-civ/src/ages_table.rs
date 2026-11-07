@@ -3,7 +3,7 @@
 #![allow(clippy::all)]
 
 /// FNV-1a of data/ages.json (carriage returns dropped) when this table was generated.
-pub const SOURCE_FNV: u64 = 0x56fe54f89515dedb;
+pub const SOURCE_FNV: u64 = 0xf570fb985e85b156;
 
 /// The simulation metrics of `data/ages.json` (`metrics`), in file order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -15,7 +15,7 @@ pub enum Metric {
     Settlements,
     /// food stock divided by daily consumption
     FoodDays,
-    /// 0-1; falls with hunger, overcrowding, inequality, war losses, the player's anger and pulse
+    /// 0-1; falls with hunger, overcrowding, inequality, war losses, the player's anger and stress
     Stability,
     /// share of the planet's land the civilisation owns, 0-1
     Territory,
@@ -332,7 +332,7 @@ pub static AGES: [AgeDef; 20] = [
         buildings: &[Building::Hut],
         systems: &["shelter", "families", "night_and_sleep"],
         crises: &["cold_snap"],
-        brain: "Calm warms the hearth; a racing pulse makes the night colder.",
+        brain: "Calm warms the hearth; stress makes the night colder.",
         weapon: Weapon { name: "clubs and torches", power: 1.2, range: 1.0 },
     },
     AgeDef {
@@ -358,7 +358,7 @@ pub static AGES: [AgeDef; 20] = [
         buildings: &[Building::Field, Building::GoatPen],
         systems: &["seasons", "harvest", "goats"],
         crises: &["drought", "locusts"],
-        brain: "Calm brings rain; a racing pulse brings drought.",
+        brain: "Calm brings rain; stress brings drought.",
         weapon: Weapon { name: "slings", power: 1.8, range: 4.0 },
     },
     AgeDef {
@@ -384,7 +384,7 @@ pub static AGES: [AgeDef; 20] = [
         buildings: &[Building::Market, Building::Dock],
         systems: &["trade_between_civs", "goat_currency"],
         crises: &["bandits"],
-        brain: "Your pulse tips first contact toward trade (steady) or raids (racing).",
+        brain: "Your stress tips first contact toward trade (calm) or raids (stressed).",
         weapon: Weapon { name: "caravan guards", power: 2.4, range: 2.0 },
     },
     AgeDef {
@@ -501,7 +501,7 @@ pub static AGES: [AgeDef; 20] = [
         buildings: &[Building::Factory, Building::Railway],
         systems: &["goat_exchange", "strikes", "smog"],
         crises: &["market_crash", "general_strike"],
-        brain: "Your pulse drives market volatility; calm brings it back.",
+        brain: "Your stress drives market volatility; calm brings it back.",
         weapon: Weapon { name: "rifles", power: 10.0, range: 14.0 },
     },
     AgeDef {
@@ -527,7 +527,7 @@ pub static AGES: [AgeDef; 20] = [
         buildings: &[Building::PowerPlant, Building::StreetLights],
         systems: &["cities", "night_lights", "alliances"],
         crises: &["blackout", "world_war"],
-        brain: "Focus keeps the grid stable; a racing pulse risks blackouts.",
+        brain: "Focus keeps the grid stable; anger risks blackouts.",
         weapon: Weapon { name: "artillery", power: 13.0, range: 24.0 },
     },
     AgeDef {
@@ -540,7 +540,7 @@ pub static AGES: [AgeDef; 20] = [
         buildings: &[Building::Tower, Building::DataCentre],
         systems: &["networks", "instant_ideas", "misinformation"],
         crises: &["panic", "cyber_war"],
-        brain: "Focus spreads truth; a racing pulse spreads panic.",
+        brain: "Focus spreads truth; anger spreads panic.",
         weapon: Weapon { name: "drones", power: 15.0, range: 30.0 },
     },
     AgeDef {
@@ -553,7 +553,7 @@ pub static AGES: [AgeDef; 20] = [
         buildings: &[Building::LaunchPad, Building::Satellite],
         systems: &["rocket_project"],
         crises: &["launch_failure"],
-        brain: "The 10-second countdown: hold focus, keep your pulse low.",
+        brain: "The 10-second countdown: hold focus. Before it, stress makes engineers drop parts.",
         weapon: Weapon { name: "satellite strikes", power: 18.0, range: 60.0 },
     },
     AgeDef {

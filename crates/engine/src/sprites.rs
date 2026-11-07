@@ -157,34 +157,53 @@ pub fn draw_person(
     hair: (u8, u8, u8),
 ) {
     if pose == 3 {
-        // dead
-        fill_rect(buf, x - 2, y - 1, 3, 1, shirt.0, shirt.1, shirt.2, 255);
-        put_pixel(buf, x + 1, y - 1, skin.0, skin.1, skin.2, 255);
+        // Fallen smitten body on the ground with charred clothing
+        fill_rect(buf, x - 3, y - 1, 7, 2, 0x1e, 0x14, 0x0d, 255);
+        fill_rect(buf, x - 2, y - 1, 4, 1, shirt.0, shirt.1, shirt.2, 255);
+        fill_rect(buf, x + 2, y - 1, 2, 1, skin.0, skin.1, skin.2, 255);
+        put_pixel(buf, x + 3, y - 2, hair.0, hair.1, hair.2, 255);
+        put_pixel(buf, x - 3, y - 2, 0x33, 0x33, 0x33, 255);
         return;
     }
     let bob = if pose == 1 { (frame % 2) as i32 } else { 0 };
     let sy = y - bob;
-    fill_rect(buf, x - 1, y, 3, 1, 0, 0, 0, 64); // shadow
+    fill_rect(buf, x - 2, y, 5, 1, 0, 0, 0, 64); // shadow
 
+    // Legs with boots & walk cycle
+    let leg_col = (0x2d, 0x21, 0x18);
     if pose == 0 && (frame % 2 == 1) {
-        put_pixel(buf, x - 1, sy - 1, 0x3a, 0x2b, 0x20, 255);
-        put_pixel(buf, x + 1, sy - 1, 0x3a, 0x2b, 0x20, 255);
+        put_pixel(buf, x - 1, sy - 1, leg_col.0, leg_col.1, leg_col.2, 255);
+        put_pixel(buf, x + 1, sy - 1, leg_col.0, leg_col.1, leg_col.2, 255);
+        put_pixel(buf, x - 1, sy - 2, 0x4a, 0x34, 0x24, 255);
+        put_pixel(buf, x + 1, sy - 2, 0x4a, 0x34, 0x24, 255);
     } else {
-        put_pixel(buf, x, sy - 1, 0x3a, 0x2b, 0x20, 255);
+        put_pixel(buf, x, sy - 1, leg_col.0, leg_col.1, leg_col.2, 255);
+        fill_rect(buf, x - 1, sy - 2, 3, 1, 0x4a, 0x34, 0x24, 255);
     }
 
-    fill_rect(buf, x, sy - 3, 1, 2, shirt.0, shirt.1, shirt.2, 255);
+    // Torso (3px wide with collar & belt for depth)
+    fill_rect(buf, x - 1, sy - 4, 3, 2, shirt.0, shirt.1, shirt.2, 255);
+    fill_rect(buf, x - 1, sy - 2, 3, 1, 0x2e, 0x1d, 0x13, 255); // belt
+
+    // Arms with skin hands
     if pose == 1 || pose == 2 {
         let flick = if pose == 2 && frame % 2 == 1 { -1 } else { 0 };
-        put_pixel(buf, x - 1, sy - 4 + flick, skin.0, skin.1, skin.2, 255);
-        put_pixel(buf, x + 1, sy - 4 - flick, skin.0, skin.1, skin.2, 255);
+        put_pixel(buf, x - 2, sy - 5 + flick, shirt.0, shirt.1, shirt.2, 255);
+        put_pixel(buf, x + 2, sy - 5 - flick, shirt.0, shirt.1, shirt.2, 255);
+        put_pixel(buf, x - 2, sy - 6 + flick, skin.0, skin.1, skin.2, 255);
+        put_pixel(buf, x + 2, sy - 6 - flick, skin.0, skin.1, skin.2, 255);
     } else {
-        put_pixel(buf, x - 1, sy - 3, shirt.0, shirt.1, shirt.2, 255);
-        put_pixel(buf, x + 1, sy - 3, shirt.0, shirt.1, shirt.2, 255);
+        fill_rect(buf, x - 2, sy - 4, 1, 2, shirt.0, shirt.1, shirt.2, 255);
+        fill_rect(buf, x + 2, sy - 4, 1, 2, shirt.0, shirt.1, shirt.2, 255);
+        put_pixel(buf, x - 2, sy - 2, skin.0, skin.1, skin.2, 255);
+        put_pixel(buf, x + 2, sy - 2, skin.0, skin.1, skin.2, 255);
     }
 
-    put_pixel(buf, x, sy - 4, skin.0, skin.1, skin.2, 255);
-    put_pixel(buf, x, sy - 5, hair.0, hair.1, hair.2, 255);
+    // Head, face, eye, and hair crown
+    fill_rect(buf, x - 1, sy - 5, 3, 1, skin.0, skin.1, skin.2, 255); // face
+    put_pixel(buf, x + 1, sy - 5, 0x1e, 0x10, 0x08, 255); // eye
+    fill_rect(buf, x - 1, sy - 6, 3, 1, hair.0, hair.1, hair.2, 255); // hair crown
+    put_pixel(buf, x, sy - 7, hair.0, hair.1, hair.2, 255); // hair tuft
 }
 
 pub fn draw_mammoth(buf: &mut [u8], x: i32, y: i32, facing: i32, frame: u32, dead: bool) {
@@ -230,19 +249,31 @@ pub fn draw_chicken(buf: &mut [u8], x: i32, y: i32, facing: i32, frame: u32, hal
     }
 }
 
+pub fn draw_unlit_wood(buf: &mut [u8], x: i32, y: i32) {
+    fill_rect(buf, x - 4, y, 9, 1, 0x50, 0x50, 0x50, 255); // hearth stones
+    fill_rect(buf, x - 3, y + 1, 7, 1, 0x65, 0x65, 0x65, 255);
+    fill_rect(buf, x - 3, y - 1, 7, 1, 0x44, 0x44, 0x44, 255);
+    fill_rect(buf, x - 3, y, 7, 1, 0x5a, 0x3a, 0x22, 255); // bottom horizontal log
+    put_pixel(buf, x - 3, y, 0x8d, 0x5b, 0x35, 255); // cut wood ends
+    put_pixel(buf, x + 3, y, 0x8d, 0x5b, 0x35, 255);
+    fill_rect(buf, x - 2, y - 1, 5, 1, 0x6e, 0x4a, 0x2c, 255); // diagonal crossed log
+    fill_rect(buf, x - 1, y - 2, 3, 1, 0x7a, 0x52, 0x32, 255); // top crossed log
+    put_pixel(buf, x, y - 3, 0x9c, 0x68, 0x3e, 255); // apex stick tip
+    put_pixel(buf, x - 1, y - 1, 0x3e, 0x24, 0x13, 255); // notch shadows
+    put_pixel(buf, x + 1, y - 1, 0x3e, 0x24, 0x13, 255);
+}
+
 pub fn draw_fire(buf: &mut [u8], x: i32, y: i32, heat: f32, t: f32) {
+    if heat <= 0.0 {
+        draw_unlit_wood(buf, x, y);
+        return;
+    }
     fill_rect(buf, x - 2, y - 1, 5, 1, 0x5a, 0x3a, 0x22, 255);
     fill_rect(buf, x - 1, y - 2, 3, 1, 0x6e, 0x4a, 0x2c, 255);
     put_pixel(buf, x - 3, y, 0x6b, 0x6b, 0x6b, 255);
     put_pixel(buf, x + 3, y, 0x6b, 0x6b, 0x6b, 255);
     fill_rect(buf, x - 2, y + 1, 5, 1, 0x6b, 0x6b, 0x6b, 255);
 
-    if heat <= 0.0 {
-        if (t * 3.0).sin() > 0.6 {
-            put_pixel(buf, x, y - 3, 0x9a, 0x9a, 0x9a, 255);
-        }
-        return;
-    }
     let n = (heat * 6.0).ceil() as i32;
     for i in 0..n {
         let fx = x - 1 + ((i * 7 + (t * 12.0) as i32) % 3);
@@ -350,6 +381,92 @@ pub fn draw_shadow(buf: &mut [u8], cx: i32, cy: i32, rx: i32, ry: i32) {
     }
 }
 
+#[allow(dead_code)]
+pub fn draw_gantry(buf: &mut [u8], x: i32, y: i32, h: i32) {
+    for i in 0..h {
+        let (r, g, b) = if i % 3 == 0 { (0xc9, 0xa2, 0x27) } else { (0x8c, 0x7a, 0x3c) };
+        put_pixel(buf, x, y - i, r, g, b, 255);
+    }
+    let mut i = 0;
+    while i < h {
+        fill_rect(buf, x - 1, y - i, 3, 1, 0x8c, 0x7a, 0x3c, 255);
+        i += 4;
+    }
+    put_pixel(buf, x - 1, y - h, 0xff, 0x5a, 0x5a, 255);
+}
+
+#[allow(dead_code)]
+pub fn draw_boat(buf: &mut [u8], x: i32, y: i32, facing: i32, is_raft: bool, sail_color: Option<(u8, u8, u8)>) {
+    let f = if facing >= 0 { 1 } else { -1 };
+    if is_raft {
+        fill_rect(buf, x - 2, y, 5, 1, 0x7a, 0x55, 0x30, 255);
+        fill_rect(buf, x - 2, y - 1, 5, 1, 0x9a, 0x70, 0x40, 255);
+        fill_rect(buf, x, y - 4, 1, 3, 0x6b, 0x4a, 0x2c, 255);
+        fill_rect(buf, x + f, y - 4, 1, 2, 0xe8, 0xdc, 0xc0, 255);
+    } else {
+        fill_rect(buf, x - 3, y, 7, 1, 0x5a, 0x3a, 0x22, 255);
+        fill_rect(buf, x - 2, y + 1, 5, 1, 0x4a, 0x2f, 0x1b, 255);
+        let prow_x = x - 3 + if f > 0 { 6 } else { 0 };
+        put_pixel(buf, prow_x, y - 1, 0x5a, 0x3a, 0x22, 255);
+        fill_rect(buf, x, y - 6, 1, 6, 0x4a, 0x3a, 0x2a, 255);
+        let (sr, sg, sb) = sail_color.unwrap_or((0xf2, 0xea, 0xd8));
+        let sail_x = x - if f > 0 { 2 } else { 0 };
+        fill_rect(buf, sail_x, y - 5, 2, 3, sr, sg, sb, 255);
+    }
+}
+
+#[allow(dead_code)]
+pub fn draw_reticle(buf: &mut [u8], x: i32, y: i32, t: f32, color: (u8, u8, u8)) {
+    let r = 3 + (((t * 6.0).sin() + 1.0) * 0.5).round() as i32;
+    fill_rect(buf, x - r - 1, y, 2, 1, color.0, color.1, color.2, 255);
+    fill_rect(buf, x + r, y, 2, 1, color.0, color.1, color.2, 255);
+    fill_rect(buf, x, y - r - 1, 1, 2, color.0, color.1, color.2, 255);
+    fill_rect(buf, x, y + r, 1, 2, color.0, color.1, color.2, 255);
+    put_pixel(buf, x, y, color.0, color.1, color.2, 255);
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BoltPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+#[allow(dead_code)]
+pub fn make_bolt<R: FnMut() -> f32>(tx: f32, ty: f32, mut rand_fn: R) -> Vec<BoltPoint> {
+    let mut pts = Vec::with_capacity(11);
+    let start_x = tx + (rand_fn() - 0.5) * 30.0;
+    pts.push(BoltPoint { x: start_x, y: -4.0 });
+    let steps = 9;
+    for i in 1..steps {
+        let t = i as f32 / steps as f32;
+        let x = start_x + (tx - start_x) * t + (rand_fn() - 0.5) * 9.0;
+        let y = ty * t;
+        pts.push(BoltPoint { x, y });
+    }
+    pts.push(BoltPoint { x: tx, y: ty });
+    pts
+}
+
+#[allow(dead_code)]
+pub fn draw_bolt(buf: &mut [u8], pts: &[BoltPoint], alpha: f32) {
+    if pts.len() < 2 || alpha <= 0.01 {
+        return;
+    }
+    for i in 0..(pts.len() - 1) {
+        let a = pts[i];
+        let b = pts[i + 1];
+        let n = ((b.x - a.x).abs().max((b.y - a.y).abs()) as i32).max(1);
+        for s in 0..=n {
+            let t = s as f32 / n as f32;
+            let x = (a.x + (b.x - a.x) * t).round() as i32;
+            let y = (a.y + (b.y - a.y) * t).round() as i32;
+            put_pixel(buf, x - 1, y, 160, 200, 255, (alpha * 0.6 * 255.0) as u8);
+            put_pixel(buf, x + 1, y, 160, 200, 255, (alpha * 0.6 * 255.0) as u8);
+            put_pixel(buf, x, y, 255, 255, 255, (alpha * 255.0) as u8);
+        }
+    }
+}
+
 pub fn get_sprite_atlas_entry(sprite_id: u32, facing: i32, frame: u32, variant: u32) -> AtlasEntry {
     let (col, row, world_w, world_h) = match sprite_id {
         SPRITE_VILLAGER => {
@@ -390,8 +507,12 @@ pub fn get_sprite_atlas_entry(sprite_id: u32, facing: i32, frame: u32, variant: 
             }
         }
         SPRITE_FIRE => {
-            let f = (frame % 3) as usize;
-            (f, 2, 10.0, 10.0)
+            if variant == 1 {
+                (0, 4, 10.0, 8.0) // unlit firewood pile
+            } else {
+                let f = (frame % 3) as usize;
+                (f, 2, 10.0, 10.0)
+            }
         }
         SPRITE_RETICLE => (3, 2, 8.0, 8.0),
         SPRITE_HUT => (4, 2, 14.0, 14.0),
@@ -594,6 +715,11 @@ pub fn create_sprite_atlas() -> Vec<u8> {
     draw_shadow(&mut temp, cx, cy, 14, 7);
     copy_cell(&mut atlas, &temp, 4, 4, 16);
 
+    // Unlit Firewood pile in Row 4 (col 0)
+    temp.fill(0);
+    draw_unlit_wood(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 0, 4, 31);
+
     atlas
 }
 
@@ -619,5 +745,15 @@ mod tests {
         let shadow_entry = get_sprite_atlas_entry(SPRITE_SHADOW, 1, 0, 0);
         assert!(shadow_entry.u1 > shadow_entry.u0);
         assert!(shadow_entry.world_w > 0.0);
+
+        // Test newly added sprites
+        let mut buf = vec![0u8; W * H * 4];
+        draw_gantry(&mut buf, 50, 50, 20);
+        draw_boat(&mut buf, 20, 20, 1, true, None);
+        draw_boat(&mut buf, 30, 30, -1, false, Some((200, 200, 200)));
+        draw_reticle(&mut buf, 60, 60, 1.0, (255, 255, 0));
+        let bolt = make_bolt(50.0, 50.0, || 0.5);
+        draw_bolt(&mut buf, &bolt, 1.0);
+        assert!(buf.iter().any(|&b| b > 0));
     }
 }

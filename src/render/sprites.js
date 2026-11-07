@@ -68,41 +68,80 @@ export function drawPad(ctx, x, y) {
 // ---------- animated sprites ----------
 
 // Villager. opts: shirt, skin, hair, frame (walk cycle), pose, carry (color), facing (-1|1)
+// Clean pixel art with dark silhouette outline and readable clothing so people pop against grass and dirt.
 export function drawPerson(ctx, x, y, o = {}) {
   x = Math.round(x); y = Math.round(y);
-  const skin = o.skin || '#e0b48a', shirt = o.shirt || '#8b5a3c', hair = o.hair || '#3b2a1e';
+  const skin = o.skin || '#e0b48a', shirt = o.shirt || '#c0703a', hair = o.hair || '#3b2a1e';
   const pose = o.pose || 'walk';
+  const facing = o.facing || 1;
+
   if (pose === 'dead') {
-    px(ctx, x - 2, y - 1, shirt, 3, 1); px(ctx, x + 1, y - 1, skin);
+    // Fallen smitten/starved body with outline and charred clothing
+    px(ctx, x - 3, y - 2, '#120d09', 7, 3); // outline
+    px(ctx, x - 2, y - 1, shirt, 4, 1);     // charred torso
+    px(ctx, x + 2, y - 1, skin, 2, 1);      // head
+    px(ctx, x + 3, y - 2, hair, 1, 1);      // hair
+    px(ctx, x - 3, y - 1, '#2b1d14', 1, 1); // feet/boots
     return;
   }
-  const bob = pose === 'dance' ? (o.frame % 2) : 0;
+
+  const bob = (pose === 'dance' || pose === 'cheer') ? (o.frame % 2) : 0;
   const sy = y - bob;
-  // shadow
-  px(ctx, x - 1, y, 'rgba(0,0,0,0.25)', 3, 1);
-  // legs
-  if (pose === 'walk' && o.frame % 2) { px(ctx, x - 1, sy - 1, '#3a2b20'); px(ctx, x + 1, sy - 1, '#3a2b20'); }
-  else px(ctx, x, sy - 1, '#3a2b20');
-  // body
-  px(ctx, x, sy - 3, shirt, 1, 2);
-  // arms
-  if (pose === 'pray' || pose === 'dance' || pose === 'panic' || pose === 'cheer') {
-    const flick = pose === 'panic' ? (o.frame % 2 ? -1 : 0) : 0;
-    px(ctx, x - 1, sy - 4 + flick, skin); px(ctx, x + 1, sy - 4 - flick, skin);
+
+  // Ground contact shadow
+  px(ctx, x - 2, y, 'rgba(0,0,0,0.3)', 5, 1);
+
+  // Dark silhouette backing for crisp readability on any background
+  px(ctx, x - 2, sy - 7, 5, 7, '#120d09');
+
+  // Legs and boots
+  const legStep = (pose === 'walk' && (o.frame % 2 === 1)) ? 1 : 0;
+  if (pose === 'walk') {
+    px(ctx, x - 1, sy - 2 + legStep, '#2b1d14', 1, 2);
+    px(ctx, x + 1, sy - 2 + (1 - legStep), '#2b1d14', 1, 2);
   } else {
-    px(ctx, x - 1, sy - 3, shirt); px(ctx, x + 1, sy - 3, shirt);
+    px(ctx, x - 1, sy - 2, '#2b1d14', 3, 2);
   }
-  // head + hair
-  px(ctx, x, sy - 4, skin);
-  px(ctx, x, sy - 5, hair);
-  if (o.hat) px(ctx, x - 1, sy - 5, o.hat, 3, 1);
-  if (o.carry) px(ctx, x + (o.facing || 1), sy - 4, o.carry, 2, 1);
+
+  // Torso / shirt
+  px(ctx, x - 1, sy - 5, shirt, 3, 3);
+  // Belt & buckle
+  px(ctx, x - 1, sy - 3, '#3a2414', 3, 1);
+  px(ctx, x, sy - 3, '#d4af37', 1, 1);
+
+  // Head and face
+  px(ctx, x - 1, sy - 7, skin, 3, 2);
+  // Eye pointing towards facing direction
+  const eyeX = facing > 0 ? x + 1 : x - 1;
+  px(ctx, eyeX, sy - 6, '#1a110a');
+  // Hair crown and back
+  px(ctx, x - 1, sy - 8, hair, 3, 1);
+  const hairBackX = facing > 0 ? x - 1 : x + 1;
+  px(ctx, hairBackX, sy - 7, hair, 1, 1);
+
+  // Arms and poses
+  if (pose === 'pray' || pose === 'dance' || pose === 'cheer') {
+    px(ctx, x - 2, sy - 6, skin);
+    px(ctx, x + 2, sy - 6, skin);
+  } else if (pose === 'panic') {
+    const flick = (o.frame % 2 === 1) ? -1 : 1;
+    px(ctx, x - 2, sy - 6 + flick, skin);
+    px(ctx, x + 2, sy - 6 - flick, skin);
+  } else {
+    // Walk swing
+    px(ctx, x - 2, sy - 4 + (legStep ? 1 : 0), shirt);
+    px(ctx, x + 2, sy - 4 + (legStep ? 0 : 1), shirt);
+  }
+
+  // Accessories
+  if (o.hat) px(ctx, x - 2, sy - 8, o.hat, 5, 1);
+  if (o.carry) px(ctx, x + facing * 2, sy - 4, o.carry, 2, 2);
   if (pose === 'sign') {
     px(ctx, x, sy - 7, '#7a5a3a', 1, 3);
-    px(ctx, x - 2, sy - 9, '#f2ead8', 5, 2);
+    px(ctx, x - 2, sy - 10, '#f2ead8', 5, 3);
     px(ctx, x - 1, sy - 9, '#c0392b', 3, 1);
   }
-  if (o.mark) px(ctx, x, sy - 7, o.mark);
+  if (o.mark) px(ctx, x, sy - 8, o.mark);
 }
 
 export function drawMammoth(ctx, x, y, o = {}) {
@@ -145,13 +184,26 @@ export function drawChicken(ctx, x, y, o = {}) {
 // Campfire. heat 0..1, t = time in seconds.
 export function drawFire(ctx, x, y, heat, t) {
   x = Math.round(x); y = Math.round(y);
+  if (heat <= 0) {
+    // Hearth stones ring
+    px(ctx, x - 4, y, '#505050', 9, 1);
+    px(ctx, x - 3, y + 1, '#656565', 7, 1);
+    px(ctx, x - 3, y - 1, '#444444', 7, 1);
+    // Unlit firewood log stack
+    px(ctx, x - 3, y, '#5a3a22', 7, 1); // bottom horizontal log
+    px(ctx, x - 3, y, '#8d5b35');        // cut wood ends
+    px(ctx, x + 3, y, '#8d5b35');
+    px(ctx, x - 2, y - 1, '#6e4a2c', 5, 1); // diagonal crossed log
+    px(ctx, x - 1, y - 2, '#7a5232', 3, 1); // top crossed log
+    px(ctx, x, y - 3, '#9c683e');        // apex stick tip
+    px(ctx, x - 1, y - 1, '#3e2413');    // notch shadows
+    px(ctx, x + 1, y - 1, '#3e2413');
+    return;
+  }
+  // Lit campfire
   px(ctx, x - 2, y - 1, '#5a3a22', 5, 1);
   px(ctx, x - 1, y - 2, '#6e4a2c', 3, 1);
   px(ctx, x - 3, y, '#6b6b6b'); px(ctx, x + 3, y, '#6b6b6b'); px(ctx, x - 2, y + 1, '#6b6b6b', 5, 1);
-  if (heat <= 0) {
-    if (Math.sin(t * 3) > 0.6) px(ctx, x, y - 3, '#9a9a9a');
-    return;
-  }
   const n = Math.ceil(heat * 6);
   for (let i = 0; i < n; i++) {
     const fx = x - 1 + ((i * 7 + Math.floor(t * 12)) % 3);

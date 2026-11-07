@@ -40,6 +40,18 @@ pub fn wrap_xf(x: f32) -> f32 {
     x.rem_euclid(PW as f32)
 }
 
+/// Wrap a y coordinate around the torus (#111).
+#[inline]
+pub fn wrap_y(y: i32) -> i32 {
+    y.rem_euclid(PH as i32)
+}
+
+/// Wrap a float y coordinate around the torus (#111).
+#[inline]
+pub fn wrap_yf(y: f32) -> f32 {
+    y.rem_euclid(PH as f32)
+}
+
 /// Shortest signed east–west distance from `a` to `b` on the planet.
 #[inline]
 pub fn dx_wrap(a: f32, b: f32) -> f32 {
@@ -51,11 +63,22 @@ pub fn dx_wrap(a: f32, b: f32) -> f32 {
     d
 }
 
-/// Distance between two points, taking the short way round the planet.
+/// Shortest signed north–south distance from `a` to `b` on the torus (#111).
+#[inline]
+pub fn dy_wrap(a: f32, b: f32) -> f32 {
+    let h = PH as f32;
+    let mut d = (b - a).rem_euclid(h);
+    if d > h / 2.0 {
+        d -= h;
+    }
+    d
+}
+
+/// Distance between two points, taking the short way round the torus (#111).
 #[inline]
 pub fn dist_wrap(ax: f32, ay: f32, bx: f32, by: f32) -> f32 {
     let dx = dx_wrap(ax, bx);
-    let dy = by - ay;
+    let dy = dy_wrap(ay, by);
     (dx * dx + dy * dy).sqrt()
 }
 

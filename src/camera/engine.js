@@ -302,8 +302,20 @@ class MainEngine extends Engine {
       this.nextAt.gesture = now + Math.max(tracking ? HAND_MS.tracking : HAND_MS.searching, this.cost.gesture * HAND_MS.costX);
       const at = performance.now();
       this.record('gesture', at, ms, at - now);
+      const lms = res?.landmarks || [];
+      const handsList = lms.map((lm, i) => {
+        const g = res?.gestures?.[i]?.[0];
+        const h = res?.handedness?.[i]?.[0];
+        return {
+          landmarks: lm,
+          name: g?.categoryName || 'None',
+          score: g?.score || 0,
+          handedness: h?.categoryName || null,
+          handednessScore: h?.score || 0,
+        };
+      });
       const top = res?.gestures?.[0]?.[0];
-      this.handlers.gesture?.({ hand: res?.landmarks?.[0] || null, name: top?.categoryName || 'None', score: top?.score || 0, aspect, at, latency: at - now, ms });
+      this.handlers.gesture?.({ hands: handsList, hand: res?.landmarks?.[0] || null, name: top?.categoryName || 'None', score: top?.score || 0, aspect, at, latency: at - now, ms });
     } else if (v.face && now >= this.nextAt.face && t !== this.seen.face && !this.rebuilding.face) {
       this.seen.face = t;
       const { res, ms } = this.timed('face', () => v.face.detectForVideo(video, now));

@@ -123,11 +123,11 @@ mod tests {
         let mut game = GameFlow::new(0);
         let dt = 0.1;
 
-        // Simulated focused/calm player with zero pulse dependency
+        // Simulated focused/calm player (low stress)
         let good_brain = BrainInput {
             calm: 0.85,
             focus: 0.85,
-            hr_delta: 0.0,
+            stress: 0.15,
             ..Default::default()
         };
 

@@ -9,7 +9,6 @@ export class Engine {
     add_custom_billboard(x: number, y: number, z: number, w: number, h: number, u0: number, v0: number, u1: number, v1: number): void;
     add_light(x: number, y: number, radius: number, intensity: number): void;
     advisor_say(key: string, text: string, mood: string, priority: number, cooldown: number): boolean;
-    audio_heartbeat(now: number, bpm: number, intensity: number): void;
     audio_play(sound: string): void;
     audio_toggle(): boolean;
     audio_unlock(): void;
@@ -34,21 +33,28 @@ export class Engine {
     game_on_cast(spell: string, aim_x: number, aim_y: number): void;
     game_restart_era(): void;
     game_start_era(index: number): void;
-    game_tick(dt: number, calm: number, focus: number, panic: number, hr: number, rest_hr: number, hr_delta: number, blinks: number): void;
+    /**
+     * One tick of the Rust eras. `stress` is the JS brain's `brain.stress`
+     * (EEG agitation or face anger, 0..1, about 0.15 at rest).
+     */
+    game_tick(dt: number, calm: number, focus: number, stress: number, blinks: number): void;
     /**
      * Standalone helper to generate a civ planet RGBA texture (#109).
      */
     static generate_civ_terrain(seed: number, width: number, height: number): Uint8Array;
     /**
-     * Generate realistic procedural terrain using moc-terrain (#109).
-     * Updates the engine's internal heightmap, 3D relief mesh, and base pixel texture.
+     * Generate a home world with moc-terrain (#109) and make it the engine's: heights, tiles,
+     * colours, sites and the 3D relief. `width`/`height` 0 (or left out) mean the engine's
+     * 320×180; the engine only draws worlds of its own size, so another size only updates the
+     * 3D mesh (until the game supports bigger maps, #129).
      */
-    generate_terrain(seed: number): void;
+    generate_terrain(seed: number, width: number, height: number): void;
     get_camera_distance(): number;
     get_camera_pitch(): number;
     get_camera_target_x(): number;
     get_camera_target_z(): number;
     get_camera_yaw(): number;
+    get_continent_count(): number;
     get_game_births_stat(): number;
     get_game_deaths_stat(): number;
     get_game_era_id(): string;
@@ -67,18 +73,27 @@ export class Engine {
     get_site_exchange_y(): number;
     get_site_factory_x(): number;
     get_site_factory_y(): number;
+    get_site_fire_x(): number;
+    get_site_fire_y(): number;
     get_site_hangar_x(): number;
     get_site_hangar_y(): number;
     get_site_pad_x(): number;
     get_site_pad_y(): number;
     get_site_village_x(): number;
     get_site_village_y(): number;
+    get_terrain_field(tx: number, ty: number): Int16Array;
+    get_terrain_sea_field(tx: number, ty: number): Int16Array;
     get_terrain_type(x: number, y: number): number;
+    get_tree_count(): number;
+    get_tree_variant(idx: number): number;
+    get_tree_x(idx: number): number;
+    get_tree_y(idx: number): number;
     init_3d(): void;
     init_world(seed: number): void;
     is_3d_mode(): boolean;
     is_game_failed(): string | undefined;
     is_game_finished(): boolean;
+    is_terrain_reachable(x: number, y: number): boolean;
     is_walkable(x: number, y: number): boolean;
     constructor(canvas_id: string);
     orbit_camera(delta_yaw: number, delta_pitch: number): void;
@@ -100,6 +115,7 @@ export class Engine {
      * raycast and where billboards stand.
      */
     set_heightmap(heights: Float32Array | number[]): void;
+    set_terrain_biome(biome_name: string): void;
     upload_canvas(canvas: HTMLCanvasElement): void;
     zoom_camera(factor: number): void;
 }
@@ -132,6 +148,18 @@ export class PointerGesture {
      * Press ended. Returns true when it was a tap (blink). A cancelled pointer never taps.
      */
     up(id: number, cancelled: boolean): boolean;
+}
+
+/**
+ * Standalone WebAssembly MLP Policy AI God (#25, #108)
+ */
+export class RustAiPolicy {
+    free(): void;
+    [Symbol.dispose](): void;
+    act(obs: Float32Array | number[], greedy: boolean, sample_val: number): number;
+    constructor();
+    probs(obs: Float32Array | number[]): Float32Array;
+    self_check(): number;
 }
 
 export class RustBlinkClassifier {
@@ -170,6 +198,100 @@ export class RustBlinkClassifier {
     record_blink_button(): boolean;
     reset_model(): void;
     total_detected(): number;
+}
+
+/**
+ * Standalone WebAssembly Brain signal processor and personal model (#20, #108)
+ */
+export class RustBrain {
+    free(): void;
+    [Symbol.dispose](): void;
+    accuracy(): number;
+    anger(): number;
+    blinks(): number;
+    calm(): number;
+    focus(): number;
+    ingest(delta: number, theta: number, alpha: number, beta: number, gamma: number, blink: boolean, hr: number, tilt_x: number, tilt_y: number, motion: number, quality: number): boolean;
+    constructor();
+    retrain(): boolean;
+    set_cue(cue_id: number): void;
+    stress(): number;
+    update(dt: number): boolean;
+}
+
+/**
+ * Standalone WebAssembly Calibration traits (#54, #108)
+ */
+export class RustCalibration {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    static random_traits(seed: number): Float32Array;
+    static traits_from_sensors(calm: number, focus: number, stress: number, blink_rate: number, joy: number, anger: number): Float32Array;
+}
+
+/**
+ * Standalone WebAssembly Cast Controller for camera god powers (#33, #108)
+ */
+export class RustCastController {
+    free(): void;
+    [Symbol.dispose](): void;
+    cooldown_frac(spell_id: string, now: number): number;
+    cooldown_left(spell_id: string, now: number): number;
+    constructor();
+    ready(spell_id: string, now: number): boolean;
+    reset(): void;
+    spell_for(gesture: string): string | undefined;
+    trigger(spell_id: string, now: number): boolean;
+    update(gesture: string, score: number, now: number): Array<any>;
+}
+
+/**
+ * Standalone WebAssembly Face Emotion Tracker (#33, #108)
+ */
+export class RustEmotionTracker {
+    free(): void;
+    [Symbol.dispose](): void;
+    constructor(calibrate_seconds: number);
+    reset(): void;
+    update_direct(has_face: boolean, mouth_smile_left: number, mouth_smile_right: number, brow_down_left: number, brow_down_right: number, mouth_press_left: number, mouth_press_right: number, jaw_open: number, brow_inner_up: number, eye_wide_left: number, eye_wide_right: number, mouth_frown_left: number, mouth_frown_right: number, dt: number): Array<any>;
+}
+
+/**
+ * Standalone WebAssembly Finger Controller for smoothing, deadzone and pinching (#33, #67, #108)
+ */
+export class RustFingerController {
+    free(): void;
+    [Symbol.dispose](): void;
+    constructor();
+    reset(): void;
+    update(landmarks: Float64Array | number[] | null | undefined, gesture: string, score: number, now: number, aspect: number): Array<any>;
+}
+
+/**
+ * Standalone WebAssembly Galaxy & Multi-World Simulator (#24, #108)
+ */
+export class RustGalaxy {
+    free(): void;
+    [Symbol.dispose](): void;
+    get_attended(): number;
+    is_mind_done(): boolean;
+    constructor(seed: number);
+    on_blink(): void;
+    planet_biome(idx: number): string;
+    planet_channel(idx: number): string;
+    planet_count(): number;
+    planet_era(idx: number): number;
+    planet_is_alive(idx: number): boolean;
+    planet_is_forming(idx: number): boolean;
+    planet_market(idx: number): number;
+    planet_name(idx: number): string;
+    planet_pop(idx: number): number;
+    planet_pos_x(idx: number): number;
+    planet_pos_y(idx: number): number;
+    planet_progress(idx: number): number;
+    set_attended(planet_idx: number): void;
+    step(dt: number, calm: number, focus: number, stress: number, blinks_last_10s: number, blinks_total: number): void;
 }
 
 export class RustImuTracker {
@@ -221,18 +343,93 @@ export class RustImuTracker {
 }
 
 /**
- * Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109)
+ * Standalone WebAssembly Simulated Headset Source (#20, #108)
+ */
+export class RustSimSource {
+    free(): void;
+    [Symbol.dispose](): void;
+    blink(): void;
+    constructor(seed: number);
+    set_input(calm: boolean, focus: boolean, panic: boolean): void;
+    step(dt: number): Float32Array;
+}
+
+/**
+ * A generated world for JS (#109, from #112): the JS `World` is a thin wrapper that fills its
+ * arrays from this. `new(seed)` is the 320×180 home world; `home(seed, w, h)` any size;
+ * `planet(seed, biome)` a galaxy planet's 640×360 surface with its 320×180 capital (the AI
+ * tribe's world) cut from it at (0, 90). Accessors without `surface_` describe the world (the
+ * capital for a planet); `surface_*` describe the whole surface.
  */
 export class RustWorldGen {
     free(): void;
     [Symbol.dispose](): void;
+    biomes(): Uint8Array;
     continents_json(): string;
+    has_surface(): boolean;
+    height(): number;
+    /**
+     * Heights 0..1, sea level 0.33 (like the old maps, so the 3D water level is unchanged).
+     */
     heights(): Float32Array;
+    /**
+     * A home world of any size (0 × 0: the game's 320×180) for a planet biome (temperate,
+     * desert, ice, jungle, alien).
+     */
+    static home(seed: number, width: number, height: number, biome: string): RustWorldGen;
+    lakes(): Uint8Array;
+    /**
+     * Generation time, ms.
+     */
+    ms(): number;
+    /**
+     * The 320×180 home world.
+     */
     constructor(seed: number);
+    /**
+     * Campaign landmass per tile (index into `continents_json`), 255 for none.
+     */
+    owner(): Uint8Array;
+    /**
+     * A galaxy planet: its 640×360 surface, and the 320×180 capital at (0, 90) as the world.
+     */
+    static planet(seed: number, biome: string): RustWorldGen;
+    /**
+     * The base colour layer, RGBA.
+     */
     rgba(): Uint8Array;
+    rivers(): Uint8Array;
     sites_json(): string;
+    stats_json(): string;
+    surface_height(): number;
+    surface_heights(): Float32Array;
+    /**
+     * The surface's landmasses and settlement spots (capital first, then nearest first), as
+     * the galaxy's surface view expects them: {tile, continents, spots}.
+     */
+    surface_json(): string;
+    surface_rgba(): Uint8Array;
+    surface_stats_json(): string;
+    surface_types(): Uint8Array;
+    surface_width(): number;
+    /**
+     * Game tiles (the JS `T` codes).
+     */
     types(): Uint8Array;
+    width(): number;
 }
+
+/**
+ * The era's land use (farms, roads, paving: tiles whose type differs from the base type)
+ * painted over the base colour layer, in a planet biome's colours.
+ */
+export function paint_land_use(base: Uint8Array | number[], types: Uint8Array | number[], base_types: Uint8Array | number[], width: number, biome: string): Uint8Array;
+
+/**
+ * Walking distance (8-neighbour steps, no wrap) from every tile to (tx, ty) over walkable
+ * tiles, or over water with `sea`; -1 where unreachable. The JS `World.field`/`seaField`.
+ */
+export function walk_field(types: Uint8Array | number[], width: number, height: number, tx: number, ty: number, sea: boolean): Int16Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -240,15 +437,22 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_engine_free: (a: number, b: number) => void;
     readonly __wbg_pointergesture_free: (a: number, b: number) => void;
+    readonly __wbg_rustaipolicy_free: (a: number, b: number) => void;
     readonly __wbg_rustblinkclassifier_free: (a: number, b: number) => void;
+    readonly __wbg_rustbrain_free: (a: number, b: number) => void;
+    readonly __wbg_rustcalibration_free: (a: number, b: number) => void;
+    readonly __wbg_rustcastcontroller_free: (a: number, b: number) => void;
+    readonly __wbg_rustemotiontracker_free: (a: number, b: number) => void;
+    readonly __wbg_rustfingercontroller_free: (a: number, b: number) => void;
+    readonly __wbg_rustgalaxy_free: (a: number, b: number) => void;
     readonly __wbg_rustimutracker_free: (a: number, b: number) => void;
+    readonly __wbg_rustsimsource_free: (a: number, b: number) => void;
     readonly __wbg_rustworldgen_free: (a: number, b: number) => void;
     readonly engine_add_3d_light: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly engine_add_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly engine_add_custom_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
     readonly engine_add_light: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly engine_advisor_say: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
-    readonly engine_audio_heartbeat: (a: number, b: number, c: number, d: number) => void;
     readonly engine_audio_play: (a: number, b: number, c: number) => void;
     readonly engine_audio_toggle: (a: number) => number;
     readonly engine_audio_unlock: (a: number) => void;
@@ -273,14 +477,15 @@ export interface InitOutput {
     readonly engine_game_on_cast: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly engine_game_restart_era: (a: number) => void;
     readonly engine_game_start_era: (a: number, b: number) => void;
-    readonly engine_game_tick: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+    readonly engine_game_tick: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly engine_generate_civ_terrain: (a: number, b: number, c: number) => [number, number];
-    readonly engine_generate_terrain: (a: number, b: number) => [number, number];
+    readonly engine_generate_terrain: (a: number, b: number, c: number, d: number) => [number, number];
     readonly engine_get_camera_distance: (a: number) => number;
     readonly engine_get_camera_pitch: (a: number) => number;
     readonly engine_get_camera_target_x: (a: number) => number;
     readonly engine_get_camera_target_z: (a: number) => number;
     readonly engine_get_camera_yaw: (a: number) => number;
+    readonly engine_get_continent_count: (a: number) => number;
     readonly engine_get_game_births_stat: (a: number) => number;
     readonly engine_get_game_deaths_stat: (a: number) => number;
     readonly engine_get_game_era_id: (a: number) => [number, number];
@@ -299,18 +504,27 @@ export interface InitOutput {
     readonly engine_get_site_exchange_y: (a: number) => number;
     readonly engine_get_site_factory_x: (a: number) => number;
     readonly engine_get_site_factory_y: (a: number) => number;
+    readonly engine_get_site_fire_x: (a: number) => number;
+    readonly engine_get_site_fire_y: (a: number) => number;
     readonly engine_get_site_hangar_x: (a: number) => number;
     readonly engine_get_site_hangar_y: (a: number) => number;
     readonly engine_get_site_pad_x: (a: number) => number;
     readonly engine_get_site_pad_y: (a: number) => number;
     readonly engine_get_site_village_x: (a: number) => number;
     readonly engine_get_site_village_y: (a: number) => number;
+    readonly engine_get_terrain_field: (a: number, b: number, c: number) => [number, number];
+    readonly engine_get_terrain_sea_field: (a: number, b: number, c: number) => [number, number];
     readonly engine_get_terrain_type: (a: number, b: number, c: number) => number;
+    readonly engine_get_tree_count: (a: number) => number;
+    readonly engine_get_tree_variant: (a: number, b: number) => number;
+    readonly engine_get_tree_x: (a: number, b: number) => number;
+    readonly engine_get_tree_y: (a: number, b: number) => number;
     readonly engine_init_3d: (a: number) => [number, number];
     readonly engine_init_world: (a: number, b: number) => void;
     readonly engine_is_3d_mode: (a: number) => number;
     readonly engine_is_game_failed: (a: number) => [number, number];
     readonly engine_is_game_finished: (a: number) => number;
+    readonly engine_is_terrain_reachable: (a: number, b: number, c: number) => number;
     readonly engine_is_walkable: (a: number, b: number, c: number) => number;
     readonly engine_new: (a: number, b: number) => [number, number, number];
     readonly engine_orbit_camera: (a: number, b: number, c: number) => void;
@@ -324,8 +538,10 @@ export interface InitOutput {
     readonly engine_set_camera_target: (a: number, b: number, c: number) => void;
     readonly engine_set_era: (a: number, b: number) => void;
     readonly engine_set_heightmap: (a: number, b: number, c: number) => [number, number];
+    readonly engine_set_terrain_biome: (a: number, b: number, c: number) => void;
     readonly engine_upload_canvas: (a: number, b: any) => [number, number];
     readonly engine_zoom_camera: (a: number, b: number) => void;
+    readonly paint_land_use: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number];
     readonly pointergesture_down: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly pointergesture_is_panning: (a: number) => number;
     readonly pointergesture_moved: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
@@ -334,6 +550,10 @@ export interface InitOutput {
     readonly pointergesture_pan_dx: (a: number) => number;
     readonly pointergesture_pan_dy: (a: number) => number;
     readonly pointergesture_up: (a: number, b: number, c: number) => number;
+    readonly rustaipolicy_act: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly rustaipolicy_new: () => number;
+    readonly rustaipolicy_probs: (a: number, b: number, c: number) => any;
+    readonly rustaipolicy_self_check: (a: number) => number;
     readonly rustblinkclassifier_accuracy: (a: number) => number;
     readonly rustblinkclassifier_arm_flash_window: (a: number, b: number) => void;
     readonly rustblinkclassifier_baseline_samples: (a: number) => number;
@@ -356,6 +576,51 @@ export interface InitOutput {
     readonly rustblinkclassifier_record_blink_button: (a: number) => number;
     readonly rustblinkclassifier_reset_model: (a: number) => void;
     readonly rustblinkclassifier_total_detected: (a: number) => number;
+    readonly rustbrain_accuracy: (a: number) => number;
+    readonly rustbrain_anger: (a: number) => number;
+    readonly rustbrain_blinks: (a: number) => number;
+    readonly rustbrain_calm: (a: number) => number;
+    readonly rustbrain_focus: (a: number) => number;
+    readonly rustbrain_ingest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => number;
+    readonly rustbrain_new: () => number;
+    readonly rustbrain_retrain: (a: number) => number;
+    readonly rustbrain_set_cue: (a: number, b: number) => void;
+    readonly rustbrain_stress: (a: number) => number;
+    readonly rustbrain_update: (a: number, b: number) => number;
+    readonly rustcalibration_random_traits: (a: number) => any;
+    readonly rustcalibration_traits_from_sensors: (a: number, b: number, c: number, d: number, e: number, f: number) => any;
+    readonly rustcastcontroller_cooldown_frac: (a: number, b: number, c: number, d: number) => number;
+    readonly rustcastcontroller_cooldown_left: (a: number, b: number, c: number, d: number) => number;
+    readonly rustcastcontroller_new: () => number;
+    readonly rustcastcontroller_ready: (a: number, b: number, c: number, d: number) => number;
+    readonly rustcastcontroller_reset: (a: number) => void;
+    readonly rustcastcontroller_spell_for: (a: number, b: number, c: number) => [number, number];
+    readonly rustcastcontroller_trigger: (a: number, b: number, c: number, d: number) => number;
+    readonly rustcastcontroller_update: (a: number, b: number, c: number, d: number, e: number) => any;
+    readonly rustemotiontracker_new: (a: number) => number;
+    readonly rustemotiontracker_reset: (a: number) => void;
+    readonly rustemotiontracker_update_direct: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => any;
+    readonly rustfingercontroller_new: () => number;
+    readonly rustfingercontroller_reset: (a: number) => void;
+    readonly rustfingercontroller_update: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => any;
+    readonly rustgalaxy_get_attended: (a: number) => number;
+    readonly rustgalaxy_is_mind_done: (a: number) => number;
+    readonly rustgalaxy_new: (a: number) => number;
+    readonly rustgalaxy_on_blink: (a: number) => void;
+    readonly rustgalaxy_planet_biome: (a: number, b: number) => [number, number];
+    readonly rustgalaxy_planet_channel: (a: number, b: number) => [number, number];
+    readonly rustgalaxy_planet_count: (a: number) => number;
+    readonly rustgalaxy_planet_era: (a: number, b: number) => number;
+    readonly rustgalaxy_planet_is_alive: (a: number, b: number) => number;
+    readonly rustgalaxy_planet_is_forming: (a: number, b: number) => number;
+    readonly rustgalaxy_planet_market: (a: number, b: number) => number;
+    readonly rustgalaxy_planet_name: (a: number, b: number) => [number, number];
+    readonly rustgalaxy_planet_pop: (a: number, b: number) => number;
+    readonly rustgalaxy_planet_pos_x: (a: number, b: number) => number;
+    readonly rustgalaxy_planet_pos_y: (a: number, b: number) => number;
+    readonly rustgalaxy_planet_progress: (a: number, b: number) => number;
+    readonly rustgalaxy_set_attended: (a: number, b: number) => void;
+    readonly rustgalaxy_step: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly rustimutracker_add_calib_point: (a: number, b: number, c: number) => void;
     readonly rustimutracker_aim_x: (a: number) => number;
     readonly rustimutracker_aim_y: (a: number) => number;
@@ -384,12 +649,65 @@ export interface InitOutput {
     readonly rustimutracker_tilt_x: (a: number) => number;
     readonly rustimutracker_tilt_y: (a: number) => number;
     readonly rustimutracker_update: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
+    readonly rustsimsource_blink: (a: number) => void;
+    readonly rustsimsource_new: (a: number) => number;
+    readonly rustsimsource_set_input: (a: number, b: number, c: number, d: number) => void;
+    readonly rustsimsource_step: (a: number, b: number) => any;
+    readonly rustworldgen_biomes: (a: number) => any;
     readonly rustworldgen_continents_json: (a: number) => [number, number];
+    readonly rustworldgen_has_surface: (a: number) => number;
+    readonly rustworldgen_height: (a: number) => number;
     readonly rustworldgen_heights: (a: number) => any;
+    readonly rustworldgen_home: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly rustworldgen_lakes: (a: number) => any;
+    readonly rustworldgen_ms: (a: number) => number;
     readonly rustworldgen_new: (a: number) => number;
+    readonly rustworldgen_owner: (a: number) => any;
+    readonly rustworldgen_planet: (a: number, b: number, c: number) => number;
     readonly rustworldgen_rgba: (a: number) => any;
+    readonly rustworldgen_rivers: (a: number) => any;
     readonly rustworldgen_sites_json: (a: number) => [number, number];
+    readonly rustworldgen_stats_json: (a: number) => [number, number];
+    readonly rustworldgen_surface_height: (a: number) => number;
+    readonly rustworldgen_surface_heights: (a: number) => any;
+    readonly rustworldgen_surface_json: (a: number) => [number, number];
+    readonly rustworldgen_surface_rgba: (a: number) => any;
+    readonly rustworldgen_surface_stats_json: (a: number) => [number, number];
+    readonly rustworldgen_surface_types: (a: number) => any;
+    readonly rustworldgen_surface_width: (a: number) => number;
     readonly rustworldgen_types: (a: number) => any;
+    readonly rustworldgen_width: (a: number) => number;
+    readonly walk_field: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+    readonly moc_brain_free: (a: number) => void;
+    readonly moc_brain_get_agitation: (a: number) => number;
+    readonly moc_brain_get_calm: (a: number) => number;
+    readonly moc_brain_get_focus: (a: number) => number;
+    readonly moc_brain_get_hr_delta: (a: number) => number;
+    readonly moc_brain_get_model_accuracy: (a: number) => number;
+    readonly moc_brain_get_model_trust: (a: number, b: number) => number;
+    readonly moc_brain_get_stress: (a: number) => number;
+    readonly moc_brain_ingest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => number;
+    readonly moc_brain_new: () => number;
+    readonly moc_brain_set_cue: (a: number, b: number) => void;
+    readonly moc_brain_update: (a: number, b: number) => number;
+    readonly moc_calibration_traits_from_sensors: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly moc_calibration_traits_random: (a: number, b: number) => void;
+    readonly moc_sim_blink: (a: number) => void;
+    readonly moc_sim_free: (a: number) => void;
+    readonly moc_sim_new: (a: number) => number;
+    readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
+    readonly moc_ai_policy_act: (a: number, b: number, c: number, d: number) => number;
+    readonly moc_ai_policy_free: (a: number) => void;
+    readonly moc_ai_policy_new: () => number;
+    readonly moc_ai_policy_probs: (a: number, b: number, c: number) => void;
+    readonly moc_ai_policy_self_check: (a: number) => number;
+    readonly moc_galaxy_blink: (a: number) => void;
+    readonly moc_galaxy_free: (a: number) => void;
+    readonly moc_galaxy_new: (a: number) => number;
+    readonly moc_galaxy_planet_count: (a: number) => number;
+    readonly moc_galaxy_planet_metrics: (a: number, b: number, c: number) => number;
+    readonly moc_galaxy_set_attended: (a: number, b: number) => void;
+    readonly moc_galaxy_step: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

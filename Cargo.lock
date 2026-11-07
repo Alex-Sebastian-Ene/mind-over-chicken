@@ -201,6 +201,9 @@ version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
+ "moc-ai",
+ "moc-brain",
+ "moc-cosmos",
  "moc-planet",
  "moc-terrain",
  "wasm-bindgen",

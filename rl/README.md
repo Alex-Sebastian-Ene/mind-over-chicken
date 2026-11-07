@@ -205,8 +205,9 @@ Construction and stepping:
   fear and faith), with a separate 0.5 s cooldown per caster (`Human` / `Ai`). The JS port
   emulates this by restoring `scene.lastBolt` after an AI bolt.
 - The AI's own brain: `set_ai_calm(bool)`, then `calm`, `threshold('calm', 0.55)`, `setCue`,
-  `hrDelta`, either the full `Brain` + `SimSource` dynamics or `ProxyBrain`. A human brain can
-  be layered on top as `max(ai, human)` for calm and focus.
+  `stress` (`max(1 - calm, anger)`; the AI has no face, so `1 - calm`), either the full
+  `Brain` + `SimSource` dynamics or `ProxyBrain`. A human brain can be layered on top as
+  `max(ai, human)` for calm and focus, with the human's face anger counting toward stress.
 
 Read-only state for the observation, reward and info:
 - `scene.t`, `done`, `strikes`, `lastBolt`
