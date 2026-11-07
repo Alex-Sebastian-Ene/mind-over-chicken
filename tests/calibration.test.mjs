@@ -28,15 +28,15 @@ test('random setup is reproducible from the run seed and differs between seeds',
   for (const v of Object.values(randomSeedTraits(99))) assert.ok(v >= 0 && v <= 1);
 });
 
-test('sensor formula: calm and joy read friendly; pulse and anger read aggressive and violent', () => {
-  const serene = traitsFromFeatures({ calm: 0.9, focus: 0.2, hrDelta: -2, blinkRate: 1, joy: 0.8, anger: 0 });
-  const furious = traitsFromFeatures({ calm: 0.05, focus: 0.6, hrDelta: 25, blinkRate: 8, joy: 0, anger: 0.9 });
+test('sensor formula: calm and joy read friendly; stress and anger read aggressive and violent', () => {
+  const serene = traitsFromFeatures({ calm: 0.9, focus: 0.2, stress: 0.1, blinkRate: 1, joy: 0.8, anger: 0 });
+  const furious = traitsFromFeatures({ calm: 0.05, focus: 0.6, stress: 0.95, blinkRate: 8, joy: 0, anger: 0.9 });
   assert.ok(serene.friendliness > 0.7 && serene.aggressiveness < 0.15 && serene.violence < 0.1, JSON.stringify(serene));
   assert.ok(furious.friendliness < 0.15 && furious.aggressiveness > 0.7 && furious.violence > 0.7, JSON.stringify(furious));
 });
 
 test('the window collects features for its configured length, then seeds once', () => {
-  const brain = { calm: 0.8, focus: 0.3, stats: { blinks: 0 }, hrDelta: () => 2 };
+  const brain = { calm: 0.8, focus: 0.3, stress: 0.2, stats: { blinks: 0 } };
   const cal = new Calibration({ seconds: 3, mode: 'sensor', seed: 7 });
   let seeded = 0;
   cal.onDone(() => seeded++);
@@ -51,6 +51,8 @@ test('the window collects features for its configured length, then seeds once', 
   assert.equal(r.source, 'sensor');
   assert.equal(r.seconds, 3);
   assert.ok(Math.abs(r.features.calm - 0.8) < 1e-6);
+  assert.ok(Math.abs(r.features.stress - 0.2) < 1e-6);
+  assert.equal('hrDelta' in r.features, false);
   assert.ok(r.features.blinkRate > 0);
   assert.ok(r.friendliness > r.aggressiveness);
   cal.update(1, brain, null);              // no re-seeding after done
@@ -59,7 +61,7 @@ test('the window collects features for its configured length, then seeds once', 
 
 test('random mode ignores the signals and uses the run seed', () => {
   const cal = new Calibration({ seconds: 1, mode: 'random', seed: 2024 });
-  cal.update(1, { calm: 1, focus: 1, stats: { blinks: 0 }, hrDelta: () => 30 }, null);
+  cal.update(1, { calm: 0, focus: 1, stress: 1, stats: { blinks: 0 } }, null);
   const { friendliness, aggressiveness, violence } = cal.result;
   assert.deepEqual({ friendliness, aggressiveness, violence }, randomSeedTraits(2024));
   assert.equal(cal.result.source, 'random');

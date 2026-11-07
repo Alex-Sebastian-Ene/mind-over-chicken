@@ -59,7 +59,7 @@ const advisor = new Advisor($('advisor'));
 const hud = new Hud(document);
 const cosmos = new Cosmos();
 // What the HUD shows while you look at the galaxy.
-const galaxyHudScene = { label: 'Galaxy', powers: ['calm', 'focus', 'heart'], objectives: () => cosmos.galaxy?.objectives() || [] };
+const galaxyHudScene = { label: 'Galaxy', powers: ['calm', 'focus', 'stress'], objectives: () => cosmos.galaxy?.objectives() || [] };
 let hudScene = null;
 let G = null;
 let fade = 0;           // 0..1 black overlay for transitions
@@ -155,8 +155,10 @@ function dismissBanner() {
   if (!banner) return;
   banner = null;
   $('banner').hidden = true;
-  // Re-arm the scene's calibration cue after the pause.
-  if (G.scene.id === 'stone' || G.scene.id === 'industry') G.brain.setCue(G.scene.hold?.active || G.scene.ipo?.state === 'active' ? 'calm' : 'rest');
+  // Re-arm the scene's calibration cue after the pause. Industry records only during the IPO:
+  // the rest of the era asks for calm (stress drives the market), so it is not "rest".
+  if (G.scene.id === 'stone') G.brain.setCue(G.scene.hold?.active ? 'calm' : 'rest');
+  if (G.scene.id === 'industry') G.brain.setCue(G.scene.ipo?.state === 'active' ? 'calm' : null);
 }
 
 let failTimer = null;
@@ -188,7 +190,6 @@ function showEnd() {
     ['Countdown scrubs', x.scrubs ?? 0],
     ['Seconds of calm', Math.round(b.stats.calmSeconds)],
     ['Seconds of focus', Math.round(b.stats.focusSeconds)],
-    ['Peak heart rate', b.stats.peakHr ? `${Math.round(b.stats.peakHr)} bpm` : 'n/a'],
     ['Brain windows recorded', m.total()],
     ['Personal model accuracy', m.trained ? `${Math.round(m.accuracy * 100)}% (chance ${Math.round(m.chance * 100)}%)` : 'not trained'],
   ];
@@ -282,7 +283,7 @@ function frame(ts) {
   const dt = Math.min(0.05, (ts - lastTs) / 1000 || 0.016);
   lastTs = ts;
   if (G) {
-    G.brain.update(dt);
+    G.brain.update(dt, G.mood);   // the camera's face anger counts toward brain.stress
     if (banner) {
       banner.t += dt;
       if (banner.t > 6) dismissBanner();
@@ -379,6 +380,7 @@ screen.addEventListener('wheel', (e) => {
 }, { passive: false });
 screen.addEventListener('contextmenu', (e) => e.preventDefault());
 
+// Shift is the Stress demo key: it lowers the emulated headset's calm (input.panic).
 const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'panic' };
 window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input')) return;
@@ -415,7 +417,7 @@ window.addEventListener('blur', () => { const s = sim(); if (s) Object.keys(s.in
 // Toolbar tiles double as touch controls for the simulated brain.
 document.querySelectorAll('[data-power]').forEach((tile) => {
   const power = tile.dataset.power;
-  const map = { calm: 'calm', focus: 'focus', heart: 'panic' };
+  const map = { calm: 'calm', focus: 'focus', stress: 'panic' };
   tile.addEventListener('pointerdown', (e) => {
     audio.unlock();
     const s = sim(); if (!s) return;
@@ -503,7 +505,7 @@ function updateCosmosUi(dt) {
   }
   const m = gal.mind;
   $('mindLine').textContent = m.done
-    ? `Read from your first 10 s: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, ${m.blinks} blinks.`
+    ? `Read from your first 10 s: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, ${m.blinks} blinks.`
     : `Reading your mind: ${Math.max(0, Math.ceil(SIM.MIND_SECONDS - m.t))} s of play left.`;
   $('galaxyLog').replaceChildren(...gal.log.slice(0, 4).map((l) => { const li = document.createElement('li'); li.textContent = l.text; return li; }));
 }
@@ -543,7 +545,7 @@ $('galaxyBtn').addEventListener('click', () => {
   $('endScreen').hidden = true;
   audio.unlock();
   openGalaxy({ fromEnding: true });
-  advisor.say('galaxy', 'Behold, my lord: the galaxy. Make planets. Keep your pulse down near them.', { mood: 'happy', priority: 3, cooldown: 999 });
+  advisor.say('galaxy', 'Behold, my lord: the galaxy. Make planets. Stay calm near them.', { mood: 'happy', priority: 3, cooldown: 999 });
 });
 
 // ---------- title screen ----------

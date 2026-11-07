@@ -1,8 +1,13 @@
 // ERA III · SPACE AGE (finale)
-// Engineers carry parts to the pad: focus speeds them up, a racing pulse makes them drop things.
-// Calm keeps citizens brave enough to board. Then the 10-second countdown runs on the personal
-// focus classifier while your pulse has to stay near resting. A broken count holds; a long hold
-// scrubs and resets the countdown, never the era. Then liftoff, and a new world.
+// Engineers carry parts to the pad: focus speeds them up, stress (brain.stress: low calm, or an
+// angry face on camera) makes them drop things. Calm keeps citizens brave enough to board, stress
+// scares them off. Then the 10-second countdown runs on the personal focus classifier. A broken
+// count holds; a long hold scrubs and resets the countdown, never the era. Then liftoff, and a
+// new world.
+//
+// The countdown is focus only. Stress is max(1 - calm, anger) and the personal classifier's calm
+// and focus share one softmax, so while you hold focus, calm is near 0 and stress near 1: a
+// "focus and low stress" test could never pass.
 
 import { W, H, Particles, clamp, dist, rand, chance, floater, pick, mulberry32 } from '../sim/util.js';
 import { walk, animate, villagerLook } from '../sim/agents.js';
@@ -23,9 +28,9 @@ export class SpaceAge {
     this.intro = {
       title: 'Space Age',
       goal: 'Build the rocket, board the citizens, survive a 10-second countdown.',
-      how: [['Focus', 'Speeds up the engineers, and holds the final countdown.'], ['Calm', 'Keeps citizens brave enough to board.'], ['Heart rate', 'Keep it near resting, or parts get dropped and the count holds.']],
+      how: [['Focus', 'Speeds up the engineers, and holds the final countdown.'], ['Calm', 'Keeps citizens brave enough to board.'], ['Stress', 'Makes engineers drop parts and scares boarding citizens off.']],
     };
-    this.powers = ['focus', 'calm', 'heart'];
+    this.powers = ['focus', 'calm', 'stress'];
     this.darkness = 0;
   }
 
@@ -68,8 +73,9 @@ export class SpaceAge {
 
   focusOk() { return this.G.brain.focus >= this.focusThr(); }
   focusThr() { return this.G.brain.threshold('focus', 0.5); }
-  hrLimit() { return 12 - 4 * this.G.brain.model.trust('focus'); }
-  hrOk() { return this.G.brain.hrDelta() <= this.hrLimit(); }
+  // Stressed = stress above 1 - the calm bar (0.45, down to 0.31 as the model learns you).
+  stressLimit() { return 1 - this.G.brain.threshold('calm', 0.55); }
+  stressed() { return (this.G.brain.stress ?? 1) > this.stressLimit(); }
 
   update(dt) {
     const G = this.G, w = G.world, brain = G.brain;
@@ -86,13 +92,12 @@ export class SpaceAge {
         if (e.state === 'load') { if (walk(e, hangar.x + e.side * 2, hangar.y + 1, speed, dt, w) && e.timer <= 0) { e.state = 'deliver'; e.carry = pick(['#c7ccd6', '#e04a3a', '#3e8ed0', '#f2c14e']); } }
         else if (e.state === 'deliver') {
           if (walk(e, pad.x - 5 * e.side, pad.y + 1, speed, dt, w)) {
-            const stressed = brain.hrDelta() > this.hrLimit() + 3;
-            if (stressed && chance(0.3)) {
+            if (this.stressed() && chance(0.3)) {
               this.drops++;
               this.progress = Math.max(0, this.progress - 0.01);
               this.particles.burst(8, () => ({ x: e.x, y: e.y - 2, vx: rand(-12, 12), vy: rand(-16, -4), g: 30, life: 0.8, maxLife: 0.8, size: 1, color: pick(['#999', '#ccc', '#ff9a2e']) }));
               floater(this.particles, e.x, e.y - 8, 'dropped it', '#ff8a9c', 5);
-              G.advisor.say('drop', pick(['Someone dropped the fuel valve. I will not say who. It was because of your pulse.', 'Another wrench in the ocean. The engineers can feel your heartbeat, my lord.']), { mood: 'panic', priority: 2, cooldown: 10 });
+              G.advisor.say('drop', pick(['Someone dropped the fuel valve. I will not say who. It was because of your stress.', 'Another wrench in the ocean. The engineers can feel your stress, my lord.']), { mood: 'panic', priority: 2, cooldown: 10 });
             } else if (this.progress < 1) {
               this.progress = Math.min(1, this.progress + 0.03);
               G.audio.tick();
@@ -103,18 +108,18 @@ export class SpaceAge {
       }
       if (this.progress >= 1 && !this.builtSaid) { this.builtSaid = true; G.audio.good(); G.advisor.say('built', 'The rocket is finished. It is very tall and very pointy. Now we need passengers.', { mood: 'happy', priority: 3 }); }
 
-      // Boarding: calm makes citizens brave, a racing pulse sends them running.
+      // Boarding: calm makes citizens brave, stress sends them running.
       const boarding = this.progress >= 0.5;
       if (boarding && !this.boardSaid) { this.boardSaid = true; G.advisor.say('board', 'Citizens are boarding. Calm keeps them brave. The sacred chicken has seat 1A, obviously.', { mood: 'happy', priority: 2 }); this.chicken.state = 'board'; }
       this.boardTimer += dt;
       for (const c of this.citizens) {
         animate(c, dt, 6);
-        c.courage = clamp(c.courage + dt * (0.12 * brain.calm - 0.1 * clamp(brain.hrDelta() / 15) - 0.02));
+        c.courage = clamp(c.courage + dt * (0.12 * brain.calm - 0.1 * (brain.stress ?? 1) - 0.02));
         if (c.state === 'watch') {
           if (!c.spot || walk(c, c.spot.x, c.spot.y, 5, dt, w)) c.spot = w.randomLand(w.sites.crowd.x, w.sites.crowd.y, 1, 14);
           if (boarding && c.courage > 0.55 && this.boardTimer > 0.5) { c.state = 'board'; this.boardTimer = 0; }
         } else if (c.state === 'board') {
-          if (c.courage < 0.25 && brain.hrDelta() > this.hrLimit()) { c.state = 'flee'; floater(this.particles, c.x, c.y - 7, 'nope', '#f2e8d5', 5); }
+          if (c.courage < 0.25 && this.stressed()) { c.state = 'flee'; floater(this.particles, c.x, c.y - 7, 'nope', '#f2e8d5', 5); }
           else if (walk(c, pad.x, pad.y, 9, dt, w)) { c.state = 'aboard'; this.passengers++; G.audio.pop(); }
         } else if (c.state === 'flee') {
           if (walk(c, w.sites.crowd.x, w.sites.crowd.y, 14, dt, w)) c.state = 'watch';
@@ -129,12 +134,12 @@ export class SpaceAge {
         this.count = COUNT_FROM; this.holdT = 0;
         brain.setCue('focus');
         G.audio.bell();
-        G.advisor.say('count', 'Final countdown. Hold focus and keep your heart slow. Ten seconds. The whole species is watching. No pressure.', { mood: 'nervous', priority: 4, cooldown: 0 });
+        G.advisor.say('count', 'Final countdown. Hold focus for ten seconds. The whole species is watching. No pressure.', { mood: 'nervous', priority: 4, cooldown: 0 });
       }
     }
 
     if (this.phase === 'countdown') {
-      const ok = this.focusOk() && this.hrOk();
+      const ok = this.focusOk();
       if (ok) {
         const before = Math.ceil(this.count);
         this.count -= dt;
@@ -142,7 +147,7 @@ export class SpaceAge {
         if (Math.ceil(this.count) !== before) G.audio.tick();
       } else {
         this.holdT += dt;
-        G.advisor.say('hold', this.focusOk() ? 'HOLD! Your pulse, my lord! Breathe!' : 'HOLD! Hold the count! Focus, my lord!', { mood: 'panic', priority: 3, cooldown: 4 });
+        G.advisor.say('hold', 'HOLD! Hold the count! Focus, my lord!', { mood: 'panic', priority: 3, cooldown: 4 });
         if (this.holdT > SCRUB_AFTER) {
           this.scrubs++;
           this.count = COUNT_FROM; this.holdT = 0;
@@ -213,11 +218,11 @@ export class SpaceAge {
     for (const s of this.stars) { ctx.fillStyle = s.b > 0.8 ? '#ffffff' : s.b > 0.5 ? '#9fb0d9' : '#4a5580'; ctx.fillRect(Math.round((s.x - t * 6 * s.b) % W + W) % W, Math.round(s.y), 1, 1); }
     // Home: the island itself, seen from orbit, shrinking away.
     const k = clamp(t / 4);
-    const hr = 150 * (1 - k) + 18 * k;
+    const homeR = 150 * (1 - k) + 18 * k;
     const hx = 60 * (1 - k) + 40 * k + 100 * (1 - k), hy = 220 * (1 - k) + 140 * k;
-    ctx.save(); ctx.beginPath(); ctx.arc(hx, hy, hr, 0, Math.PI * 2); ctx.clip();
+    ctx.save(); ctx.beginPath(); ctx.arc(hx, hy, homeR, 0, Math.PI * 2); ctx.clip();
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(this.layer, hx - hr * 1.6, hy - hr * 0.9, hr * 3.2, hr * 1.8);
+    ctx.drawImage(this.layer, hx - homeR * 1.6, hy - homeR * 0.9, homeR * 3.2, homeR * 1.8);
     ctx.restore();
     // New world growing on the right.
     const k2 = clamp((t - 2) / 5.5);
@@ -248,12 +253,10 @@ export class SpaceAge {
     }
     if (this.phase === 'countdown') {
       const n = Math.max(0, Math.ceil(this.count));
-      const ok = this.focusOk() && this.hrOk();
+      const ok = this.focusOk();
       label(ctx, W / 2, 46, ok ? `T−${n}` : 'HOLD', ok ? '#f2e8d5' : '#ff5a72', 30);
       const fpct = Math.round(brain.focus * 100), fthr = Math.round(this.focusThr() * 100);
-      const hrNow = Math.round(brain.hr || 0), hrMax = Math.round((brain.restHr || 70) + this.hrLimit());
-      label(ctx, W / 2 - 48, 60, `focus ${fpct}% (need ${fthr}%)`, this.focusOk() ? '#ffcf4a' : '#ff8a9c', 6);
-      label(ctx, W / 2 + 48, 60, `pulse ${hrNow} (max ${hrMax})`, this.hrOk() ? '#7ee08a' : '#ff8a9c', 6);
+      label(ctx, W / 2, 60, `focus ${fpct}% (need ${fthr}%)`, ok ? '#ffcf4a' : '#ff8a9c', 6);
       if (this.holdT > 0) {
         ctx.fillStyle = 'rgba(14,15,26,0.8)'; ctx.fillRect(W / 2 - 30, 66, 60, 2);
         ctx.fillStyle = '#ff5a72'; ctx.fillRect(W / 2 - 30, 66, 60 * clamp(this.holdT / SCRUB_AFTER), 2);
@@ -266,7 +269,7 @@ export class SpaceAge {
   }
 
   // ---- camera (#33): hand casts and face mood. Extra inputs on top of the brain, never instead of it. ----
-  // They never touch the countdown itself: that stays a focus-and-pulse challenge.
+  // They never touch the countdown itself: that stays a focus challenge.
 
   // aim is 0..1 like the brain's.
   onCast(spell, aim) {

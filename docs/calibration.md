@@ -20,20 +20,20 @@ The window only counts seconds of real play; menus and the era intro card don't 
 | Feature | Source |
 |---|---|
 | `calm`, `focus` (0–1) | the brain model (personal classifier blended with the generic rule) |
-| `hrDelta` (bpm) | heart rate above the player's resting rate |
+| `stress` (0–1) | `brain.stress` = max(1 − calm, face anger while a face is visible), the same stress the eras read |
 | `blinkRate` | deliberate blinks per 10 s |
 | `joy`, `anger`, `surprise`, `sadness` (0–1) | the face emotion manager, only while a face is visible (#33). They are 0 without a camera. |
 
 ## Formula (`sensor` mode)
-With `pulse = clamp(hrDelta / 20)` and `blinks = clamp(blinkRate / 6)`:
+With `blinks = clamp(blinkRate / 6)`:
 
 | Trait | Formula |
 |---|---|
 | **friendliness** | 0.55·calm + 0.35·joy + 0.10·(1 − anger) |
-| **aggressiveness** | 0.50·pulse + 0.35·anger + 0.15·focus |
-| **violence** | 0.45·anger + 0.35·pulse·(1 − calm) + 0.20·blinks |
+| **aggressiveness** | 0.50·stress + 0.35·anger + 0.15·focus |
+| **violence** | 0.45·anger + 0.35·stress·(1 − calm) + 0.20·blinks |
 
-All three are clamped to 0–1. A calm, smiling player seeds a friendly civilisation; a tense, angry one seeds an aggressive, violent one.
+All three are clamped to 0–1. A calm, smiling player seeds a friendly civilisation; a tense, angry one seeds an aggressive, violent one. Stress is high whenever the player is not calm, so a player who neither relaxes nor smiles during the window seeds a fairly aggressive civilisation.
 
 ## Random setup (`random` mode, the dummy run)
 `friendliness`, `aggressiveness` and `violence` (scaled by 0.8) are the first three draws of `mulberry32(seed)`, so the same seed always gives the same setup.

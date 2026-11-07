@@ -51,18 +51,18 @@ export function randomSeedTraits(seed) {
 
 // Sensor-to-trait formula (documented in docs/calibration.md). Inputs are window averages:
 //   calm, focus           0..1 from the brain model
-//   hrDelta               bpm above the player's resting heart rate
+//   stress                0..1 brain.stress = max(1 - calm, face anger)
 //   blinkRate             deliberate blinks per 10 s
 //   joy, anger            0..1 from the face emotion manager (0 without a camera)
 export function traitsFromFeatures(f) {
-  const pulse = clamp((f.hrDelta ?? 0) / 20, 0, 1);
+  const stress = clamp(f.stress ?? 0);
   const blinks = clamp((f.blinkRate ?? 0) / 6, 0, 1);
   const calm = clamp(f.calm ?? 0), focus = clamp(f.focus ?? 0);
   const joy = clamp(f.joy ?? 0), anger = clamp(f.anger ?? 0);
   return {
     friendliness: round(clamp(0.55 * calm + 0.35 * joy + 0.1 * (1 - anger))),
-    aggressiveness: round(clamp(0.5 * pulse + 0.35 * anger + 0.15 * focus)),
-    violence: round(clamp(0.45 * anger + 0.35 * pulse * (1 - calm) + 0.2 * blinks)),
+    aggressiveness: round(clamp(0.5 * stress + 0.35 * anger + 0.15 * focus)),
+    violence: round(clamp(0.45 * anger + 0.35 * stress * (1 - calm) + 0.2 * blinks)),
   };
 }
 
@@ -74,7 +74,7 @@ export class Calibration {
     this.t = 0;
     this.done = false;
     this.result = null;
-    this.sum = { calm: 0, focus: 0, hrDelta: 0, joy: 0, anger: 0, surprise: 0, sadness: 0, faceFrames: 0, n: 0 };
+    this.sum = { calm: 0, focus: 0, stress: 0, joy: 0, anger: 0, surprise: 0, sadness: 0, faceFrames: 0, n: 0 };
     this.blinksAtStart = null;
     this.listeners = [];
   }
@@ -90,7 +90,7 @@ export class Calibration {
     const s = this.sum;
     s.calm += (brain?.calm ?? 0) * dt;
     s.focus += (brain?.focus ?? 0) * dt;
-    s.hrDelta += (brain?.hrDelta?.() ?? 0) * dt;
+    s.stress += (brain?.stress ?? 0) * dt;
     if (mood?.active && mood?.face) {
       s.joy += (mood.joy ?? 0) * dt; s.anger += (mood.anger ?? 0) * dt;
       s.surprise += (mood.surprise ?? 0) * dt; s.sadness += (mood.sadness ?? 0) * dt;
@@ -105,7 +105,7 @@ export class Calibration {
     const s = this.sum, n = Math.max(1e-6, s.n), face = s.faceFrames > 0 ? s.faceFrames : 0;
     const blinks = Math.max(0, (brain?.stats?.blinks ?? 0) - (this.blinksAtStart ?? 0));
     const features = {
-      calm: round(s.calm / n), focus: round(s.focus / n), hrDelta: round(s.hrDelta / n),
+      calm: round(s.calm / n), focus: round(s.focus / n), stress: round(s.stress / n),
       blinkRate: round((blinks / n) * 10),
       joy: face ? round(s.joy / face) : 0, anger: face ? round(s.anger / face) : 0,
       surprise: face ? round(s.surprise / face) : 0, sadness: face ? round(s.sadness / face) : 0,

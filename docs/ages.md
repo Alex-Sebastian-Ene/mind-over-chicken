@@ -75,7 +75,7 @@ Fights are **agent against agent** and come out of the simulation. They also hap
 **Weapons change by age:** clubs → stone spears → slings → bronze swords → legions → knights and crossbows → cannon and muskets → rifles → artillery → drones → orbital defences. Each age's `weapon` in the data sets power and range.
 
 **The player on the battlefield:**
-- anger or a racing pulse pushes conflicts up the ladder;
+- anger or stress pushes conflicts up the ladder;
 - calm drifts them down toward a truce;
 - the peace cast forces a truce around the aim point;
 - lightning breaks a charge, and the struck side loses morale;
@@ -85,7 +85,7 @@ Fights are **agent against agent** and come out of the simulation. They also hap
 Every age has a "brain moment" (the `brain` field in the data). Examples:
 - calm brings rain to first farmers and keeps the lords loyal;
 - focus lets the scribes write law and fuels Renaissance breakthroughs;
-- a racing pulse crashes the goat market and spreads misinformation;
+- stress crashes the goat market and spreads misinformation;
 - anger drives conquest and bloody revolutions;
 - blinks are lightning, miracles or storms at sea.
 

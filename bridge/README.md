@@ -28,7 +28,6 @@ The bump then goes through the same detector as real data. Expect these differen
 
 - `quality` reads about 0.4, because BrainFlow's synthetic channels get louder with channel
   index (about 10 µV × index) and the higher ones look "noisy".
-- `hr` is meaningless. The synthetic PPG is noise, so BrainFlow returns anything from 140 to 220 bpm.
 - `accel` is random noise near 0.9 g on each axis, so `motion` hovers around 0.1 to 0.5.
 - `gyro` is random noise between 0.8 and 1.0 deg/s on each axis. The filter takes that offset as
   gyro bias, so `orientation.yaw` stays near 0. Pitch and roll sit near 35°, because the synthetic
@@ -43,14 +42,13 @@ The bump then goes through the same detector as real data. Expect these differen
 
 1. Turn the headset on, wear it, and close the Muse phone app (or turn off the phone's Bluetooth).
    A headset already connected to a phone cannot be found.
-2. Start the bridge and wait for `Streaming from Muse 2 (PPG, accel, gyro)`. The game shows the same
+2. Start the bridge and wait for `Streaming from Muse 2 (accel, gyro)`. The game shows the same
    status text. If several Muses are nearby, add `--serial-number Muse-XXXX` (the name printed on
    the headset or shown in the Muse app) or `--mac-address`.
-3. Heart rate shows up about 16 s after connecting, once BrainFlow has enough PPG.
-4. Tune blinks: run with `-v`, then do some natural and some hard blinks. The log prints
+3. Tune blinks: run with `-v`, then do some natural and some hard blinks. The log prints
    `blink candidate ptp=...` and `blink rejected/accepted ptp=[AF7, AF8]`. Set
    `--blink-threshold` between your natural blinks and your hard blinks.
-5. Head tracking: hold your head still for the first couple of seconds after the bridge starts
+4. Head tracking: hold your head still for the first couple of seconds after the bridge starts
    streaming, so it can measure the gyro bias. Then hold it still for another second after the game connects,
    so the game can take your neutral pose. See [Head tracking](#head-tracking).
 
@@ -66,10 +64,9 @@ The bump then goes through the same detector as real data. Expect these differen
 | `--host` | `127.0.0.1` | Bind address. `localhost` binds both IPv4 and IPv6 loopback. `0.0.0.0` exposes the bridge to your LAN |
 | `--port` | `8765` | WebSocket port |
 | `--blink-threshold` | `200` | µV peak-to-peak (mean of AF7 and AF8) over 0.4 s for a blink to count |
-| `--no-ppg` | off | Don't enable or read PPG, so `hr` is always `null` |
 | `--fake-blinks` | off | Synthetic board only: inject hard blinks |
 | `--fake-blink-every` | `4` | Seconds between fake blinks (±0.5 s jitter) |
-| `-v`, `--verbose` | off | Log blink candidates and heart-rate estimates, and turn on the BrainFlow logger |
+| `-v`, `--verbose` | off | Log blink candidates and turn on the BrainFlow logger |
 
 Stop with Ctrl+C (or Ctrl+Break on Windows). The bridge stops the stream, releases the BrainFlow
 session and closes the sockets.
@@ -84,7 +81,6 @@ A feature frame, about every 100 ms:
 {"t": 12.61,
  "bands": {"delta": 0.036, "theta": 0.026, "alpha": 0.079, "beta": 0.435, "gamma": 0.424},
  "blink": false,
- "hr": 71.2,
  "accel": [0.0312, -0.0127, 0.9981],
  "gyro": [0.41, -1.87, 12.3],
  "orientation": {"pitch": 1.79, "roll": -0.73, "yaw": -6.2},
@@ -97,7 +93,6 @@ A feature frame, about every 100 ms:
 | `t` | Seconds since the bridge started |
 | `bands` | `DataFilter.get_avg_band_powers` over all EEG channels for the last 2 s, with filters on (detrend plus 50/60 Hz notch). Bands are 2–4, 4–8, 8–13, 13–30 and 30–45 Hz. They already sum to about 1, and the browser renormalises them anyway |
 | `blink` | A deliberate blink was detected since the previous frame (see below) |
-| `hr` | Heart rate in bpm from `DataFilter.get_heart_rate` on PPG, refreshed every 2 s and taken as the median of the last 5 estimates. `null` if there is no PPG, it is still warming up, or it went quiet |
 | `accel` | Accelerometer reading in g, averaged over the last 0.1 s. `null` if the board has no accelerometer |
 | `gyro` | Gyroscope reading in deg/s, averaged over the last 0.1 s. This is the raw reading: the bias is not removed. `null` if the board has no gyroscope in the accelerometer's preset |
 | `orientation` | Fused head orientation in degrees: `pitch`, `roll` and `yaw`. See [Head tracking](#head-tracking). `null` without a gyroscope, and then the game falls back to `accel` tilt |
@@ -107,7 +102,7 @@ A feature frame, about every 100 ms:
 A status message, sent on connect and whenever the status changes:
 
 ```json
-{"type": "status", "text": "Streaming from Muse 2 (PPG, accel, gyro)"}
+{"type": "status", "text": "Streaming from Muse 2 (accel, gyro)"}
 ```
 
 Typical texts are `Connecting to Muse 2`, `Waiting for headset: Muse 2 not found, retrying`,
@@ -206,8 +201,6 @@ them on a Muse. If the aim moves the wrong way, flip `BridgeSource.AIM_SIGN.yaw`
   `--port 8766` and point the game at `ws://localhost:8766`.
 - **The game says "No bridge answered".** Make sure the bridge is running. If your browser resolves
   `localhost` to IPv6 only, start the bridge with `--host localhost`.
-- **No `hr`.** PPG needs about 16 s of data after connecting, and skin contact. `--no-ppg` turns it
-  off. If the log says `could not enable PPG`, that firmware rejected the PPG preset command.
 - **Lightning fires on normal blinks.** Raise `--blink-threshold`, using `-v` to see your values.
   **It never fires:** lower it, and blink harder and longer.
 - **`quality` is low on a real headset.** Wet the sensors, move hair away from the TP9/TP10
@@ -219,17 +212,14 @@ them on a Muse. If the aim moves the wrong way, flip `BridgeSource.AIM_SIGN.yaw`
 
 ## BrainFlow facts this relies on
 
-- The PPG preset commands come from BrainFlow's Supported Boards page
+- From BrainFlow's Supported Boards page
   (<https://brainflow.readthedocs.io/en/stable/SupportedBoards.html>, sections "Muse 2" and "Muse S"):
-  - For Muse 2, `ANCILLARY_PRESET` "contains PPG data, to enable it use `board.config_board("p50")`.
-    It also enables 5th channel for EEG".
-  - For Muse S, PPG is enabled with `board.config_board("p61")`.
   - On both, `AUXILIARY_PRESET` holds gyro and accelerometer data and is "enabled by default".
-  - Both default to Muse command `p21` (4 EEG channels plus IMU).
+  - Both default to Muse command `p21` (4 EEG channels plus IMU). The bridge sends no
+    `config_board` command, so it streams exactly that.
   - Built-in Bluetooth needs Windows 10.0.19041.0+ or macOS 10.15+.
-  - The bridge calls `config_board` after `prepare_session` and before `start_stream`.
 - The BLED112 variants (`MUSE_2_BLED_BOARD`, `MUSE_S_BLED_BOARD`) need `serial_port` and a BLED112
-  dongle, and use the same `p50` / `p61` PPG commands. This comes from the BrainFlow 5.10.0 docs
+  dongle. This comes from the BrainFlow 5.10.0 docs
   (<https://github.com/brainflow-dev/brainflow/blob/5.10.0/docs/SupportedBoards.rst>). The current
   stable docs no longer list the BLED boards, although `BoardIds` 21 and 22 still exist in
   BrainFlow 5.23.0.
@@ -246,10 +236,3 @@ them on a Muse. If the aim moves the wrong way, flip `BridgeSource.AIM_SIGN.yaw`
   BrainFlow 5.23.0, querying a preset that a board lacks (for example `ANCILLARY` on the synthetic
   board, even with `get_board_descr`) makes a later `start_stream` in the same process fail with
   `GENERAL_ERROR:17`.
-- `DataFilter.get_heart_rate(ppg_ir, ppg_red, sampling_rate, fft_size)` documents `fft_size` as
-  "recommended 8192". In 5.23.0 it rejects `fft_size` values that are odd or under 1024, and needs
-  at least `fft_size` samples. At the Muse's 64 Hz PPG rate the bridge uses 1024 samples (16 s),
-  which gives 3.75 bpm resolution.
-- Muse PPG rows are treated as ambient, infrared and red, in GATT characteristic order, as
-  muse-lsl and Mind Monitor label them. BrainFlow's docs do not name the rows. **Not verified on
-  hardware.**

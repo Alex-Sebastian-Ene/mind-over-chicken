@@ -1,7 +1,6 @@
 // Signal sources. Every source emits "frames" at roughly 10 Hz:
 //   { bands: {delta, theta, alpha, beta, gamma},   relative band power, sums to ~1
 //     blink: boolean,                              a deliberate blink happened since last frame
-//     hr: number|null,                             heart rate in bpm
 //     tilt: {x, y}|null,                           head tilt, -1..1 on each axis
 //     motion: number,                              head movement magnitude, 0..1
 //     quality: number }                            0..1 signal quality
@@ -21,7 +20,8 @@ export class SimSource {
     this.label = 'Emulated headset';
     this.connected = true;
     this.status = 'Emulated headset (keyboard)';
-    // What the player is pressing right now.
+    // What the player is pressing right now. `panic` is the Stress demo key (Shift): it lowers
+    // calm, so brain.stress rises.
     this.input = { calm: false, focus: false, panic: false };
     this.pendingBlink = false;
     this.aim = { x: 0.5, y: 0.6 };
@@ -33,11 +33,9 @@ export class SimSource {
       betaGain: rand(0.55, 1.2),     // how strongly focus shows up as beta
       thetaFocus: rand(-0.4, 0.5),   // some people's theta rises with focus, some fall
       gammaArousal: rand(0.3, 1.0),
-      restHr: Math.round(rand(62, 76)),
     };
     // Latent mental state, smoothed so it behaves like a person rather than a switch.
     this.latent = { calm: 0.15, focus: 0.1, arousal: 0.1 };
-    this.hr = this.fp.restHr;
     this.startle = 0;
     this.acc = 0;
   }
@@ -51,19 +49,18 @@ export class SimSource {
     this.aim.x = clamp(x); this.aim.y = clamp(y);
   }
   // Called by the game when something alarming happens (a market crash, a scrubbed launch).
-  // A real player's pulse jumps at these moments; the sim imitates that a little.
+  // A real player tenses up at these moments; the sim imitates that a little (less alpha, so
+  // less calm and more stress).
   addStartle(amount) { this.startle = Math.min(1, this.startle + amount); }
 
   update(dt, emit) {
     const L = this.latent, I = this.input;
-    L.calm = smooth(L.calm, I.calm ? 0.95 : (I.panic ? 0.02 : 0.15), I.calm ? 1.1 : 1.6, dt);
+    // The Stress key wins over the calm key, so stress can spike mid-calm (e.g. during the IPO).
+    L.calm = smooth(L.calm, I.panic ? 0.02 : I.calm ? 0.95 : 0.15, I.calm && !I.panic ? 1.1 : 1.6, dt);
     L.focus = smooth(L.focus, I.focus ? 0.95 : 0.12, I.focus ? 1.3 : 1.8, dt);
     const arousalTarget = I.panic ? 1 : clamp(0.12 + 0.06 * L.focus - 0.12 * L.calm + this.startle * 0.8);
     L.arousal = smooth(L.arousal, arousalTarget, I.panic ? 0.9 : 0.35, dt);
     this.startle = Math.max(0, this.startle - dt * 0.12);
-
-    const hrTarget = this.fp.restHr + 42 * L.arousal - 7 * L.calm + 2 * L.focus;
-    this.hr = smooth(this.hr, hrTarget, 0.45, dt) + gauss() * 0.15;
 
     this.acc += dt;
     while (this.acc >= FRAME_DT) {
@@ -90,7 +87,6 @@ export class SimSource {
     return {
       bands: { delta: delta / sum, theta: theta / sum, alpha: alpha / sum, beta: beta / sum, gamma: gamma / sum },
       blink,
-      hr: Math.round(this.hr * 10) / 10,
       tilt: { x: this.aim.x * 2 - 1, y: this.aim.y * 2 - 1 },
       motion,
       quality: 1,
@@ -98,8 +94,8 @@ export class SimSource {
   }
 }
 
-// Reads frames from the Python bridge (BrainFlow → band powers, blinks, PPG heart rate, accelerometer
-// and gyroscope). With the bridge's fused `orientation` the aim follows yaw (left/right) and pitch
+// Reads frames from the Python bridge (BrainFlow → band powers, blinks, accelerometer and
+// gyroscope). With the bridge's fused `orientation` the aim follows yaw (left/right) and pitch
 // (up/down); without it (no gyro, older bridge) it falls back to accelerometer tilt.
 export class BridgeSource {
   static AIM_RANGE_DEG = 25;    // degrees of yaw or pitch from neutral that reach the screen edge
@@ -187,7 +183,6 @@ export class BridgeSource {
     return {
       bands: { delta: (b.delta || 0) / sum, theta: (b.theta || 0) / sum, alpha: (b.alpha || 0) / sum, beta: (b.beta || 0) / sum, gamma: (b.gamma || 0) / sum },
       blink: !!msg.blink,
-      hr: typeof msg.hr === 'number' && msg.hr > 30 && msg.hr < 220 ? msg.hr : null,
       tilt,
       motion: clamp(msg.motion ?? 0),   // the bridge folds gyro rotation speed into this
       quality: clamp(msg.quality ?? 1),

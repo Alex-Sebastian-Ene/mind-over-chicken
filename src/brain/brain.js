@@ -1,9 +1,24 @@
-// Brain = source frames → smoothed features → calm / focus / heart rate the game can use.
+// Brain = source frames → smoothed features → calm / focus / stress the game can use.
 // It blends a generic rule (alpha/beta ratios) with the personal model as that model
 // earns trust, and records labelled windows whenever the game sets a cue.
+//
+// Stress is the one number the game reads for "how wound up is the god":
+// stress = max(1 - calm, face anger while the camera sees a face), 0..1. It is computed here,
+// once, so the eras, HUD, calibration and galaxy all agree on it.
 
 import { clamp, sigmoid, smooth, median } from '../sim/util.js';
 import { PersonalModel, featuresFromBands } from './model.js';
+
+// stress = max(1 - calm, anger), both 0..1. `anger` is the face's anger score while the camera
+// is on and sees a face, else 0. ProxyBrain and SharedBrain use the same function.
+export function stressFrom(calm, anger = 0) {
+  return clamp(Math.max(1 - clamp(calm || 0), clamp(anger || 0)));
+}
+
+// The face's anger, if the camera is on and sees a face (G.mood from src/camera/camera.js).
+export function faceAnger(mood) {
+  return mood?.active && mood.face ? clamp(mood.anger || 0) : 0;
+}
 
 const WINDOW = 6;            // frames averaged per feature window (~0.6 s)
 const TRAIN_EVERY = 2.5;     // seconds between retrains
@@ -21,9 +36,8 @@ export class Brain {
     this.genericCalm = 0;
     this.genericFocus = 0;
     this.personal = null;
-    this.hr = null;
-    this.hrHistory = [];      // [{t, hr}]
-    this.restHr = null;
+    this.anger = 0;           // face anger counted into stress (0 without a camera)
+    this.stress = 1;          // max(1 - calm, anger), updated every frame
     this.aim = { x: 0.5, y: 0.55 };
     this.motion = 0;
     this.quality = 1;
@@ -33,20 +47,23 @@ export class Brain {
     this.time = 0;
     this.trainTimer = 0;
     this.restRef = { ab: [], bat: [] };
-    this.stats = { blinks: 0, calmSeconds: 0, focusSeconds: 0, peakHr: 0, framesSeen: 0 };
+    this.stats = { blinks: 0, calmSeconds: 0, focusSeconds: 0, framesSeen: 0 };
     this.onTrained = null;
   }
 
   onBlink(fn) { this.blinkListeners.push(fn); }
   setCue(label) { this.cue = label; }
 
-  update(dt) {
+  // mood: G.mood from the camera (optional). Only its anger is read, for stress.
+  update(dt, mood = null) {
     this.time += dt;
     this.source.update(dt, (frame) => this.ingest(frame));
 
     // Smooth the outputs the game reads, so a single noisy window can't flip a challenge.
     this.calm = smooth(this.calm, this.calmRaw, 4, dt);
     this.focus = smooth(this.focus, this.focusRaw, 4, dt);
+    this.anger = faceAnger(mood);
+    this.stress = stressFrom(this.calm, this.anger);
     if (this.calm > 0.6) this.stats.calmSeconds += dt;
     if (this.focus > 0.6) this.stats.focusSeconds += dt;
 
@@ -65,18 +82,6 @@ export class Brain {
       this.aim.y = smooth(this.aim.y, clamp(0.5 + frame.tilt.y * 0.5), 10, 0.1);
     }
     this.motion = frame.motion;
-
-    if (frame.hr) {
-      this.hr = frame.hr;
-      this.hrHistory.push({ t: this.time, hr: frame.hr });
-      while (this.hrHistory.length && this.time - this.hrHistory[0].t > 180) this.hrHistory.shift();
-      if (this.hrHistory.length > 20) {
-        // Resting pulse ≈ 25th percentile of the last three minutes.
-        const s = this.hrHistory.map((h) => h.hr).sort((a, b) => a - b);
-        this.restHr = s[Math.floor(s.length * 0.25)];
-      } else if (this.restHr == null) this.restHr = frame.hr;
-      this.stats.peakHr = Math.max(this.stats.peakHr, frame.hr);
-    }
 
     if (frame.blink) {
       if (this.time - this.lastBlinkAt > 0.45) {
@@ -117,10 +122,5 @@ export class Brain {
   // The better the model knows the player, the higher the bar. Players never see this.
   threshold(kind, base = 0.55) {
     return clamp(base + 0.14 * this.model.trust(kind), 0, 0.85);
-  }
-
-  hrDelta() {
-    if (this.hr == null || this.restHr == null) return 0;
-    return this.hr - this.restHr;
   }
 }

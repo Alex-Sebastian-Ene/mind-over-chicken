@@ -8,7 +8,8 @@ const ICONS = {
   blink: { c: '#ffcf4a', p: ['....##..', '...##...', '..##....', '.######.', '....##..', '...##...', '..##....', '.#......'] },
   calm: { c: '#59d8c8', p: ['...#....', '...##...', '..###...', '..####..', '.##.###.', '.#...##.', '.##.###.', '..####..'] },
   focus: { c: '#ffcf4a', p: ['........', '..####..', '.#....#.', '#..##..#', '#..##..#', '.#....#.', '..####..', '........'] },
-  heart: { c: '#ff5a72', p: ['........', '.##.##..', '#######.', '#######.', '.#####..', '..###...', '...#....', '........'] },
+  // Stress: the cartoon "cross vein" of an agitated god.
+  stress: { c: '#ff5a72', p: ['..#..#..', '.##..##.', '##....##', '........', '........', '##....##', '.##..##.', '..#..#..'] },
 };
 
 function paintIcon(canvas, icon) {
@@ -19,7 +20,7 @@ function paintIcon(canvas, icon) {
   icon.p.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === '#') ctx.fillRect(x, y, 1, 1); }));
 }
 
-const POWER_UNLOCK = { blink: 'stone', calm: 'stone', focus: 'kingdoms', heart: 'industry' };
+const POWER_UNLOCK = { blink: 'stone', calm: 'stone', focus: 'kingdoms', stress: 'industry' };
 
 export class Hud {
   constructor(doc) {
@@ -30,7 +31,7 @@ export class Hud {
       blink: doc.querySelector('[data-power="blink"]'),
       calm: doc.querySelector('[data-power="calm"]'),
       focus: doc.querySelector('[data-power="focus"]'),
-      heart: doc.querySelector('[data-power="heart"]'),
+      stress: doc.querySelector('[data-power="stress"]'),
     };
     this.source = doc.getElementById('sourceStatus');
     this.modelPanel = doc.getElementById('modelPanel');
@@ -79,10 +80,10 @@ export class Hud {
     };
     set(this.powers.calm, b.calm, scene?.powers.includes('calm') ? b.threshold('calm', 0.55) : null, `${Math.round(b.calm * 100)}%`);
     set(this.powers.focus, b.focus, scene?.powers.includes('focus') ? b.threshold('focus', 0.5) : null, `${Math.round(b.focus * 100)}%`);
-    const d = b.hrDelta();
-    set(this.powers.heart, Math.min(1, Math.max(0, d / 30)), null, b.hr ? `${Math.round(b.hr)} bpm` : 'no pulse');
-    this.powers.heart.classList.toggle('is-hot', d > 10);
-    this.powers.heart.querySelector('.power-sub').textContent = b.hr && b.restHr ? `${d >= 0 ? '+' : ''}${Math.round(d)} vs resting` : 'Heart rate';
+    // Stress = max(1 - calm, face anger): high whenever the god is not calm.
+    const stress = b.stress ?? 0;
+    set(this.powers.stress, stress, null, `${Math.round(stress * 100)}%`);
+    this.powers.stress.classList.toggle('is-hot', stress > 0.9);
     if (this.blinkFlash > 0) { this.blinkFlash -= dt; if (this.blinkFlash <= 0) this.powers.blink.classList.remove('is-firing'); }
     this.powers.blink.querySelector('.power-value').textContent = `${b.stats.blinks}`;
 

@@ -9,7 +9,6 @@ Frame:
     {"t": 12.3,                       # seconds since the bridge started
      "bands": {"delta": .., "theta": .., "alpha": .., "beta": .., "gamma": ..},
      "blink": false,                  # deliberate blink since the previous frame
-     "hr": 71.2 | null,               # heart rate from PPG, bpm
      "accel": [x, y, z] | null,       # accelerometer, g
      "gyro": [x, y, z] | null,        # gyroscope, deg/s (null if the board has none)
      "orientation": {"pitch": .., "roll": .., "yaw": ..} | null,
@@ -42,15 +41,13 @@ from websockets.exceptions import ConnectionClosed
 
 log = logging.getLogger("muse_bridge")
 
-# --board choice -> (BrainFlow board id, display name, config_board command that turns PPG on).
-# PPG commands come from BrainFlow's SupportedBoards docs: Muse 2 uses "p50" (which also
-# enables the 5th EEG channel), Muse S uses "p61". See README.md for the citation.
+# --board choice -> (BrainFlow board id, display name).
 BOARDS = {
-    "synthetic": (BoardIds.SYNTHETIC_BOARD, "Synthetic board", None),
-    "muse2": (BoardIds.MUSE_2_BOARD, "Muse 2", "p50"),
-    "muse2-bled": (BoardIds.MUSE_2_BLED_BOARD, "Muse 2 (BLED112)", "p50"),
-    "muses": (BoardIds.MUSE_S_BOARD, "Muse S", "p61"),
-    "muses-bled": (BoardIds.MUSE_S_BLED_BOARD, "Muse S (BLED112)", "p61"),
+    "synthetic": (BoardIds.SYNTHETIC_BOARD, "Synthetic board"),
+    "muse2": (BoardIds.MUSE_2_BOARD, "Muse 2"),
+    "muse2-bled": (BoardIds.MUSE_2_BLED_BOARD, "Muse 2 (BLED112)"),
+    "muses": (BoardIds.MUSE_S_BOARD, "Muse S"),
+    "muses-bled": (BoardIds.MUSE_S_BLED_BOARD, "Muse S (BLED112)"),
 }
 
 DEFAULT = BrainFlowPresets.DEFAULT_PRESET.value
@@ -66,8 +63,6 @@ BLINK_REARM = 0.6         # signal must fall below this fraction of the threshol
 BLINK_MIN_CORR = 0.3      # AF7/AF8 must move together (vertical EOG); saccades are anti-correlated
 ARTIFACT_PTP = 900.0      # µV; above this it is a contact pop / railed channel, not a blink
 BLINK_MAX_MOTION = 0.8    # ignore "blinks" during big head jerks
-HR_EVERY = 2.0            # seconds between heart-rate updates
-HR_SECONDS = 15.0         # PPG history used per estimate (BrainFlow needs fft_size >= 1024)
 ACCEL_FRAME = 0.1         # seconds of accelerometer averaged into "accel"
 ACCEL_SHAKE = 0.3         # seconds of accelerometer used for the shake term
 IMU_WINDOW = 0.5          # seconds of accel/gyro read per frame; new samples are picked by timestamp
@@ -95,13 +90,6 @@ def finite(x, ndigits=4, default=0.0):
     """JSON-safe float: the browser's JSON.parse rejects NaN/Infinity."""
     x = float(x)
     return round(x, ndigits) + 0.0 if math.isfinite(x) else default   # + 0.0: no "-0.0" in JSON
-
-
-def next_pow2(n):
-    p = 1
-    while p < n:
-        p *= 2
-    return p
 
 
 class Sensor:
@@ -289,14 +277,13 @@ class HeadTracker:
 class Bridge:
     def __init__(self, args):
         self.args = args
-        self.board_id, self.label, self.ppg_command = BOARDS[args.board]
+        self.board_id, self.label = BOARDS[args.board]
         self.board_id = self.board_id.value
         self.clients = set()
         self.status = "Starting bridge"
         self.streaming_status = "Streaming"
         self.t0 = time.monotonic()
         self.board = None
-        self.ppg_enabled = False
         self.frames_sent = 0
         self.blinks_sent = 0
         self._reset_signal_state()
@@ -315,12 +302,9 @@ class Bridge:
         if self.accel is not None and len(self.accel.channels) == 3:
             gyro = find_sensor(bid, BoardShim.get_gyro_channels, [self.accel.preset])
             self.gyro = gyro if gyro is not None and len(gyro.channels) == 3 else None
-        self.ppg = None if args.no_ppg else find_sensor(bid, BoardShim.get_ppg_channels,
-                                                       [ANCILLARY, AUXILIARY, DEFAULT])
         log.info("EEG: %s, blink channels %s", self.eeg, "/".join(frontal_labels))
         log.info("Accelerometer: %s", self.accel or "not available")
         log.info("Gyroscope: %s", self.gyro or "not available (orientation will be null)")
-        log.info("PPG: %s", self.ppg or ("disabled (--no-ppg)" if args.no_ppg else "not available"))
 
         self.fake_blinks = bool(args.fake_blinks)
         if self.fake_blinks and args.board != "synthetic":
@@ -335,11 +319,6 @@ class Bridge:
         self.head = HeadTracker()
         self.imu_last_ts = None
         self.imu_last_at = None
-        self.hr_estimates = deque(maxlen=5)
-        self.hr = None
-        self.last_hr_at = -1e9
-        self.last_ppg_ts = None
-        self.last_ppg_new_at = time.monotonic()
         self.last_eeg_ts = None
         self.last_eeg_new_at = time.monotonic()
         self.fake_next = None
@@ -394,22 +373,9 @@ class Bridge:
             try:
                 # prepare_session scans BLE / opens the dongle and can block for seconds.
                 await asyncio.to_thread(board.prepare_session)
-                self.ppg_enabled = False
-                if self.ppg is not None and self.ppg_command:
-                    try:
-                        await asyncio.to_thread(board.config_board, self.ppg_command)
-                        self.ppg_enabled = True
-                        log.info("PPG enabled with config_board(%r)", self.ppg_command)
-                    except BrainFlowError as e:
-                        log.warning("could not enable PPG with %r: %s (continuing without heart rate)",
-                                    self.ppg_command, e)
-                elif self.ppg is not None:
-                    self.ppg_enabled = True   # synthetic: PPG is always streamed
                 board.start_stream(BUFFER_SAMPLES)
                 self._reset_signal_state()
                 extras = []
-                if self.ppg_enabled:
-                    extras.append("PPG")
                 if self.accel:
                     extras.append("accel")
                 if self.gyro:
@@ -474,9 +440,9 @@ class Bridge:
 
             if now - last_report > 10:
                 last_report = now
-                log.info("clients=%d frames=%d blinks=%d hr=%s quality=%s",
+                log.info("clients=%d frames=%d blinks=%d quality=%s",
                          len(self.clients), self.frames_sent, self.blinks_sent,
-                         self.hr, frame["quality"] if frame else "-")
+                         frame["quality"] if frame else "-")
 
             next_tick += FRAME_DT
             delay = next_tick - time.monotonic()
@@ -510,13 +476,11 @@ class Bridge:
         quality = self.signal_quality(eeg_block, now)
         accel, gyro, orientation, motion = self.read_imu(board, now)
         blink = self.detect_blink([rows[ch] for ch in self.frontal], fs, now, motion)
-        hr = self.read_hr(board, now)
 
         return {
             "t": round(now - self.t0, 3),
             "bands": bands,
             "blink": bool(blink),
-            "hr": hr,
             "accel": accel,
             "gyro": gyro,
             "orientation": orientation,
@@ -646,44 +610,6 @@ class Bridge:
         k = n if last is None else min(n, int(round((now - last) * s.fs)))
         return range(n - k, n)
 
-    def read_hr(self, board, now):
-        s = self.ppg
-        if s is None or not self.ppg_enabled:
-            return None
-        if now - self.last_hr_at < HR_EVERY:
-            return self.hr
-        self.last_hr_at = now
-        fft = max(1024, next_pow2(int(HR_SECONDS * s.fs)))   # BrainFlow: even and >= 1024
-        try:
-            d = board.get_current_board_data(fft, s.preset)
-        except BrainFlowError:
-            return self.hr
-        if s.ts_channel is not None and d.shape[1]:
-            newest = float(d[s.ts_channel, -1])
-            if newest != self.last_ppg_ts:
-                self.last_ppg_ts, self.last_ppg_new_at = newest, now
-            elif now - self.last_ppg_new_at > 10:
-                self.hr_estimates.clear()     # PPG went quiet: stop reporting a stale pulse
-                self.hr = None
-                return None
-        if d.shape[1] < fft:
-            return self.hr                   # not enough PPG yet (~16 s on a Muse)
-        ch = s.channels
-        # Muse PPG rows are ambient, infrared, red (in GATT characteristic order).
-        ir, red = (d[ch[1]], d[ch[2]]) if len(ch) >= 3 else (d[ch[0]], d[ch[-1]])
-        try:
-            bpm = DataFilter.get_heart_rate(np.ascontiguousarray(ir, dtype=np.float64),
-                                            np.ascontiguousarray(red, dtype=np.float64), s.fs, fft)
-        except BrainFlowError as e:
-            log.debug("heart rate failed: %s", e)
-            return self.hr
-        if math.isfinite(bpm) and 40 <= bpm <= 200:
-            self.hr_estimates.append(bpm)
-            log.debug("heart rate estimate %.1f bpm", bpm)
-        if self.hr_estimates:
-            self.hr = round(float(np.median(self.hr_estimates)), 1)
-        return self.hr
-
     # ------------------------------------------------------------------ synthetic helpers
 
     def inject_fake_blinks(self, rows, ts):
@@ -712,7 +638,7 @@ class Bridge:
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(
-        description="Stream EEG band powers, blinks, heart rate, head motion and head orientation from "
+        description="Stream EEG band powers, blinks, head motion and head orientation from "
                     "a BrainFlow board to the Mind over Chicken browser game over a WebSocket.")
     p.add_argument("--board", choices=list(BOARDS), default="synthetic",
                    help="headset to read (default: synthetic, no hardware needed)")
@@ -726,13 +652,12 @@ def parse_args(argv=None):
     p.add_argument("--blink-threshold", type=float, default=200.0,
                    help="blink threshold in microvolts peak-to-peak on the frontal channels over "
                         f"{BLINK_WINDOW:g} s (default 200; natural blinks usually stay below it)")
-    p.add_argument("--no-ppg", action="store_true", help="do not enable or read PPG (no heart rate)")
     p.add_argument("--fake-blinks", action="store_true",
                    help="synthetic board only: inject a hard blink every few seconds")
     p.add_argument("--fake-blink-every", type=float, default=4.0,
                    help="seconds between fake blinks (default 4)")
     p.add_argument("-v", "--verbose", action="store_true",
-                   help="log blink candidates and heart-rate estimates (use it to tune --blink-threshold)")
+                   help="log blink candidates (use it to tune --blink-threshold)")
     args = p.parse_args(argv)
     if args.board.endswith("-bled") and not args.serial_port:
         p.error(f"--board {args.board} needs --serial-port (the BLED112 dongle, e.g. COM3)")
