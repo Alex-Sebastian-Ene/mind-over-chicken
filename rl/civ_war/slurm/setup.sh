@@ -9,7 +9,9 @@ set -euo pipefail
 mkdir -p "$CIV_WAR_WORK"
 if ! command -v cargo >/dev/null 2>&1; then
   echo "installing Rust with rustup into $HOME/.cargo"
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+  RUSTUP_INIT="$CIV_WAR_WORK/rustup-init.sh"
+  curl -sSf https://sh.rustup.rs -o "$RUSTUP_INIT" 2>/dev/null || env -u LD_LIBRARY_PATH curl -sSf https://sh.rustup.rs -o "$RUSTUP_INIT" || wget -q -O "$RUSTUP_INIT" https://sh.rustup.rs
+  sh "$RUSTUP_INIT" -y --profile minimal --default-toolchain stable
   . "$HOME/.cargo/env"
 fi
 cd "$REPO"
