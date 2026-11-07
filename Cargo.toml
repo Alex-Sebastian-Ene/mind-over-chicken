@@ -2,5 +2,7 @@
 members = [
     "crates/engine",
     "crates/moc-planet",
+    "crates/moc-ai",
+    "crates/moc-bridge",
 ]
 resolver = "2"
