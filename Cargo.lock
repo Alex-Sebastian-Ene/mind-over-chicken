@@ -70,6 +70,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "moc-civ"
+version = "0.1.0"
+dependencies = [
+ "moc-planet",
+]
+
+[[package]]
 name = "moc-planet"
 version = "0.1.0"
 

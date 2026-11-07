@@ -1,0 +1,15 @@
+[package]
+name = "moc-civ"
+description = "Warring civilisations for Mind over Chicken: villages spawn agents that gather, settle, fight for territory and rebel, on the wrapping planet"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Alex-Sebastian-Ene/mind-over-chicken"
+
+# rlib for tests and other crates; cdylib for the browser, as a plain extern "C" WebAssembly
+# module (no wasm-bindgen). Build with crates/moc-civ/build-wasm.sh.
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+moc-planet = { path = "../moc-planet" }

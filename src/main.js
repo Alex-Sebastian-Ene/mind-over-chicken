@@ -17,6 +17,7 @@ import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel } from '.
 import { initCamera } from './camera/camera.js'; // camera (#33)
 import { Calibration, readCalibrationConfig } from './brain/calibration.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
+import { CivSandbox } from './civ/sandbox.js'; // civ (#50)
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
 // mind read uses the same window.
@@ -563,6 +564,17 @@ $('playSandbox').addEventListener('click', () => {
   cosmos.z = 1; cosmos.target = 2;
   advisor.setEra('space');
   advisor.say('sandbox', 'Galaxy sandbox, my lord. Three worlds are forming from your thoughts. Make more planets and let them run.', { mood: 'happy', priority: 3, cooldown: 999 });
+});
+// civ (#50): "Sandbox: four civilisations" runs its own scene (Rust sim in src/civ/) on the emulated headset.
+$('playCiv').addEventListener('click', () => {
+  begin(new SimSource());
+  const scene = new CivSandbox({ cosmos });
+  G.scene = scene;
+  advisor.setEra(scene.era);
+  scene.enter(G);
+  hud.setScene(scene);
+  document.body.dataset.era = scene.era;
+  showBanner(scene, -1);
 });
 $('playBridge').addEventListener('click', async () => {
   const url = $('bridgeUrl').value.trim() || 'ws://localhost:8765';
