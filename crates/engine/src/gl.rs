@@ -236,6 +236,31 @@ impl WebGlRenderer {
         canvas_w: i32,
         canvas_h: i32,
     ) {
+        self.render_scene_texture(
+            &self.texture,
+            night,
+            flash,
+            fade,
+            shake_x,
+            shake_y,
+            lights,
+            canvas_w,
+            canvas_h,
+        );
+    }
+
+    pub fn render_scene_texture(
+        &self,
+        texture: &WebGlTexture,
+        night: f32,
+        flash: f32,
+        fade: f32,
+        shake_x: f32,
+        shake_y: f32,
+        lights: &[Light],
+        canvas_w: i32,
+        canvas_h: i32,
+    ) {
         // Clear whole canvas with dark letterbox background
         self.gl.viewport(0, 0, canvas_w, canvas_h);
         self.gl.clear_color(0.02, 0.02, 0.06, 1.0);
@@ -270,7 +295,7 @@ impl WebGlRenderer {
         }
         self.gl.uniform4fv_with_f32_array(Some(&self.u_lights), &light_data);
 
-        self.gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&self.texture));
+        self.gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(texture));
         self.gl.draw_arrays(WebGlRenderingContext::TRIANGLES, 0, 6);
     }
 }

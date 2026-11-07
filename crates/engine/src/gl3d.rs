@@ -1,0 +1,794 @@
+use crate::camera3d::OrbitCamera;
+use crate::math3d::Vec3;
+use crate::mesh3d::TerrainMesh;
+use web_sys::{
+    WebGlBuffer, WebGlFramebuffer, WebGlProgram, WebGlRenderbuffer, WebGlRenderingContext,
+    WebGlShader, WebGlTexture, WebGlUniformLocation,
+};
+
+pub struct Light3D {
+    pub pos: Vec3,
+    pub radius: f32,
+    pub intensity: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct BillboardVertex {
+    pub center: [f32; 3],
+    pub offset: [f32; 2],
+    pub uv: [f32; 2],
+}
+
+pub struct WebGl3DRenderer {
+    pub gl: WebGlRenderingContext,
+    pub terrain_program: WebGlProgram,
+    pub water_program: WebGlProgram,
+    pub billboard_program: WebGlProgram,
+
+    // Terrain buffers
+    pub terrain_vbo: WebGlBuffer,
+    pub terrain_ibo: WebGlBuffer,
+    pub terrain_index_count: i32,
+
+    // Water buffers
+    pub water_vbo: WebGlBuffer,
+    pub water_ibo: WebGlBuffer,
+    pub water_index_count: i32,
+
+    // Billboard buffer
+    pub billboard_vbo: WebGlBuffer,
+
+    // Low-res offscreen render target (320x180) for retro pixel-art aesthetic
+    pub fbo: WebGlFramebuffer,
+    pub fbo_texture: WebGlTexture,
+    pub _fbo_depth_rb: WebGlRenderbuffer,
+
+    // Textures
+    pub terrain_texture: WebGlTexture,
+    pub atlas_texture: WebGlTexture,
+
+    // Terrain uniforms
+    pub u_terrain_vp: WebGlUniformLocation,
+    pub u_terrain_sun_dir: WebGlUniformLocation,
+    pub u_terrain_ambient: WebGlUniformLocation,
+    pub u_terrain_night: WebGlUniformLocation,
+    pub u_terrain_time: WebGlUniformLocation,
+    pub u_terrain_light_count: WebGlUniformLocation,
+    pub u_terrain_light_pos: WebGlUniformLocation,
+    pub u_terrain_light_rad: WebGlUniformLocation,
+    pub u_terrain_light_int: WebGlUniformLocation,
+
+    // Water uniforms
+    pub u_water_vp: WebGlUniformLocation,
+    pub u_water_sun_dir: WebGlUniformLocation,
+    pub u_water_night: WebGlUniformLocation,
+    pub u_water_time: WebGlUniformLocation,
+    pub u_water_light_count: WebGlUniformLocation,
+    pub u_water_light_pos: WebGlUniformLocation,
+    pub u_water_light_rad: WebGlUniformLocation,
+    pub u_water_light_int: WebGlUniformLocation,
+
+    // Billboard uniforms
+    pub u_billboard_vp: WebGlUniformLocation,
+    pub u_billboard_cam_right: WebGlUniformLocation,
+    pub u_billboard_night: WebGlUniformLocation,
+}
+
+const TERRAIN_VS: &str = r#"
+attribute vec3 a_position;
+attribute vec2 a_texCoord;
+attribute vec3 a_normal;
+
+uniform mat4 u_viewProjection;
+
+varying vec2 v_texCoord;
+varying vec3 v_normal;
+varying vec3 v_worldPos;
+
+void main() {
+    v_worldPos = a_position;
+    v_normal = a_normal;
+    v_texCoord = a_texCoord;
+    gl_Position = u_viewProjection * vec4(a_position, 1.0);
+}
+"#;
+
+const TERRAIN_FS: &str = r#"
+precision mediump float;
+
+varying vec2 v_texCoord;
+varying vec3 v_normal;
+varying vec3 v_worldPos;
+
+uniform sampler2D u_texture;
+uniform vec3 u_sunDir;
+uniform float u_ambient;
+uniform float u_night;
+uniform int u_lightCount;
+uniform vec3 u_lightPos[16];
+uniform float u_lightRad[16];
+uniform float u_lightInt[16];
+
+void main() {
+    vec4 albedo = texture2D(u_texture, v_texCoord);
+    vec3 norm = normalize(v_normal);
+
+    // Quantized diffuse lighting for pixel-art aesthetic
+    float nDotL = max(0.0, dot(norm, normalize(u_sunDir)));
+    float diffuse = floor(nDotL * 4.0 + 0.5) / 4.0;
+
+    // Ambient day vs night
+    vec3 nightTint = vec3(0.08, 0.12, 0.28);
+    vec3 ambientCol = mix(vec3(u_ambient), nightTint, u_night);
+
+    vec3 lightAccum = ambientCol + vec3(diffuse * (1.0 - u_night * 0.75));
+
+    // Dynamic 3D point lights (fires, torches, lightning)
+    for (int i = 0; i < 16; i++) {
+        if (i >= u_lightCount) break;
+        float d = distance(v_worldPos, u_lightPos[i]);
+        if (d < u_lightRad[i]) {
+            float atten = (1.0 - d / u_lightRad[i]) * u_lightInt[i];
+            lightAccum += vec3(1.0, 0.65, 0.3) * atten;
+        }
+    }
+
+    vec3 finalColor = albedo.rgb * lightAccum;
+    gl_FragColor = vec4(clamp(finalColor, 0.0, 1.0), albedo.a);
+}
+"#;
+
+const WATER_VS: &str = r#"
+attribute vec3 a_position;
+attribute vec2 a_texCoord;
+attribute vec3 a_normal;
+
+uniform mat4 u_viewProjection;
+uniform float u_time;
+
+varying vec2 v_texCoord;
+varying vec3 v_worldPos;
+
+void main() {
+    vec3 pos = a_position;
+    // Dynamic 3D wave ripples
+    pos.y += sin(pos.x * 0.18 + u_time * 2.8) * cos(pos.z * 0.18 + u_time * 2.2) * 0.45;
+    v_worldPos = pos;
+    v_texCoord = a_texCoord;
+    gl_Position = u_viewProjection * vec4(pos, 1.0);
+}
+"#;
+
+const WATER_FS: &str = r#"
+precision mediump float;
+
+varying vec2 v_texCoord;
+varying vec3 v_worldPos;
+
+uniform vec3 u_sunDir;
+uniform float u_night;
+uniform float u_time;
+uniform int u_lightCount;
+uniform vec3 u_lightPos[16];
+uniform float u_lightRad[16];
+uniform float u_lightInt[16];
+
+void main() {
+    vec3 dayWater = vec3(0.12, 0.38, 0.64);
+    vec3 nightWater = vec3(0.04, 0.08, 0.20);
+    vec3 col = mix(dayWater, nightWater, u_night);
+
+    // Wave foam highlights
+    float foam = sin(v_worldPos.x * 0.45 + v_worldPos.z * 0.45 + u_time * 3.2);
+    if (foam > 0.82) {
+        col += vec3(0.18, 0.28, 0.35) * (1.0 - u_night * 0.5);
+    }
+
+    // Dynamic point lights reflection on water
+    for (int i = 0; i < 16; i++) {
+        if (i >= u_lightCount) break;
+        float d = distance(v_worldPos, u_lightPos[i]);
+        if (d < u_lightRad[i]) {
+            float atten = (1.0 - d / u_lightRad[i]) * u_lightInt[i];
+            col += vec3(1.0, 0.65, 0.3) * atten;
+        }
+    }
+
+    gl_FragColor = vec4(clamp(col, 0.0, 1.0), 0.86);
+}
+"#;
+
+const BILLBOARD_VS: &str = r#"
+attribute vec3 a_center;
+attribute vec2 a_offset;
+attribute vec2 a_texCoord;
+
+uniform mat4 u_viewProjection;
+uniform vec3 u_camRight;
+
+varying vec2 v_texCoord;
+
+void main() {
+    v_texCoord = a_texCoord;
+    vec3 camUp = vec3(0.0, 1.0, 0.0);
+    vec3 worldPos = a_center + u_camRight * a_offset.x + camUp * a_offset.y;
+    gl_Position = u_viewProjection * vec4(worldPos, 1.0);
+}
+"#;
+
+const BILLBOARD_FS: &str = r#"
+precision mediump float;
+varying vec2 v_texCoord;
+uniform sampler2D u_texture;
+uniform float u_night;
+
+void main() {
+    vec4 c = texture2D(u_texture, v_texCoord);
+    if (c.a < 0.1) discard;
+
+    vec3 nightTint = vec3(0.18, 0.24, 0.45);
+    vec3 lit = mix(c.rgb, c.rgb * nightTint, u_night * 0.75);
+
+    gl_FragColor = vec4(lit, c.a);
+}
+"#;
+
+impl WebGl3DRenderer {
+    pub fn new(gl: WebGlRenderingContext) -> Result<Self, String> {
+        let t_vert = compile_shader(&gl, WebGlRenderingContext::VERTEX_SHADER, TERRAIN_VS)?;
+        let t_frag = compile_shader(&gl, WebGlRenderingContext::FRAGMENT_SHADER, TERRAIN_FS)?;
+        let terrain_program = link_program(&gl, &t_vert, &t_frag)?;
+
+        let w_vert = compile_shader(&gl, WebGlRenderingContext::VERTEX_SHADER, WATER_VS)?;
+        let w_frag = compile_shader(&gl, WebGlRenderingContext::FRAGMENT_SHADER, WATER_FS)?;
+        let water_program = link_program(&gl, &w_vert, &w_frag)?;
+
+        let b_vert = compile_shader(&gl, WebGlRenderingContext::VERTEX_SHADER, BILLBOARD_VS)?;
+        let b_frag = compile_shader(&gl, WebGlRenderingContext::FRAGMENT_SHADER, BILLBOARD_FS)?;
+        let billboard_program = link_program(&gl, &b_vert, &b_frag)?;
+
+        let terrain_vbo = gl.create_buffer().ok_or("Failed to create terrain vbo")?;
+        let terrain_ibo = gl.create_buffer().ok_or("Failed to create terrain ibo")?;
+        let water_vbo = gl.create_buffer().ok_or("Failed to create water vbo")?;
+        let water_ibo = gl.create_buffer().ok_or("Failed to create water ibo")?;
+        let billboard_vbo = gl.create_buffer().ok_or("Failed to create billboard vbo")?;
+
+        // Offscreen Framebuffer (320x180) for low-res pixel art pass
+        let fbo = gl.create_framebuffer().ok_or("Failed to create framebuffer")?;
+        let fbo_texture = gl.create_texture().ok_or("Failed to create fbo texture")?;
+        gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&fbo_texture));
+        gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
+            WebGlRenderingContext::TEXTURE_2D,
+            0,
+            WebGlRenderingContext::RGBA as i32,
+            320,
+            180,
+            0,
+            WebGlRenderingContext::RGBA,
+            WebGlRenderingContext::UNSIGNED_BYTE,
+            None,
+        )
+        .map_err(|e| format!("{:?}", e))?;
+        gl.tex_parameteri(
+            WebGlRenderingContext::TEXTURE_2D,
+            WebGlRenderingContext::TEXTURE_MIN_FILTER,
+            WebGlRenderingContext::NEAREST as i32,
+        );
+        gl.tex_parameteri(
+            WebGlRenderingContext::TEXTURE_2D,
+            WebGlRenderingContext::TEXTURE_MAG_FILTER,
+            WebGlRenderingContext::NEAREST as i32,
+        );
+        gl.tex_parameteri(
+            WebGlRenderingContext::TEXTURE_2D,
+            WebGlRenderingContext::TEXTURE_WRAP_S,
+            WebGlRenderingContext::CLAMP_TO_EDGE as i32,
+        );
+        gl.tex_parameteri(
+            WebGlRenderingContext::TEXTURE_2D,
+            WebGlRenderingContext::TEXTURE_WRAP_T,
+            WebGlRenderingContext::CLAMP_TO_EDGE as i32,
+        );
+
+        let fbo_depth_rb = gl
+            .create_renderbuffer()
+            .ok_or("Failed to create depth renderbuffer")?;
+        gl.bind_renderbuffer(WebGlRenderingContext::RENDERBUFFER, Some(&fbo_depth_rb));
+        gl.renderbuffer_storage(
+            WebGlRenderingContext::RENDERBUFFER,
+            WebGlRenderingContext::DEPTH_COMPONENT16,
+            320,
+            180,
+        );
+
+        gl.bind_framebuffer(WebGlRenderingContext::FRAMEBUFFER, Some(&fbo));
+        gl.framebuffer_texture_2d(
+            WebGlRenderingContext::FRAMEBUFFER,
+            WebGlRenderingContext::COLOR_ATTACHMENT0,
+            WebGlRenderingContext::TEXTURE_2D,
+            Some(&fbo_texture),
+            0,
+        );
+        gl.framebuffer_renderbuffer(
+            WebGlRenderingContext::FRAMEBUFFER,
+            WebGlRenderingContext::DEPTH_ATTACHMENT,
+            WebGlRenderingContext::RENDERBUFFER,
+            Some(&fbo_depth_rb),
+        );
+        gl.bind_framebuffer(WebGlRenderingContext::FRAMEBUFFER, None);
+
+        // Terrain texture
+        let terrain_texture = gl.create_texture().ok_or("Failed to create terrain texture")?;
+        gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&terrain_texture));
+        gl.tex_parameteri(
+            WebGlRenderingContext::TEXTURE_2D,
+            WebGlRenderingContext::TEXTURE_MIN_FILTER,
+            WebGlRenderingContext::NEAREST as i32,
+        );
+        gl.tex_parameteri(
+            WebGlRenderingContext::TEXTURE_2D,
+            WebGlRenderingContext::TEXTURE_MAG_FILTER,
+            WebGlRenderingContext::NEAREST as i32,
+        );
+        gl.tex_parameteri(
+            WebGlRenderingContext::TEXTURE_2D,
+            WebGlRenderingContext::TEXTURE_WRAP_S,
+            WebGlRenderingContext::CLAMP_TO_EDGE as i32,
+        );
+        gl.tex_parameteri(
+            WebGlRenderingContext::TEXTURE_2D,
+            WebGlRenderingContext::TEXTURE_WRAP_T,
+            WebGlRenderingContext::CLAMP_TO_EDGE as i32,
+        );
+
+        // Atlas texture for billboards
+        let atlas_texture = gl.create_texture().ok_or("Failed to create atlas texture")?;
+        gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&atlas_texture));
+        gl.tex_parameteri(
+            WebGlRenderingContext::TEXTURE_2D,
+            WebGlRenderingContext::TEXTURE_MIN_FILTER,
+            WebGlRenderingContext::NEAREST as i32,
+        );
+        gl.tex_parameteri(
+            WebGlRenderingContext::TEXTURE_2D,
+            WebGlRenderingContext::TEXTURE_MAG_FILTER,
+            WebGlRenderingContext::NEAREST as i32,
+        );
+        gl.tex_parameteri(
+            WebGlRenderingContext::TEXTURE_2D,
+            WebGlRenderingContext::TEXTURE_WRAP_S,
+            WebGlRenderingContext::CLAMP_TO_EDGE as i32,
+        );
+        gl.tex_parameteri(
+            WebGlRenderingContext::TEXTURE_2D,
+            WebGlRenderingContext::TEXTURE_WRAP_T,
+            WebGlRenderingContext::CLAMP_TO_EDGE as i32,
+        );
+
+        // Terrain uniform locations
+        let u_terrain_vp = gl
+            .get_uniform_location(&terrain_program, "u_viewProjection")
+            .ok_or("Missing u_viewProjection in terrain shader")?;
+        let u_terrain_sun_dir = gl
+            .get_uniform_location(&terrain_program, "u_sunDir")
+            .ok_or("Missing u_sunDir in terrain shader")?;
+        let u_terrain_ambient = gl
+            .get_uniform_location(&terrain_program, "u_ambient")
+            .ok_or("Missing u_ambient in terrain shader")?;
+        let u_terrain_night = gl
+            .get_uniform_location(&terrain_program, "u_night")
+            .ok_or("Missing u_night in terrain shader")?;
+        let u_terrain_time = gl
+            .get_uniform_location(&terrain_program, "u_time")
+            .unwrap_or_else(|| gl.get_uniform_location(&terrain_program, "u_sunDir").unwrap());
+        let u_terrain_light_count = gl
+            .get_uniform_location(&terrain_program, "u_lightCount")
+            .ok_or("Missing u_lightCount in terrain shader")?;
+        let u_terrain_light_pos = gl
+            .get_uniform_location(&terrain_program, "u_lightPos")
+            .ok_or("Missing u_lightPos in terrain shader")?;
+        let u_terrain_light_rad = gl
+            .get_uniform_location(&terrain_program, "u_lightRad")
+            .ok_or("Missing u_lightRad in terrain shader")?;
+        let u_terrain_light_int = gl
+            .get_uniform_location(&terrain_program, "u_lightInt")
+            .ok_or("Missing u_lightInt in terrain shader")?;
+
+        // Water uniform locations
+        let u_water_vp = gl
+            .get_uniform_location(&water_program, "u_viewProjection")
+            .ok_or("Missing u_viewProjection in water shader")?;
+        let u_water_sun_dir = gl
+            .get_uniform_location(&water_program, "u_sunDir")
+            .ok_or("Missing u_sunDir in water shader")?;
+        let u_water_night = gl
+            .get_uniform_location(&water_program, "u_night")
+            .ok_or("Missing u_night in water shader")?;
+        let u_water_time = gl
+            .get_uniform_location(&water_program, "u_time")
+            .ok_or("Missing u_time in water shader")?;
+        let u_water_light_count = gl
+            .get_uniform_location(&water_program, "u_lightCount")
+            .ok_or("Missing u_lightCount in water shader")?;
+        let u_water_light_pos = gl
+            .get_uniform_location(&water_program, "u_lightPos")
+            .ok_or("Missing u_lightPos in water shader")?;
+        let u_water_light_rad = gl
+            .get_uniform_location(&water_program, "u_lightRad")
+            .ok_or("Missing u_lightRad in water shader")?;
+        let u_water_light_int = gl
+            .get_uniform_location(&water_program, "u_lightInt")
+            .ok_or("Missing u_lightInt in water shader")?;
+
+        // Billboard uniform locations
+        let u_billboard_vp = gl
+            .get_uniform_location(&billboard_program, "u_viewProjection")
+            .ok_or("Missing u_viewProjection in billboard shader")?;
+        let u_billboard_cam_right = gl
+            .get_uniform_location(&billboard_program, "u_camRight")
+            .ok_or("Missing u_camRight in billboard shader")?;
+        let u_billboard_night = gl
+            .get_uniform_location(&billboard_program, "u_night")
+            .ok_or("Missing u_night in billboard shader")?;
+
+        Ok(Self {
+            gl,
+            terrain_program,
+            water_program,
+            billboard_program,
+            terrain_vbo,
+            terrain_ibo,
+            terrain_index_count: 0,
+            water_vbo,
+            water_ibo,
+            water_index_count: 0,
+            billboard_vbo,
+            fbo,
+            fbo_texture,
+            _fbo_depth_rb: fbo_depth_rb,
+            terrain_texture,
+            atlas_texture,
+            u_terrain_vp,
+            u_terrain_sun_dir,
+            u_terrain_ambient,
+            u_terrain_night,
+            u_terrain_time,
+            u_terrain_light_count,
+            u_terrain_light_pos,
+            u_terrain_light_rad,
+            u_terrain_light_int,
+            u_water_vp,
+            u_water_sun_dir,
+            u_water_night,
+            u_water_time,
+            u_water_light_count,
+            u_water_light_pos,
+            u_water_light_rad,
+            u_water_light_int,
+            u_billboard_vp,
+            u_billboard_cam_right,
+            u_billboard_night,
+        })
+    }
+
+    pub fn upload_mesh(&mut self, mesh: &TerrainMesh) {
+        let gl = &self.gl;
+
+        // Terrain vertices
+        gl.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&self.terrain_vbo));
+        unsafe {
+            let view = js_sys::Float32Array::view(&mesh.vertices);
+            gl.buffer_data_with_array_buffer_view(
+                WebGlRenderingContext::ARRAY_BUFFER,
+                &view,
+                WebGlRenderingContext::STATIC_DRAW,
+            );
+        }
+
+        // Terrain indices
+        gl.bind_buffer(WebGlRenderingContext::ELEMENT_ARRAY_BUFFER, Some(&self.terrain_ibo));
+        unsafe {
+            let view = js_sys::Uint16Array::view(&mesh.indices);
+            gl.buffer_data_with_array_buffer_view(
+                WebGlRenderingContext::ELEMENT_ARRAY_BUFFER,
+                &view,
+                WebGlRenderingContext::STATIC_DRAW,
+            );
+        }
+        self.terrain_index_count = mesh.indices.len() as i32;
+
+        // Water vertices
+        gl.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&self.water_vbo));
+        unsafe {
+            let view = js_sys::Float32Array::view(&mesh.water_vertices);
+            gl.buffer_data_with_array_buffer_view(
+                WebGlRenderingContext::ARRAY_BUFFER,
+                &view,
+                WebGlRenderingContext::STATIC_DRAW,
+            );
+        }
+
+        // Water indices
+        gl.bind_buffer(WebGlRenderingContext::ELEMENT_ARRAY_BUFFER, Some(&self.water_ibo));
+        unsafe {
+            let view = js_sys::Uint16Array::view(&mesh.water_indices);
+            gl.buffer_data_with_array_buffer_view(
+                WebGlRenderingContext::ELEMENT_ARRAY_BUFFER,
+                &view,
+                WebGlRenderingContext::STATIC_DRAW,
+            );
+        }
+        self.water_index_count = mesh.water_indices.len() as i32;
+    }
+
+    pub fn upload_terrain_texture(&self, pixels: &[u8], width: i32, height: i32) {
+        let gl = &self.gl;
+        gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&self.terrain_texture));
+        gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
+            WebGlRenderingContext::TEXTURE_2D,
+            0,
+            WebGlRenderingContext::RGBA as i32,
+            width,
+            height,
+            0,
+            WebGlRenderingContext::RGBA,
+            WebGlRenderingContext::UNSIGNED_BYTE,
+            Some(pixels),
+        )
+        .unwrap();
+    }
+
+    pub fn upload_atlas_texture(&self, pixels: &[u8], width: i32, height: i32) {
+        let gl = &self.gl;
+        gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&self.atlas_texture));
+        gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
+            WebGlRenderingContext::TEXTURE_2D,
+            0,
+            WebGlRenderingContext::RGBA as i32,
+            width,
+            height,
+            0,
+            WebGlRenderingContext::RGBA,
+            WebGlRenderingContext::UNSIGNED_BYTE,
+            Some(pixels),
+        )
+        .unwrap();
+    }
+
+    pub fn render_3d(
+        &mut self,
+        camera: &OrbitCamera,
+        time: f32,
+        sun_dir: Vec3,
+        night: f32,
+        lights: &[Light3D],
+        billboards: &[BillboardVertex],
+    ) {
+        let gl = &self.gl;
+
+        // 1. Render to offscreen 320x180 framebuffer for pixel-art aesthetic
+        gl.bind_framebuffer(WebGlRenderingContext::FRAMEBUFFER, Some(&self.fbo));
+        gl.viewport(0, 0, 320, 180);
+
+        // Sky background: deep blue to twilight night
+        let sky_r = 0.05 * (1.0 - night) + 0.02 * night;
+        let sky_g = 0.12 * (1.0 - night) + 0.04 * night;
+        let sky_b = 0.28 * (1.0 - night) + 0.12 * night;
+        gl.clear_color(sky_r, sky_g, sky_b, 1.0);
+        gl.clear(WebGlRenderingContext::COLOR_BUFFER_BIT | WebGlRenderingContext::DEPTH_BUFFER_BIT);
+
+        let aspect = 320.0 / 180.0;
+        let (_view, _proj, view_proj) = camera.compute_matrices(aspect);
+        let cam_right = Vec3::new(camera.yaw.cos(), 0.0, -camera.yaw.sin());
+
+        gl.enable(WebGlRenderingContext::DEPTH_TEST);
+        gl.depth_func(WebGlRenderingContext::LEQUAL);
+        gl.depth_mask(true);
+
+        // 2. Render Terrain Mesh
+        gl.use_program(Some(&self.terrain_program));
+        gl.uniform_matrix4fv_with_f32_array(Some(&self.u_terrain_vp), false, &view_proj.m);
+        gl.uniform3f(Some(&self.u_terrain_sun_dir), sun_dir.x, sun_dir.y, sun_dir.z);
+        gl.uniform1f(Some(&self.u_terrain_ambient), 0.38);
+        gl.uniform1f(Some(&self.u_terrain_night), night);
+        gl.uniform1f(Some(&self.u_terrain_time), time);
+
+        let count = lights.len().min(16);
+        gl.uniform1i(Some(&self.u_terrain_light_count), count as i32);
+
+        let mut pos_arr = [0.0f32; 16 * 3];
+        let mut rad_arr = [0.0f32; 16];
+        let mut int_arr = [0.0f32; 16];
+        for (i, l) in lights.iter().take(count).enumerate() {
+            pos_arr[i * 3] = l.pos.x;
+            pos_arr[i * 3 + 1] = l.pos.y;
+            pos_arr[i * 3 + 2] = l.pos.z;
+            rad_arr[i] = l.radius;
+            int_arr[i] = l.intensity;
+        }
+        gl.uniform3fv_with_f32_array(Some(&self.u_terrain_light_pos), &pos_arr);
+        gl.uniform1fv_with_f32_array(Some(&self.u_terrain_light_rad), &rad_arr);
+        gl.uniform1fv_with_f32_array(Some(&self.u_terrain_light_int), &int_arr);
+
+        gl.active_texture(WebGlRenderingContext::TEXTURE0);
+        gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&self.terrain_texture));
+
+        gl.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&self.terrain_vbo));
+        let stride = 8 * 4;
+        let a_pos = gl.get_attrib_location(&self.terrain_program, "a_position") as u32;
+        let a_uv = gl.get_attrib_location(&self.terrain_program, "a_texCoord") as u32;
+        let a_norm = gl.get_attrib_location(&self.terrain_program, "a_normal") as u32;
+
+        gl.enable_vertex_attrib_array(a_pos);
+        gl.vertex_attrib_pointer_with_i32(a_pos, 3, WebGlRenderingContext::FLOAT, false, stride, 0);
+
+        gl.enable_vertex_attrib_array(a_uv);
+        gl.vertex_attrib_pointer_with_i32(a_uv, 2, WebGlRenderingContext::FLOAT, false, stride, 3 * 4);
+
+        gl.enable_vertex_attrib_array(a_norm);
+        gl.vertex_attrib_pointer_with_i32(a_norm, 3, WebGlRenderingContext::FLOAT, false, stride, 5 * 4);
+
+        gl.bind_buffer(WebGlRenderingContext::ELEMENT_ARRAY_BUFFER, Some(&self.terrain_ibo));
+        gl.draw_elements_with_i32(
+            WebGlRenderingContext::TRIANGLES,
+            self.terrain_index_count,
+            WebGlRenderingContext::UNSIGNED_SHORT,
+            0,
+        );
+
+        // 3. Render Animated Water Grid
+        gl.use_program(Some(&self.water_program));
+        gl.uniform_matrix4fv_with_f32_array(Some(&self.u_water_vp), false, &view_proj.m);
+        gl.uniform3f(Some(&self.u_water_sun_dir), sun_dir.x, sun_dir.y, sun_dir.z);
+        gl.uniform1f(Some(&self.u_water_night), night);
+        gl.uniform1f(Some(&self.u_water_time), time);
+        gl.uniform1i(Some(&self.u_water_light_count), count as i32);
+        gl.uniform3fv_with_f32_array(Some(&self.u_water_light_pos), &pos_arr);
+        gl.uniform1fv_with_f32_array(Some(&self.u_water_light_rad), &rad_arr);
+        gl.uniform1fv_with_f32_array(Some(&self.u_water_light_int), &int_arr);
+
+        gl.enable(WebGlRenderingContext::BLEND);
+        gl.blend_func(
+            WebGlRenderingContext::SRC_ALPHA,
+            WebGlRenderingContext::ONE_MINUS_SRC_ALPHA,
+        );
+
+        gl.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&self.water_vbo));
+        let w_pos = gl.get_attrib_location(&self.water_program, "a_position") as u32;
+        let w_uv = gl.get_attrib_location(&self.water_program, "a_texCoord") as u32;
+        let w_norm = gl.get_attrib_location(&self.water_program, "a_normal") as u32;
+
+        gl.enable_vertex_attrib_array(w_pos);
+        gl.vertex_attrib_pointer_with_i32(w_pos, 3, WebGlRenderingContext::FLOAT, false, stride, 0);
+
+        gl.enable_vertex_attrib_array(w_uv);
+        gl.vertex_attrib_pointer_with_i32(w_uv, 2, WebGlRenderingContext::FLOAT, false, stride, 3 * 4);
+
+        gl.enable_vertex_attrib_array(w_norm);
+        gl.vertex_attrib_pointer_with_i32(w_norm, 3, WebGlRenderingContext::FLOAT, false, stride, 5 * 4);
+
+        gl.bind_buffer(WebGlRenderingContext::ELEMENT_ARRAY_BUFFER, Some(&self.water_ibo));
+        gl.draw_elements_with_i32(
+            WebGlRenderingContext::TRIANGLES,
+            self.water_index_count,
+            WebGlRenderingContext::UNSIGNED_SHORT,
+            0,
+        );
+
+        // 4. Render Billboard Sprites (camera-facing entities standing on the ground)
+        if !billboards.is_empty() {
+            gl.use_program(Some(&self.billboard_program));
+            gl.uniform_matrix4fv_with_f32_array(Some(&self.u_billboard_vp), false, &view_proj.m);
+            gl.uniform3f(
+                Some(&self.u_billboard_cam_right),
+                cam_right.x,
+                cam_right.y,
+                cam_right.z,
+            );
+            gl.uniform1f(Some(&self.u_billboard_night), night);
+
+            gl.active_texture(WebGlRenderingContext::TEXTURE0);
+            gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&self.atlas_texture));
+
+            gl.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&self.billboard_vbo));
+            unsafe {
+                let bytes = std::slice::from_raw_parts(
+                    billboards.as_ptr() as *const u8,
+                    billboards.len() * std::mem::size_of::<BillboardVertex>(),
+                );
+                gl.buffer_data_with_u8_array(
+                    WebGlRenderingContext::ARRAY_BUFFER,
+                    bytes,
+                    WebGlRenderingContext::DYNAMIC_DRAW,
+                );
+            }
+
+            let b_stride = std::mem::size_of::<BillboardVertex>() as i32;
+            let b_center = gl.get_attrib_location(&self.billboard_program, "a_center") as u32;
+            let b_offset = gl.get_attrib_location(&self.billboard_program, "a_offset") as u32;
+            let b_uv = gl.get_attrib_location(&self.billboard_program, "a_texCoord") as u32;
+
+            gl.enable_vertex_attrib_array(b_center);
+            gl.vertex_attrib_pointer_with_i32(
+                b_center,
+                3,
+                WebGlRenderingContext::FLOAT,
+                false,
+                b_stride,
+                0,
+            );
+
+            gl.enable_vertex_attrib_array(b_offset);
+            gl.vertex_attrib_pointer_with_i32(
+                b_offset,
+                2,
+                WebGlRenderingContext::FLOAT,
+                false,
+                b_stride,
+                3 * 4,
+            );
+
+            gl.enable_vertex_attrib_array(b_uv);
+            gl.vertex_attrib_pointer_with_i32(
+                b_uv,
+                2,
+                WebGlRenderingContext::FLOAT,
+                false,
+                b_stride,
+                5 * 4,
+            );
+
+            gl.draw_arrays(WebGlRenderingContext::TRIANGLES, 0, billboards.len() as i32);
+        }
+
+        gl.disable(WebGlRenderingContext::BLEND);
+        gl.disable(WebGlRenderingContext::DEPTH_TEST);
+        gl.bind_framebuffer(WebGlRenderingContext::FRAMEBUFFER, None);
+    }
+}
+
+fn compile_shader(
+    gl: &WebGlRenderingContext,
+    shader_type: u32,
+    src: &str,
+) -> Result<WebGlShader, String> {
+    let shader = gl.create_shader(shader_type).ok_or("Cannot create shader")?;
+    gl.shader_source(&shader, src);
+    gl.compile_shader(&shader);
+
+    if gl
+        .get_shader_parameter(&shader, WebGlRenderingContext::COMPILE_STATUS)
+        .as_bool()
+        .unwrap_or(false)
+    {
+        Ok(shader)
+    } else {
+        Err(gl
+            .get_shader_info_log(&shader)
+            .unwrap_or_else(|| "Unknown compile error".into()))
+    }
+}
+
+fn link_program(
+    gl: &WebGlRenderingContext,
+    vert: &WebGlShader,
+    frag: &WebGlShader,
+) -> Result<WebGlProgram, String> {
+    let program = gl.create_program().ok_or("Cannot create program")?;
+    gl.attach_shader(&program, vert);
+    gl.attach_shader(&program, frag);
+    gl.link_program(&program);
+
+    if gl
+        .get_program_parameter(&program, WebGlRenderingContext::LINK_STATUS)
+        .as_bool()
+        .unwrap_or(false)
+    {
+        Ok(program)
+    } else {
+        Err(gl
+            .get_program_info_log(&program)
+            .unwrap_or_else(|| "Unknown link error".into()))
+    }
+}

@@ -4,8 +4,12 @@
 export class Engine {
     free(): void;
     [Symbol.dispose](): void;
+    add_3d_light(x: number, y: number, z: number, radius: number, intensity: number): void;
+    add_billboard(sprite_id: number, x: number, z: number, facing: number, frame: number, variant: number): void;
+    add_custom_billboard(x: number, y: number, z: number, w: number, h: number, u0: number, v0: number, u1: number, v1: number): void;
     add_light(x: number, y: number, radius: number, intensity: number): void;
     begin_frame(): void;
+    clear_3d_billboards(): void;
     draw_chicken(x: number, y: number, facing: number, frame: number, halo: boolean): void;
     draw_fire(x: number, y: number, heat: number, t: number): void;
     draw_goat(x: number, y: number, facing: number): void;
@@ -20,6 +24,11 @@ export class Engine {
     draw_text_badge(cx: number, y: number, text: string, text_r: number, text_g: number, text_b: number, bg_r: number, bg_g: number, bg_b: number, bg_a: number): void;
     draw_text_centered(cx: number, y: number, text: string, r: number, g: number, b: number, a: number): void;
     end_frame(night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
+    get_camera_distance(): number;
+    get_camera_pitch(): number;
+    get_camera_target_x(): number;
+    get_camera_target_z(): number;
+    get_camera_yaw(): number;
     get_site_cave_mouth_x(): number;
     get_site_cave_mouth_y(): number;
     get_site_cave_x(): number;
@@ -35,12 +44,21 @@ export class Engine {
     get_site_village_x(): number;
     get_site_village_y(): number;
     get_terrain_type(x: number, y: number): number;
+    init_3d(): void;
     init_world(seed: number): void;
+    is_3d_mode(): boolean;
     is_walkable(x: number, y: number): boolean;
     constructor(canvas_id: string);
+    orbit_camera(delta_yaw: number, delta_pitch: number): void;
+    pan_camera(dx: number, dz: number): void;
+    render_3d(dt: number, sun_x: number, sun_y: number, sun_z: number, night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
     render_uploaded_canvas(night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
+    screen_to_ground(sx: number, sy: number, cw: number, ch: number): Float32Array;
+    set_3d_mode(enabled: boolean): void;
+    set_camera_target(tx: number, tz: number): void;
     set_era(era: number): void;
     upload_canvas(canvas: HTMLCanvasElement): void;
+    zoom_camera(factor: number): void;
 }
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -48,8 +66,12 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_engine_free: (a: number, b: number) => void;
+    readonly engine_add_3d_light: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly engine_add_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly engine_add_custom_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
     readonly engine_add_light: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly engine_begin_frame: (a: number) => void;
+    readonly engine_clear_3d_billboards: (a: number) => void;
     readonly engine_draw_chicken: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly engine_draw_fire: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly engine_draw_goat: (a: number, b: number, c: number, d: number) => void;
@@ -64,6 +86,11 @@ export interface InitOutput {
     readonly engine_draw_text_badge: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
     readonly engine_draw_text_centered: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly engine_end_frame: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+    readonly engine_get_camera_distance: (a: number) => number;
+    readonly engine_get_camera_pitch: (a: number) => number;
+    readonly engine_get_camera_target_x: (a: number) => number;
+    readonly engine_get_camera_target_z: (a: number) => number;
+    readonly engine_get_camera_yaw: (a: number) => number;
     readonly engine_get_site_cave_mouth_x: (a: number) => number;
     readonly engine_get_site_cave_mouth_y: (a: number) => number;
     readonly engine_get_site_cave_x: (a: number) => number;
@@ -79,12 +106,21 @@ export interface InitOutput {
     readonly engine_get_site_village_x: (a: number) => number;
     readonly engine_get_site_village_y: (a: number) => number;
     readonly engine_get_terrain_type: (a: number, b: number, c: number) => number;
+    readonly engine_init_3d: (a: number) => [number, number];
     readonly engine_init_world: (a: number, b: number) => void;
+    readonly engine_is_3d_mode: (a: number) => number;
     readonly engine_is_walkable: (a: number, b: number, c: number) => number;
     readonly engine_new: (a: number, b: number) => [number, number, number];
+    readonly engine_orbit_camera: (a: number, b: number, c: number) => void;
+    readonly engine_pan_camera: (a: number, b: number, c: number) => void;
+    readonly engine_render_3d: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
     readonly engine_render_uploaded_canvas: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+    readonly engine_screen_to_ground: (a: number, b: number, c: number, d: number, e: number) => any;
+    readonly engine_set_3d_mode: (a: number, b: number) => void;
+    readonly engine_set_camera_target: (a: number, b: number, c: number) => void;
     readonly engine_set_era: (a: number, b: number) => void;
     readonly engine_upload_canvas: (a: number, b: any) => [number, number];
+    readonly engine_zoom_camera: (a: number, b: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

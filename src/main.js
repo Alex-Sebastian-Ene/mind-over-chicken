@@ -237,15 +237,32 @@ function render() {
 
   if (engine) {
     try {
-      // begin_frame clears last frame's lights; without it they pile up every frame (#38).
-      engine.begin_frame();
-      engine.upload_canvas(low);
-      if (surface && scene.lights) {
-        for (const l of scene.lights()) {
-          for (const off of offsets) engine.add_light(l.x + off, l.y, l.r, 1.0);
+      if (surface && engine.is_3d_mode()) {
+        engine.upload_canvas(low);
+        if (scene.draw3d) {
+          scene.draw3d(engine, 0.016);
+        } else if (scene.lights) {
+          for (const l of scene.lights()) {
+            engine.add_3d_light(l.x, 10.0, l.y, l.r, 1.2);
+          }
         }
+        // Directional sun rotates with day/night
+        const sunAngle = (G.runTime || 0) * 0.15;
+        const sunX = Math.cos(sunAngle);
+        const sunY = 0.85;
+        const sunZ = Math.sin(sunAngle);
+        engine.render_3d(0.016, sunX, sunY, sunZ, dark, flash, fade, sx, sy, screen.width, screen.height);
+      } else {
+        // begin_frame clears last frame's lights; without it they pile up every frame (#38).
+        engine.begin_frame();
+        engine.upload_canvas(low);
+        if (surface && scene.lights) {
+          for (const l of scene.lights()) {
+            for (const off of offsets) engine.add_light(l.x + off, l.y, l.r, 1.0);
+          }
+        }
+        engine.render_uploaded_canvas(dark, flash, fade, sx, sy, screen.width, screen.height);
       }
-      engine.render_uploaded_canvas(dark, flash, fade, sx, sy, screen.width, screen.height);
     } catch (e) {
       console.error('WebGL render error:', e);
     }
@@ -326,13 +343,46 @@ function aimFromEvent(e) {
 }
 
 function worldFromEvent(e) { const a = aimFromEvent(e); return { x: a.x * W, y: a.y * H }; }
-// Aim on the (panned, wrapping) surface: screen position → map position.
-function surfaceAim(e) { const a = aimFromEvent(e); return { x: cosmos.mapX(a.x * W) / W, y: a.y }; }
+// Aim on the surface: in 3D mode, raycast from screen to terrain; in 2D, screen → map position.
+function surfaceAim(e) {
+  if (engine && engine.is_3d_mode() && !cosmos.active) {
+    const r = screen.getBoundingClientRect();
+    const sx = e.clientX - r.left;
+    const sy = e.clientY - r.top;
+    const hit = engine.screen_to_ground(sx, sy, r.width, r.height);
+    if (hit && hit[0] >= 0 && hit[1] >= 0) {
+      return { x: clamp(hit[0] / W), y: clamp(hit[1] / H) };
+    }
+  }
+  const a = aimFromEvent(e);
+  return { x: cosmos.mapX(a.x * W) / W, y: a.y };
+}
 let panDrag = null;
+let orbitDrag = null;
 
 screen.addEventListener('pointermove', (e) => {
   if (G && cosmos.active) { const p = worldFromEvent(e); cosmos.pointerMove(e.pointerId, p.x, p.y, G); return; }
-  if (panDrag && panDrag.id === e.pointerId) { const x = worldFromEvent(e).x; cosmos.pan(x - panDrag.x); panDrag.x = x; return; }
+  if (orbitDrag && orbitDrag.id === e.pointerId) {
+    const dx = e.clientX - orbitDrag.x;
+    const dy = e.clientY - orbitDrag.y;
+    orbitDrag.x = e.clientX;
+    orbitDrag.y = e.clientY;
+    if (engine && engine.is_3d_mode()) {
+      engine.orbit_camera(dx * 0.008, dy * 0.008);
+    }
+    return;
+  }
+  if (panDrag && panDrag.id === e.pointerId) {
+    const x = worldFromEvent(e).x;
+    const dx = x - panDrag.x;
+    panDrag.x = x;
+    if (engine && engine.is_3d_mode()) {
+      engine.pan_camera(-dx * 0.4, 0);
+    } else {
+      cosmos.pan(dx);
+    }
+    return;
+  }
   const s = sim(); if (!s) return;
   const a = surfaceAim(e);
   s.setAim(a.x, a.y);
@@ -347,8 +397,22 @@ screen.addEventListener('pointerdown', (e) => {
     cosmos.pointerDown(e.pointerId, p.x, p.y);
     return;
   }
-  // Right or middle drag pans the planet's surface; left click stays the blink.
-  if (G && (e.button === 1 || e.button === 2)) {
+  // Right-click or Alt/Shift-click orbits camera in 3D
+  if (G && (e.button === 2 || (e.button === 0 && (e.altKey || e.shiftKey)))) {
+    e.preventDefault();
+    screen.setPointerCapture?.(e.pointerId);
+    orbitDrag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    return;
+  }
+  // Middle click pans the camera
+  if (G && e.button === 1) {
+    e.preventDefault();
+    screen.setPointerCapture?.(e.pointerId);
+    panDrag = { id: e.pointerId, x: worldFromEvent(e).x };
+    return;
+  }
+  // Right drag in 2D mode pans surface
+  if (G && e.button === 2) {
     e.preventDefault();
     screen.setPointerCapture?.(e.pointerId);
     panDrag = { id: e.pointerId, x: worldFromEvent(e).x };
@@ -361,6 +425,7 @@ screen.addEventListener('pointerdown', (e) => {
   s.blink();
 });
 const endPointer = (e) => {
+  if (orbitDrag && orbitDrag.id === e.pointerId) { orbitDrag = null; return; }
   if (panDrag && panDrag.id === e.pointerId) { panDrag = null; return; }
   if (!G || !cosmos.pointers.has(e.pointerId)) return;
   const p = worldFromEvent(e);
@@ -372,6 +437,18 @@ screen.addEventListener('pointercancel', endPointer);
 screen.addEventListener('wheel', (e) => {
   if (!G) return;
   e.preventDefault();
+  if (engine && engine.is_3d_mode() && !cosmos.active) {
+    if (e.deltaY > 0) {
+      if (engine.get_camera_distance() > 220) {
+        cosmos.zoomOut(G);
+      } else {
+        engine.zoom_camera(1.1);
+      }
+    } else {
+      engine.zoom_camera(0.91);
+    }
+    return;
+  }
   // Horizontal scroll (or Shift+scroll) pans the surface; vertical scroll zooms.
   const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey;
   if (horizontal && !cosmos.active) { cosmos.pan(-(e.shiftKey ? e.deltaY : e.deltaX) * 0.15); return; }
@@ -383,6 +460,7 @@ const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'pa
 window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input')) return;
   if (e.code === 'KeyM') { toggleModel(); return; }
+  if (e.code === 'KeyT' || e.code === 'Digit3') { toggle3D(); return; }
   if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { cosmos.zoomOut(G); return; }
   if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { cosmos.zoomIn(G); return; }
   if (G && !cosmos.active && (e.code === 'KeyA' || e.code === 'KeyD')) { cosmos.panVel = e.code === 'KeyA' ? 140 : -140; return; }
@@ -436,6 +514,19 @@ function toggleModel() {
 }
 $('modelBtn').addEventListener('click', toggleModel);
 $('modelClose').addEventListener('click', toggleModel);
+
+function toggle3D() {
+  if (!engine) return;
+  const next = !engine.is_3d_mode();
+  engine.set_3d_mode(next);
+  const btn = $('mode3dBtn');
+  if (btn) {
+    btn.textContent = next ? '3D: ON' : '3D: OFF';
+    btn.setAttribute('aria-pressed', String(next));
+  }
+  advisor.say('3d-toggle', next ? '3D View: right-drag to orbit, wheel to zoom.' : '2D Classic Mode.', { mood: 'happy', priority: 2, cooldown: 1 });
+}
+$('mode3dBtn')?.addEventListener('click', toggle3D);
 $('soundBtn').addEventListener('click', () => {
   audio.unlock();
   const on = audio.toggle();
