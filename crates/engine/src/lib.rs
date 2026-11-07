@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod audio;
 pub mod biosignal;
+pub mod camera;
 mod camera3d;
 pub mod eras;
 pub mod input; // pointer gestures: tap blinks, drag pans
@@ -341,6 +342,44 @@ impl Engine {
         let wx = x.rem_euclid(map_w);
         let wz = z.rem_euclid(map_h);
         let h_norm = self.get_terrain_height_at(wx, wz);
+
+        // Never let land entities (villagers, mammoths, chickens, goats, fires) stand or walk on water
+        let is_land_entity = matches!(
+            sprite_id,
+            sprites::SPRITE_VILLAGER
+                | sprites::SPRITE_MAMMOTH
+                | sprites::SPRITE_CHICKEN
+                | sprites::SPRITE_GOAT
+                | sprites::SPRITE_FIRE
+        );
+        let (wx, wz, h_norm) = if is_land_entity && h_norm < 0.33 {
+            // Find nearest land point on the coast
+            let mut best_x = wx;
+            let mut best_z = wz;
+            let mut best_h = h_norm;
+            'search_land: for r in 1..=8 {
+                let rf = r as f32;
+                for &(dx, dz) in &[
+                    (rf, 0.0), (-rf, 0.0), (0.0, rf), (0.0, -rf),
+                    (rf * 0.707, rf * 0.707), (-rf * 0.707, rf * 0.707),
+                    (rf * 0.707, -rf * 0.707), (-rf * 0.707, -rf * 0.707),
+                ] {
+                    let tx = (wx + dx).rem_euclid(map_w);
+                    let tz = (wz + dz).rem_euclid(map_h);
+                    let th = self.get_terrain_height_at(tx, tz);
+                    if th >= 0.33 {
+                        best_x = tx;
+                        best_z = tz;
+                        best_h = th;
+                        break 'search_land;
+                    }
+                }
+            }
+            (best_x, best_z, best_h)
+        } else {
+            (wx, wz, h_norm)
+        };
+
         let ground_y = (h_norm * 24.0).max(7.92) + 0.15; // Slightly above ground so feet never clip into slopes
         let center = [wx, ground_y, wz];
 
@@ -1134,10 +1173,10 @@ impl Engine {
     }
 }
 
-/// Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109)
+/// Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109, #19, #128)
 #[wasm_bindgen]
 pub struct RustWorldGen {
-    map: moc_terrain::TerrainMap,
+    terrain: crate::terrain::Terrain,
 }
 
 #[wasm_bindgen]
@@ -1145,27 +1184,241 @@ impl RustWorldGen {
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Self {
         Self {
-            map: moc_terrain::TerrainMap::generate_home_world(seed),
+            terrain: crate::terrain::Terrain::new(seed),
         }
     }
 
     pub fn heights(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.map.heights[..])
+        js_sys::Float32Array::from(&self.terrain.h[..])
     }
 
     pub fn types(&self) -> js_sys::Uint8Array {
-        js_sys::Uint8Array::from(&self.map.types[..])
+        js_sys::Uint8Array::from(&self.terrain.tile_type[..])
     }
 
     pub fn rgba(&self) -> js_sys::Uint8Array {
-        js_sys::Uint8Array::from(&self.map.rgba[..])
+        js_sys::Uint8Array::from(&self.terrain.pixels[..])
     }
 
     pub fn sites_json(&self) -> String {
-        self.map.sites_json()
+        self.terrain.sites_json()
     }
 
     pub fn continents_json(&self) -> String {
-        self.map.continents_json()
+        self.terrain.continents_json()
+    }
+}
+
+/// Standalone WebAssembly Cast Controller for camera god powers (#33, #108)
+#[wasm_bindgen]
+pub struct RustCastController {
+    inner: camera::casts::CastController,
+}
+
+#[wasm_bindgen]
+impl RustCastController {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: camera::casts::CastController::default(),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    pub fn spell_for(&self, gesture: &str) -> Option<String> {
+        self.inner.spell_for(gesture).map(|s| s.as_str().to_string())
+    }
+
+    pub fn update(&mut self, gesture: &str, score: f64, now: f64) -> js_sys::Array {
+        let u = self.inner.update(gesture, score, now);
+        let arr = js_sys::Array::new();
+        arr.push(&JsValue::from(u.held.map(|s| s.as_str())));
+        arr.push(&JsValue::from_f64(u.progress));
+        arr.push(&JsValue::from(u.cast.map(|s| s.as_str())));
+        arr.push(&JsValue::from_bool(u.aiming));
+        arr
+    }
+
+    pub fn trigger(&mut self, spell_id: &str, now: f64) -> bool {
+        if let Some(id) = camera::spells::SpellId::from_str(spell_id) {
+            self.inner.trigger(id, now)
+        } else {
+            false
+        }
+    }
+
+    pub fn ready(&self, spell_id: &str, now: f64) -> bool {
+        if let Some(id) = camera::spells::SpellId::from_str(spell_id) {
+            self.inner.ready(id, now)
+        } else {
+            false
+        }
+    }
+
+    pub fn cooldown_left(&self, spell_id: &str, now: f64) -> f64 {
+        if let Some(id) = camera::spells::SpellId::from_str(spell_id) {
+            self.inner.cooldown_left(id, now)
+        } else {
+            0.0
+        }
+    }
+
+    pub fn cooldown_frac(&self, spell_id: &str, now: f64) -> f64 {
+        if let Some(id) = camera::spells::SpellId::from_str(spell_id) {
+            self.inner.cooldown_frac(id, now)
+        } else {
+            0.0
+        }
+    }
+}
+
+/// Standalone WebAssembly Finger Controller for smoothing, deadzone and pinching (#33, #67, #108)
+#[wasm_bindgen]
+pub struct RustFingerController {
+    inner: camera::fingers::FingerController,
+}
+
+#[wasm_bindgen]
+impl RustFingerController {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: camera::fingers::FingerController::default(),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    pub fn update(
+        &mut self,
+        landmarks: Option<Vec<f64>>,
+        gesture: &str,
+        score: f64,
+        now: f64,
+        aspect: f64,
+    ) -> js_sys::Array {
+        let landmarks_vec = landmarks.and_then(|coords| {
+            if coords.len() >= 63 {
+                let mut v = Vec::with_capacity(21);
+                for i in 0..21 {
+                    v.push(camera::fingers::Landmark {
+                        x: coords[i * 3],
+                        y: coords[i * 3 + 1],
+                        z: coords[i * 3 + 2],
+                    });
+                }
+                Some(v)
+            } else {
+                None
+            }
+        });
+
+        let u = self.inner.update(
+            landmarks_vec.as_deref(),
+            gesture,
+            score,
+            now,
+            aspect,
+        );
+
+        let arr = js_sys::Array::new();
+        let mode_str = match u.mode {
+            camera::fingers::FingerMode::None => "none",
+            camera::fingers::FingerMode::Point => "point",
+            camera::fingers::FingerMode::Pinch => "pinch",
+            camera::fingers::FingerMode::Release => "release",
+        };
+        arr.push(&JsValue::from_str(mode_str));
+        if let Some((ax, ay)) = u.aim {
+            let aim_arr = js_sys::Array::new();
+            aim_arr.push(&JsValue::from_f64(ax));
+            aim_arr.push(&JsValue::from_f64(ay));
+            arr.push(&aim_arr);
+        } else {
+            arr.push(&JsValue::NULL);
+        }
+        arr.push(&JsValue::from_bool(u.cast));
+        arr.push(&JsValue::from_bool(u.cancelled));
+        arr.push(&JsValue::from_bool(u.suppress));
+        arr.push(&JsValue::from_f64(u.progress));
+        arr
+    }
+}
+
+/// Standalone WebAssembly Face Emotion Tracker (#33, #108)
+#[wasm_bindgen]
+pub struct RustEmotionTracker {
+    inner: camera::emotion::EmotionTracker,
+}
+
+#[wasm_bindgen]
+impl RustEmotionTracker {
+    #[wasm_bindgen(constructor)]
+    pub fn new(calibrate_seconds: f64) -> Self {
+        Self {
+            inner: camera::emotion::EmotionTracker::new(calibrate_seconds),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    pub fn update_direct(
+        &mut self,
+        has_face: bool,
+        mouth_smile_left: f64,
+        mouth_smile_right: f64,
+        brow_down_left: f64,
+        brow_down_right: f64,
+        mouth_press_left: f64,
+        mouth_press_right: f64,
+        jaw_open: f64,
+        brow_inner_up: f64,
+        eye_wide_left: f64,
+        eye_wide_right: f64,
+        mouth_frown_left: f64,
+        mouth_frown_right: f64,
+        dt: f64,
+    ) -> js_sys::Array {
+        let mut map = std::collections::HashMap::new();
+        if has_face {
+            map.insert("mouthSmileLeft".to_string(), mouth_smile_left);
+            map.insert("mouthSmileRight".to_string(), mouth_smile_right);
+            map.insert("browDownLeft".to_string(), brow_down_left);
+            map.insert("browDownRight".to_string(), brow_down_right);
+            map.insert("mouthPressLeft".to_string(), mouth_press_left);
+            map.insert("mouthPressRight".to_string(), mouth_press_right);
+            map.insert("jawOpen".to_string(), jaw_open);
+            map.insert("browInnerUp".to_string(), brow_inner_up);
+            map.insert("eyeWideLeft".to_string(), eye_wide_left);
+            map.insert("eyeWideRight".to_string(), eye_wide_right);
+            map.insert("mouthFrownLeft".to_string(), mouth_frown_left);
+            map.insert("mouthFrownRight".to_string(), mouth_frown_right);
+        }
+
+        let (mood, ev) = self.inner.update(if has_face { Some(&map) } else { None }, dt);
+
+        let arr = js_sys::Array::new();
+        arr.push(&JsValue::from_str(mood.dominant.as_str()));
+        arr.push(&JsValue::from_f64(mood.joy));
+        arr.push(&JsValue::from_f64(mood.anger));
+        arr.push(&JsValue::from_f64(mood.surprise));
+        arr.push(&JsValue::from_f64(mood.sadness));
+        arr.push(&JsValue::from_f64(mood.neutral));
+        arr.push(&JsValue::from_f64(mood.intensity));
+        arr.push(&JsValue::from_bool(mood.face));
+        let ev_str = match ev {
+            Some(camera::emotion::EmotionEvent::Change) => "change",
+            Some(camera::emotion::EmotionEvent::Strong) => "strong",
+            None => "",
+        };
+        arr.push(&JsValue::from_str(ev_str));
+        arr
     }
 }

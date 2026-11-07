@@ -186,6 +186,44 @@ export class RustBlinkClassifier {
     total_detected(): number;
 }
 
+/**
+ * Standalone WebAssembly Cast Controller for camera god powers (#33, #108)
+ */
+export class RustCastController {
+    free(): void;
+    [Symbol.dispose](): void;
+    cooldown_frac(spell_id: string, now: number): number;
+    cooldown_left(spell_id: string, now: number): number;
+    constructor();
+    ready(spell_id: string, now: number): boolean;
+    reset(): void;
+    spell_for(gesture: string): string | undefined;
+    trigger(spell_id: string, now: number): boolean;
+    update(gesture: string, score: number, now: number): Array<any>;
+}
+
+/**
+ * Standalone WebAssembly Face Emotion Tracker (#33, #108)
+ */
+export class RustEmotionTracker {
+    free(): void;
+    [Symbol.dispose](): void;
+    constructor(calibrate_seconds: number);
+    reset(): void;
+    update_direct(has_face: boolean, mouth_smile_left: number, mouth_smile_right: number, brow_down_left: number, brow_down_right: number, mouth_press_left: number, mouth_press_right: number, jaw_open: number, brow_inner_up: number, eye_wide_left: number, eye_wide_right: number, mouth_frown_left: number, mouth_frown_right: number, dt: number): Array<any>;
+}
+
+/**
+ * Standalone WebAssembly Finger Controller for smoothing, deadzone and pinching (#33, #67, #108)
+ */
+export class RustFingerController {
+    free(): void;
+    [Symbol.dispose](): void;
+    constructor();
+    reset(): void;
+    update(landmarks: Float64Array | number[] | null | undefined, gesture: string, score: number, now: number, aspect: number): Array<any>;
+}
+
 export class RustImuTracker {
     free(): void;
     [Symbol.dispose](): void;
@@ -235,7 +273,7 @@ export class RustImuTracker {
 }
 
 /**
- * Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109)
+ * Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109, #19, #128)
  */
 export class RustWorldGen {
     free(): void;
@@ -255,6 +293,9 @@ export interface InitOutput {
     readonly __wbg_engine_free: (a: number, b: number) => void;
     readonly __wbg_pointergesture_free: (a: number, b: number) => void;
     readonly __wbg_rustblinkclassifier_free: (a: number, b: number) => void;
+    readonly __wbg_rustcastcontroller_free: (a: number, b: number) => void;
+    readonly __wbg_rustemotiontracker_free: (a: number, b: number) => void;
+    readonly __wbg_rustfingercontroller_free: (a: number, b: number) => void;
     readonly __wbg_rustimutracker_free: (a: number, b: number) => void;
     readonly __wbg_rustworldgen_free: (a: number, b: number) => void;
     readonly engine_add_3d_light: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
@@ -380,6 +421,20 @@ export interface InitOutput {
     readonly rustblinkclassifier_record_blink_button: (a: number) => number;
     readonly rustblinkclassifier_reset_model: (a: number) => void;
     readonly rustblinkclassifier_total_detected: (a: number) => number;
+    readonly rustcastcontroller_cooldown_frac: (a: number, b: number, c: number, d: number) => number;
+    readonly rustcastcontroller_cooldown_left: (a: number, b: number, c: number, d: number) => number;
+    readonly rustcastcontroller_new: () => number;
+    readonly rustcastcontroller_ready: (a: number, b: number, c: number, d: number) => number;
+    readonly rustcastcontroller_reset: (a: number) => void;
+    readonly rustcastcontroller_spell_for: (a: number, b: number, c: number) => [number, number];
+    readonly rustcastcontroller_trigger: (a: number, b: number, c: number, d: number) => number;
+    readonly rustcastcontroller_update: (a: number, b: number, c: number, d: number, e: number) => any;
+    readonly rustemotiontracker_new: (a: number) => number;
+    readonly rustemotiontracker_reset: (a: number) => void;
+    readonly rustemotiontracker_update_direct: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => any;
+    readonly rustfingercontroller_new: () => number;
+    readonly rustfingercontroller_reset: (a: number) => void;
+    readonly rustfingercontroller_update: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => any;
     readonly rustimutracker_add_calib_point: (a: number, b: number, c: number) => void;
     readonly rustimutracker_aim_x: (a: number) => number;
     readonly rustimutracker_aim_y: (a: number) => number;

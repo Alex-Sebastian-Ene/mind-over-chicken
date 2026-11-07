@@ -108,10 +108,11 @@ pub fn animate(a: &mut AgentState, dt: f32, rate: f32) {
 /// Far away (`d > 7.0`): follows distance field around water and mountains.
 /// Close up: steers directly toward target, sliding around local obstacles.
 /// Returns `true` on arrival (`d < 1.2` or stuck close to target).
+/// Invariant: sprites must never stand or walk on water.
 pub fn walk<W>(
     a: &mut AgentState,
-    tx: f32,
-    ty: f32,
+    mut tx: f32,
+    mut ty: f32,
     speed: f32,
     dt: f32,
     field: Option<&[i16]>,
@@ -121,6 +122,49 @@ pub fn walk<W>(
 where
     W: Fn(f32, f32) -> bool,
 {
+    // If agent is displaced into water, snap to nearest walkable land
+    if !walkable_fn(a.x, a.y) {
+        let mut found = false;
+        'search_land: for r in 1i32..=30 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs().max(dy.abs()) == r {
+                        let nx = a.x + dx as f32;
+                        let ny = a.y + dy as f32;
+                        if walkable_fn(nx, ny) {
+                            a.x = nx;
+                            a.y = ny;
+                            found = true;
+                            break 'search_land;
+                        }
+                    }
+                }
+            }
+        }
+        if !found {
+            return false;
+        }
+    }
+
+    // If destination is in water, clamp target to nearest walkable land
+    if !walkable_fn(tx, ty) {
+        'search_target: for r in 1i32..=30 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs().max(dy.abs()) == r {
+                        let nx = tx + dx as f32;
+                        let ny = ty + dy as f32;
+                        if walkable_fn(nx, ny) {
+                            tx = nx;
+                            ty = ny;
+                            break 'search_target;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let dx = tx - a.x;
     let dy = ty - a.y;
     let d = (dx * dx + dy * dy).sqrt();
@@ -170,11 +214,15 @@ where
                         if md == 0.0 {
                             md = 1.0;
                         }
-                        a.x += (mx / md) * step;
-                        a.y += (my / md) * step;
-                        a.facing = if mx >= 0.0 { 1 } else { -1 };
-                        a.stuck = 0.0;
-                        return false;
+                        let nx = a.x + (mx / md) * step;
+                        let ny = a.y + (my / md) * step;
+                        if walkable_fn(nx, ny) {
+                            a.x = nx;
+                            a.y = ny;
+                            a.facing = if mx >= 0.0 { 1 } else { -1 };
+                            a.stuck = 0.0;
+                            return false;
+                        }
                     }
                 }
             }
@@ -318,5 +366,43 @@ mod tests {
         let target_y = boat.y;
         let arrived_near = sail(&mut boat, target_x, target_y, 10.0, 0.1, None, 320);
         assert!(arrived_near);
+    }
+
+    #[test]
+    fn test_walk_never_steps_into_water_and_recovers_if_displaced() {
+        // Water is x in 15..=25 (lake/channel)
+        let is_walkable = |x: f32, _y: f32| -> bool {
+            !(15.0..=25.0).contains(&x)
+        };
+
+        // 1. Agent starts at (10, 10) on land and tries to walk to (30, 10) across water
+        let mut agent = AgentState {
+            x: 10.0,
+            y: 10.0,
+            ..Default::default()
+        };
+
+        for _ in 0..50 {
+            walk(&mut agent, 30.0, 10.0, 10.0, 0.05, None, 320, is_walkable);
+            assert!(
+                is_walkable(agent.x, agent.y),
+                "Agent must never step into water at x={}, y={}",
+                agent.x, agent.y
+            );
+        }
+        assert!(agent.x <= 15.0, "Agent must not cross into water barrier");
+
+        // 2. Agent artificially displaced into water at (20, 10)
+        let mut displaced = AgentState {
+            x: 20.0,
+            y: 10.0,
+            ..Default::default()
+        };
+        walk(&mut displaced, 30.0, 10.0, 5.0, 0.05, None, 320, is_walkable);
+        assert!(
+            is_walkable(displaced.x, displaced.y),
+            "Displaced agent must recover to land immediately, got x={}, y={}",
+            displaced.x, displaced.y
+        );
     }
 }

@@ -1141,6 +1141,211 @@ export class RustBlinkClassifier {
 }
 if (Symbol.dispose) RustBlinkClassifier.prototype[Symbol.dispose] = RustBlinkClassifier.prototype.free;
 
+/**
+ * Standalone WebAssembly Cast Controller for camera god powers (#33, #108)
+ */
+export class RustCastController {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustCastControllerFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustcastcontroller_free(ptr, 0);
+    }
+    /**
+     * @param {string} spell_id
+     * @param {number} now
+     * @returns {number}
+     */
+    cooldown_frac(spell_id, now) {
+        const val2 = +now;
+        const ptr0 = passStringToWasm0(spell_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustcastcontroller_cooldown_frac(this.__wbg_ptr, ptr0, len0, val2);
+        return ret;
+    }
+    /**
+     * @param {string} spell_id
+     * @param {number} now
+     * @returns {number}
+     */
+    cooldown_left(spell_id, now) {
+        const val2 = +now;
+        const ptr0 = passStringToWasm0(spell_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustcastcontroller_cooldown_left(this.__wbg_ptr, ptr0, len0, val2);
+        return ret;
+    }
+    constructor() {
+        const ret = wasm.rustcastcontroller_new();
+        this.__wbg_ptr = ret;
+        RustCastControllerFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @param {string} spell_id
+     * @param {number} now
+     * @returns {boolean}
+     */
+    ready(spell_id, now) {
+        const val2 = +now;
+        const ptr0 = passStringToWasm0(spell_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustcastcontroller_ready(this.__wbg_ptr, ptr0, len0, val2);
+        return ret !== 0;
+    }
+    reset() {
+        wasm.rustcastcontroller_reset(this.__wbg_ptr);
+    }
+    /**
+     * @param {string} gesture
+     * @returns {string | undefined}
+     */
+    spell_for(gesture) {
+        const ptr0 = passStringToWasm0(gesture, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustcastcontroller_spell_for(this.__wbg_ptr, ptr0, len0);
+        let v2;
+        if (ret[0] !== 0) {
+            v2 = getStringFromWasm0(ret[0], ret[1]);
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v2;
+    }
+    /**
+     * @param {string} spell_id
+     * @param {number} now
+     * @returns {boolean}
+     */
+    trigger(spell_id, now) {
+        const val2 = +now;
+        const ptr0 = passStringToWasm0(spell_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustcastcontroller_trigger(this.__wbg_ptr, ptr0, len0, val2);
+        return ret !== 0;
+    }
+    /**
+     * @param {string} gesture
+     * @param {number} score
+     * @param {number} now
+     * @returns {Array<any>}
+     */
+    update(gesture, score, now) {
+        const val2 = +score;
+        const val3 = +now;
+        const ptr0 = passStringToWasm0(gesture, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustcastcontroller_update(this.__wbg_ptr, ptr0, len0, val2, val3);
+        return ret;
+    }
+}
+if (Symbol.dispose) RustCastController.prototype[Symbol.dispose] = RustCastController.prototype.free;
+
+/**
+ * Standalone WebAssembly Face Emotion Tracker (#33, #108)
+ */
+export class RustEmotionTracker {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustEmotionTrackerFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustemotiontracker_free(ptr, 0);
+    }
+    /**
+     * @param {number} calibrate_seconds
+     */
+    constructor(calibrate_seconds) {
+        const ret = wasm.rustemotiontracker_new(calibrate_seconds);
+        this.__wbg_ptr = ret;
+        RustEmotionTrackerFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    reset() {
+        wasm.rustemotiontracker_reset(this.__wbg_ptr);
+    }
+    /**
+     * @param {boolean} has_face
+     * @param {number} mouth_smile_left
+     * @param {number} mouth_smile_right
+     * @param {number} brow_down_left
+     * @param {number} brow_down_right
+     * @param {number} mouth_press_left
+     * @param {number} mouth_press_right
+     * @param {number} jaw_open
+     * @param {number} brow_inner_up
+     * @param {number} eye_wide_left
+     * @param {number} eye_wide_right
+     * @param {number} mouth_frown_left
+     * @param {number} mouth_frown_right
+     * @param {number} dt
+     * @returns {Array<any>}
+     */
+    update_direct(has_face, mouth_smile_left, mouth_smile_right, brow_down_left, brow_down_right, mouth_press_left, mouth_press_right, jaw_open, brow_inner_up, eye_wide_left, eye_wide_right, mouth_frown_left, mouth_frown_right, dt) {
+        const ret = wasm.rustemotiontracker_update_direct(this.__wbg_ptr, has_face, mouth_smile_left, mouth_smile_right, brow_down_left, brow_down_right, mouth_press_left, mouth_press_right, jaw_open, brow_inner_up, eye_wide_left, eye_wide_right, mouth_frown_left, mouth_frown_right, dt);
+        return ret;
+    }
+}
+if (Symbol.dispose) RustEmotionTracker.prototype[Symbol.dispose] = RustEmotionTracker.prototype.free;
+
+/**
+ * Standalone WebAssembly Finger Controller for smoothing, deadzone and pinching (#33, #67, #108)
+ */
+export class RustFingerController {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustFingerControllerFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustfingercontroller_free(ptr, 0);
+    }
+    constructor() {
+        const ret = wasm.rustfingercontroller_new();
+        this.__wbg_ptr = ret;
+        RustFingerControllerFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    reset() {
+        wasm.rustfingercontroller_reset(this.__wbg_ptr);
+    }
+    /**
+     * @param {Float64Array | number[] | null | undefined} landmarks
+     * @param {string} gesture
+     * @param {number} score
+     * @param {number} now
+     * @param {number} aspect
+     * @returns {Array<any>}
+     */
+    update(landmarks, gesture, score, now, aspect) {
+        const val3 = +score;
+        const val4 = +now;
+        const val5 = +aspect;
+        let ptr0, len0, ptr1, len1;
+        try {
+            ptr0 = isLikeNone(landmarks) ? 0 : passArrayF64ToWasm0(landmarks, wasm.__wbindgen_malloc);
+            len0 = WASM_VECTOR_LEN;
+            ptr1 = passStringToWasm0(gesture, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len1 = WASM_VECTOR_LEN;
+        } catch (e) {
+            if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+            if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 8, 8); }
+            throw e;
+        }
+        const ret = wasm.rustfingercontroller_update(this.__wbg_ptr, ptr0, len0, ptr1, len1, val3, val4, val5);
+        return ret;
+    }
+}
+if (Symbol.dispose) RustFingerController.prototype[Symbol.dispose] = RustFingerController.prototype.free;
+
 export class RustImuTracker {
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
@@ -1355,7 +1560,7 @@ export class RustImuTracker {
 if (Symbol.dispose) RustImuTracker.prototype[Symbol.dispose] = RustImuTracker.prototype.free;
 
 /**
- * Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109)
+ * Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109, #19, #128)
  */
 export class RustWorldGen {
     __destroy_into_raw() {
@@ -1734,6 +1939,10 @@ function __wbg_get_imports() {
             const ret = new lAudioContext();
             return ret;
         }, arguments); },
+        __wbg_new_37eb45aaf5eeb820: function() {
+            const ret = new Array();
+            return ret;
+        },
         __wbg_new_bb74001155cb8ca8: function() {
             const ret = new Error();
             return ret;
@@ -1753,6 +1962,10 @@ function __wbg_get_imports() {
         __wbg_ownerDocument_adefd47fd596fe80: function(arg0) {
             const ret = arg0.ownerDocument;
             return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        },
+        __wbg_push_c9f4893fc209f768: function(arg0, arg1) {
+            const ret = arg0.push(arg1);
+            return ret;
         },
         __wbg_querySelector_1555c239948f2bf0: function() { return handleError(function (arg0, arg1, arg2) {
             const ret = arg0.querySelector(getStringFromWasm0(arg1, arg2));
@@ -1898,17 +2111,22 @@ function __wbg_get_imports() {
         __wbg_viewport_aaac6dd8cff1831a: function(arg0, arg1, arg2, arg3, arg4) {
             arg0.viewport(arg1, arg2, arg3, arg4);
         },
-        __wbindgen_generic_0000000000000001: function(arg0, arg1) {
+        __wbindgen_generic_0000000000000001: function(arg0) {
+            // Cast intrinsic for `F64 -> Externref`.
+            const ret = arg0;
+            return ret;
+        },
+        __wbindgen_generic_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Ref(Slice(F32)) -> NamedExternref("Float32Array")`.
             const ret = getArrayF32FromWasm0(arg0, arg1);
             return ret;
         },
-        __wbindgen_generic_0000000000000002: function(arg0, arg1) {
+        __wbindgen_generic_0000000000000003: function(arg0, arg1) {
             // Cast intrinsic for `Ref(Slice(U16)) -> NamedExternref("Uint16Array")`.
             const ret = getArrayU16FromWasm0(arg0, arg1);
             return ret;
         },
-        __wbindgen_generic_0000000000000003: function(arg0, arg1) {
+        __wbindgen_generic_0000000000000004: function(arg0, arg1) {
             // Cast intrinsic for `Ref(String) -> Externref`.
             const ret = getStringFromWasm0(arg0, arg1);
             return ret;
@@ -1942,6 +2160,15 @@ const PointerGestureFinalization = (typeof FinalizationRegistry === 'undefined')
 const RustBlinkClassifierFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_rustblinkclassifier_free(ptr, 1));
+const RustCastControllerFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustcastcontroller_free(ptr, 1));
+const RustEmotionTrackerFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustemotiontracker_free(ptr, 1));
+const RustFingerControllerFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustfingercontroller_free(ptr, 1));
 const RustImuTrackerFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_rustimutracker_free(ptr, 1));
@@ -2049,6 +2276,14 @@ function getFloat32ArrayMemory0() {
     return cachedFloat32ArrayMemory0;
 }
 
+let cachedFloat64ArrayMemory0 = null;
+function getFloat64ArrayMemory0() {
+    if (cachedFloat64ArrayMemory0 === null || cachedFloat64ArrayMemory0.byteLength === 0) {
+        cachedFloat64ArrayMemory0 = new Float64Array(wasm.memory.buffer);
+    }
+    return cachedFloat64ArrayMemory0;
+}
+
 let cachedInt16ArrayMemory0 = null;
 function getInt16ArrayMemory0() {
     if (cachedInt16ArrayMemory0 === null || cachedInt16ArrayMemory0.byteLength === 0) {
@@ -2094,6 +2329,13 @@ function isLikeNone(x) {
 function passArrayF32ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 4, 4) >>> 0;
     getFloat32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passArrayF64ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 8, 8) >>> 0;
+    getFloat64ArrayMemory0().set(arg, ptr / 8);
     WASM_VECTOR_LEN = arg.length;
     return ptr;
 }
@@ -2177,6 +2419,7 @@ function __wbg_finalize_init(instance, module) {
     wasmModule = module;
     cachedDataViewMemory0 = null;
     cachedFloat32ArrayMemory0 = null;
+    cachedFloat64ArrayMemory0 = null;
     cachedInt16ArrayMemory0 = null;
     cachedUint16ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
