@@ -20,6 +20,7 @@ export const engine_add_billboard: (a: number, b: number, c: number, d: number, 
 export const engine_add_custom_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
 export const engine_add_light: (a: number, b: number, c: number, d: number, e: number) => void;
 export const engine_advisor_say: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
+export const engine_advisor_set_era: (a: number, b: number, c: number) => void;
 export const engine_audio_play: (a: number, b: number, c: number) => void;
 export const engine_audio_toggle: (a: number) => number;
 export const engine_audio_unlock: (a: number) => void;
@@ -269,8 +270,8 @@ export const moc_sim_new: (a: number) => number;
 export const moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
 export const wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
 export const wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
-export const wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__224: (a: number, b: number, c: any) => void;
 export const wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__225: (a: number, b: number, c: any) => void;
+export const wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__226: (a: number, b: number, c: any) => void;
 export const __wbindgen_malloc: (a: number, b: number) => number;
 export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
 export const __wbindgen_free: (a: number, b: number, c: number) => void;

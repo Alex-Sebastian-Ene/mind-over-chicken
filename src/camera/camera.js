@@ -3,8 +3,7 @@
 //   Hands: MediaPipe Gesture Recognizer (numHands=2, #118) →
 //          1. One-hand pinch grabs & relocates living entities under the head cursor (#120)
 //          2. Two-hand pinch distance continuously zooms in/out & freezes on release (#119)
-//          3. Open-hand wave orbits the 3D camera / cycles planets (#121)
-//          4. Three core moves (#122): Pinch (1), Open Palm / Calm (2), Closed Fist / Strike (3)
+//          3. Three core moves (#122): Pinch (1), Open Palm / Calm (2), Closed Fist / Strike (3)
 //   Face:  MediaPipe Face Landmarker blendshapes → Joy (continuous) + Surprise (debounced event) (#117).
 //   Coach: Collapsible bottom panel with procedural 21-landmark ghost hands (#123).
 //
@@ -21,7 +20,7 @@
 import { clamp } from '../sim/util.js';
 import { SPELLS, SPELL_BY_ID, GESTURE_LABEL, spellForKeyCode, CAMERA_CASTS_ENABLED } from './spells.js';
 import { CastController } from './casts.js';
-import { EMOTIONS, EmotionTracker, neutralMood } from './emotion.js';
+import { EMOTIONS, EmotionTracker, neutralMood, blendshapeMap } from './emotion.js';
 import { loadVision } from './vision.js';
 import { loadEngine, workerPreference } from './engine.js';
 import { FingerController, MultiHandTracker } from './fingers.js';
@@ -51,7 +50,7 @@ const TEMPLATE = `
       <strong data-cam-state>Camera off</strong>
       <span class="eeg-qual" data-cam-mode>Idle</span>
     </div>
-    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam: head cursor aims; hands pinch-grab creatures, two-hand pinch-zoom, wave to orbit, palm to calm, fist to strike. Frames never leave this device.</p>
+    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam: head cursor aims; hands pinch-grab creatures, two-hand pinch-zoom, palm to calm, fist to strike. Frames never leave this device.</p>
     <div class="eeg-url-row">
       <button type="button" class="btn btn-primary btn-small" data-cam-start>Start Camera</button>
       <button type="button" class="btn btn-small" data-cam-stop disabled>Stop &amp; Clear</button>
@@ -131,13 +130,13 @@ function cameraError(err, castsEnabled) {
 function stopTracks(stream) { stream?.getTracks().forEach((t) => t.stop()); }
 
 export function initCamera({
-  getG,
+  app = null,
+  getG = () => window.__moc?.G,
   canCast = () => true,
   castsEnabled = CAMERA_CASTS_ENABLED,
   mapX = (x) => x,
   screenX = (x) => x,
   onZoomDelta = null,
-  onWave = null,
   onGrabMove = null,
   getContext = () => 'surface',
   onStatusChange = null,
@@ -246,7 +245,7 @@ export function initCamera({
   }
   function setMsg(msg) {
     if (!ui.msg) return;
-    ui.msg.textContent = msg || 'Opt-in webcam: head cursor aims; hands grab, zoom, wave, calm and strike.';
+    ui.msg.textContent = msg || 'Opt-in webcam: head cursor aims; hands grab, zoom, calm and strike.';
   }
 
   function togglePanel(force) {
@@ -536,7 +535,7 @@ export function initCamera({
       aspect: handAspect,
     });
 
-    // Multi-hand tracker: 2-hand continuous zoom (#118, #119), 1-hand grab (#120), wave orbit (#121)
+    // Multi-hand tracker: 2-hand continuous zoom (#118, #119), 1-hand grab (#120)
     multi = multiHand.update({ hands: rawHands, now, aspect: handAspect });
 
     if (live) {
@@ -568,13 +567,7 @@ export function initCamera({
         }
       }
 
-      // 3. Open-hand wave orbit (#121)
-      if (multi.wave && onWave) {
-        onWave(multi.wave, multi.waveVel);
-        coach?.flash(`👋 Wave ${multi.wave} · camera orbited`, 'ok', 1400);
-      }
-
-      // 4. Palm (Calm) & Fist (Strike) gesture holds (#122) — suppressed while pinching, grabbing, or waving
+      // 3. Palm (Calm) & Fist (Strike) gesture holds (#122) — suppressed while pinching or grabbing
       const suppressCast = multi.suppressCasts || finger.suppress;
       hold = suppressCast ? casts.update('None', 0, now) : casts.update(gesture.name, gesture.score, now);
       if (hold.cast) cast(hold.cast, 'gesture', now);
@@ -854,7 +847,6 @@ export function initCamera({
         distance: multi?.distance ?? null,
         pinchStart: multi?.pinchStart ?? null,
         zoomFactor: multi?.zoomFactor ?? 1,
-        wave: multi?.wave || null,
       },
       grabbed: grabbed ? { ...grabbed } : null,
       finger: finger && { mode: finger.mode, ratio: finger.ratio, reach: finger.reach, pinching: finger.pinching, progress: finger.progress, suppress: finger.suppress, tip: finger.tip },
