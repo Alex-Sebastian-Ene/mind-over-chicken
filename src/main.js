@@ -11,18 +11,24 @@ import { StoneAge } from './eras/stone.js';
 import { FarmingToKingdoms, InfoAge } from './eras/timeskip.js';
 import { Industry } from './eras/industry.js';
 import { SpaceAge } from './eras/space.js';
+import initEngine, { Engine } from '../pkg/mind_over_chicken_engine.js';
 
 const SCENES = [() => new StoneAge(), () => new FarmingToKingdoms(), () => new Industry(), () => new InfoAge(), () => new SpaceAge()];
 const $ = (id) => document.getElementById(id);
 
-// ---------- canvases ----------
+// ---------- canvases & WebGL engine ----------
 const screen = $('screen');
-const main = screen.getContext('2d');
 const low = Object.assign(document.createElement('canvas'), { width: W, height: H });
 const lowCtx = low.getContext('2d');
-const light = Object.assign(document.createElement('canvas'), { width: W, height: H });
-const lightCtx = light.getContext('2d');
 let K = 3;
+let engine = null;
+
+try {
+  await initEngine();
+  engine = new Engine('screen');
+} catch (err) {
+  console.error('Failed to initialize Rust WebGL engine:', err);
+}
 
 function resize() {
   const rect = screen.getBoundingClientRect();
@@ -60,6 +66,10 @@ function newGame(source, startIndex = 0) {
   brain.onTrained = () => {};
   $('endScreen').hidden = true;
   $('failScreen').hidden = true;
+  if (engine && G.world) {
+    engine.init_world(G.world.seed);
+    engine.set_era(startIndex);
+  }
   startScene(startIndex);
   try { window.claude?.hot?.snapshot?.(() => ({ sceneIndex: G?.sceneIndex ?? 0, kind: G?.source?.kind })); } catch {}
 }
@@ -71,6 +81,7 @@ function startScene(i) {
   G.sceneIndex = i;
   const scene = SCENES[i]();
   G.scene = scene;
+  if (engine) engine.set_era(i);
   advisor.setEra(scene.era);
   scene.enter(G);
   hud.setScene(scene);
@@ -85,6 +96,7 @@ function restartScene() {
   const i = G.sceneIndex;
   const scene = SCENES[i]();
   G.scene = scene;
+  if (engine) engine.set_era(i);
   advisor.setEra(scene.era);
   scene.enter(G);
   hud.setScene(scene);
@@ -165,46 +177,38 @@ function showEnd() {
 // ---------- render ----------
 function render() {
   const scene = G?.scene;
+  if (!scene) {
+    if (engine) {
+      engine.begin_frame();
+      engine.end_frame(0, 0, 0, 0, 0, screen.width, screen.height);
+    }
+    return;
+  }
   lowCtx.imageSmoothingEnabled = false;
-  if (!scene) { main.fillStyle = '#0b0c16'; main.fillRect(0, 0, screen.width, screen.height); return; }
   lowCtx.setTransform(1, 0, 0, 1, 0, 0);
   scene.draw(lowCtx);
-  const dark = scene.darkness || 0;
-  if (dark > 0) {
-    lightCtx.globalCompositeOperation = 'source-over';
-    lightCtx.clearRect(0, 0, W, H);
-    lightCtx.fillStyle = `rgba(6, 10, 32, ${dark})`;
-    lightCtx.fillRect(0, 0, W, H);
-    lightCtx.globalCompositeOperation = 'destination-out';
-    for (const l of scene.lights()) {
-      const g = lightCtx.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r);
-      g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.55, 'rgba(0,0,0,0.75)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-      lightCtx.fillStyle = g;
-      lightCtx.beginPath(); lightCtx.arc(l.x, l.y, l.r, 0, Math.PI * 2); lightCtx.fill();
-    }
-    lightCtx.globalCompositeOperation = 'source-over';
-    lowCtx.drawImage(light, 0, 0);
-    // warm glow on top of fires
-    lowCtx.globalCompositeOperation = 'lighter';
-    for (const l of scene.lights()) {
-      const g = lowCtx.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r * 0.6);
-      g.addColorStop(0, 'rgba(255,140,50,0.22)'); g.addColorStop(1, 'rgba(255,140,50,0)');
-      lowCtx.fillStyle = g; lowCtx.fillRect(l.x - l.r, l.y - l.r, l.r * 2, l.r * 2);
-    }
-    lowCtx.globalCompositeOperation = 'source-over';
-  }
   scene.drawAfterLight?.(lowCtx);
+  scene.drawOverlay?.(lowCtx);
 
-  const sx = G.shake ? (Math.random() - 0.5) * G.shake * K : 0;
-  const sy = G.shake ? (Math.random() - 0.5) * G.shake * K : 0;
-  main.setTransform(1, 0, 0, 1, 0, 0);
-  main.imageSmoothingEnabled = false;
-  main.fillStyle = '#05060f';
-  main.fillRect(0, 0, screen.width, screen.height);
-  main.drawImage(low, sx, sy, W * K, H * K);
-  main.setTransform(K, 0, 0, K, sx, sy);
-  scene.drawOverlay?.(main);
-  if (fade > 0) { main.setTransform(1, 0, 0, 1, 0, 0); main.fillStyle = `rgba(5,6,15,${fade})`; main.fillRect(0, 0, screen.width, screen.height); }
+  const dark = scene.darkness || 0;
+  const flash = scene.flash || 0;
+  const shakeAmount = G.shake ? (G.shake * 0.008) : 0;
+  const sx = shakeAmount ? (Math.random() - 0.5) * shakeAmount : 0;
+  const sy = shakeAmount ? (Math.random() - 0.5) * shakeAmount : 0;
+
+  if (engine) {
+    try {
+      engine.upload_canvas(low);
+      if (scene.lights) {
+        for (const l of scene.lights()) {
+          engine.add_light(l.x, l.y, l.r, 1.0);
+        }
+      }
+      engine.render_uploaded_canvas(dark, flash, fade, sx, sy, screen.width, screen.height);
+    } catch (e) {
+      console.error('WebGL render error:', e);
+    }
+  }
 }
 
 // ---------- loop ----------
