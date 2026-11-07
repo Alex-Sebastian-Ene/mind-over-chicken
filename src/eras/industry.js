@@ -1,15 +1,17 @@
 // ERA II · INDUSTRY
 // The Goat Exchange. Prices come from trader agents, half fundamentalists (goats are worth
 // what the economy produces) and half chartists (goats are worth whatever they did yesterday,
-// plus vibes). Your stress (brain.stress: low calm, or an angry face on camera) adds noise and
-// herding, so bubbles and crashes emerge from the agents instead of being scripted. Fear spreads
-// between neighbours, unrest turns into strikes at the factory gate and, if fear runs hot, riots.
-// Brain challenge: the Goat IPO, 8 s of low stress (that is, calm).
+// plus vibes). Your stress (brain.stress: EEG agitation, or an angry face on camera; about 0.15
+// at rest) adds noise and herding, so bubbles and crashes emerge from the agents instead of being
+// scripted. Fear spreads between neighbours, unrest turns into strikes at the factory gate and,
+// if fear runs hot, riots.
+// Brain challenge: the Goat IPO, 8 s of steady nerves (stress below STRESSED).
 
 import { W, H, Particles, clamp, dist, rand, chance, gauss, floater, pick } from '../sim/util.js';
 import { walk, animate, villagerLook, sail } from '../sim/agents.js';
 import { drawPerson, drawGoat, drawChicken, drawBoat } from '../render/sprites.js';
 import { label } from './stone.js';
+import { STRESSED } from '../brain/brain.js';
 
 const N = 38;
 const GDP_TARGET = 620;
@@ -24,7 +26,7 @@ export class Industry {
     this.intro = {
       title: 'Industry',
       goal: `Reach ${GDP_TARGET} goats of GDP and land the Goat IPO.`,
-      how: [['Stress', 'Your stress drives market volatility. Stay calm or the goats stampede.'], ['Calm', 'A serene god calms the traders and cools the strikers.']],
+      how: [['Stress', 'Your stress drives market volatility. Stay steady or the goats stampede.'], ['Calm', 'A serene god calms the traders and cools the strikers.']],
     };
     this.powers = ['stress', 'calm'];
     this.darkness = 0.12;
@@ -77,14 +79,12 @@ export class Industry {
     const ex = w.sites.exchange;
     for (let i = 0; i < 8; i++) { const p = w.randomLand(ex.x, ex.y + 6, 1, 6); this.goats.push({ ...p, frame: 0, ft: 0, facing: 1, side: 1, spot: null }); }
     this.chicken = { x: ex.x + 6, y: ex.y + 2, frame: 0, ft: 0, facing: -1, side: 1 };
-    // No 'rest' cue here: this era asks for calm (stress drives the market), so its windows are
-    // not rest. Only the IPO records, as calm.
-    G.brain.setCue(null);
+    G.brain.setCue('rest');
     G.advisor.setEra('industry');
-    G.advisor.say('intro', 'My lord! Bro. The Goat Exchange is open. Stay calm or the market goes full stampede.', { mood: 'happy', priority: 3, cooldown: 999 });
+    G.advisor.say('intro', 'My lord! Bro. The Goat Exchange is open. Keep your nerves steady or the market goes full stampede.', { mood: 'happy', priority: 3, cooldown: 999 });
   }
 
-  // The traders' arousal, 0..1: the god's stress, max(1 - calm, face anger).
+  // The traders' arousal, 0..1: the god's stress (about 0.15 at rest, 1 when agitated).
   arousal() { return clamp(this.G.brain.stress ?? 0); }
 
   marketTick() {
@@ -238,12 +238,11 @@ export class Industry {
       ipo.state = 'active'; ipo.progress = 0;
       brain.setCue('calm');
       G.audio.bell();
-      G.advisor.say('ipo', 'It is IPO time. Eight seconds of calm. Do not look at the ticker. Do NOT look at the ticker.', { mood: 'nervous', priority: 4, cooldown: 0 });
+      G.advisor.say('ipo', 'It is IPO time. Steady nerves for eight seconds. Do not look at the ticker. Do NOT look at the ticker.', { mood: 'nervous', priority: 4, cooldown: 0 });
       this.headlines.push('GOAT EXCHANGE ANNOUNCES IPO OF... THE GOAT EXCHANGE');
     }
     if (ipo.state === 'active') {
-      // Stress at most 1 - the calm bar: the same bar as a calm hold, raised as the model learns you.
-      ipo.limit = 1 - brain.threshold('calm', 0.55);
+      ipo.limit = STRESSED;
       if ((brain.stress ?? 1) <= ipo.limit) ipo.progress += dt;
       else {
         if (ipo.progress > 2) { ipo.attempts++; G.advisor.say('ipofail', 'Stress spiked, IPO wobbled. The goats can smell fear.', { mood: 'panic', priority: 3, cooldown: 6 }); }
@@ -251,7 +250,7 @@ export class Industry {
       }
       if (ipo.progress >= IPO_SECONDS) {
         ipo.state = 'done';
-        brain.setCue(null);
+        brain.setCue('rest');
         this.confidence += 0.4;
         this.price *= 1.15;
         G.audio.fanfare();
@@ -366,7 +365,7 @@ export class Industry {
       ctx.lineWidth = 1.4;
       ctx.strokeStyle = 'rgba(10,12,30,0.7)'; ctx.beginPath(); ctx.arc(ex.x, ex.y - 5, 12, 0, Math.PI * 2); ctx.stroke();
       ctx.strokeStyle = '#ff5a72'; ctx.beginPath(); ctx.arc(ex.x, ex.y - 5, 12, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2); ctx.stroke();
-      label(ctx, ex.x, ex.y - 21, `IPO · keep stress under ${Math.round((this.ipo.limit ?? 0.45) * 100)}%`, '#ff8a9c', 6);
+      label(ctx, ex.x, ex.y - 21, `IPO · keep stress under ${Math.round((this.ipo.limit ?? STRESSED) * 100)}%`, '#ff8a9c', 6);
     }
     if (this.agents.some((a) => a.state === 'strike' || a.state === 'riot')) label(ctx, G.world.sites.picket.x, G.world.sites.picket.y + 12, 'picket line', '#f2e8d5', 5);
     // Ticker tape

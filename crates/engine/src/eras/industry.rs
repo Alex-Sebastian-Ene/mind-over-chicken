@@ -109,7 +109,7 @@ impl Era for IndustryEra {
             self.crash_cooldown -= dt;
         }
 
-        // Arousal: the god's stress (max(1 - calm, face anger)), as in src/eras/industry.js.
+        // Arousal: the god's stress, as in src/eras/industry.js.
         let arousal = brain.stress.clamp(0.0, 1.0);
         let herding = 1.0 + 1.6 * arousal;
 
@@ -157,7 +157,7 @@ impl Era for IndustryEra {
             self.momentum *= 0.5;
         }
 
-        // IPO hold: low stress (that is, calm) completes the IPO
+        // IPO hold: steady nerves (stress at or below STRESS_LIMIT) complete the IPO
         if self.gdp >= GDP_TARGET && !self.ipo_done {
             let steady = brain.stress <= STRESS_LIMIT;
             if steady {

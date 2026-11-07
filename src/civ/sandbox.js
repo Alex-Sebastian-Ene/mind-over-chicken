@@ -145,7 +145,7 @@ export class CivSandbox {
     if (px || py) civ.pan(px * PAN_SPEED * dt, py * PAN_SPEED * dt);
 
     // The brain (and the face, if the camera is on) tilts every chief this step.
-    const calm = b.calm || 0, focus = b.focus || 0, hr = b.hrDelta() || 0;
+    const calm = b.calm || 0, focus = b.focus || 0, hr = b.stress ?? 0;   // stress, 0..1 (full rename: #69)
     const anger = G.mood && G.mood.active !== false ? (G.mood.anger || 0) : (this.mood?.anger || 0);
     civ.setInputs(calm, focus, hr, anger);
     if (!this.G.calibration) this.readMind(dt, calm, focus, hr);
@@ -194,7 +194,7 @@ export class CivSandbox {
     const f = r.features || {};
     const sensor = r.source === 'sensor';
     if (sensor) {
-      this.civ.seedMind(f.calm ?? 0, f.focus ?? 0, f.hrDelta ?? 0, ((f.blinkRate ?? 0) * r.seconds) / 10);
+      this.civ.seedMind(f.calm ?? 0, f.focus ?? 0, f.stress ?? 0, ((f.blinkRate ?? 0) * r.seconds) / 10);
       this.civ.setPlayerTraits(r.friendliness, r.aggressiveness, r.violence);
     }
     this.refresh();
@@ -233,7 +233,7 @@ export class CivSandbox {
   reactToMood(dt, calm, hr, anger) {
     const h = this.moodHold, say = this.G.advisor.say.bind(this.G.advisor);
     h.calm = calm > 0.65 ? h.calm + dt : 0;
-    h.pulse = hr > 12 ? h.pulse + dt : 0;
+    h.pulse = hr > 0.5 ? h.pulse + dt : 0;   // hr is stress, 0..1
     h.anger = anger > 0.4 ? h.anger + dt : 0;
     const wars = this.factions.reduce((s, f) => s + (f.alive ? f.wars : 0), 0) / 2;
     if (h.calm > 4) say('civ-calm', wars ? 'Your calm spreads, my lord. The chiefs are tired of war and want soup.' : 'Your calm spreads, my lord. Chiefs unclench their fists and swap grain.', { mood: 'happy', priority: 1, cooldown: 25 });
@@ -244,7 +244,7 @@ export class CivSandbox {
   // ---------- news ----------
   onEvent(e) {
     const A = this.name(e.a), B = this.name(e.b), say = this.G.advisor.say.bind(this.G.advisor);
-    const hot = (this.G.brain.hrDelta() || 0) > 10;
+    const hot = (this.G.brain.stress ?? 0) > 0.5;
     let text = null;
     switch (e.kind) {
       case EVENT.CONTACT:

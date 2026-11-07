@@ -2,6 +2,7 @@
 // with its live meter), and the judge overlay that shows the personal model.
 
 import { FEATURE_NAMES } from '../brain/model.js';
+import { STRESSED } from '../brain/brain.js';
 
 // 8×8 pixel icons for the power tiles.
 const ICONS = {
@@ -80,10 +81,10 @@ export class Hud {
     };
     set(this.powers.calm, b.calm, scene?.powers.includes('calm') ? b.threshold('calm', 0.55) : null, `${Math.round(b.calm * 100)}%`);
     set(this.powers.focus, b.focus, scene?.powers.includes('focus') ? b.threshold('focus', 0.5) : null, `${Math.round(b.focus * 100)}%`);
-    // Stress = max(1 - calm, face anger): high whenever the god is not calm.
+    // Stress: about 0.15 at rest, up with EEG agitation or an angry face (brain.js).
     const stress = b.stress ?? 0;
     set(this.powers.stress, stress, null, `${Math.round(stress * 100)}%`);
-    this.powers.stress.classList.toggle('is-hot', stress > 0.9);
+    this.powers.stress.classList.toggle('is-hot', stress > STRESSED);
     if (this.blinkFlash > 0) { this.blinkFlash -= dt; if (this.blinkFlash <= 0) this.powers.blink.classList.remove('is-firing'); }
     this.powers.blink.querySelector('.power-value').textContent = `${b.stats.blinks}`;
 

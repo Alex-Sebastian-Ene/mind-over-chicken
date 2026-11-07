@@ -106,7 +106,7 @@ impl Era for SpaceAge {
                 let build_rate = 0.05 + 0.15 * brain.focus;
                 self.progress = (self.progress + build_rate * dt).min(1.0);
 
-                // Stress (max(1 - calm, face anger)) makes the engineers drop parts
+                // Stress (EEG agitation or face anger) makes the engineers drop parts
                 if brain.stress > STRESS_LIMIT && self.progress > 0.05 {
                     self.progress = (self.progress - dt * 0.04).max(0.0);
                 }
@@ -140,7 +140,7 @@ impl Era for SpaceAge {
                     events.push(EraEvent::PlaySound(SoundKind::Bell));
                     events.push(EraEvent::AdvisorSay {
                         key: "countdown-start".to_string(),
-                        text: "All passengers aboard! Hold focus for the final 10s countdown!"
+                        text: "All passengers aboard! Hold focus and keep your nerve for the final 10s countdown!"
                             .to_string(),
                         mood: "nervous".to_string(),
                         priority: 4,
@@ -149,11 +149,11 @@ impl Era for SpaceAge {
                 }
             }
             "countdown" => {
-                // Focus only: calm and focus share one softmax in the personal classifier, so while
-                // the player holds focus, calm is near 0 and stress near 1 (see src/eras/space.js).
+                // Focus, and stress at or below STRESS_LIMIT (focus does not read as stress).
                 let focus_ok = brain.focus >= 0.45;
+                let steady_ok = brain.stress <= STRESS_LIMIT;
 
-                if focus_ok {
+                if focus_ok && steady_ok {
                     self.countdown -= dt;
                     self.hold_time = 0.0;
                     if (self.countdown % 1.0) < dt {
@@ -183,7 +183,7 @@ impl Era for SpaceAge {
                         events.push(EraEvent::PlaySound(SoundKind::Bad));
                         events.push(EraEvent::AdvisorSay {
                             key: "count-scrub".to_string(),
-                            text: "Countdown scrubbed: focus slipped! Resetting to T-10s.".to_string(),
+                            text: "Countdown scrubbed! Resetting to T-10s.".to_string(),
                             mood: "panic".to_string(),
                             priority: 3,
                             cooldown: 6.0,
@@ -244,11 +244,23 @@ mod tests {
         assert!(space.passengers >= MIN_PASSENGERS);
         assert_eq!(space.phase, "countdown");
 
-        // Countdown on focus alone, even at full stress (calm is near 0 while focusing)
-        let focused = BrainInput {
+        // Stress holds the countdown: it doesn't run while agitated, even with focus
+        let agitated = BrainInput {
             focus: 0.9,
             calm: 0.0,
             stress: 1.0,
+            ..Default::default()
+        };
+        for _ in 0..20 {
+            space.update(0.1, &agitated);
+        }
+        assert_eq!(space.countdown, COUNT_FROM);
+
+        // Focus at rest stress (calm is near 0 while focusing, stress about 0.15) runs it
+        let focused = BrainInput {
+            focus: 0.9,
+            calm: 0.0,
+            stress: 0.15,
             ..Default::default()
         };
         while space.phase == "countdown" {

@@ -4,7 +4,7 @@
 //   - the recognised gesture and its confidence, hold progress, the pinch, the learned hand range and cooldowns;
 //   - live emotion bars and the dominant mood;
 //   - inference rate (Hz), model time and end-to-end latency (ms) for hands and face, and where they run;
-//   - the brain signals: calm, focus, stress (max(1 - calm, face anger)), blinks; and the game's frame rate.
+//   - the brain signals: calm, focus, stress (EEG agitation or face anger), blinks; and the game's frame rate.
 // Without a camera it still shows key casts, cooldowns, brain values and the frame rate.
 
 import { SPELL_BY_ID, GESTURE_LABEL } from './spells.js';
@@ -212,7 +212,7 @@ export function initDebug({ getG, camera }) {
     if (b) {
       set(el.calm, pct(b.calm));
       set(el.focus, pct(b.focus));
-      set(el.stress, b.stress == null ? '–' : `${pct(b.stress)}${b.anger > 0 && b.anger >= 1 - b.calm ? ' · face anger' : ''}`);
+      set(el.stress, b.stress == null ? '–' : `${pct(b.stress)}${b.anger > 0 && b.anger >= b.stress - 1e-6 ? ' · face anger' : ''}`);
       set(el.blinks, String(b.stats?.blinks ?? 0));
       set(el.source, `${G.source?.kind === 'sim' ? 'emulated headset' : 'headset bridge'} · signal ${pct(b.quality)}`);
     } else {

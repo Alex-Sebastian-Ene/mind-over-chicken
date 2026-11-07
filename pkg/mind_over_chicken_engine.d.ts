@@ -35,7 +35,7 @@ export class Engine {
     game_start_era(index: number): void;
     /**
      * One tick of the Rust eras. `stress` is the JS brain's `brain.stress`
-     * (max(1 - calm, face anger), 0..1).
+     * (EEG agitation or face anger, 0..1, about 0.15 at rest).
      */
     game_tick(dt: number, calm: number, focus: number, stress: number, blinks: number): void;
     get_camera_distance(): number;

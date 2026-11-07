@@ -827,7 +827,7 @@ impl Engine {
     }
 
     /// One tick of the Rust eras. `stress` is the JS brain's `brain.stress`
-    /// (max(1 - calm, face anger), 0..1).
+    /// (EEG agitation or face anger, 0..1, about 0.15 at rest).
     pub fn game_tick(&mut self, dt: f32, calm: f32, focus: f32, stress: f32, blinks: u32) {
         let brain = eras::BrainInput {
             calm,

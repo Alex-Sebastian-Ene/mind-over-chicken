@@ -20,8 +20,8 @@ export class SimSource {
     this.label = 'Emulated headset';
     this.connected = true;
     this.status = 'Emulated headset (keyboard)';
-    // What the player is pressing right now. `panic` is the Stress demo key (Shift): it lowers
-    // calm, so brain.stress rises.
+    // What the player is pressing right now. `panic` is the Stress demo key (Shift): full
+    // agitation (beta and gamma up, alpha and calm down), so brain.stress rises.
     this.input = { calm: false, focus: false, panic: false };
     this.pendingBlink = false;
     this.aim = { x: 0.5, y: 0.6 };
@@ -32,7 +32,7 @@ export class SimSource {
       alphaGain: rand(0.55, 1.25),   // how strongly calm shows up as alpha
       betaGain: rand(0.55, 1.2),     // how strongly focus shows up as beta
       thetaFocus: rand(-0.4, 0.5),   // some people's theta rises with focus, some fall
-      gammaArousal: rand(0.3, 1.0),
+      gammaArousal: rand(0.5, 1.0),  // how much muscle tension (gamma) agitation adds
     };
     // Latent mental state, smoothed so it behaves like a person rather than a switch.
     this.latent = { calm: 0.15, focus: 0.1, arousal: 0.1 };
@@ -49,8 +49,7 @@ export class SimSource {
     this.aim.x = clamp(x); this.aim.y = clamp(y);
   }
   // Called by the game when something alarming happens (a market crash, a scrubbed launch).
-  // A real player tenses up at these moments; the sim imitates that a little (less alpha, so
-  // less calm and more stress).
+  // A real player tenses up at these moments; the sim imitates that a little (more agitation).
   addStartle(amount) { this.startle = Math.min(1, this.startle + amount); }
 
   update(dt, emit) {
@@ -74,9 +73,12 @@ export class SimSource {
     const n = () => Math.exp(gauss() * 0.16); // multiplicative band noise
     let delta = 0.26 * n();
     let theta = (0.17 + 0.06 * f.thetaFocus * L.focus + 0.03 * L.calm) * n();
-    let alpha = (0.17 + 0.32 * f.alphaGain * L.calm - 0.07 * L.focus - 0.06 * L.arousal) * n();
-    let beta = (0.15 + 0.26 * f.betaGain * L.focus + 0.1 * L.arousal - 0.05 * L.calm) * n();
-    let gamma = (0.05 + 0.06 * f.gammaArousal * L.arousal + 0.02 * L.focus) * n();
+    // Agitation (the Stress key, startles) suppresses alpha and raises beta and, like a clenched
+    // jaw on a real headset, gamma. Focus raises beta far more than gamma, so the brain's
+    // agitation index tells the two apart.
+    let alpha = (0.17 + 0.32 * f.alphaGain * L.calm - 0.07 * L.focus - 0.08 * L.arousal) * n();
+    let beta = (0.15 + 0.26 * f.betaGain * L.focus + 0.12 * L.arousal - 0.05 * L.calm) * n();
+    let gamma = (0.05 + 0.2 * f.gammaArousal * L.arousal + 0.02 * L.focus) * n();
     const blink = this.pendingBlink;
     if (blink) delta *= 3.2; // blinks smear huge low-frequency power across frontal channels
     alpha = Math.max(alpha, 0.02); beta = Math.max(beta, 0.02); theta = Math.max(theta, 0.02);

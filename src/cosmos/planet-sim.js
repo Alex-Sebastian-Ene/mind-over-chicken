@@ -256,9 +256,9 @@ export function freshSettlement() {
   };
 }
 
-// Brain readings every world sees this frame. `stress` is brain.stress = max(1 - calm, face
-// anger), 0..1 (src/brain/brain.js); without it, it is worked out the same way from calm and
-// anger. `anger` is the camera mood (0..1).
+// Brain readings every world sees this frame. `stress` is brain.stress (src/brain/brain.js):
+// EEG agitation or face anger, about 0.15 at rest, 0..1. Without it, it is worked out from calm
+// and anger with stressFrom. `anger` is the camera mood (0..1).
 export function brainEffects({ calm, focus, stress, blinksLast10s, anger = 0 }) {
   return {
     calm, focus,

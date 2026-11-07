@@ -233,7 +233,7 @@ export class Galaxy {
     const fx = brainEffects({
       calm: brain.calm,
       focus: brain.focus,
-      stress: brain.stress,           // max(1 - calm, face anger), from the brain
+      stress: brain.stress,           // EEG agitation or face anger, from the brain
       blinksLast10s: this.recentBlinks.length,
       anger: opts.anger ?? 0,
     });

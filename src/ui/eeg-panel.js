@@ -1,6 +1,6 @@
 // EEG & Biosensing Side Panel: connect/disconnect Muse 2 bridge at any time,
 // inspect electrode contact (TP9, AF7, AF8, TP10), 4-channel oscilloscope,
-// 5-band frequency spectrum, mental state (calm, focus, stress = max(1 - calm, face anger)),
+// 5-band frequency spectrum, mental state (calm, focus, stress: EEG agitation or face anger),
 // and 3-axis Accelerometer & Gyroscope waveforms + head pose calibration & cursor pad.
 
 const BANDS = [
@@ -164,7 +164,7 @@ const TEMPLATE = `
         <span class="eeg-band-val">--</span>
       </div>
       <div class="eeg-band-row" data-metric="stress">
-        <span class="eeg-band-lbl">Stress (1 − calm, or anger)</span>
+        <span class="eeg-band-lbl">Stress (agitation, anger)</span>
         <span class="eeg-bar"><span style="background:var(--alarm)"></span></span>
         <span class="eeg-band-val">--</span>
       </div>
@@ -1018,7 +1018,7 @@ export class EegPanel {
       this.ui.bands[band.key].val.textContent = pct;
     }
 
-    // Mental state: calm, focus and stress (brain.stress = max(1 - calm, face anger))
+    // Mental state: calm, focus and stress (brain.stress: EEG agitation or face anger)
     const calmPct = `${Math.round((b.calm || 0) * 100)}%`;
     const focusPct = `${Math.round((b.focus || 0) * 100)}%`;
     const stressPct = `${Math.round((b.stress ?? 0) * 100)}%`;

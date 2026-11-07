@@ -275,10 +275,8 @@ function dismissBanner() {
   if (!banner) return;
   banner = null;
   $('banner').hidden = true;
-  // Re-arm the scene's calibration cue after the pause. Industry records only during the IPO:
-  // the rest of the era asks for calm (stress drives the market), so it is not "rest".
-  if (G.scene.id === 'stone') G.brain.setCue(G.scene.hold?.active ? 'calm' : 'rest');
-  if (G.scene.id === 'industry') G.brain.setCue(G.scene.ipo?.state === 'active' ? 'calm' : null);
+  // Re-arm the scene's calibration cue after the pause.
+  if (G.scene.id === 'stone' || G.scene.id === 'industry') G.brain.setCue(G.scene.hold?.active || G.scene.ipo?.state === 'active' ? 'calm' : 'rest');
 }
 
 let failTimer = null;
@@ -643,7 +641,7 @@ screen.addEventListener('wheel', (e) => {
 }, { passive: false });
 screen.addEventListener('contextmenu', (e) => e.preventDefault());
 
-// Shift is the Stress demo key: it lowers the emulated headset's calm (input.panic).
+// Shift is the Stress demo key: full agitation on the emulated headset (input.panic).
 const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'panic' };
 window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input')) return;

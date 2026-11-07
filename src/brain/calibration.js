@@ -51,7 +51,7 @@ export function randomSeedTraits(seed) {
 
 // Sensor-to-trait formula (documented in docs/calibration.md). Inputs are window averages:
 //   calm, focus           0..1 from the brain model
-//   stress                0..1 brain.stress = max(1 - calm, face anger)
+//   stress                0..1 brain.stress = max(agitation, face anger, 0.15·(1 - calm))
 //   blinkRate             deliberate blinks per 10 s
 //   joy, anger            0..1 from the face emotion manager (0 without a camera)
 export function traitsFromFeatures(f) {
@@ -102,6 +102,7 @@ export class Calibration {
   }
 
   finish(brain) {
+    brain?.lockAgitationBaseline?.(this.config.seconds);   // the same window sets the resting agitation
     const s = this.sum, n = Math.max(1e-6, s.n), face = s.faceFrames > 0 ? s.faceFrames : 0;
     const blinks = Math.max(0, (brain?.stats?.blinks ?? 0) - (this.blinksAtStart ?? 0));
     const features = {

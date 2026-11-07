@@ -1,18 +1,16 @@
 // ERA III · SPACE AGE (finale)
-// Engineers carry parts to the pad: focus speeds them up, stress (brain.stress: low calm, or an
-// angry face on camera) makes them drop things. Calm keeps citizens brave enough to board, stress
-// scares them off. Then the 10-second countdown runs on the personal focus classifier. A broken
+// Engineers carry parts to the pad: focus speeds them up, stress (brain.stress: EEG agitation, or
+// an angry face on camera) makes them drop things. Calm keeps citizens brave enough to board,
+// stress scares them off. Then the 10-second countdown runs on the personal focus classifier
+// while your stress has to stay below STRESSED (focus itself does not read as stress). A broken
 // count holds; a long hold scrubs and resets the countdown, never the era. Then liftoff, and a
 // new world.
-//
-// The countdown is focus only. Stress is max(1 - calm, anger) and the personal classifier's calm
-// and focus share one softmax, so while you hold focus, calm is near 0 and stress near 1: a
-// "focus and low stress" test could never pass.
 
 import { W, H, Particles, clamp, dist, rand, chance, floater, pick, mulberry32 } from '../sim/util.js';
 import { walk, animate, villagerLook } from '../sim/agents.js';
 import { drawPerson, drawChicken, drawRocket, drawGantry } from '../render/sprites.js';
 import { label } from './stone.js';
+import { STRESSED } from '../brain/brain.js';
 
 const ENGINEERS = 10;
 const CITIZENS = 28;
@@ -28,7 +26,7 @@ export class SpaceAge {
     this.intro = {
       title: 'Space Age',
       goal: 'Build the rocket, board the citizens, survive a 10-second countdown.',
-      how: [['Focus', 'Speeds up the engineers, and holds the final countdown.'], ['Calm', 'Keeps citizens brave enough to board.'], ['Stress', 'Makes engineers drop parts and scares boarding citizens off.']],
+      how: [['Focus', 'Speeds up the engineers, and holds the final countdown.'], ['Calm', 'Keeps citizens brave enough to board.'], ['Stress', 'Keep it low, or parts get dropped and the count holds.']],
     };
     this.powers = ['focus', 'calm', 'stress'];
     this.darkness = 0;
@@ -73,9 +71,7 @@ export class SpaceAge {
 
   focusOk() { return this.G.brain.focus >= this.focusThr(); }
   focusThr() { return this.G.brain.threshold('focus', 0.5); }
-  // Stressed = stress above 1 - the calm bar (0.45, down to 0.31 as the model learns you).
-  stressLimit() { return 1 - this.G.brain.threshold('calm', 0.55); }
-  stressed() { return (this.G.brain.stress ?? 1) > this.stressLimit(); }
+  stressed() { return (this.G.brain.stress ?? 1) > STRESSED; }
 
   update(dt) {
     const G = this.G, w = G.world, brain = G.brain;
@@ -134,12 +130,12 @@ export class SpaceAge {
         this.count = COUNT_FROM; this.holdT = 0;
         brain.setCue('focus');
         G.audio.bell();
-        G.advisor.say('count', 'Final countdown. Hold focus for ten seconds. The whole species is watching. No pressure.', { mood: 'nervous', priority: 4, cooldown: 0 });
+        G.advisor.say('count', 'Final countdown. Hold focus and keep your nerve. Ten seconds. The whole species is watching. No pressure.', { mood: 'nervous', priority: 4, cooldown: 0 });
       }
     }
 
     if (this.phase === 'countdown') {
-      const ok = this.focusOk();
+      const ok = this.focusOk() && !this.stressed();
       if (ok) {
         const before = Math.ceil(this.count);
         this.count -= dt;
@@ -147,7 +143,7 @@ export class SpaceAge {
         if (Math.ceil(this.count) !== before) G.audio.tick();
       } else {
         this.holdT += dt;
-        G.advisor.say('hold', 'HOLD! Hold the count! Focus, my lord!', { mood: 'panic', priority: 3, cooldown: 4 });
+        G.advisor.say('hold', this.focusOk() ? 'HOLD! Your stress, my lord! Breathe!' : 'HOLD! Hold the count! Focus, my lord!', { mood: 'panic', priority: 3, cooldown: 4 });
         if (this.holdT > SCRUB_AFTER) {
           this.scrubs++;
           this.count = COUNT_FROM; this.holdT = 0;
@@ -253,10 +249,11 @@ export class SpaceAge {
     }
     if (this.phase === 'countdown') {
       const n = Math.max(0, Math.ceil(this.count));
-      const ok = this.focusOk();
+      const ok = this.focusOk() && !this.stressed();
       label(ctx, W / 2, 46, ok ? `T−${n}` : 'HOLD', ok ? '#f2e8d5' : '#ff5a72', 30);
       const fpct = Math.round(brain.focus * 100), fthr = Math.round(this.focusThr() * 100);
-      label(ctx, W / 2, 60, `focus ${fpct}% (need ${fthr}%)`, ok ? '#ffcf4a' : '#ff8a9c', 6);
+      label(ctx, W / 2 - 48, 60, `focus ${fpct}% (need ${fthr}%)`, this.focusOk() ? '#ffcf4a' : '#ff8a9c', 6);
+      label(ctx, W / 2 + 48, 60, `stress ${Math.round((brain.stress ?? 0) * 100)}% (max ${Math.round(STRESSED * 100)}%)`, this.stressed() ? '#ff8a9c' : '#7ee08a', 6);
       if (this.holdT > 0) {
         ctx.fillStyle = 'rgba(14,15,26,0.8)'; ctx.fillRect(W / 2 - 30, 66, 60, 2);
         ctx.fillStyle = '#ff5a72'; ctx.fillRect(W / 2 - 30, 66, 60 * clamp(this.holdT / SCRUB_AFTER), 2);
@@ -269,7 +266,7 @@ export class SpaceAge {
   }
 
   // ---- camera (#33): hand casts and face mood. Extra inputs on top of the brain, never instead of it. ----
-  // They never touch the countdown itself: that stays a focus challenge.
+  // They never touch the countdown itself: that stays a focus-and-nerve challenge.
 
   // aim is 0..1 like the brain's.
   onCast(spell, aim) {

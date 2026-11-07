@@ -2,17 +2,40 @@
 // It blends a generic rule (alpha/beta ratios) with the personal model as that model
 // earns trust, and records labelled windows whenever the game sets a cue.
 //
-// Stress is the one number the game reads for "how wound up is the god":
-// stress = max(1 - calm, face anger while the camera sees a face), 0..1. It is computed here,
-// once, so the eras, HUD, calibration and galaxy all agree on it.
+// Stress is the one number the game reads for "how wound up is the god", 0..1. It is computed
+// here, once, so the eras, HUD, calibration and galaxy all agree on it. It is neutral at rest
+// (about REST_STRESS) and rises on agitation, not on a missing calm:
+//
+//   stress = max(agitation, face anger while the camera sees a face, REST_STRESS * (1 - calm))
+//
+// Agitation is EEG, measured against the player's own resting level (agitationIndex below): the
+// high-frequency power a tense player adds (gamma, which on a Muse is mostly muscle tension: a
+// clenched jaw, a frown) relative to beta, plus a fifth of the fast/slow ratio beta/(alpha+theta).
+// Focus raises beta far more than gamma, so it lowers this index: focus does not read as stress.
+// The resting level is the calibration window's (#54, lockAgitationBaseline), or a slow running
+// average until that window has run (and for brains without one, like the AI's).
 
 import { clamp, sigmoid, smooth, median } from '../sim/util.js';
 import { PersonalModel, featuresFromBands } from './model.js';
 
-// stress = max(1 - calm, anger), both 0..1. `anger` is the face's anger score while the camera
-// is on and sees a face, else 0. ProxyBrain and SharedBrain use the same function.
-export function stressFrom(calm, anger = 0) {
-  return clamp(Math.max(1 - clamp(calm || 0), clamp(anger || 0)));
+export const REST_STRESS = 0.15;   // stress of a player at rest: the small (1 - calm) term
+export const STRESSED = 0.5;       // above this the god counts as stressed (eras' thresholds)
+const AG_MARGIN = 0.12;            // index above rest that still reads as rest (window noise)
+const AG_SPAN = 0.4;               // index above rest + margin that reads as full agitation
+const AG_WARMUP = 30;              // windows (~3 s) whose median starts the running average
+const AG_HISTORY = 300;            // feature windows kept for the baseline (~30 s at 10 Hz)
+const AG_RUNNING_TAU = 60;         // s, the running-average baseline's time constant
+
+// ProxyBrain and SharedBrain use the same function. All inputs 0..1; `anger` is the face's anger
+// while the camera is on and sees a face, else 0.
+export function stressFrom(calm, anger = 0, agitation = 0) {
+  return clamp(Math.max(clamp(agitation || 0), clamp(anger || 0), REST_STRESS * (1 - clamp(calm || 0))));
+}
+
+// Agitation index of one feature window f (model.js FEATURE_NAMES):
+// ln(gamma/beta) + 0.2 * ln(beta/(alpha+theta)) = ln γ - 0.8 ln β - 0.2 ln(α+θ).
+export function agitationIndex(f) {
+  return f[4] - f[3] + 0.2 * f[6];
 }
 
 // The face's anger, if the camera is on and sees a face (G.mood from src/camera/camera.js).
@@ -37,7 +60,12 @@ export class Brain {
     this.genericFocus = 0;
     this.personal = null;
     this.anger = 0;           // face anger counted into stress (0 without a camera)
-    this.stress = 1;          // max(1 - calm, anger), updated every frame
+    this.agitation = 0;       // 0..1, EEG agitation above the player's resting level
+    this.agitationRaw = 0;
+    this.agHistory = [];      // recent agitation indices, for the calibration baseline
+    this.agBaseline = null;   // resting index from the calibration window (#54)
+    this.agRunning = null;    // slow running average of the index: the fallback baseline
+    this.stress = REST_STRESS;  // stressFrom(calm, anger, agitation), updated every frame
     this.aim = { x: 0.5, y: 0.55 };
     this.motion = 0;
     this.quality = 1;
@@ -74,7 +102,9 @@ export class Brain {
     this.calmRaw = 0;
     this.focusRaw = 0;
     this.anger = 0;
-    this.stress = 1;
+    this.agitation = 0;
+    this.agitationRaw = 0;
+    this.stress = REST_STRESS;
     this.motion = 0;
     this.quality = 0;
     this.bands = { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 };
@@ -99,8 +129,9 @@ export class Brain {
     // Smooth the outputs the game reads, so a single noisy window can't flip a challenge.
     this.calm = smooth(this.calm, this.calmRaw, 4, dt);
     this.focus = smooth(this.focus, this.focusRaw, 4, dt);
+    this.agitation = smooth(this.agitation, this.agitationRaw, 3, dt);
     this.anger = faceAnger(mood);
-    this.stress = stressFrom(this.calm, this.anger);
+    this.stress = stressFrom(this.calm, this.anger, this.agitation);
     if (this.calm > 0.6) this.stats.calmSeconds += dt;
     if (this.focus > 0.6) this.stats.focusSeconds += dt;
 
@@ -166,6 +197,7 @@ export class Brain {
     const f = new Array(D).fill(0);
     for (const w of this.window) for (let j = 0; j < D; j++) f[j] += w[j] / this.window.length;
     this.feat = f;
+    this.updateAgitation(agitationIndex(f));
 
     if (this.cue) this.model.add(this.cue, f);
     if (this.cue === 'rest') {
@@ -189,5 +221,24 @@ export class Brain {
   // The better the model knows the player, the higher the bar. Players never see this.
   threshold(kind, base = 0.55) {
     return clamp(base + 0.14 * this.model.trust(kind), 0, 0.85);
+  }
+
+  // One feature window's agitation index → agitationRaw, against the player's resting level.
+  updateAgitation(ag) {
+    this.agHistory.push(ag);
+    if (this.agHistory.length > AG_HISTORY) this.agHistory.shift();
+    // Slow running average (one window ≈ 0.1 s, time constant AG_RUNNING_TAU): the fallback
+    // baseline until the calibration window sets one.
+    if (this.agHistory.length <= AG_WARMUP) this.agRunning = median(this.agHistory);
+    else this.agRunning += (ag - this.agRunning) * (1 - Math.exp(-0.1 / AG_RUNNING_TAU));
+    const base = this.agBaseline ?? this.agRunning;
+    this.agitationRaw = clamp((ag - base - AG_MARGIN) / AG_SPAN);
+  }
+
+  // calibration (#54): the window that seeds the player's civilisation also sets their resting
+  // agitation level, from its last `seconds` of feature windows.
+  lockAgitationBaseline(seconds = 10) {
+    const recent = this.agHistory.slice(-Math.max(10, Math.round(seconds * 10)));
+    if (recent.length >= 10) this.agBaseline = median(recent);
   }
 }

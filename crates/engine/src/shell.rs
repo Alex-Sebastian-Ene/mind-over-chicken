@@ -344,11 +344,11 @@ impl HudDriver {
                     &format!("{}%", (focus * 100.0).round() as i32),
                 );
             }
-            // Stress = max(1 - calm, face anger), as the JS HUD shows it (src/ui/hud.js).
+            // Stress (EEG agitation or face anger), as the JS HUD shows it (src/ui/hud.js).
             if let Some(el) = self.powers.get("stress") {
                 let s = stress.clamp(0.0, 1.0);
                 set_meter(el, s, None, &format!("{}%", (s * 100.0).round() as i32));
-                if s > 0.9 {
+                if s > crate::eras::STRESS_LIMIT {
                     let _ = el.class_list().add_1("is-hot");
                 } else {
                     let _ = el.class_list().remove_1("is-hot");

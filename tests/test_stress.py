@@ -1,4 +1,4 @@
-"""Stress: runs the Node unit tests for brain.stress = max(1 - calm, face anger) and the eras that
+"""Stress: runs the Node unit tests for brain.stress (EEG agitation or face anger) and the eras that
 read it (industry market and IPO, space-age drops, boarding and countdown). Skipped when Node
 isn't installed."""
 
