@@ -225,7 +225,7 @@ def main():
     prev_batch = val_set.batch(8, args.crop, np.random.default_rng(7))
     use_bf16 = dev.type == "cuda" and torch.cuda.is_bf16_supported()
     metrics = open(args.out / "metrics.jsonl", "a")
-    t_log, loss_acc, n_acc = time.time(), 0.0, 0
+    t_log, loss_acc, n_acc = time.time(), torch.zeros((), device=dev), 0
     net.train()
     while step < args.steps and not stop["flag"]:
         lr = args.lr * min(1.0, (step + 1) / args.warmup) * (0.5 * (1 + math.cos(math.pi * min(1.0, step / args.steps))) * 0.9 + 0.1)
@@ -248,7 +248,7 @@ def main():
             for pe, pn in zip(ema.parameters(), net.parameters()):
                 pe.lerp_(pn, 1 - d)
         step += 1
-        loss_acc += float(loss)
+        loss_acc += loss.detach().float()  # no per-step GPU sync
         n_acc += 1
         if step % args.log_every == 0:
             with torch.no_grad(), torch.autocast(device_type=dev.type, dtype=torch.bfloat16, enabled=use_bf16):
@@ -256,11 +256,11 @@ def main():
                 vx0, vcond, _ = make_pair(val_batch.to(dev), stats, gen=None, augment=False)
                 vl = float(v_loss(ema, vx0, vcond)) if teacher is None else float(distill_loss(ema, teacher, vx0, vcond, args.student_steps))
                 torch.manual_seed(args.seed + step)
-            rec = {"step": step, "loss": loss_acc / n_acc, "val": vl, "lr": lr, "sec_per_step": (time.time() - t_log) / n_acc, "elapsed_min": (time.time() - t_start) / 60}
+            rec = {"step": step, "loss": float(loss_acc) / n_acc, "val": vl, "lr": lr, "sec_per_step": (time.time() - t_log) / n_acc, "elapsed_min": (time.time() - t_start) / 60}
             print(json.dumps(rec), flush=True)
             metrics.write(json.dumps(rec) + "\n")
             metrics.flush()
-            t_log, loss_acc, n_acc = time.time(), 0.0, 0
+            t_log, loss_acc, n_acc = time.time(), torch.zeros((), device=dev), 0
         if step % args.ckpt_every == 0:
             save_ckpt(ck, state())
         if args.preview_every and step % args.preview_every == 0:

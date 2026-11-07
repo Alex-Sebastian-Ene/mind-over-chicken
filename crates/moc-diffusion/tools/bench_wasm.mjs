@@ -24,5 +24,6 @@ for (const [name, w, h, cell, reps] of [
     mocd_bench_run(w, h, cell, steps, 1 + r);
     best = Math.min(best, performance.now() - t);
   }
-  console.log(`${name.padEnd(15)} ${w}x${h}  ${best.toFixed(0)} ms`);
+  const mib = instance.exports.memory.buffer.byteLength / 2 ** 20;
+  console.log(`${name.padEnd(15)} ${w}x${h}  ${best.toFixed(0)} ms  (wasm memory ${mib.toFixed(0)} MiB)`);
 }
