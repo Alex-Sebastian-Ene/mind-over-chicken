@@ -32,6 +32,7 @@ class SiteSmokeTest(unittest.TestCase):
 
     def test_bridge_compiles(self):
         py_compile.compile(str(ROOT / "bridge" / "muse_bridge.py"), doraise=True)
+        py_compile.compile(str(ROOT / "scripts" / "serve.py"), doraise=True)
 
 
 if __name__ == "__main__":
