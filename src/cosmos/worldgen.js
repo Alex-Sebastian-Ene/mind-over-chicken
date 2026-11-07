@@ -56,7 +56,8 @@ function rehydrate(d) {
 }
 
 // opts.vast: also build the planet's vaster surface (world.vast).
-export function generateWorld(seed, biome, { vast = false } = {}) {
+// opts.track: show it in the loading pill (the galaxy's forming queue shows its own step instead).
+export function generateWorld(seed, biome, { vast = false, track = true } = {}) {
   const wk = getWorker();
   if (!wk) return Promise.resolve(buildHere(seed, biome, vast));
   const id = nextId++;
@@ -64,6 +65,7 @@ export function generateWorld(seed, biome, { vast = false } = {}) {
     pending.set(id, { resolve, seed, biome, vast });
     wk.postMessage({ id, seed, biome, vast });
   });
+  if (!track) return job;
   // loading screen: the corner pill counts planets forming ("Forming 3 planets").
   return loading.track(`world-${id}`, 'Forming a planet', job, { group: 'worlds', plural: 'Forming {n} planets', doneText: 'Planet formed' });
 }
