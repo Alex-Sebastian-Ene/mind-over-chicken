@@ -991,6 +991,20 @@ export class EegPanel {
     const open = force !== undefined ? force : this.panel.hidden;
     this.panel.hidden = !open;
     this.btn.setAttribute('aria-pressed', String(open));
+    if (open && this.doc) {
+      const camP = this.doc.getElementById('camPanel');
+      const camB = this.doc.getElementById('camBtn');
+      if (camP && !camP.hidden) {
+        camP.hidden = true;
+        camB?.setAttribute('aria-pressed', 'false');
+      }
+      const modP = this.doc.getElementById('modelPanel');
+      const modB = this.doc.getElementById('modelBtn');
+      if (modP && !modP.hidden) {
+        modP.hidden = true;
+        modB?.setAttribute('aria-pressed', 'false');
+      }
+    }
   }
 
   async handleConnect() {

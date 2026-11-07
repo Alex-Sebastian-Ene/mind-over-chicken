@@ -725,6 +725,10 @@ function toggleModel() {
   const p = $('modelPanel');
   p.hidden = !p.hidden;
   $('modelBtn').setAttribute('aria-pressed', String(!p.hidden));
+  if (!p.hidden) {
+    eegPanel?.toggle(false);
+    window.__moc?.camera?.togglePanel?.(false);
+  }
 }
 $('modelBtn').addEventListener('click', toggleModel);
 $('modelClose').addEventListener('click', toggleModel);
