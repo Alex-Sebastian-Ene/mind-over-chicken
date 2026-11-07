@@ -44,6 +44,28 @@ try {
 // Without WebGL, fall back to a plain 2D upscale so the game still shows.
 const fallback2d = engine ? null : screen.getContext('2d');
 
+// 3D world (#51): set_3d_mode only takes effect once the 3D renderer exists, so create it
+// here and start in 3D. If the GPU can't do it, stay in 2D and hide the toggle.
+let has3d = false;
+if (engine) {
+  try {
+    engine.init_3d();
+    engine.set_3d_mode(true);
+    has3d = engine.is_3d_mode();
+  } catch (err) {
+    console.warn('3D renderer unavailable; staying in 2D:', err);
+  }
+}
+function sync3dButton() {
+  const btn = $('mode3dBtn');
+  if (!btn) return;
+  const on = !!engine && engine.is_3d_mode();
+  btn.hidden = !has3d;
+  btn.textContent = on ? '3D: ON' : '3D: OFF';
+  btn.setAttribute('aria-pressed', String(on));
+}
+sync3dButton();
+
 function resize() {
   const rect = screen.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
@@ -96,6 +118,10 @@ function newGame(source, startIndex = 0) {
   $('failScreen').hidden = true;
   if (engine && G.world) {
     engine.init_world(G.world.seed);
+    // The 3D relief must be the world the simulation runs on (#71). Older pkg builds lack this.
+    if (engine.set_heightmap) {
+      try { engine.set_heightmap(G.world.h); } catch (err) { console.warn('set_heightmap failed:', err); }
+    }
     engine.set_era(startIndex);
   }
   startScene(startIndex);
@@ -397,8 +423,8 @@ screen.addEventListener('pointerdown', (e) => {
     cosmos.pointerDown(e.pointerId, p.x, p.y);
     return;
   }
-  // Right-click or Alt/Shift-click orbits camera in 3D
-  if (G && (e.button === 2 || (e.button === 0 && (e.altKey || e.shiftKey)))) {
+  // Right-drag or Alt-drag orbits the camera, in 3D only. (Shift is the racing-pulse key.)
+  if (G && engine && engine.is_3d_mode() && !cosmos.active && (e.button === 2 || (e.button === 0 && e.altKey))) {
     e.preventDefault();
     screen.setPointerCapture?.(e.pointerId);
     orbitDrag = { id: e.pointerId, x: e.clientX, y: e.clientY };
@@ -460,7 +486,7 @@ const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'pa
 window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input')) return;
   if (e.code === 'KeyM') { toggleModel(); return; }
-  if (e.code === 'KeyT' || e.code === 'Digit3') { toggle3D(); return; }
+  if (e.code === 'KeyT') { toggle3D(); return; }
   if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { cosmos.zoomOut(G); return; }
   if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { cosmos.zoomIn(G); return; }
   if (G && !cosmos.active && (e.code === 'KeyA' || e.code === 'KeyD')) { cosmos.panVel = e.code === 'KeyA' ? 140 : -140; return; }
@@ -516,15 +542,11 @@ $('modelBtn').addEventListener('click', toggleModel);
 $('modelClose').addEventListener('click', toggleModel);
 
 function toggle3D() {
-  if (!engine) return;
-  const next = !engine.is_3d_mode();
-  engine.set_3d_mode(next);
-  const btn = $('mode3dBtn');
-  if (btn) {
-    btn.textContent = next ? '3D: ON' : '3D: OFF';
-    btn.setAttribute('aria-pressed', String(next));
-  }
-  advisor.say('3d-toggle', next ? '3D View: right-drag to orbit, wheel to zoom.' : '2D Classic Mode.', { mood: 'happy', priority: 2, cooldown: 1 });
+  if (!engine || !has3d) return;
+  engine.set_3d_mode(!engine.is_3d_mode());
+  sync3dButton();
+  const on = engine.is_3d_mode();
+  advisor.say('3d-toggle', on ? '3D view: right-drag to orbit, wheel to zoom.' : '2D classic view.', { mood: 'happy', priority: 2, cooldown: 1 });
 }
 $('mode3dBtn')?.addEventListener('click', toggle3D);
 $('soundBtn').addEventListener('click', () => {
@@ -670,7 +692,7 @@ $('playBridge').addEventListener('click', async () => {
 });
 
 // Debug handle for the console (and for automated playtests).
-window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos };
+window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos, get engine() { return engine; } };
 
 // camera (#33): opt-in webcam. Hand gestures cast spells (keys 1-7 without a webcam), the face sets
 // the world's mood. It adds to the brain and keyboard inputs and never replaces them.

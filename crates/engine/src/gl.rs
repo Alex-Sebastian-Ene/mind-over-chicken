@@ -15,6 +15,8 @@ pub struct WebGlRenderer {
     pub gl: WebGlRenderingContext,
     pub program: WebGlProgram,
     pub _vertex_buffer: WebGlBuffer,
+    pub a_position: u32,
+    pub a_tex_coord: u32,
     pub texture: WebGlTexture,
     pub u_night: WebGlUniformLocation,
     pub u_flash: WebGlUniformLocation,
@@ -186,6 +188,8 @@ impl WebGlRenderer {
             gl,
             program,
             _vertex_buffer: vertex_buffer,
+            a_position,
+            a_tex_coord,
             texture,
             u_night,
             u_flash,
@@ -295,6 +299,15 @@ impl WebGlRenderer {
         }
         self.gl.uniform4fv_with_f32_array(Some(&self.u_lights), &light_data);
 
+        // The 3D renderer shares this context and re-points vertex attributes every frame, so
+        // bind the blit quad on every draw rather than once at startup (#71: black screen in 3D).
+        self.gl.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&self._vertex_buffer));
+        self.gl.enable_vertex_attrib_array(self.a_position);
+        self.gl.vertex_attrib_pointer_with_i32(self.a_position, 2, WebGlRenderingContext::FLOAT, false, 4 * 4, 0);
+        self.gl.enable_vertex_attrib_array(self.a_tex_coord);
+        self.gl.vertex_attrib_pointer_with_i32(self.a_tex_coord, 2, WebGlRenderingContext::FLOAT, false, 4 * 4, 2 * 4);
+
+        self.gl.active_texture(WebGlRenderingContext::TEXTURE0);
         self.gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(texture));
         self.gl.draw_arrays(WebGlRenderingContext::TRIANGLES, 0, 6);
     }

@@ -172,8 +172,9 @@ impl Engine {
     // Unproject screen coordinates to 3D terrain surface for click aiming & lightning
     pub fn screen_to_ground(&self, sx: f32, sy: f32, cw: f32, ch: f32) -> js_sys::Float32Array {
         let result = js_sys::Float32Array::new_with_length(2);
-        let ground_y = 8.0; // Sea/ground reference level
-        if let Some([hx, hz]) = self.camera_3d.screen_to_ground(sx, sy, cw, ch, ground_y) {
+        // Land on the terrain surface (hills included), never below the sea.
+        let ground_at = |x: f32, z: f32| (self.get_terrain_height_at(x, z) * 24.0).max(7.92);
+        if let Some([hx, hz]) = self.camera_3d.screen_to_terrain(sx, sy, cw, ch, 24.0, ground_at) {
             result.set_index(0, hx);
             result.set_index(1, hz);
         } else {
@@ -196,10 +197,31 @@ impl Engine {
         self.billboards_3d.clear();
     }
 
+    /// Use the JS world's heights (row-major W×H, 0..1, sea level 0.33) for the 3D mesh, the
+    /// raycast and where billboards stand. The engine's own `Terrain` is still the old single
+    /// island, so without this the relief doesn't match the map the simulation runs on.
+    /// Call after `init_world`.
+    pub fn set_heightmap(&mut self, heights: &[f32]) -> Result<(), JsValue> {
+        if heights.len() != W * H {
+            return Err(JsValue::from_str(&format!(
+                "set_heightmap: expected {} heights ({}x{}), got {}",
+                W * H, W, H, heights.len()
+            )));
+        }
+        if let Some(t) = &mut self.terrain {
+            t.h.copy_from_slice(heights);
+        }
+        if let Some(r3d) = &mut self.renderer_3d {
+            let mesh = TerrainMesh::build(heights, W, H, W as f32, H as f32, 24.0, 0.33);
+            r3d.upload_mesh(&mesh);
+        }
+        Ok(())
+    }
+
     fn get_terrain_height_at(&self, x: f32, z: f32) -> f32 {
         if let Some(t) = &self.terrain {
-            let px = (x.round() as usize).min(W - 1);
-            let pz = (z.round() as usize).min(H - 1);
+            let px = (x.round().max(0.0) as usize).min(W - 1);
+            let pz = (z.round().max(0.0) as usize).min(H - 1);
             t.h[pz * W + px]
         } else {
             0.33

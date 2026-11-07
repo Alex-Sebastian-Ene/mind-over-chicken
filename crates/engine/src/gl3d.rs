@@ -53,7 +53,7 @@ pub struct WebGl3DRenderer {
     pub u_terrain_sun_dir: WebGlUniformLocation,
     pub u_terrain_ambient: WebGlUniformLocation,
     pub u_terrain_night: WebGlUniformLocation,
-    pub u_terrain_time: WebGlUniformLocation,
+    pub u_terrain_time: Option<WebGlUniformLocation>,
     pub u_terrain_light_count: WebGlUniformLocation,
     pub u_terrain_light_pos: WebGlUniformLocation,
     pub u_terrain_light_rad: WebGlUniformLocation,
@@ -145,7 +145,7 @@ attribute vec2 a_texCoord;
 attribute vec3 a_normal;
 
 uniform mat4 u_viewProjection;
-uniform float u_time;
+uniform mediump float u_time; // must match WATER_FS precision or the program fails to link
 
 varying vec2 v_texCoord;
 varying vec3 v_worldPos;
@@ -178,6 +178,10 @@ void main() {
     vec3 dayWater = vec3(0.12, 0.38, 0.64);
     vec3 nightWater = vec3(0.04, 0.08, 0.20);
     vec3 col = mix(dayWater, nightWater, u_night);
+
+    // Sun height brightens the water in steps (pixel-art lighting, like the terrain)
+    float sunUp = max(0.0, normalize(u_sunDir).y);
+    col += vec3(0.04, 0.06, 0.08) * (floor(sunUp * 3.0 + 0.5) / 3.0) * (1.0 - u_night);
 
     // Wave foam highlights
     float foam = sin(v_worldPos.x * 0.45 + v_worldPos.z * 0.45 + u_time * 3.2);
@@ -379,9 +383,8 @@ impl WebGl3DRenderer {
         let u_terrain_night = gl
             .get_uniform_location(&terrain_program, "u_night")
             .ok_or("Missing u_night in terrain shader")?;
-        let u_terrain_time = gl
-            .get_uniform_location(&terrain_program, "u_time")
-            .unwrap_or_else(|| gl.get_uniform_location(&terrain_program, "u_sunDir").unwrap());
+        // Optional: the terrain shader doesn't animate today.
+        let u_terrain_time = gl.get_uniform_location(&terrain_program, "u_time");
         let u_terrain_light_count = gl
             .get_uniform_location(&terrain_program, "u_lightCount")
             .ok_or("Missing u_lightCount in terrain shader")?;
@@ -592,7 +595,9 @@ impl WebGl3DRenderer {
         gl.uniform3f(Some(&self.u_terrain_sun_dir), sun_dir.x, sun_dir.y, sun_dir.z);
         gl.uniform1f(Some(&self.u_terrain_ambient), 0.38);
         gl.uniform1f(Some(&self.u_terrain_night), night);
-        gl.uniform1f(Some(&self.u_terrain_time), time);
+        if let Some(loc) = self.u_terrain_time.as_ref() {
+            gl.uniform1f(Some(loc), time);
+        }
 
         let count = lights.len().min(16);
         gl.uniform1i(Some(&self.u_terrain_light_count), count as i32);
@@ -616,18 +621,11 @@ impl WebGl3DRenderer {
 
         gl.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&self.terrain_vbo));
         let stride = 8 * 4;
-        let a_pos = gl.get_attrib_location(&self.terrain_program, "a_position") as u32;
-        let a_uv = gl.get_attrib_location(&self.terrain_program, "a_texCoord") as u32;
-        let a_norm = gl.get_attrib_location(&self.terrain_program, "a_normal") as u32;
-
-        gl.enable_vertex_attrib_array(a_pos);
-        gl.vertex_attrib_pointer_with_i32(a_pos, 3, WebGlRenderingContext::FLOAT, false, stride, 0);
-
-        gl.enable_vertex_attrib_array(a_uv);
-        gl.vertex_attrib_pointer_with_i32(a_uv, 2, WebGlRenderingContext::FLOAT, false, stride, 3 * 4);
-
-        gl.enable_vertex_attrib_array(a_norm);
-        gl.vertex_attrib_pointer_with_i32(a_norm, 3, WebGlRenderingContext::FLOAT, false, stride, 5 * 4);
+        let terrain_attrs = [
+            bind_attr(gl, &self.terrain_program, "a_position", 3, stride, 0),
+            bind_attr(gl, &self.terrain_program, "a_texCoord", 2, stride, 3 * 4),
+            bind_attr(gl, &self.terrain_program, "a_normal", 3, stride, 5 * 4),
+        ];
 
         gl.bind_buffer(WebGlRenderingContext::ELEMENT_ARRAY_BUFFER, Some(&self.terrain_ibo));
         gl.draw_elements_with_i32(
@@ -636,6 +634,7 @@ impl WebGl3DRenderer {
             WebGlRenderingContext::UNSIGNED_SHORT,
             0,
         );
+        unbind_attrs(gl, &terrain_attrs);
 
         // 3. Render Animated Water Grid
         gl.use_program(Some(&self.water_program));
@@ -655,18 +654,11 @@ impl WebGl3DRenderer {
         );
 
         gl.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&self.water_vbo));
-        let w_pos = gl.get_attrib_location(&self.water_program, "a_position") as u32;
-        let w_uv = gl.get_attrib_location(&self.water_program, "a_texCoord") as u32;
-        let w_norm = gl.get_attrib_location(&self.water_program, "a_normal") as u32;
-
-        gl.enable_vertex_attrib_array(w_pos);
-        gl.vertex_attrib_pointer_with_i32(w_pos, 3, WebGlRenderingContext::FLOAT, false, stride, 0);
-
-        gl.enable_vertex_attrib_array(w_uv);
-        gl.vertex_attrib_pointer_with_i32(w_uv, 2, WebGlRenderingContext::FLOAT, false, stride, 3 * 4);
-
-        gl.enable_vertex_attrib_array(w_norm);
-        gl.vertex_attrib_pointer_with_i32(w_norm, 3, WebGlRenderingContext::FLOAT, false, stride, 5 * 4);
+        let water_attrs = [
+            bind_attr(gl, &self.water_program, "a_position", 3, stride, 0),
+            bind_attr(gl, &self.water_program, "a_texCoord", 2, stride, 3 * 4),
+            bind_attr(gl, &self.water_program, "a_normal", 3, stride, 5 * 4),
+        ];
 
         gl.bind_buffer(WebGlRenderingContext::ELEMENT_ARRAY_BUFFER, Some(&self.water_ibo));
         gl.draw_elements_with_i32(
@@ -675,6 +667,7 @@ impl WebGl3DRenderer {
             WebGlRenderingContext::UNSIGNED_SHORT,
             0,
         );
+        unbind_attrs(gl, &water_attrs);
 
         // 4. Render Billboard Sprites (camera-facing entities standing on the ground)
         if !billboards.is_empty() {
@@ -705,46 +698,47 @@ impl WebGl3DRenderer {
             }
 
             let b_stride = std::mem::size_of::<BillboardVertex>() as i32;
-            let b_center = gl.get_attrib_location(&self.billboard_program, "a_center") as u32;
-            let b_offset = gl.get_attrib_location(&self.billboard_program, "a_offset") as u32;
-            let b_uv = gl.get_attrib_location(&self.billboard_program, "a_texCoord") as u32;
-
-            gl.enable_vertex_attrib_array(b_center);
-            gl.vertex_attrib_pointer_with_i32(
-                b_center,
-                3,
-                WebGlRenderingContext::FLOAT,
-                false,
-                b_stride,
-                0,
-            );
-
-            gl.enable_vertex_attrib_array(b_offset);
-            gl.vertex_attrib_pointer_with_i32(
-                b_offset,
-                2,
-                WebGlRenderingContext::FLOAT,
-                false,
-                b_stride,
-                3 * 4,
-            );
-
-            gl.enable_vertex_attrib_array(b_uv);
-            gl.vertex_attrib_pointer_with_i32(
-                b_uv,
-                2,
-                WebGlRenderingContext::FLOAT,
-                false,
-                b_stride,
-                5 * 4,
-            );
+            let billboard_attrs = [
+                bind_attr(gl, &self.billboard_program, "a_center", 3, b_stride, 0),
+                bind_attr(gl, &self.billboard_program, "a_offset", 2, b_stride, 3 * 4),
+                bind_attr(gl, &self.billboard_program, "a_texCoord", 2, b_stride, 5 * 4),
+            ];
 
             gl.draw_arrays(WebGlRenderingContext::TRIANGLES, 0, billboards.len() as i32);
+            unbind_attrs(gl, &billboard_attrs);
         }
 
         gl.disable(WebGlRenderingContext::BLEND);
         gl.disable(WebGlRenderingContext::DEPTH_TEST);
         gl.bind_framebuffer(WebGlRenderingContext::FRAMEBUFFER, None);
+    }
+}
+
+/// Point a vertex attribute at the bound ARRAY_BUFFER. Returns None, and touches nothing, when
+/// the shader compiler stripped the attribute (location -1); `-1 as u32` would otherwise be
+/// GL_INVALID_VALUE on every frame.
+fn bind_attr(
+    gl: &WebGlRenderingContext,
+    program: &WebGlProgram,
+    name: &str,
+    size: i32,
+    stride: i32,
+    offset: i32,
+) -> Option<u32> {
+    let loc = gl.get_attrib_location(program, name);
+    if loc < 0 {
+        return None;
+    }
+    let loc = loc as u32;
+    gl.enable_vertex_attrib_array(loc);
+    gl.vertex_attrib_pointer_with_i32(loc, size, WebGlRenderingContext::FLOAT, false, stride, offset);
+    Some(loc)
+}
+
+/// Leave no attribute arrays enabled for the next pass (the 2D blit shares this context).
+fn unbind_attrs(gl: &WebGlRenderingContext, attrs: &[Option<u32>]) {
+    for loc in attrs.iter().flatten() {
+        gl.disable_vertex_attrib_array(*loc);
     }
 }
 
