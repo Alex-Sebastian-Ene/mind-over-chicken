@@ -257,10 +257,10 @@ impl HudDriver {
 
         #[cfg(target_arch = "wasm32")]
         if let Some(list_el) = &self.objectives {
-            list_el.set_inner_html("");
-            if let Some(doc) = list_el.owner_document() {
-                for obj in objectives {
-                    if let Ok(li) = doc.create_element("li") {
+            let children = list_el.children();
+            if children.length() == objectives.len() as u32 {
+                for (i, obj) in objectives.iter().enumerate() {
+                    if let Some(li) = children.item(i as u32) {
                         let cls = if obj.done {
                             "is-done"
                         } else if obj.bad {
@@ -270,21 +270,45 @@ impl HudDriver {
                         } else {
                             ""
                         };
-                        if !cls.is_empty() {
-                            let _ = li.set_class_name(cls);
-                        }
-
-                        if let Ok(lbl) = doc.create_element("span") {
-                            let _ = lbl.set_class_name("obj-label");
+                        let _ = li.set_class_name(cls);
+                        if let Ok(Some(lbl)) = li.query_selector(".obj-label") {
                             lbl.set_text_content(Some(&obj.label));
-                            let _ = li.append_child(&lbl);
                         }
-                        if let Ok(val) = doc.create_element("span") {
-                            let _ = val.set_class_name("obj-value");
+                        if let Ok(Some(val)) = li.query_selector(".obj-value") {
                             val.set_text_content(Some(&obj.value));
-                            let _ = li.append_child(&val);
                         }
-                        let _ = list_el.append_child(&li);
+                    }
+                }
+            } else {
+                list_el.set_inner_html("");
+                if let Some(doc) = list_el.owner_document() {
+                    for obj in objectives {
+                        if let Ok(li) = doc.create_element("li") {
+                            let cls = if obj.done {
+                                "is-done"
+                            } else if obj.bad {
+                                "is-bad"
+                            } else if obj.plain {
+                                "is-plain"
+                            } else {
+                                ""
+                            };
+                            if !cls.is_empty() {
+                                let _ = li.set_class_name(cls);
+                            }
+
+                            if let Ok(lbl) = doc.create_element("span") {
+                                let _ = lbl.set_class_name("obj-label");
+                                lbl.set_text_content(Some(&obj.label));
+                                let _ = li.append_child(&lbl);
+                            }
+                            if let Ok(val) = doc.create_element("span") {
+                                let _ = val.set_class_name("obj-value");
+                                val.set_text_content(Some(&obj.value));
+                                let _ = li.append_child(&val);
+                            }
+                            let _ = list_el.append_child(&li);
+                        }
                     }
                 }
             }
