@@ -203,7 +203,8 @@ export class CivSandbox {
 
     // The world runs at its own speed (×1/×4/×16) in steps of at most 0.1 s.
     const t0 = performance.now();
-    civ.advance(Math.min(dt, 0.05));
+    // Real time (the 5 s seeding window is real seconds even in a slow tab); Rust caps the work.
+    civ.advance(Math.min(dt, 0.25));
     const ms = performance.now() - t0;
     const p = this.perf;
     p.stepMs = ms; p.sumStep += ms; p.samples++; p.worstStepMs = Math.max(p.worstStepMs, ms);

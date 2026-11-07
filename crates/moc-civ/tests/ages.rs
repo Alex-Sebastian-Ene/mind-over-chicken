@@ -519,8 +519,13 @@ fn the_speed_control_runs_the_world_faster() {
     assert!((w.time - t0 - 16.0).abs() < 0.05, "16 s of world in a second ({})", w.time - t0);
     w.set_speed(4.0);
     let t1 = w.time;
+    w.advance(0.1);
+    assert!((w.time - t1 - 0.4).abs() < 0.01);
+    // A long frame doesn't pile up work: at most MAX_STEPS_PER_ADVANCE steps of MAX_SUBSTEP.
+    let t1 = w.time;
     w.advance(0.5);
-    assert!((w.time - t1 - 2.0).abs() < 0.01);
+    assert!((w.time - t1 - MAX_SUBSTEP * MAX_STEPS_PER_ADVANCE as f32).abs() < 0.01);
+    assert_eq!(w.last_steps as usize, MAX_STEPS_PER_ADVANCE);
     w.set_speed(1.0);
     let t2 = w.time;
     w.advance(1.0 / 60.0);
