@@ -277,7 +277,11 @@ export class StoneAge {
     walk(c, c.tx, c.ty, 6, dt, w);
 
     // ---- Live reactions ----
-    if (brain.hrDelta() > 18) G.advisor.say('hr', 'Your pulse is thundering, my lord. Even the mammoths are nervous.', { mood: 'panic', priority: 1, cooldown: 25 });
+    if (brain.hr && brain.hrDelta() > 18) {
+      G.advisor.say('hr', 'Your pulse is thundering, my lord. Even the mammoths are nervous.', { mood: 'panic', priority: 1, cooldown: 25 });
+    } else if ((brain.panic || 0) > 0.7) {
+      G.advisor.say('hr', 'Your tension is high, my lord. Even the mammoths are nervous.', { mood: 'panic', priority: 1, cooldown: 25 });
+    }
 
     // ---- Win / lose ----
     const alive = this.living().length;
@@ -421,11 +425,62 @@ export class StoneAge {
     return L;
   }
 
+  draw3d(engine, _dt) {
+    const f = this.fire;
+    // 3D Point Lights
+    if (f.lit) {
+      engine.add_3d_light(f.x, 10.0, f.y, 25.0 + f.heat * 30.0 + Math.sin(this.t * 13) * 1.5, 1.8);
+    }
+    for (const b of this.bolts) {
+      const e = b.pts[b.pts.length - 1];
+      engine.add_3d_light(e.x, 12.0, e.y, 55.0, 2.5);
+    }
+    for (const c of Object.values(this.colonies)) {
+      engine.add_3d_light(c.x, 10.0, c.y, 22.0 + Math.sin(this.t * 11) * 1.5, 1.4);
+    }
+
+    // Billboards
+    // Fire pit
+    engine.add_billboard(4, f.x, f.y, 1, Math.floor(this.t * 6) % 3, 0);
+
+    // Mammoths
+    for (const m of this.mammoths) {
+      engine.add_billboard(1, m.x, m.y, m.facing || 1, m.frame, m.dead ? 1 : 0);
+    }
+
+    // People
+    for (const p of this.people) {
+      if (!p.alive && (p.deadT || 0) > 12) continue;
+      if (p.state === 'aboard') continue;
+      const pose = !p.alive ? 3 : p.state === 'dance' || p.state2 === 'dance' ? 1 : p.state === 'cower' ? 2 : p.halo && p.state === 'warm' ? 1 : 0;
+      engine.add_billboard(0, p.x, p.y, p.facing || 1, p.frame, pose);
+    }
+
+    // Chicken
+    engine.add_billboard(3, this.chicken.x, this.chicken.y, this.chicken.facing || 1, this.chicken.frame, this.chicken.halo ? 1 : 0);
+
+    // Colony fires
+    for (const c of Object.values(this.colonies)) {
+      engine.add_billboard(4, c.x, c.y, 1, Math.floor(this.t * 6 + 1) % 3, 0);
+    }
+
+    // Reticle
+    const a = this.G.brain.aim;
+    engine.add_billboard(13, a.x * (W - 1), a.y * (H - 1), 1, 0, 0);
+  }
+
   draw(ctx) {
     const G = this.G;
     ctx.drawImage(this.layer, 0, 0);
     G.world.drawWater(ctx, this.t);
     for (const m of this.meat) { ctx.fillStyle = m.cooked ? '#c0562f' : '#9e3d3d'; ctx.fillRect(m.x - 1, m.y - 1, 3, 2); }
+    // In 3D, draw3d stands people, mammoths, fires and the chicken up as sprites; painting them
+    // flat as well showed everything twice. Boats have no sprite yet, so they stay painted.
+    if (G.render3d) {
+      for (const b of this.boats) drawBoat(ctx, b.x, b.y, b);
+      this.particles.draw(ctx);
+      return;
+    }
     // y-sorted actors
     const actors = [];
     for (const m of this.mammoths) actors.push({ y: m.y, d: () => drawMammoth(ctx, m.x, m.y, m) });
@@ -446,7 +501,7 @@ export class StoneAge {
   drawAfterLight(ctx) {
     for (const b of this.bolts) drawBolt(ctx, b.pts, Math.min(1, b.life * 4));
     const a = this.G.brain.aim;
-    drawReticle(ctx, a.x * (W - 1), a.y * (H - 1), this.t, '#ffe066');
+    if (!this.G.render3d) drawReticle(ctx, a.x * (W - 1), a.y * (H - 1), this.t, '#ffe066'); // 3D: a sprite
     if (this.flash > 0) { ctx.fillStyle = `rgba(220,230,255,${this.flash * 0.9})`; ctx.fillRect(0, 0, W, H); }
   }
 

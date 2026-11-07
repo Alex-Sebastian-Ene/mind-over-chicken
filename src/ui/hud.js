@@ -79,10 +79,17 @@ export class Hud {
     };
     set(this.powers.calm, b.calm, scene?.powers.includes('calm') ? b.threshold('calm', 0.55) : null, `${Math.round(b.calm * 100)}%`);
     set(this.powers.focus, b.focus, scene?.powers.includes('focus') ? b.threshold('focus', 0.5) : null, `${Math.round(b.focus * 100)}%`);
-    const d = b.hrDelta();
-    set(this.powers.heart, Math.min(1, Math.max(0, d / 30)), null, b.hr ? `${Math.round(b.hr)} bpm` : 'no pulse');
-    this.powers.heart.classList.toggle('is-hot', d > 10);
-    this.powers.heart.querySelector('.power-sub').textContent = b.hr && b.restHr ? `${d >= 0 ? '+' : ''}${Math.round(d)} vs resting` : 'Heart rate';
+    if (b.hr && b.hr > 0) {
+      const d = b.hrDelta();
+      set(this.powers.heart, Math.min(1, Math.max(0, d / 30)), null, `${Math.round(b.hr)} bpm`);
+      this.powers.heart.classList.toggle('is-hot', d > 10);
+      this.powers.heart.querySelector('.power-sub').textContent = b.restHr ? `${d >= 0 ? '+' : ''}${Math.round(d)} vs resting` : 'Pulse';
+    } else {
+      const tension = Math.min(1, Math.max(0, (b.panic || 0) > 0 ? b.panic : (1 - b.calm) * 0.7));
+      set(this.powers.heart, tension, null, `${Math.round(tension * 100)}%`);
+      this.powers.heart.classList.toggle('is-hot', tension > 0.5);
+      this.powers.heart.querySelector('.power-sub').textContent = 'Tension';
+    }
     if (this.blinkFlash > 0) { this.blinkFlash -= dt; if (this.blinkFlash <= 0) this.powers.blink.classList.remove('is-firing'); }
     this.powers.blink.querySelector('.power-value').textContent = `${b.stats.blinks}`;
 

@@ -1,0 +1,17 @@
+[package]
+name = "moc-brain"
+description = "Brain signal processing, personal softmax regression model, calibration, and simulated headset for Mind over Chicken"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Alex-Sebastian-Ene/mind-over-chicken"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = { version = "0.2", optional = true }
+
+[features]
+default = []
+wasm = ["wasm-bindgen"]

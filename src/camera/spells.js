@@ -1,6 +1,7 @@
 // camera (#33): the seven hand casts. One row per canned MediaPipe gesture.
 // `gesture` is the Gesture Recognizer's category name, `key` the keyboard fallback (1–7),
-// `cooldown` is per spell, in milliseconds.
+// `cooldown` is per spell, in milliseconds. `aimed` spells land where the reticle is; releasing a
+// pinch re-casts the last aimed spell at the precisely placed reticle (camera debug, #67).
 //
 // Hand-gesture casts (god powers) are in scope: decided by Alex on #55 (README §1/§4.3).
 // Gesture-driven UI navigation is still deferred. Set this to false to hide the hand model
@@ -10,15 +11,15 @@ export const CAMERA_CASTS_ENABLED = true;
 export const SPELLS = [
   { id: 'point', key: 1, gesture: 'Pointing_Up', glyph: '☝️', name: 'Aim', cooldown: 0,
     hint: 'Point up: your index fingertip moves the reticle. Key 1 jumps to the next landmark.' },
-  { id: 'fireball', key: 2, gesture: 'Closed_Fist', glyph: '✊', name: 'Fireball', cooldown: 1500,
+  { id: 'fireball', aimed: true, key: 2, gesture: 'Closed_Fist', glyph: '✊', name: 'Fireball', cooldown: 1500,
     hint: 'Closed fist: lightning strikes the reticle.' },
-  { id: 'spawn', key: 3, gesture: 'Open_Palm', glyph: '🖐️', name: 'Bounty', cooldown: 6000,
+  { id: 'spawn', aimed: true, key: 3, gesture: 'Open_Palm', glyph: '🖐️', name: 'Bounty', cooldown: 6000,
     hint: 'Open palm: food, goats or rocket parts, by era.' },
-  { id: 'rain', key: 4, gesture: 'Victory', glyph: '✌️', name: 'Rain', cooldown: 10000,
+  { id: 'rain', aimed: true, key: 4, gesture: 'Victory', glyph: '✌️', name: 'Rain', cooldown: 10000,
     hint: 'Victory: rain calms fear and boosts the harvest.' },
   { id: 'bless', key: 5, gesture: 'Thumb_Up', glyph: '👍', name: 'Bless', cooldown: 9000,
     hint: 'Thumb up: faith, morale and courage rise.' },
-  { id: 'disaster', key: 6, gesture: 'Thumb_Down', glyph: '👎', name: 'Disaster', cooldown: 14000,
+  { id: 'disaster', aimed: true, key: 6, gesture: 'Thumb_Down', glyph: '👎', name: 'Disaster', cooldown: 14000,
     hint: 'Thumb down: a storm hits the reticle.' },
   { id: 'peace', key: 7, gesture: 'ILoveYou', glyph: '🤟', name: 'Peace', cooldown: 15000,
     hint: 'I-love-you: ends strikes, riots and panics.' },
