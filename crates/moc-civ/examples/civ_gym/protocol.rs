@@ -1,3 +1,6 @@
+//! The JSON-lines protocol of the war councils' env server (#100); `main.rs` runs it on
+//! stdin/stdout and `tests/war_council.rs` round-trips it.
+//!
 //! The war councils' training environment (#100) as a headless server: newline-delimited JSON
 //! on stdin/stdout, one request per line, one reply per line (like `rl/env_server.mjs` for the
 //! Stone Age). Build with `--release`; `rl/civ_war/civ_env.py` starts one per env process.
@@ -17,8 +20,6 @@
 //! `terminal_obs` (null or the ended episode's last observation), `infos` and `episodes`
 //! (finished episodes: return, length, civ, pop, villages, age, alive). Errors: `{"error":…}`.
 
-use std::io::{self, BufRead, Write};
-
 use moc_civ::gym::{self, Config, Gym, Mode, SlotInfo};
 use moc_civ::{commander, council};
 use serde_json::{json, Value};
@@ -31,7 +32,7 @@ fn info_json(i: &SlotInfo) -> Value {
     json!({"civ": i.civ, "ret": i.ret, "pop": i.pop, "villages": i.villages, "age": i.age, "alive": i.alive, "idle": i.idle})
 }
 
-fn spec() -> Value {
+pub fn spec() -> Value {
     json!({
         "obs_version": council::OBS_VERSION,
         "council": {"obs_size": council::OBS_SIZE, "nvec": council::HEADS, "obs_names": council::obs_names(),
@@ -99,6 +100,26 @@ fn read_paths(v: &Value, key: &str) -> Result<Vec<Vec<u8>>, String> {
     Ok(out)
 }
 
+/// One server: the gym (made on the first `reset`), its config and the league's weights.
+#[derive(Default)]
+pub struct Server {
+    pub gym: Option<Gym>,
+    pub cfg: Config,
+    pub league: (Vec<Vec<u8>>, Vec<Vec<u8>>),
+}
+
+impl Server {
+    /// Answer one request line (a reply line, or None for `close`).
+    pub fn line(&mut self, line: &str) -> Option<String> {
+        let reply = match serde_json::from_str::<Value>(line) {
+            Ok(v) if v.get("cmd").and_then(|x| x.as_str()) == Some("close") => return None,
+            Ok(v) => handle(&mut self.gym, &mut self.cfg, &mut self.league, &v).unwrap_or_else(|e| json!({ "error": e })),
+            Err(e) => json!({ "error": format!("bad json: {e}") }),
+        };
+        Some(reply.to_string())
+    }
+}
+
 fn handle(gym: &mut Option<Gym>, cfg: &mut Config, league: &mut (Vec<Vec<u8>>, Vec<Vec<u8>>), v: &Value) -> Result<Value, String> {
     let cmd = v.get("cmd").and_then(|x| x.as_str()).ok_or("missing cmd")?;
     match cmd {
@@ -160,23 +181,3 @@ fn handle(gym: &mut Option<Gym>, cfg: &mut Config, league: &mut (Vec<Vec<u8>>, V
     }
 }
 
-fn main() {
-    let stdin = io::stdin();
-    let mut out = io::BufWriter::new(io::stdout().lock());
-    let mut gym: Option<Gym> = None;
-    let mut cfg = Config::default();
-    let mut league = (Vec::new(), Vec::new());
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
-        if line.trim().is_empty() {
-            continue;
-        }
-        let reply = match serde_json::from_str::<Value>(&line) {
-            Ok(v) if v.get("cmd").and_then(|x| x.as_str()) == Some("close") => break,
-            Ok(v) => handle(&mut gym, &mut cfg, &mut league, &v).unwrap_or_else(|e| json!({ "error": e })),
-            Err(e) => json!({ "error": format!("bad json: {e}") }),
-        };
-        let _ = writeln!(out, "{reply}");
-        let _ = out.flush();
-    }
-}
