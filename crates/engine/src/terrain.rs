@@ -40,12 +40,14 @@ impl Mulberry32 {
         Self { state: seed }
     }
     pub fn next(&mut self) -> f32 {
+        // All arithmetic in u32, matching JS `Math.imul`, so seeds produce the same
+        // sequence as the JS build's mulberry32.
         self.state = self.state.wrapping_add(0x6D2B79F5);
-        let mut t = self.state as u64;
+        let mut t = self.state;
         t = (t ^ (t >> 15)).wrapping_mul(t | 1);
         t ^= t.wrapping_add((t ^ (t >> 7)).wrapping_mul(t | 61));
-        let res = (t ^ (t >> 14)) as u32;
-        (res as f32) / 4294967296.0
+        let res = t ^ (t >> 14);
+        (res as f64 / 4294967296.0) as f32
     }
 }
 
