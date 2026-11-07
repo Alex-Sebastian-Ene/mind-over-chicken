@@ -98,8 +98,16 @@ export class SimSource {
   }
 }
 
-// Reads frames from the Python bridge (BrainFlow → band powers, blinks, PPG heart rate, accelerometer).
+// Reads frames from the Python bridge (BrainFlow → band powers, blinks, PPG heart rate, accelerometer
+// and gyroscope). With the bridge's fused `orientation` the aim follows yaw (left/right) and pitch
+// (up/down); without it (no gyro, older bridge) it falls back to accelerometer tilt.
 export class BridgeSource {
+  static AIM_RANGE_DEG = 25;    // degrees of yaw or pitch from neutral that reach the screen edge
+  static AIM_SMOOTH = 15;       // 1/s, light smoothing on top of Brain's own aim smoothing
+  static NEUTRAL_FRAMES = 10;   // the first ~1 s of frames sets the neutral pose
+  static YAW_ZERO_TAU = 20;     // s; the yaw neutral fades to 0 as the bridge re-centres yaw itself
+  static AIM_SIGN = { yaw: 1, pitch: 1 };   // flip one if a headset aims mirrored
+
   constructor(url) {
     this.kind = 'bridge';
     this.label = 'Headset bridge';
@@ -109,11 +117,21 @@ export class BridgeSource {
     this.queue = [];
     this.ws = null;
     this.lastFrameAt = 0;
+    this.recenter();
+  }
+
+  // Forget the neutral pose; the next ~1 s of frames becomes the new straight-ahead.
+  recenter() {
     this.tiltZero = null;
     this.tiltSamples = [];
+    this.aimZero = null;        // {yaw, pitch} neutral from frame.orientation
+    this.aimSamples = [];
+    this.aimTilt = null;
+    this.lastT = null;
   }
 
   connect() {
+    this.recenter();
     return new Promise((resolve, reject) => {
       let settled = false;
       let ws;
@@ -148,9 +166,12 @@ export class BridgeSource {
   normalise(msg) {
     const b = msg.bands || {};
     const sum = (b.delta || 0) + (b.theta || 0) + (b.alpha || 0) + (b.beta || 0) + (b.gamma || 0) || 1;
-    // Head tilt from the accelerometer's gravity vector, zeroed on the first second of data.
     let tilt = null;
-    if (Array.isArray(msg.accel)) {
+    const o = msg.orientation;
+    if (o && Number.isFinite(o.yaw) && Number.isFinite(o.pitch)) {
+      tilt = this.orientationTilt(o, msg.t);
+    } else if (Array.isArray(msg.accel)) {
+      // Head tilt from the accelerometer's gravity vector, zeroed on the first second of data.
       const [ax, ay] = msg.accel;
       if (!this.tiltZero) {
         this.tiltSamples.push([ax, ay]);
@@ -168,9 +189,37 @@ export class BridgeSource {
       blink: !!msg.blink,
       hr: typeof msg.hr === 'number' && msg.hr > 30 && msg.hr < 220 ? msg.hr : null,
       tilt,
-      motion: clamp(msg.motion ?? 0),
+      motion: clamp(msg.motion ?? 0),   // the bridge folds gyro rotation speed into this
       quality: clamp(msg.quality ?? 1),
     };
+  }
+
+  // Fused head orientation (degrees) → tilt: yaw aims left/right, pitch aims up/down. Positive yaw is
+  // a turn to the right; pitch keeps the accelerometer path's sign (it rises with accel x), so both
+  // paths aim the same way. ±AIM_RANGE_DEG from the neutral pose spans the screen.
+  orientationTilt(o, t) {
+    const S = BridgeSource;
+    const wrap = (deg) => ((deg + 540) % 360) - 180;
+    const dt = typeof t === 'number' && this.lastT != null ? clamp(t - this.lastT, 0, 1) : FRAME_DT;
+    if (typeof t === 'number') this.lastT = t;
+    if (!this.aimZero) {
+      this.aimSamples.push([o.yaw, o.pitch]);
+      if (this.aimSamples.length < S.NEUTRAL_FRAMES) return { x: 0, y: 0 };
+      const y0 = this.aimSamples[0][0], n = this.aimSamples.length;
+      this.aimZero = {
+        yaw: wrap(y0 + this.aimSamples.reduce((s, v) => s + wrap(v[0] - y0), 0) / n),
+        pitch: this.aimSamples.reduce((s, v) => s + v[1], 0) / n,
+      };
+      this.aimTilt = { x: 0, y: 0 };
+    } else {
+      // The bridge leaks yaw back to 0, so a fixed yaw offset would turn into a permanent bias.
+      this.aimZero.yaw *= Math.exp(-dt / S.YAW_ZERO_TAU);
+    }
+    const x = clamp(S.AIM_SIGN.yaw * wrap(o.yaw - this.aimZero.yaw) / S.AIM_RANGE_DEG, -1, 1);
+    const y = clamp(S.AIM_SIGN.pitch * (o.pitch - this.aimZero.pitch) / S.AIM_RANGE_DEG, -1, 1);
+    this.aimTilt.x = smooth(this.aimTilt.x, x, S.AIM_SMOOTH, FRAME_DT);
+    this.aimTilt.y = smooth(this.aimTilt.y, y, S.AIM_SMOOTH, FRAME_DT);
+    return { x: this.aimTilt.x, y: this.aimTilt.y };
   }
 
   blink() {}
