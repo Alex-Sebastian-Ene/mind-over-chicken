@@ -312,6 +312,8 @@ void main() {
 
     v_worldPos = worldPos;
     gl_Position = u_viewProjection * vec4(worldPos, 1.0);
+    // Depth bias: pull billboard slightly forward in clip space so it never clips into ground triangles
+    gl_Position.z -= 0.003 * gl_Position.w;
 }
 "#;
 
@@ -807,19 +809,22 @@ impl WebGl3DRenderer {
         // Determine visible wrap copies along both axes for seamless torus world (#111)
         let map_w = crate::sprites::W as f32;
         let map_h = crate::sprites::H as f32;
+        let view_radius_x = (camera.distance * 0.75 + 40.0).max(150.0);
+        let view_radius_z = (camera.distance * 0.55 + 30.0).max(120.0);
+
         let mut x_offsets = vec![0.0f32];
-        if camera.target.x < 150.0 {
+        if camera.target.x - view_radius_x < 0.0 {
             x_offsets.push(-map_w);
         }
-        if camera.target.x > map_w - 150.0 {
+        if camera.target.x + view_radius_x > map_w {
             x_offsets.push(map_w);
         }
 
         let mut z_offsets = vec![0.0f32];
-        if camera.target.z < 120.0 {
+        if camera.target.z - view_radius_z < 0.0 {
             z_offsets.push(-map_h);
         }
-        if camera.target.z > map_h - 120.0 {
+        if camera.target.z + view_radius_z > map_h {
             z_offsets.push(map_h);
         }
 

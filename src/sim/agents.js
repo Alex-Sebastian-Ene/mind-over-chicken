@@ -2,12 +2,13 @@
 
 import { pick, rand } from './util.js';
 
-const SHIRTS = ['#8b5a3c', '#a0673f', '#6e4b33', '#9c7a4f', '#7d5e44'];
+// Warm, bright hides and dyes so people stand out clearly on grass and dirt.
+const SHIRTS = ['#c0703a', '#d68c45', '#b5523a', '#d9a85b', '#a8613a'];
 const HAIR = ['#2b1d14', '#3b2a1e', '#5a3b22', '#1c1410', '#8a5a32'];
 const SKIN = ['#e0b48a', '#c99470', '#a8754f', '#f0c9a0', '#8d5a3b'];
 
 export function villagerLook(era = 'stone') {
-  const shirts = era === 'industry' ? ['#4a5a7a', '#6b4a3a', '#3f6650', '#7a3f3a', '#555d6b']
+  const shirts = era === 'industry' ? ['#5a74a8', '#9a5a40', '#4f8a66', '#a8473f', '#7a8296']
     : era === 'space' ? ['#d9dde6', '#3e8ed0', '#e0a43a', '#c0392b', '#6c7a92'] : SHIRTS;
   return { shirt: pick(shirts), hair: pick(HAIR), skin: pick(SKIN) };
 }

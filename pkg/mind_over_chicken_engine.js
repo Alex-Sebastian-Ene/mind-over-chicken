@@ -393,6 +393,13 @@ export class Engine {
     /**
      * @returns {number}
      */
+    get_continent_count() {
+        const ret = wasm.engine_get_continent_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
     get_game_births_stat() {
         const ret = wasm.engine_get_game_births_stat(this.__wbg_ptr);
         return ret >>> 0;
@@ -535,6 +542,20 @@ export class Engine {
     /**
      * @returns {number}
      */
+    get_site_fire_x() {
+        const ret = wasm.engine_get_site_fire_x(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get_site_fire_y() {
+        const ret = wasm.engine_get_site_fire_y(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
     get_site_hangar_x() {
         const ret = wasm.engine_get_site_hangar_x(this.__wbg_ptr);
         return ret;
@@ -575,12 +596,65 @@ export class Engine {
         return ret;
     }
     /**
+     * @param {number} tx
+     * @param {number} ty
+     * @returns {Int16Array}
+     */
+    get_terrain_field(tx, ty) {
+        const ret = wasm.engine_get_terrain_field(this.__wbg_ptr, tx, ty);
+        var v1 = getArrayI16FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 2, 2);
+        return v1;
+    }
+    /**
+     * @param {number} tx
+     * @param {number} ty
+     * @returns {Int16Array}
+     */
+    get_terrain_sea_field(tx, ty) {
+        const ret = wasm.engine_get_terrain_sea_field(this.__wbg_ptr, tx, ty);
+        var v1 = getArrayI16FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 2, 2);
+        return v1;
+    }
+    /**
      * @param {number} x
      * @param {number} y
      * @returns {number}
      */
     get_terrain_type(x, y) {
         const ret = wasm.engine_get_terrain_type(this.__wbg_ptr, x, y);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get_tree_count() {
+        const ret = wasm.engine_get_tree_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    get_tree_variant(idx) {
+        const ret = wasm.engine_get_tree_variant(this.__wbg_ptr, idx);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    get_tree_x(idx) {
+        const ret = wasm.engine_get_tree_x(this.__wbg_ptr, idx);
+        return ret;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    get_tree_y(idx) {
+        const ret = wasm.engine_get_tree_y(this.__wbg_ptr, idx);
         return ret;
     }
     init_3d() {
@@ -619,6 +693,15 @@ export class Engine {
      */
     is_game_finished() {
         const ret = wasm.engine_is_game_finished(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    is_terrain_reachable(x, y) {
+        const ret = wasm.engine_is_terrain_reachable(this.__wbg_ptr, x, y);
         return ret !== 0;
     }
     /**
@@ -749,6 +832,14 @@ export class Engine {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
+    }
+    /**
+     * @param {string} biome_name
+     */
+    set_terrain_biome(biome_name) {
+        const ptr0 = passStringToWasm0(biome_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.engine_set_terrain_biome(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * @param {HTMLCanvasElement} canvas
@@ -1927,6 +2018,11 @@ function getArrayF32FromWasm0(ptr, len) {
     return getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
 }
 
+function getArrayI16FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getInt16ArrayMemory0().subarray(ptr / 2, ptr / 2 + len);
+}
+
 function getArrayU16FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint16ArrayMemory0().subarray(ptr / 2, ptr / 2 + len);
@@ -1951,6 +2047,14 @@ function getFloat32ArrayMemory0() {
         cachedFloat32ArrayMemory0 = new Float32Array(wasm.memory.buffer);
     }
     return cachedFloat32ArrayMemory0;
+}
+
+let cachedInt16ArrayMemory0 = null;
+function getInt16ArrayMemory0() {
+    if (cachedInt16ArrayMemory0 === null || cachedInt16ArrayMemory0.byteLength === 0) {
+        cachedInt16ArrayMemory0 = new Int16Array(wasm.memory.buffer);
+    }
+    return cachedInt16ArrayMemory0;
 }
 
 function getStringFromWasm0(ptr, len) {
@@ -2073,6 +2177,7 @@ function __wbg_finalize_init(instance, module) {
     wasmModule = module;
     cachedDataViewMemory0 = null;
     cachedFloat32ArrayMemory0 = null;
+    cachedInt16ArrayMemory0 = null;
     cachedUint16ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();

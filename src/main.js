@@ -325,14 +325,78 @@ function dismissBanner() {
 
 let failTimer = null;
 function showFail(reason) {
-  $('failReason').textContent = reason;
+  let heading = 'Collapse';
+  let cause = 'The era has collapsed.';
+  let nextStep = 'Try again with focused calm and steady aim.';
+
+  if (typeof reason === 'string') {
+    if (reason.includes(': ')) {
+      const parts = reason.split(': ');
+      cause = parts[0].trim();
+      nextStep = parts.slice(1).join(': ').trim();
+      heading = cause;
+    } else {
+      cause = reason;
+      heading = reason;
+      const lower = reason.toLowerCase();
+      if (lower.includes('strike') || lower.includes('union')) {
+        nextStep = 'Maintain calm when workers strike to settle tensions and resume production.';
+      } else if (lower.includes('depression') || lower.includes('price')) {
+        nextStep = 'Steady your breathing and focus to stimulate goat market confidence.';
+      } else if (lower.includes('fire')) {
+        nextStep = 'Stay calm when the flame begins to fade to rekindle warmth.';
+      } else if (lower.includes('starv') || lower.includes('food')) {
+        nextStep = 'Strike mammoths with lightning so hunters can gather meat for the tribe.';
+      } else if (lower.includes('dark')) {
+        nextStep = 'Blink directly on the fire pit to strike and kindle the flame.';
+      }
+    }
+  } else if (reason && typeof reason === 'object') {
+    heading = reason.heading || reason.title || 'Collapse';
+    cause = reason.cause || reason.message || 'The tribe was overwhelmed.';
+    nextStep = reason.nextStep || reason.advice || 'Retry the era.';
+  }
+
+  $('failHeading').textContent = heading;
+  $('failCause').textContent = cause;
+  $('failAdvice').textContent = nextStep;
   $('failScreen').hidden = false;
+  $('biometricFeedbackAck').hidden = true;
+  updateAssistUI();
+
   audio.bad();
   clearTimeout(failTimer);
-  failTimer = setTimeout(retryEra, 20000);
+  failTimer = null; // No silent auto-retry (#86)
 }
+
+function updateAssistUI() {
+  const el = $('assistState');
+  if (el) {
+    el.textContent = G?.assistMode ? 'ON (Easier)' : 'Off';
+    el.style.color = G?.assistMode ? '#70d6ff' : 'inherit';
+  }
+}
+
+function toggleAssistMode() {
+  if (!G) return;
+  G.assistMode = !G.assistMode;
+  if (engine?.set_assist_mode) engine.set_assist_mode(G.assistMode);
+  updateAssistUI();
+}
+
+function quitToTitle() {
+  clearTimeout(failTimer);
+  failTimer = null;
+  $('failScreen').hidden = true;
+  $('banner').hidden = true;
+  banner = null;
+  G.scene = null;
+  $('titleScreen').hidden = false;
+}
+
 function retryEra() {
   clearTimeout(failTimer);
+  failTimer = null;
   if ($('failScreen').hidden) return;
   $('failScreen').hidden = true;
   restartScene();
@@ -726,6 +790,21 @@ screen.addEventListener('contextmenu', (e) => e.preventDefault());
 const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'panic' };
 window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input')) return;
+  if (!$('failScreen').hidden) {
+    if (e.code === 'Enter') { e.preventDefault(); retryEra(); return; }
+    if (e.code === 'KeyA') { e.preventDefault(); toggleAssistMode(); return; }
+    if (e.key === '?' || e.code === 'KeyH') {
+      e.preventDefault();
+      $('failScreen').hidden = true;
+      if (G?.scene?.intro) showBanner(G.scene, G.sceneIndex);
+      return;
+    }
+    if (e.code === 'Escape' || e.code === 'KeyQ') {
+      e.preventDefault();
+      quitToTitle();
+      return;
+    }
+  }
   if (e.code === 'KeyM') { toggleModel(); return; }
   if (e.code === 'Escape' && eegPanel?.wiz?.active) { eegPanel?.closeWizard(); return; }
   if (e.code === 'KeyE') { eegPanel?.toggle(); return; }
@@ -810,6 +889,19 @@ $('soundBtn').addEventListener('click', () => {
 });
 $('bannerGo').addEventListener('click', dismissBanner);
 $('retryBtn').addEventListener('click', retryEra);
+$('assistBtn')?.addEventListener('click', toggleAssistMode);
+$('showHowBtn')?.addEventListener('click', () => {
+  $('failScreen').hidden = true;
+  if (G?.scene?.intro) showBanner(G.scene, G.sceneIndex);
+});
+$('quitTitleBtn')?.addEventListener('click', quitToTitle);
+$('biometricFeedbackBtn')?.addEventListener('click', () => {
+  $('biometricFeedbackAck').hidden = false;
+  if (G?.brain) {
+    G.brain.toleranceBonus = (G.brain.toleranceBonus || 0) + 0.15;
+    advisor?.say('assist', 'Tolerance widened. Take a deep breath; the gods are forgiving today.', { mood: 'happy', priority: 4, cooldown: 0 });
+  }
+});
 $('againBtn').addEventListener('click', () => { $('endScreen').hidden = true; newGame(new SimSource()); });
 $('endModelBtn').addEventListener('click', toggleModel);
 

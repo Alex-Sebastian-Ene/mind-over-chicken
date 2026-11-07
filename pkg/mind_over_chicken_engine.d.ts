@@ -52,6 +52,7 @@ export class Engine {
     get_camera_target_x(): number;
     get_camera_target_z(): number;
     get_camera_yaw(): number;
+    get_continent_count(): number;
     get_game_births_stat(): number;
     get_game_deaths_stat(): number;
     get_game_era_id(): string;
@@ -70,18 +71,27 @@ export class Engine {
     get_site_exchange_y(): number;
     get_site_factory_x(): number;
     get_site_factory_y(): number;
+    get_site_fire_x(): number;
+    get_site_fire_y(): number;
     get_site_hangar_x(): number;
     get_site_hangar_y(): number;
     get_site_pad_x(): number;
     get_site_pad_y(): number;
     get_site_village_x(): number;
     get_site_village_y(): number;
+    get_terrain_field(tx: number, ty: number): Int16Array;
+    get_terrain_sea_field(tx: number, ty: number): Int16Array;
     get_terrain_type(x: number, y: number): number;
+    get_tree_count(): number;
+    get_tree_variant(idx: number): number;
+    get_tree_x(idx: number): number;
+    get_tree_y(idx: number): number;
     init_3d(): void;
     init_world(seed: number): void;
     is_3d_mode(): boolean;
     is_game_failed(): string | undefined;
     is_game_finished(): boolean;
+    is_terrain_reachable(x: number, y: number): boolean;
     is_walkable(x: number, y: number): boolean;
     constructor(canvas_id: string);
     orbit_camera(delta_yaw: number, delta_pitch: number): void;
@@ -103,6 +113,7 @@ export class Engine {
      * raycast and where billboards stand.
      */
     set_heightmap(heights: Float32Array | number[]): void;
+    set_terrain_biome(biome_name: string): void;
     upload_canvas(canvas: HTMLCanvasElement): void;
     zoom_camera(factor: number): void;
 }
@@ -283,6 +294,7 @@ export interface InitOutput {
     readonly engine_get_camera_target_x: (a: number) => number;
     readonly engine_get_camera_target_z: (a: number) => number;
     readonly engine_get_camera_yaw: (a: number) => number;
+    readonly engine_get_continent_count: (a: number) => number;
     readonly engine_get_game_births_stat: (a: number) => number;
     readonly engine_get_game_deaths_stat: (a: number) => number;
     readonly engine_get_game_era_id: (a: number) => [number, number];
@@ -301,18 +313,27 @@ export interface InitOutput {
     readonly engine_get_site_exchange_y: (a: number) => number;
     readonly engine_get_site_factory_x: (a: number) => number;
     readonly engine_get_site_factory_y: (a: number) => number;
+    readonly engine_get_site_fire_x: (a: number) => number;
+    readonly engine_get_site_fire_y: (a: number) => number;
     readonly engine_get_site_hangar_x: (a: number) => number;
     readonly engine_get_site_hangar_y: (a: number) => number;
     readonly engine_get_site_pad_x: (a: number) => number;
     readonly engine_get_site_pad_y: (a: number) => number;
     readonly engine_get_site_village_x: (a: number) => number;
     readonly engine_get_site_village_y: (a: number) => number;
+    readonly engine_get_terrain_field: (a: number, b: number, c: number) => [number, number];
+    readonly engine_get_terrain_sea_field: (a: number, b: number, c: number) => [number, number];
     readonly engine_get_terrain_type: (a: number, b: number, c: number) => number;
+    readonly engine_get_tree_count: (a: number) => number;
+    readonly engine_get_tree_variant: (a: number, b: number) => number;
+    readonly engine_get_tree_x: (a: number, b: number) => number;
+    readonly engine_get_tree_y: (a: number, b: number) => number;
     readonly engine_init_3d: (a: number) => [number, number];
     readonly engine_init_world: (a: number, b: number) => void;
     readonly engine_is_3d_mode: (a: number) => number;
     readonly engine_is_game_failed: (a: number) => [number, number];
     readonly engine_is_game_finished: (a: number) => number;
+    readonly engine_is_terrain_reachable: (a: number, b: number, c: number) => number;
     readonly engine_is_walkable: (a: number, b: number, c: number) => number;
     readonly engine_new: (a: number, b: number) => [number, number, number];
     readonly engine_orbit_camera: (a: number, b: number, c: number) => void;
@@ -326,6 +347,7 @@ export interface InitOutput {
     readonly engine_set_camera_target: (a: number, b: number, c: number) => void;
     readonly engine_set_era: (a: number, b: number) => void;
     readonly engine_set_heightmap: (a: number, b: number, c: number) => [number, number];
+    readonly engine_set_terrain_biome: (a: number, b: number, c: number) => void;
     readonly engine_upload_canvas: (a: number, b: any) => [number, number];
     readonly engine_zoom_camera: (a: number, b: number) => void;
     readonly pointergesture_down: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
