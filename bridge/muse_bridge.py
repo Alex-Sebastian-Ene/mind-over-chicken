@@ -213,11 +213,9 @@ class HeadTracker:
         return clamp(self._win_time / max(1e-6, self.bias_init))
 
     def tare(self):
-        """Zero yaw heading and force a fresh gyro bias calibration on the next still hold."""
+        """Zero yaw heading immediately while keeping the learned gyro bias."""
         self.yaw = 0.0
-        self.bias = None
         self.rate = 0.0
-        self._reset_window()
 
     def _reset_window(self):
         self._win_sum, self._win_n, self._win_time = [0.0, 0.0, 0.0], 0, 0.0
@@ -544,7 +542,7 @@ class Bridge:
         quality = self.signal_quality(eeg_block, now)
         eeg_wave, contact = self.eeg_telemetry(eeg_block, fs, now)
         accel, gyro, orientation, motion = self.read_imu(board, now)
-        blink = self.detect_blink([rows[ch] for ch in self.frontal], fs, now, motion)
+        blink = self.detect_blink([rows[ch] for ch in self.frontal], fs, now, motion, eeg_block)
         hr = self.read_hr(board, now)
 
         return {
@@ -616,7 +614,7 @@ class Bridge:
             wave[name] = [finite(v, 1) for v in tail]
         return wave, contact
 
-    def detect_blink(self, frontal, fs, now, motion):
+    def detect_blink(self, frontal, fs, now, motion, eeg_block=None):
         n = int(BLINK_WINDOW * fs)
         segs = []
         for row in frontal:
@@ -627,25 +625,48 @@ class Bridge:
             segs.append(seg)
         ptp = np.array([s.max() - s.min() for s in segs])
         mean_ptp = float(ptp.mean())
+        max_frontal = float(ptp.max())
         thr = self.args.blink_threshold
 
-        if mean_ptp < BLINK_REARM * thr:
+        # Muse 2 uses Fpz (center forehead) as the hardware reference electrode.
+        # Eye blinks shift Fpz directly, which often produces synchronous large deflections on
+        # TP9 and TP10 alongside one or both frontal channels (AF7/AF8).
+        tp_sync_ptp = 0.0
+        tp_corr = 0.0
+        if eeg_block is not None and eeg_block.shape[0] >= 4 and eeg_block.shape[1] >= n // 2:
+            tp9 = np.ascontiguousarray(eeg_block[0, -n:], dtype=np.float64).copy()
+            tp10 = np.ascontiguousarray(eeg_block[3, -n:], dtype=np.float64).copy()
+            DataFilter.detrend(tp9, DetrendOperations.LINEAR.value)
+            DataFilter.detrend(tp10, DetrendOperations.LINEAR.value)
+            p9 = float(tp9.max() - tp9.min())
+            p10 = float(tp10.max() - tp10.min())
+            if p9 < ARTIFACT_PTP and p10 < ARTIFACT_PTP and np.std(tp9) > 0 and np.std(tp10) > 0:
+                tp_corr = float(np.corrcoef(tp9, tp10)[0, 1])
+                if tp_corr >= 0.45:
+                    tp_sync_ptp = min(p9, p10)
+
+        eff_ptp = max(mean_ptp, min(max_frontal, tp_sync_ptp * 0.85))
+        eff_thr = min(thr, 145.0) if tp_sync_ptp >= 180.0 else thr
+
+        if eff_ptp < BLINK_REARM * eff_thr:
             self.blink_armed = True
-        if mean_ptp < thr:
-            if self.args.verbose and mean_ptp > 0.5 * thr:
-                log.debug("blink candidate ptp=%.0f uV below threshold %.0f", mean_ptp, thr)
+        if eff_ptp < eff_thr:
+            if self.args.verbose and eff_ptp > 0.5 * eff_thr:
+                log.debug("blink candidate eff_ptp=%.0f (frontal=%s tp_sync=%.0f) below %.0f",
+                          eff_ptp, np.round(ptp).tolist(), tp_sync_ptp, eff_thr)
             return False
 
         corr = 1.0
         if len(segs) >= 2 and np.std(segs[0]) > 0 and np.std(segs[1]) > 0:
             corr = float(np.corrcoef(segs[0], segs[1])[0, 1])
+        effective_corr = max(corr, tp_corr)
         reason = None
         if ptp.max() > ARTIFACT_PTP:
             reason = "artifact (contact pop / railed)"
-        elif ptp.min() < 0.5 * thr:
+        elif ptp.min() < 0.5 * thr and tp_sync_ptp < 170.0:
             reason = "only one frontal channel"
-        elif corr < BLINK_MIN_CORR:
-            reason = f"channels disagree (corr {corr:.2f}, likely eye movement)"
+        elif effective_corr < BLINK_MIN_CORR:
+            reason = f"channels disagree (corr {effective_corr:.2f}, likely eye movement)"
         elif motion > BLINK_MAX_MOTION:
             reason = "head moving"
         elif not self.blink_armed:
@@ -653,11 +674,13 @@ class Bridge:
         elif now - self.last_blink_at < BLINK_REFRACTORY:
             reason = "refractory"
         if reason:
-            log.debug("blink rejected ptp=%s corr=%.2f: %s", np.round(ptp).tolist(), corr, reason)
+            log.debug("blink rejected ptp=%s tp_sync=%.0f corr=%.2f: %s",
+                      np.round(ptp).tolist(), tp_sync_ptp, effective_corr, reason)
             return False
         self.last_blink_at = now
         self.blink_armed = False
-        log.debug("blink accepted ptp=%s corr=%.2f", np.round(ptp).tolist(), corr)
+        log.info("blink accepted ptp=%s tp_sync=%.0f corr=%.2f",
+                 np.round(ptp).tolist(), tp_sync_ptp, effective_corr)
         return True
 
     def read_imu(self, board, now):

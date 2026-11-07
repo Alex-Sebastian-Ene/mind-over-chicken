@@ -79,8 +79,22 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-say "serving $(pwd) at $URL"
-python3 -m http.server "$PORT" --bind 127.0.0.1 >/dev/null 2>&1 &
+say "serving $(pwd) at $URL (no-cache)"
+python3 -c '
+import http.server, socketserver, sys
+port = int(sys.argv[1])
+class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
+    def log_message(self, format, *args):
+        pass
+socketserver.TCPServer.allow_reuse_address = True
+with socketserver.TCPServer(("127.0.0.1", port), NoCacheHandler) as httpd:
+    httpd.serve_forever()
+' "$PORT" >/dev/null 2>&1 &
 server_pid=$!
 
 for _ in $(seq 1 50); do

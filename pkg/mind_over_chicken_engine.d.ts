@@ -51,6 +51,10 @@ export class RustBlinkClassifier {
     free(): void;
     [Symbol.dispose](): void;
     accuracy(): number;
+    /**
+     * Arms a flash-cue capture window (e.g., 1.2s) right when the visual cue flashes on screen.
+     */
+    arm_flash_window(seconds: number): void;
     baseline_samples(): number;
     blink_samples(): number;
     ingest_frame(tp9: Float32Array | number[], af7: Float32Array | number[], af8: Float32Array | number[], tp10: Float32Array | number[], motion: number, dt: number): boolean;
@@ -59,16 +63,18 @@ export class RustBlinkClassifier {
     last_af7_ptp(): number;
     last_af8_ptp(): number;
     last_corr(): number;
+    last_eff_amp(): number;
     last_probability(): number;
+    last_tp10_ptp(): number;
+    last_tp9_ptp(): number;
     learned_af7_uv(): number;
     learned_af8_uv(): number;
     learned_threshold_uv(): number;
     constructor();
     record_baseline_button(): boolean;
     /**
-     * Starts or commits a blink calibration capture.
-     * If a prominent blink spike already occurred in the last ~1.0s (user blinked then clicked),
-     * it commits immediately; otherwise it stays armed for 1.5s so the user can blink right after clicking.
+     * Searches the last ~2.5s of EEG windows for the strongest blink peak if the user blinked
+     * before clicking, or arms a 2.5s capture window if they click first and then blink.
      */
     record_blink_button(): boolean;
     reset_model(): void;
@@ -78,10 +84,29 @@ export class RustBlinkClassifier {
 export class RustImuTracker {
     free(): void;
     [Symbol.dispose](): void;
+    /**
+     * Records a supervised sample pairing the user's current 3D relative orientation
+     * `(rel_yaw, rel_pitch, rel_roll)` with the target white dot screen position `(dot_x, dot_y)` in `0..1`.
+     */
+    add_calib_point(dot_x: number, dot_y: number): void;
     aim_x(): number;
     aim_y(): number;
+    begin_motion_calibration(): void;
     calib_progress(): number;
+    calib_r2_score(): number;
+    calib_sample_count(): number;
+    cancel_motion_calibration(): void;
+    /**
+     * Fits a 2D Ridge Regression model in Rust mapping `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
+     * Automatically discovers axis signs, sensitivity/range, center offset, and cross-axis head tilt coupling.
+     */
+    finish_motion_calibration(): boolean;
+    has_motion_model(): boolean;
     is_tared(): boolean;
+    learned_pitch_deg_for_edge(): number;
+    learned_pitch_sign(): number;
+    learned_yaw_deg_for_edge(): number;
+    learned_yaw_sign(): number;
     constructor();
     raw_pitch_deg(): number;
     raw_roll_deg(): number;
@@ -89,6 +114,7 @@ export class RustImuTracker {
     rel_pitch_deg(): number;
     rel_roll_deg(): number;
     rel_yaw_deg(): number;
+    reset_motion_model(): void;
     set_config(sensitivity: number, invert_yaw: boolean, invert_pitch: boolean, deadzone_deg: number): void;
     tare(): void;
     tilt_x(): number;
@@ -141,6 +167,7 @@ export interface InitOutput {
     readonly engine_set_era: (a: number, b: number) => void;
     readonly engine_upload_canvas: (a: number, b: any) => [number, number];
     readonly rustblinkclassifier_accuracy: (a: number) => number;
+    readonly rustblinkclassifier_arm_flash_window: (a: number, b: number) => void;
     readonly rustblinkclassifier_baseline_samples: (a: number) => number;
     readonly rustblinkclassifier_blink_samples: (a: number) => number;
     readonly rustblinkclassifier_ingest_frame: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
@@ -149,7 +176,10 @@ export interface InitOutput {
     readonly rustblinkclassifier_last_af7_ptp: (a: number) => number;
     readonly rustblinkclassifier_last_af8_ptp: (a: number) => number;
     readonly rustblinkclassifier_last_corr: (a: number) => number;
+    readonly rustblinkclassifier_last_eff_amp: (a: number) => number;
     readonly rustblinkclassifier_last_probability: (a: number) => number;
+    readonly rustblinkclassifier_last_tp10_ptp: (a: number) => number;
+    readonly rustblinkclassifier_last_tp9_ptp: (a: number) => number;
     readonly rustblinkclassifier_learned_af7_uv: (a: number) => number;
     readonly rustblinkclassifier_learned_af8_uv: (a: number) => number;
     readonly rustblinkclassifier_learned_threshold_uv: (a: number) => number;
@@ -158,10 +188,21 @@ export interface InitOutput {
     readonly rustblinkclassifier_record_blink_button: (a: number) => number;
     readonly rustblinkclassifier_reset_model: (a: number) => void;
     readonly rustblinkclassifier_total_detected: (a: number) => number;
+    readonly rustimutracker_add_calib_point: (a: number, b: number, c: number) => void;
     readonly rustimutracker_aim_x: (a: number) => number;
     readonly rustimutracker_aim_y: (a: number) => number;
+    readonly rustimutracker_begin_motion_calibration: (a: number) => void;
     readonly rustimutracker_calib_progress: (a: number) => number;
+    readonly rustimutracker_calib_r2_score: (a: number) => number;
+    readonly rustimutracker_calib_sample_count: (a: number) => number;
+    readonly rustimutracker_cancel_motion_calibration: (a: number) => void;
+    readonly rustimutracker_finish_motion_calibration: (a: number) => number;
+    readonly rustimutracker_has_motion_model: (a: number) => number;
     readonly rustimutracker_is_tared: (a: number) => number;
+    readonly rustimutracker_learned_pitch_deg_for_edge: (a: number) => number;
+    readonly rustimutracker_learned_pitch_sign: (a: number) => number;
+    readonly rustimutracker_learned_yaw_deg_for_edge: (a: number) => number;
+    readonly rustimutracker_learned_yaw_sign: (a: number) => number;
     readonly rustimutracker_new: () => number;
     readonly rustimutracker_raw_pitch_deg: (a: number) => number;
     readonly rustimutracker_raw_roll_deg: (a: number) => number;
@@ -169,6 +210,7 @@ export interface InitOutput {
     readonly rustimutracker_rel_pitch_deg: (a: number) => number;
     readonly rustimutracker_rel_roll_deg: (a: number) => number;
     readonly rustimutracker_rel_yaw_deg: (a: number) => number;
+    readonly rustimutracker_reset_motion_model: (a: number) => void;
     readonly rustimutracker_set_config: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly rustimutracker_tare: (a: number) => void;
     readonly rustimutracker_tilt_x: (a: number) => number;

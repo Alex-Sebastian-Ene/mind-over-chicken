@@ -40,9 +40,6 @@ fn cross3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
 }
 
 fn build_head_basis(u0: [f32; 3]) -> ([f32; 3], [f32; 3]) {
-    // Muse 2 +X is nose/forward, +Y is left ear, +Z is top of head.
-    // Project +X perpendicular to u0 to form the forward pitch reference axis f0.
-    // If the sensor happens to have +X nearly parallel to u0, fall back to -Z.
     let ref_fwd = if u0[0].abs() < 0.9 {
         [1.0, 0.0, 0.0]
     } else {
@@ -57,6 +54,50 @@ fn build_head_basis(u0: [f32; 3]) -> ([f32; 3], [f32; 3]) {
     let f0 = normalize3(f_raw).unwrap_or([1.0, 0.0, 0.0]);
     let r0 = normalize3(cross3(f0, u0)).unwrap_or([0.0, -1.0, 0.0]);
     (f0, r0)
+}
+
+#[derive(Clone, Copy)]
+struct MotionCalibSample {
+    yaw: f32,
+    pitch: f32,
+    roll: f32,
+    tx: f32,
+    ty: f32,
+}
+
+fn solve_4x4(mut a: [[f32; 4]; 4], mut b: [f32; 4]) -> Option<[f32; 4]> {
+    for i in 0..4 {
+        let mut max_row = i;
+        let mut max_val = a[i][i].abs();
+        for k in (i + 1)..4 {
+            if a[k][i].abs() > max_val {
+                max_val = a[k][i].abs();
+                max_row = k;
+            }
+        }
+        if max_val < 1e-6 {
+            return None;
+        }
+        if max_row != i {
+            a.swap(i, max_row);
+            b.swap(i, max_row);
+        }
+        let piv = a[i][i];
+        for j in i..4 {
+            a[i][j] /= piv;
+        }
+        b[i] /= piv;
+        for k in 0..4 {
+            if k != i {
+                let factor = a[k][i];
+                for j in i..4 {
+                    a[k][j] -= factor * a[i][j];
+                }
+                b[k] -= factor * b[i];
+            }
+        }
+    }
+    Some(b)
 }
 
 #[wasm_bindgen]
@@ -89,6 +130,12 @@ pub struct RustImuTracker {
     invert_pitch: bool,
     deadzone_deg: f32,
     range_deg: f32,
+    calibrating_motion: bool,
+    calib_samples: Vec<MotionCalibSample>,
+    learned_wx: [f32; 4],
+    learned_wy: [f32; 4],
+    has_learned_map: bool,
+    calib_r2: f32,
 }
 
 #[wasm_bindgen]
@@ -122,8 +169,14 @@ impl RustImuTracker {
             sensitivity: 1.0,
             invert_yaw: false,
             invert_pitch: false,
-            deadzone_deg: 1.2,
-            range_deg: 22.0,
+            deadzone_deg: 1.0,
+            range_deg: 20.0,
+            calibrating_motion: false,
+            calib_samples: Vec::new(),
+            learned_wx: [0.0, 1.0 / 18.0, 0.0, 0.0],
+            learned_wy: [0.0, 0.0, -1.0 / 16.0, 0.0],
+            has_learned_map: false,
+            calib_r2: 0.0,
         }
     }
 
@@ -158,6 +211,144 @@ impl RustImuTracker {
         self.aim_x = 0.5;
         self.aim_y = 0.5;
         self.edge_still_time = 0.0;
+        self.learned_wx[0] = 0.0;
+        self.learned_wy[0] = 0.0;
+    }
+
+    pub fn begin_motion_calibration(&mut self) {
+        self.tare();
+        self.calibrating_motion = true;
+        self.calib_samples.clear();
+    }
+
+    pub fn cancel_motion_calibration(&mut self) {
+        self.calibrating_motion = false;
+        self.calib_samples.clear();
+    }
+
+    pub fn reset_motion_model(&mut self) {
+        self.calibrating_motion = false;
+        self.calib_samples.clear();
+        self.has_learned_map = false;
+        self.calib_r2 = 0.0;
+        self.learned_wx = [0.0, 1.0 / 18.0, 0.0, 0.0];
+        self.learned_wy = [0.0, 0.0, -1.0 / 16.0, 0.0];
+    }
+
+    /// Records a supervised sample pairing the user's current 3D relative orientation
+    /// `(rel_yaw, rel_pitch, rel_roll)` with the target white dot screen position `(dot_x, dot_y)` in `0..1`.
+    pub fn add_calib_point(&mut self, dot_x: f32, dot_y: f32) {
+        if !dot_x.is_finite() || !dot_y.is_finite() {
+            return;
+        }
+        let tx = clamp((dot_x - 0.5) * 2.0, -1.0, 1.0);
+        let ty = clamp((dot_y - 0.5) * 2.0, -1.0, 1.0);
+        self.calib_samples.push(MotionCalibSample {
+            yaw: self.rel_yaw,
+            pitch: self.rel_pitch,
+            roll: self.rel_roll,
+            tx,
+            ty,
+        });
+    }
+
+    /// Fits a 2D Ridge Regression model in Rust mapping `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
+    /// Automatically discovers axis signs, sensitivity/range, center offset, and cross-axis head tilt coupling.
+    pub fn finish_motion_calibration(&mut self) -> bool {
+        self.calibrating_motion = false;
+        let n = self.calib_samples.len();
+        if n < 12 {
+            return false;
+        }
+
+        // Prior weights (default 16 deg full-scale yaw/pitch) with soft L2 regularization
+        // so even if one axis had small movement, the matrix stays well-conditioned.
+        let prior_wx = [0.0f32, 1.0 / 16.0, 0.0, 0.0];
+        let prior_wy = [0.0f32, 0.0, -1.0 / 14.0, 0.0];
+        let reg = [2.0f32, 18.0, 18.0, 45.0];
+
+        let mut xtx = [[0.0f32; 4]; 4];
+        let mut xty_x = [0.0f32; 4];
+        let mut xty_y = [0.0f32; 4];
+
+        for i in 0..4 {
+            xtx[i][i] += reg[i];
+            xty_x[i] += reg[i] * prior_wx[i];
+            xty_y[i] += reg[i] * prior_wy[i];
+        }
+
+        for s in &self.calib_samples {
+            let f = [1.0, s.yaw, s.pitch, s.roll];
+            for r in 0..4 {
+                for c in 0..4 {
+                    xtx[r][c] += f[r] * f[c];
+                }
+                xty_x[r] += f[r] * s.tx;
+                xty_y[r] += f[r] * s.ty;
+            }
+        }
+
+        let wx = match solve_4x4(xtx, xty_x) {
+            Some(w) => w,
+            None => return false,
+        };
+        let wy = match solve_4x4(xtx, xty_y) {
+            Some(w) => w,
+            None => return false,
+        };
+
+        // Clamp learned gains to reasonable physical bounds (at least ~6 deg to edge, at most ~38 deg to edge)
+        let mut clean_wx = wx;
+        let mut clean_wy = wy;
+        clean_wx[0] = clamp(clean_wx[0], -0.35, 0.35);
+        clean_wy[0] = clamp(clean_wy[0], -0.35, 0.35);
+
+        let norm_x = (clean_wx[1] * clean_wx[1] + clean_wx[2] * clean_wx[2] + clean_wx[3] * clean_wx[3]).sqrt();
+        let norm_y = (clean_wy[1] * clean_wy[1] + clean_wy[2] * clean_wy[2] + clean_wy[3] * clean_wy[3]).sqrt();
+
+        if norm_x < 1.0 / 38.0 && norm_x > 1e-5 {
+            let scale = (1.0 / 22.0) / norm_x;
+            for j in 1..4 {
+                clean_wx[j] *= scale;
+            }
+        } else if norm_x > 1.0 / 6.0 {
+            let scale = (1.0 / 6.0) / norm_x;
+            for j in 1..4 {
+                clean_wx[j] *= scale;
+            }
+        }
+
+        if norm_y < 1.0 / 38.0 && norm_y > 1e-5 {
+            let scale = (1.0 / 18.0) / norm_y;
+            for j in 1..4 {
+                clean_wy[j] *= scale;
+            }
+        } else if norm_y > 1.0 / 6.0 {
+            let scale = (1.0 / 6.0) / norm_y;
+            for j in 1..4 {
+                clean_wy[j] *= scale;
+            }
+        }
+
+        // Compute R^2 fit score across calibration trajectory
+        let mut ss_res = 0.0f32;
+        let mut ss_tot = 0.0f32;
+        for s in &self.calib_samples {
+            let px = clean_wx[0] + clean_wx[1] * s.yaw + clean_wx[2] * s.pitch + clean_wx[3] * s.roll;
+            let py = clean_wy[0] + clean_wy[1] * s.yaw + clean_wy[2] * s.pitch + clean_wy[3] * s.roll;
+            ss_res += (px - s.tx).powi(2) + (py - s.ty).powi(2);
+            ss_tot += s.tx.powi(2) + s.ty.powi(2);
+        }
+        self.calib_r2 = if ss_tot > 1e-4 {
+            clamp(1.0 - (ss_res / ss_tot), 0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        self.learned_wx = clean_wx;
+        self.learned_wy = clean_wy;
+        self.has_learned_map = true;
+        true
     }
 
     pub fn update(
@@ -200,13 +391,13 @@ impl RustImuTracker {
                     raw_g
                 };
                 let dev = norm3([raw_g[0] - mean[0], raw_g[1] - mean[1], raw_g[2] - mean[2]]);
-                if dev <= 6.5 {
+                if dev <= 8.0 {
                     self.still_sum[0] += raw_g[0];
                     self.still_sum[1] += raw_g[1];
                     self.still_sum[2] += raw_g[2];
                     self.still_count += 1;
                     self.still_time += dt;
-                    if self.still_time >= 0.6 && self.still_count >= 4 {
+                    if self.still_time >= 0.5 && self.still_count >= 3 {
                         let n = self.still_count as f32;
                         self.gyro_bias = [
                             self.still_sum[0] / n,
@@ -235,8 +426,8 @@ impl RustImuTracker {
                     raw_g[1] - self.gyro_bias[1],
                     raw_g[2] - self.gyro_bias[2],
                 ];
-                if norm3(w_check) < 3.0 {
-                    let alpha_b = dt / (15.0 + dt);
+                if norm3(w_check) < 3.5 {
+                    let alpha_b = dt / (12.0 + dt);
                     self.gyro_bias[0] += alpha_b * (raw_g[0] - self.gyro_bias[0]);
                     self.gyro_bias[1] += alpha_b * (raw_g[1] - self.gyro_bias[1]);
                     self.gyro_bias[2] += alpha_b * (raw_g[2] - self.gyro_bias[2]);
@@ -244,7 +435,7 @@ impl RustImuTracker {
             }
         }
 
-        let w = if g_valid && self.bias_calibrated {
+        let w = if g_valid {
             [
                 gx - self.gyro_bias[0],
                 gy - self.gyro_bias[1],
@@ -256,11 +447,10 @@ impl RustImuTracker {
         self.rate_deg_s = norm3(w);
 
         let mut u = self.up.unwrap();
-        if self.rate_deg_s > 0.05 {
+        if self.rate_deg_s > 0.05 && self.bias_calibrated {
             let wx = w[0].to_radians();
             let wy = w[1].to_radians();
             let wz = w[2].to_radians();
-            // du/dt = u x w in rotating body frame
             u = [
                 u[0] + (u[1] * wz - u[2] * wy) * dt,
                 u[1] + (u[2] * wx - u[0] * wz) * dt,
@@ -268,7 +458,7 @@ impl RustImuTracker {
             ];
         }
         if let Some(m) = meas {
-            let tilt_tau = if self.bias_calibrated { 0.45 } else { 0.08 };
+            let tilt_tau = if self.bias_calibrated { 0.40 } else { 0.05 };
             let alpha = tilt_tau / (tilt_tau + dt);
             u = [
                 alpha * u[0] + (1.0 - alpha) * m[0],
@@ -286,15 +476,19 @@ impl RustImuTracker {
 
         if has_bridge_yaw && bridge_yaw.is_finite() {
             self.yaw_deg = bridge_yaw;
-            self.yaw_zero_deg *= (-dt / 25.0).exp();
+            if !self.calibrating_motion {
+                self.yaw_zero_deg *= (-dt / 25.0).exp();
+            }
         } else {
             if self.rate_deg_s >= 1.5 {
                 let yaw_rate = -dot3(w, u);
                 self.yaw_deg = wrap_deg(self.yaw_deg + yaw_rate * dt);
             }
-            let rel_y = wrap_deg(self.yaw_deg - self.yaw_zero_deg);
-            let decayed = rel_y * (-dt / 25.0).exp();
-            self.yaw_deg = wrap_deg(self.yaw_zero_deg + decayed);
+            if !self.calibrating_motion {
+                let rel_y = wrap_deg(self.yaw_deg - self.yaw_zero_deg);
+                let decayed = rel_y * (-dt / 25.0).exp();
+                self.yaw_deg = wrap_deg(self.yaw_zero_deg + decayed);
+            }
         }
         self.raw_yaw = self.yaw_deg;
 
@@ -307,8 +501,6 @@ impl RustImuTracker {
         }
 
         let mut u0 = self.u0.unwrap();
-        // Relative pitch & roll in the user's gravity-aligned tare frame (u0, f0, r0):
-        // Positive rel_pitch = head pitched UP (nose up); Negative rel_pitch = head pitched DOWN.
         let cos_u = dot3(u, u0).clamp(-1.0, 1.0);
         let sin_pitch = dot3(u, self.f0);
         let sin_roll = dot3(u, self.r0);
@@ -316,19 +508,13 @@ impl RustImuTracker {
         let droll = sin_roll.atan2(cos_u).to_degrees();
         let mut dyaw = wrap_deg(self.yaw_deg - self.yaw_zero_deg);
 
-        // Posture / headband-shift protection:
-        // 1) When stationary (rate < 2.2 deg/s), if |dpitch| > 16 deg or |dyaw| > 22 deg for > 0.9s
-        //    (e.g. headset was just placed on forehead or adjusted), smoothly re-tare to current pose
-        //    so the cursor can NEVER stay pinned at the top/bottom of the screen.
-        // 2) During normal stationary rest (rate < 1.5 deg/s), slowly adapt u0 (tau = 10s) to absorb
-        //    gradual chair slouching while keeping active head movements 1:1 responsive.
-        if self.rate_deg_s < 2.2 {
-            if dpitch.abs() > 16.0 || dyaw.abs() > 22.0 {
+        if self.rate_deg_s < 2.5 && !self.calibrating_motion {
+            if dpitch.abs() > 22.0 || dyaw.abs() > 28.0 {
                 self.edge_still_time += dt;
             } else {
                 self.edge_still_time = (self.edge_still_time - dt * 0.5).max(0.0);
             }
-            let tau = if self.edge_still_time > 0.9 { 0.35 } else { 10.0 };
+            let tau = if self.edge_still_time > 2.5 { 0.8 } else { 18.0 };
             let beta = dt / (tau + dt);
             if let Some(new_u0) = normalize3([
                 (1.0 - beta) * u0[0] + beta * u[0],
@@ -341,7 +527,7 @@ impl RustImuTracker {
                 self.f0 = f0;
                 self.r0 = r0;
             }
-            if self.edge_still_time > 0.9 {
+            if self.edge_still_time > 2.5 {
                 let dy = wrap_deg(self.yaw_deg - self.yaw_zero_deg);
                 self.yaw_zero_deg = wrap_deg(self.yaw_zero_deg + dy * beta);
             }
@@ -367,18 +553,32 @@ impl RustImuTracker {
         } else {
             dpitch.signum() * (dpitch.abs() - dz)
         };
+        let eff_roll = if droll.abs() <= dz {
+            0.0
+        } else {
+            droll.signum() * (droll.abs() - dz)
+        };
 
-        let range = (self.range_deg / self.sensitivity.max(0.25)).max(4.0);
+        let sens = self.sensitivity.max(0.25);
         let sx = if self.invert_yaw { -1.0 } else { 1.0 };
-        // Screen Y is 0 at top, +1 at bottom.
-        // Positive eff_pitch = looking UP -> negative tilt_y (top of screen).
-        // Negative eff_pitch = looking DOWN -> positive tilt_y (bottom of screen).
-        let sy = if self.invert_pitch { 1.0 } else { -1.0 };
+        let sy = if self.invert_pitch { -1.0 } else { 1.0 };
 
-        let target_x = clamp(sx * eff_yaw / range, -1.0, 1.0);
-        let target_y = clamp(sy * eff_pitch / range, -1.0, 1.0);
+        let (target_x, target_y) = if self.has_learned_map {
+            let wx = self.learned_wx;
+            let wy = self.learned_wy;
+            let tx = sx * sens * (wx[0] + wx[1] * eff_yaw + wx[2] * eff_pitch + wx[3] * eff_roll);
+            let ty = sy * sens * (wy[0] + wy[1] * eff_yaw + wy[2] * eff_pitch + wy[3] * eff_roll);
+            (clamp(tx, -1.0, 1.0), clamp(ty, -1.0, 1.0))
+        } else {
+            let range = (self.range_deg / sens).max(4.0);
+            let def_sy = if self.invert_pitch { 1.0 } else { -1.0 };
+            (
+                clamp(sx * eff_yaw / range, -1.0, 1.0),
+                clamp(def_sy * eff_pitch / range, -1.0, 1.0),
+            )
+        };
 
-        let k = 1.0 - (-14.0 * dt).exp();
+        let k = 1.0 - (-15.0 * dt).exp();
         self.tilt_x += (target_x - self.tilt_x) * k;
         self.tilt_y += (target_y - self.tilt_y) * k;
         self.aim_x = clamp(0.5 + self.tilt_x * 0.5, 0.0, 1.0);
@@ -419,23 +619,48 @@ impl RustImuTracker {
         if self.bias_calibrated {
             1.0
         } else {
-            clamp(self.still_time / 0.6, 0.0, 1.0)
+            clamp(self.still_time / 0.5, 0.0, 1.0)
         }
     }
     pub fn is_tared(&self) -> bool {
         self.u0.is_some()
     }
+    pub fn has_motion_model(&self) -> bool {
+        self.has_learned_map
+    }
+    pub fn calib_sample_count(&self) -> u32 {
+        self.calib_samples.len() as u32
+    }
+    pub fn calib_r2_score(&self) -> f32 {
+        self.calib_r2
+    }
+    pub fn learned_yaw_deg_for_edge(&self) -> f32 {
+        let g = (self.learned_wx[1].powi(2) + self.learned_wx[2].powi(2) + self.learned_wx[3].powi(2)).sqrt();
+        if g > 1e-4 { 1.0 / g } else { 20.0 }
+    }
+    pub fn learned_pitch_deg_for_edge(&self) -> f32 {
+        let g = (self.learned_wy[1].powi(2) + self.learned_wy[2].powi(2) + self.learned_wy[3].powi(2)).sqrt();
+        if g > 1e-4 { 1.0 / g } else { 18.0 }
+    }
+    pub fn learned_yaw_sign(&self) -> f32 {
+        if self.learned_wx[1] >= 0.0 { 1.0 } else { -1.0 }
+    }
+    pub fn learned_pitch_sign(&self) -> f32 {
+        if self.learned_wy[2] >= 0.0 { 1.0 } else { -1.0 }
+    }
 }
 
 const BLINK_DIM: usize = 6;
-const ROLLING_EEG_SAMPLES: usize = 28; // ~0.44s at 64 Hz decimated EEG stream
+const ROLLING_EEG_SAMPLES: usize = 28;
 
 #[derive(Clone, Copy)]
 struct BlinkWindow {
     feat: [f32; BLINK_DIM],
+    ptp_tp9: f32,
     ptp_af7: f32,
     ptp_af8: f32,
-    max_frontal: f32,
+    ptp_tp10: f32,
+    eff_amp: f32,
     corr: f32,
 }
 
@@ -535,30 +760,39 @@ fn pearson_corr(a: &[f32], b: &[f32]) -> f32 {
 }
 
 fn extract_blink_window(tp9: &[f32], af7: &[f32], af8: &[f32], tp10: &[f32]) -> BlinkWindow {
+    let (ptp_tp9, prom_9) = ptp_and_prominence(tp9);
     let (ptp_af7, prom_7) = ptp_and_prominence(af7);
     let (ptp_af8, prom_8) = ptp_and_prominence(af8);
-    let (ptp_tp9, _) = ptp_and_prominence(tp9);
-    let (ptp_tp10, _) = ptp_and_prominence(tp10);
+    let (ptp_tp10, prom_10) = ptp_and_prominence(tp10);
+
+    // On Muse 2, the reference electrode Fpz sits in the center of the forehead above the eyes.
+    // Eye blinks shift Fpz, producing synchronous spikes across TP9, TP10, and AF7/AF8.
+    let corr_frontal = pearson_corr(af7, af8);
+    let corr_temporal = pearson_corr(tp9, tp10);
+    let corr_cross = pearson_corr(af8, tp10).max(pearson_corr(af7, tp9));
+    let corr = corr_frontal.max(corr_temporal).max(corr_cross);
 
     let max_frontal = ptp_af7.max(ptp_af8);
-    let max_temporal = ptp_tp9.max(ptp_tp10);
-    let corr = pearson_corr(af7, af8);
-    let prominence = prom_7.max(prom_8);
+    let sync_temporal = ptp_tp9.min(ptp_tp10);
+    let eff_amp = max_frontal.max(sync_temporal * 0.85);
+    let prominence = prom_7.max(prom_8).max(prom_9.min(prom_10));
 
     let feat = [
+        (ptp_tp9 + 1.0).ln(),
         (ptp_af7 + 1.0).ln(),
         (ptp_af8 + 1.0).ln(),
-        (max_frontal + 1.0).ln(),
+        (ptp_tp10 + 1.0).ln(),
         corr,
         prominence,
-        ((max_frontal + 10.0) / (max_temporal + 10.0)).ln(),
     ];
 
     BlinkWindow {
         feat,
+        ptp_tp9,
         ptp_af7,
         ptp_af8,
-        max_frontal,
+        ptp_tp10,
+        eff_amp,
         corr,
     }
 }
@@ -598,8 +832,11 @@ pub struct RustBlinkClassifier {
     rearmed: bool,
     quiet_timer: f32,
     last_prob: f32,
+    last_tp9_ptp: f32,
     last_af7_ptp: f32,
     last_af8_ptp: f32,
+    last_tp10_ptp: f32,
+    last_eff_amp: f32,
     last_corr: f32,
     total_detected: u32,
 }
@@ -613,16 +850,16 @@ impl RustBlinkClassifier {
             buf_af7: Vec::with_capacity(ROLLING_EEG_SAMPLES),
             buf_af8: Vec::with_capacity(ROLLING_EEG_SAMPLES),
             buf_tp10: Vec::with_capacity(ROLLING_EEG_SAMPLES),
-            recent: Vec::with_capacity(20),
+            recent: Vec::with_capacity(30),
             positives: Vec::new(),
             negatives: Vec::new(),
-            weights: [0.35, 0.35, 1.15, 0.55, 0.45, 0.40],
-            bias: -0.2,
-            feat_mean: [4.2, 4.2, 4.5, 0.1, 2.0, 0.2],
+            weights: [0.45, 0.45, 0.55, 0.45, 0.65, 0.45],
+            bias: -0.1,
+            feat_mean: [4.2, 4.0, 4.2, 4.2, 0.2, 2.0],
             feat_std: [1.0; BLINK_DIM],
             trained: false,
             accuracy: 0.0,
-            learned_threshold_uv: 220.0,
+            learned_threshold_uv: 155.0,
             learned_af7_uv: 0.0,
             learned_af8_uv: 0.0,
             capture_timer: 0.0,
@@ -630,8 +867,11 @@ impl RustBlinkClassifier {
             rearmed: true,
             quiet_timer: 0.0,
             last_prob: 0.0,
+            last_tp9_ptp: 0.0,
             last_af7_ptp: 0.0,
             last_af8_ptp: 0.0,
+            last_tp10_ptp: 0.0,
+            last_eff_amp: 0.0,
             last_corr: 0.0,
             total_detected: 0,
         }
@@ -642,29 +882,33 @@ impl RustBlinkClassifier {
         self.negatives.clear();
         self.trained = false;
         self.accuracy = 0.0;
-        self.learned_threshold_uv = 220.0;
+        self.learned_threshold_uv = 155.0;
         self.learned_af7_uv = 0.0;
         self.learned_af8_uv = 0.0;
         self.capture_timer = 0.0;
         self.last_prob = 0.0;
     }
 
-    /// Starts or commits a blink calibration capture.
-    /// If a prominent blink spike already occurred in the last ~1.0s (user blinked then clicked),
-    /// it commits immediately; otherwise it stays armed for 1.5s so the user can blink right after clicking.
+    /// Searches the last ~2.5s of EEG windows for the strongest blink peak if the user blinked
+    /// before clicking, or arms a 2.5s capture window if they click first and then blink.
     pub fn record_blink_button(&mut self) -> bool {
-        if let Some(best) = self.best_recent_candidate(130.0) {
+        if let Some(best) = self.best_recent_candidate(95.0) {
             self.add_positive(best);
             self.capture_timer = 0.0;
             return true;
         }
-        self.capture_timer = 1.5;
+        self.capture_timer = 2.5;
         false
+    }
+
+    /// Arms a flash-cue capture window (e.g., 1.2s) right when the visual cue flashes on screen.
+    pub fn arm_flash_window(&mut self, seconds: f32) {
+        self.capture_timer = clamp(seconds, 0.3, 3.5);
     }
 
     pub fn record_baseline_button(&mut self) -> bool {
         if let Some(&last) = self.recent.last() {
-            if last.max_frontal < 900.0 {
+            if last.eff_amp < 900.0 {
                 self.add_negative(last);
                 return true;
             }
@@ -675,8 +919,8 @@ impl RustBlinkClassifier {
     fn best_recent_candidate(&self, min_uv: f32) -> Option<BlinkWindow> {
         let mut best: Option<BlinkWindow> = None;
         for w in &self.recent {
-            if w.max_frontal >= min_uv && w.max_frontal <= 1800.0 {
-                if best.map_or(true, |b| w.max_frontal > b.max_frontal) {
+            if w.eff_amp >= min_uv && w.eff_amp <= 2200.0 {
+                if best.map_or(true, |b| w.eff_amp > b.eff_amp) {
                     best = Some(*w);
                 }
             }
@@ -691,17 +935,19 @@ impl RustBlinkClassifier {
         }
         if self.negatives.len() < 4 {
             for r in &self.recent {
-                if r.max_frontal < w.max_frontal * 0.45 {
+                if r.eff_amp < w.eff_amp * 0.50 {
                     self.negatives.push(*r);
                 }
             }
         }
         if self.negatives.len() < 3 {
             let synth = BlinkWindow {
-                feat: [3.4, 3.4, 3.6, 0.0, 1.5, 0.0],
-                ptp_af7: 30.0,
+                feat: [3.4, 3.2, 3.4, 3.4, 0.0, 1.4],
+                ptp_tp9: 35.0,
+                ptp_af7: 25.0,
                 ptp_af8: 30.0,
-                max_frontal: 35.0,
+                ptp_tp10: 35.0,
+                eff_amp: 35.0,
                 corr: 0.0,
             };
             self.negatives.push(synth);
@@ -728,25 +974,25 @@ impl RustBlinkClassifier {
 
         let mut af7_sum = 0.0f32;
         let mut af8_sum = 0.0f32;
-        let mut max_sum = 0.0f32;
+        let mut eff_sum = 0.0f32;
         for p in &self.positives {
             af7_sum += p.ptp_af7;
             af8_sum += p.ptp_af8;
-            max_sum += p.max_frontal;
+            eff_sum += p.eff_amp;
         }
         self.learned_af7_uv = af7_sum / n_pos as f32;
         self.learned_af8_uv = af8_sum / n_pos as f32;
-        let pos_mean_max = max_sum / n_pos as f32;
+        let pos_mean_eff = eff_sum / n_pos as f32;
 
-        let neg_mean_max = if n_neg > 0 {
-            self.negatives.iter().map(|w| w.max_frontal).sum::<f32>() / n_neg as f32
+        let neg_mean_eff = if n_neg > 0 {
+            self.negatives.iter().map(|w| w.eff_amp).sum::<f32>() / n_neg as f32
         } else {
-            45.0
+            40.0
         };
         self.learned_threshold_uv = clamp(
-            neg_mean_max + 0.48 * (pos_mean_max - neg_mean_max),
-            95.0,
-            750.0,
+            neg_mean_eff + 0.45 * (pos_mean_eff - neg_mean_eff),
+            85.0,
+            700.0,
         );
 
         let total = (n_pos + n_neg) as f32;
@@ -842,7 +1088,7 @@ impl RustBlinkClassifier {
     }
 
     fn predict_window(&self, w: &BlinkWindow) -> f32 {
-        if w.max_frontal > 1800.0 || w.max_frontal < 65.0 {
+        if w.eff_amp > 2200.0 || w.eff_amp < 55.0 {
             return 0.0;
         }
         if self.trained {
@@ -852,16 +1098,16 @@ impl RustBlinkClassifier {
                 z += self.weights[j] * x;
             }
             let lr_prob = 1.0 / (1.0 + (-z.clamp(-15.0, 15.0)).exp());
-            let thresh_ratio = (w.max_frontal - self.learned_threshold_uv) / 60.0;
+            let thresh_ratio = (w.eff_amp - self.learned_threshold_uv) / 50.0;
             let amp_prob = 1.0 / (1.0 + (-thresh_ratio.clamp(-15.0, 15.0)).exp());
             clamp(0.65 * lr_prob + 0.35 * amp_prob, 0.0, 1.0)
         } else {
             if w.corr < -0.25 {
                 return 0.05;
             }
-            let ratio = (w.max_frontal - self.learned_threshold_uv) / 55.0;
+            let ratio = (w.eff_amp - self.learned_threshold_uv) / 45.0;
             let base_p = 1.0 / (1.0 + (-ratio.clamp(-12.0, 12.0)).exp());
-            let corr_boost = if w.corr > 0.25 { 1.0 } else { 0.8 };
+            let corr_boost = if w.corr > 0.20 { 1.0 } else { 0.78 };
             clamp(base_p * corr_boost, 0.0, 1.0)
         }
     }
@@ -878,7 +1124,7 @@ impl RustBlinkClassifier {
         let dt = clamp(dt, 0.01, 0.5);
         self.cooldown = (self.cooldown - dt).max(0.0);
 
-        if af7.is_empty() && af8.is_empty() {
+        if af7.is_empty() && af8.is_empty() && tp9.is_empty() && tp10.is_empty() {
             return false;
         }
 
@@ -897,27 +1143,29 @@ impl RustBlinkClassifier {
             &self.buf_af8,
             &self.buf_tp10,
         );
+        self.last_tp9_ptp = win.ptp_tp9;
         self.last_af7_ptp = win.ptp_af7;
         self.last_af8_ptp = win.ptp_af8;
+        self.last_tp10_ptp = win.ptp_tp10;
+        self.last_eff_amp = win.eff_amp;
         self.last_corr = win.corr;
 
         self.recent.push(win);
-        if self.recent.len() > 14 {
+        if self.recent.len() > 25 {
             self.recent.remove(0);
         }
 
-        // If user clicked "Record Blink" and is blinking now within the capture window:
         if self.capture_timer > 0.0 {
             self.capture_timer = (self.capture_timer - dt).max(0.0);
             if self.capture_timer == 0.0 {
-                if let Some(best) = self.best_recent_candidate(95.0) {
+                if let Some(best) = self.best_recent_candidate(80.0) {
                     self.add_positive(best);
                 }
-            } else if win.max_frontal >= 160.0 && win.max_frontal <= 1800.0 && motion < 0.45 {
+            } else if win.eff_amp >= 135.0 && win.eff_amp <= 2200.0 && motion < 0.45 {
                 self.add_positive(win);
                 self.capture_timer = 0.0;
             }
-        } else if motion < 0.2 && win.max_frontal > 12.0 && win.max_frontal < 85.0 {
+        } else if motion < 0.2 && win.eff_amp > 10.0 && win.eff_amp < 75.0 {
             self.quiet_timer += dt;
             if self.quiet_timer >= 0.8 {
                 self.quiet_timer = 0.0;
@@ -925,7 +1173,7 @@ impl RustBlinkClassifier {
             }
         }
 
-        if win.max_frontal < self.learned_threshold_uv * 0.55 {
+        if win.eff_amp < self.learned_threshold_uv * 0.58 {
             self.rearmed = true;
         }
 
@@ -936,10 +1184,10 @@ impl RustBlinkClassifier {
         };
         self.last_prob = prob;
 
-        let trigger_thresh = if self.trained { 0.56 } else { 0.65 };
+        let trigger_thresh = if self.trained { 0.55 } else { 0.62 };
         if prob >= trigger_thresh && self.rearmed && self.cooldown <= 0.0 {
             self.rearmed = false;
-            self.cooldown = 0.48;
+            self.cooldown = 0.45;
             self.total_detected += 1;
             return true;
         }
@@ -973,11 +1221,20 @@ impl RustBlinkClassifier {
     pub fn learned_af8_uv(&self) -> f32 {
         self.learned_af8_uv
     }
+    pub fn last_tp9_ptp(&self) -> f32 {
+        self.last_tp9_ptp
+    }
     pub fn last_af7_ptp(&self) -> f32 {
         self.last_af7_ptp
     }
     pub fn last_af8_ptp(&self) -> f32 {
         self.last_af8_ptp
+    }
+    pub fn last_tp10_ptp(&self) -> f32 {
+        self.last_tp10_ptp
+    }
+    pub fn last_eff_amp(&self) -> f32 {
+        self.last_eff_amp
     }
     pub fn last_corr(&self) -> f32 {
         self.last_corr
@@ -1018,32 +1275,61 @@ mod tests {
     }
 
     #[test]
-    fn blink_classifier_learns_asymmetric_user_blinks() {
+    fn blink_classifier_learns_asymmetric_and_fpz_reference_blinks() {
         let mut clf = RustBlinkClassifier::new();
-        let quiet_7 = [-10.0, 5.0, 12.0, -8.0, 4.0, -3.0, 8.0, -5.0];
-        let quiet_8 = [-8.0, 4.0, 10.0, -6.0, 3.0, -2.0, 6.0, -4.0];
+        let quiet = [-10.0, 5.0, 12.0, -8.0, 4.0, -3.0, 8.0, -5.0];
         for _ in 0..10 {
-            let fired = clf.ingest_frame(&quiet_7, &quiet_7, &quiet_8, &quiet_8, 0.02, 0.1);
+            let fired = clf.ingest_frame(&quiet, &quiet, &quiet, &quiet, 0.02, 0.1);
             assert!(!fired);
         }
-        let blink_7 = [-120.0, -80.0, 40.0, 300.0, 220.0, -40.0, -90.0, -50.0];
-        let blink_8 = [-20.0, -12.0, 8.0, 45.0, 32.0, -5.0, -15.0, -8.0];
-        clf.ingest_frame(&quiet_7, &blink_7, &blink_8, &quiet_8, 0.03, 0.1);
+        // Simulate the exact blink pattern from the user's Muse 2 screenshot:
+        // TP9 & TP10 have large 380uV spikes, AF8 has 180uV spike, AF7 has tiny 30uV wave
+        let blink_tp9 = [-140.0, -90.0, 50.0, 240.0, 190.0, -50.0, -100.0, -40.0];
+        let blink_af7 = [-12.0, -6.0, 5.0, 18.0, 12.0, -4.0, -8.0, -3.0];
+        let blink_af8 = [-65.0, -40.0, 25.0, 115.0, 90.0, -25.0, -45.0, -20.0];
+        let blink_tp10 = [-135.0, -85.0, 45.0, 235.0, 185.0, -45.0, -95.0, -35.0];
+        clf.ingest_frame(&blink_tp9, &blink_af7, &blink_af8, &blink_tp10, 0.03, 0.1);
 
         let committed = clf.record_blink_button();
         assert!(committed);
         assert!(clf.is_trained());
         assert_eq!(clf.blink_samples(), 1);
-        assert!(clf.learned_threshold_uv() < 300.0);
 
         for _ in 0..6 {
-            clf.ingest_frame(&quiet_7, &quiet_7, &quiet_8, &quiet_8, 0.02, 0.1);
+            clf.ingest_frame(&quiet, &quiet, &quiet, &quiet, 0.02, 0.1);
         }
-        let detected = clf.ingest_frame(&quiet_7, &blink_7, &blink_8, &quiet_8, 0.03, 0.1);
+        let detected = clf.ingest_frame(&blink_tp9, &blink_af7, &blink_af8, &blink_tp10, 0.03, 0.1);
         assert!(
             detected,
-            "Trained Rust classifier should detect asymmetric blink (prob={})",
+            "Trained Rust classifier should detect Fpz-referenced Muse 2 blink (prob={})",
             clf.last_probability()
         );
+    }
+
+    #[test]
+    fn imu_follow_the_dot_ridge_regression_learns_mapping_and_sign() {
+        let mut imu = RustImuTracker::new();
+        for _ in 0..8 {
+            imu.update(0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, true, 0.1);
+        }
+        imu.begin_motion_calibration();
+
+        // Simulate user following the white dot across 20 points with inverted yaw (-14 deg -> right edge 0.85)
+        for i in 0..20 {
+            let frac = (i as f32 / 19.0) * 2.0 - 1.0; // -1..1
+            let dot_x = 0.5 + frac * 0.4;
+            let dot_y = 0.5 - frac * 0.4;
+            let sim_yaw = -frac * 14.0;
+            let sim_pitch = frac * 12.0;
+            let ax = (sim_pitch.to_radians()).sin();
+            let az = (sim_pitch.to_radians()).cos();
+            imu.update(ax, 0.0, az, 0.0, 0.0, 0.0, sim_yaw, true, 0.1);
+            imu.add_calib_point(dot_x, dot_y);
+        }
+
+        assert!(imu.finish_motion_calibration());
+        assert!(imu.has_motion_model());
+        assert!(imu.calib_r2_score() > 0.75, "r2={}", imu.calib_r2_score());
+        assert_eq!(imu.learned_yaw_sign(), -1.0);
     }
 }

@@ -388,6 +388,13 @@ export class RustBlinkClassifier {
         return ret;
     }
     /**
+     * Arms a flash-cue capture window (e.g., 1.2s) right when the visual cue flashes on screen.
+     * @param {number} seconds
+     */
+    arm_flash_window(seconds) {
+        wasm.rustblinkclassifier_arm_flash_window(this.__wbg_ptr, seconds);
+    }
+    /**
      * @returns {number}
      */
     baseline_samples() {
@@ -471,8 +478,29 @@ export class RustBlinkClassifier {
     /**
      * @returns {number}
      */
+    last_eff_amp() {
+        const ret = wasm.rustblinkclassifier_last_eff_amp(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
     last_probability() {
         const ret = wasm.rustblinkclassifier_last_probability(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    last_tp10_ptp() {
+        const ret = wasm.rustblinkclassifier_last_tp10_ptp(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    last_tp9_ptp() {
+        const ret = wasm.rustblinkclassifier_last_tp9_ptp(this.__wbg_ptr);
         return ret;
     }
     /**
@@ -510,9 +538,8 @@ export class RustBlinkClassifier {
         return ret !== 0;
     }
     /**
-     * Starts or commits a blink calibration capture.
-     * If a prominent blink spike already occurred in the last ~1.0s (user blinked then clicked),
-     * it commits immediately; otherwise it stays armed for 1.5s so the user can blink right after clicking.
+     * Searches the last ~2.5s of EEG windows for the strongest blink peak if the user blinked
+     * before clicking, or arms a 2.5s capture window if they click first and then blink.
      * @returns {boolean}
      */
     record_blink_button() {
@@ -544,6 +571,15 @@ export class RustImuTracker {
         wasm.__wbg_rustimutracker_free(ptr, 0);
     }
     /**
+     * Records a supervised sample pairing the user's current 3D relative orientation
+     * `(rel_yaw, rel_pitch, rel_roll)` with the target white dot screen position `(dot_x, dot_y)` in `0..1`.
+     * @param {number} dot_x
+     * @param {number} dot_y
+     */
+    add_calib_point(dot_x, dot_y) {
+        wasm.rustimutracker_add_calib_point(this.__wbg_ptr, dot_x, dot_y);
+    }
+    /**
      * @returns {number}
      */
     aim_x() {
@@ -557,6 +593,9 @@ export class RustImuTracker {
         const ret = wasm.rustimutracker_aim_y(this.__wbg_ptr);
         return ret;
     }
+    begin_motion_calibration() {
+        wasm.rustimutracker_begin_motion_calibration(this.__wbg_ptr);
+    }
     /**
      * @returns {number}
      */
@@ -565,11 +604,72 @@ export class RustImuTracker {
         return ret;
     }
     /**
+     * @returns {number}
+     */
+    calib_r2_score() {
+        const ret = wasm.rustimutracker_calib_r2_score(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    calib_sample_count() {
+        const ret = wasm.rustimutracker_calib_sample_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    cancel_motion_calibration() {
+        wasm.rustimutracker_cancel_motion_calibration(this.__wbg_ptr);
+    }
+    /**
+     * Fits a 2D Ridge Regression model in Rust mapping `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
+     * Automatically discovers axis signs, sensitivity/range, center offset, and cross-axis head tilt coupling.
+     * @returns {boolean}
+     */
+    finish_motion_calibration() {
+        const ret = wasm.rustimutracker_finish_motion_calibration(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
+    has_motion_model() {
+        const ret = wasm.rustimutracker_has_motion_model(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * @returns {boolean}
      */
     is_tared() {
         const ret = wasm.rustimutracker_is_tared(this.__wbg_ptr);
         return ret !== 0;
+    }
+    /**
+     * @returns {number}
+     */
+    learned_pitch_deg_for_edge() {
+        const ret = wasm.rustimutracker_learned_pitch_deg_for_edge(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    learned_pitch_sign() {
+        const ret = wasm.rustimutracker_learned_pitch_sign(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    learned_yaw_deg_for_edge() {
+        const ret = wasm.rustimutracker_learned_yaw_deg_for_edge(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    learned_yaw_sign() {
+        const ret = wasm.rustimutracker_learned_yaw_sign(this.__wbg_ptr);
+        return ret;
     }
     constructor() {
         const ret = wasm.rustimutracker_new();
@@ -618,6 +718,9 @@ export class RustImuTracker {
     rel_yaw_deg() {
         const ret = wasm.rustimutracker_rel_yaw_deg(this.__wbg_ptr);
         return ret;
+    }
+    reset_motion_model() {
+        wasm.rustimutracker_reset_motion_model(this.__wbg_ptr);
     }
     /**
      * @param {number} sensitivity

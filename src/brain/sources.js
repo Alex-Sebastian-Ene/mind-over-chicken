@@ -187,6 +187,15 @@ export class BridgeSource {
     return false;
   }
 
+  armBlinkFlashWindow(seconds = 1.2) {
+    this.ensureWasm();
+    if (this.rustBlink && typeof this.rustBlink.arm_flash_window === 'function') {
+      this.rustBlink.arm_flash_window(seconds);
+      return true;
+    }
+    return false;
+  }
+
   recordBaselineSample() {
     this.ensureWasm();
     if (this.rustBlink) {
@@ -199,6 +208,56 @@ export class BridgeSource {
     this.ensureWasm();
     if (this.rustBlink) {
       this.rustBlink.reset_model();
+    }
+  }
+
+  beginMotionCalibration() {
+    this.ensureWasm();
+    if (this.ws && this.ws.readyState === 1) {
+      try { this.ws.send(JSON.stringify({ type: 'recenter' })); } catch {}
+    }
+    if (this.rustImu && typeof this.rustImu.begin_motion_calibration === 'function') {
+      this.rustImu.begin_motion_calibration();
+      return true;
+    }
+    return false;
+  }
+
+  addMotionCalibPoint(x, y) {
+    this.ensureWasm();
+    if (this.rustImu && typeof this.rustImu.add_calib_point === 'function') {
+      this.rustImu.add_calib_point(x, y);
+      return this.rustImu.calib_sample_count();
+    }
+    return 0;
+  }
+
+  finishMotionCalibration() {
+    this.ensureWasm();
+    if (this.rustImu && typeof this.rustImu.finish_motion_calibration === 'function') {
+      const ok = this.rustImu.finish_motion_calibration();
+      return {
+        ok,
+        samples: this.rustImu.calib_sample_count(),
+        r2: this.rustImu.calib_r2_score(),
+        yawEdgeDeg: this.rustImu.learned_yaw_deg_for_edge(),
+        pitchEdgeDeg: this.rustImu.learned_pitch_deg_for_edge(),
+        yawSign: this.rustImu.learned_yaw_sign(),
+        pitchSign: this.rustImu.learned_pitch_sign(),
+      };
+    }
+    return { ok: false, samples: 0, r2: 0 };
+  }
+
+  cancelMotionCalibration() {
+    if (this.rustImu && typeof this.rustImu.cancel_motion_calibration === 'function') {
+      this.rustImu.cancel_motion_calibration();
+    }
+  }
+
+  resetMotionModel() {
+    if (this.rustImu && typeof this.rustImu.reset_motion_model === 'function') {
+      this.rustImu.reset_motion_model();
     }
   }
 
@@ -306,9 +365,14 @@ export class BridgeSource {
         thresholdUv: this.rustBlink.learned_threshold_uv(),
         learnedAf7Uv: this.rustBlink.learned_af7_uv(),
         learnedAf8Uv: this.rustBlink.learned_af8_uv(),
+        tp9Uv: this.rustBlink.last_tp9_ptp(),
         af7Uv: this.rustBlink.last_af7_ptp(),
         af8Uv: this.rustBlink.last_af8_ptp(),
+        tp10Uv: this.rustBlink.last_tp10_ptp(),
+        effUv: this.rustBlink.last_eff_amp(),
         corr: this.rustBlink.last_corr(),
+        rustFired: rustBlinkFired,
+        bridgeFired: !!msg.blink,
       };
     }
 
@@ -320,6 +384,16 @@ export class BridgeSource {
     const neutralProgress = this.rustImu
       ? (this.rustImu.is_tared() ? 1 : this.rustImu.calib_progress())
       : (this.aimZero ? 1 : clamp(this.aimSamples.length / Math.max(1, BridgeSource.NEUTRAL_FRAMES)));
+
+    const motionModel = this.rustImu && typeof this.rustImu.has_motion_model === 'function' ? {
+      trained: this.rustImu.has_motion_model(),
+      samples: this.rustImu.calib_sample_count(),
+      r2: this.rustImu.calib_r2_score(),
+      yawEdgeDeg: this.rustImu.learned_yaw_deg_for_edge(),
+      pitchEdgeDeg: this.rustImu.learned_pitch_deg_for_edge(),
+      yawSign: this.rustImu.learned_yaw_sign(),
+      pitchSign: this.rustImu.learned_pitch_sign(),
+    } : null;
 
     return {
       bands: { delta: (b.delta || 0) / sum, theta: (b.theta || 0) / sum, alpha: (b.alpha || 0) / sum, beta: (b.beta || 0) / sum, gamma: (b.gamma || 0) / sum },
@@ -335,6 +409,7 @@ export class BridgeSource {
       relOrientation: this.relAngles ? { ...this.relAngles } : null,
       imuCalib: this.imuCalib,
       neutralProgress,
+      motionModel,
       blinkModel,
       accel: Array.isArray(msg.accel) ? msg.accel : null,
       gyro: Array.isArray(msg.gyro) ? msg.gyro : null,

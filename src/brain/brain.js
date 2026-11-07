@@ -104,6 +104,7 @@ export class Brain {
     if (frame.relOrientation !== undefined) this.relOrientation = frame.relOrientation;
     if (typeof frame.imuCalib === 'number') this.imuCalib = frame.imuCalib;
     if (typeof frame.neutralProgress === 'number') this.neutralProgress = frame.neutralProgress;
+    if (frame.motionModel !== undefined) this.motionModel = frame.motionModel;
     if (frame.blinkModel !== undefined) this.blinkModel = frame.blinkModel;
     if (frame.accel !== undefined) {
       this.accel = frame.accel;

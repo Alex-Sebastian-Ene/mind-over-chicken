@@ -749,3 +749,86 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 }
 .eeg-vitals span, .eeg-imu span { font-size: 10px; color: var(--muted); }
 .eeg-vitals b, .eeg-imu b { font: 600 13px var(--pixel); font-variant-numeric: tabular-nums; color: var(--bone); }
+.eeg-btn-group { display: flex; gap: 5px; flex-wrap: wrap; }
+.eeg-conn-row { display: flex; gap: 5px; flex-wrap: wrap; }
+.eeg-log {
+  margin-top: 6px;
+  max-height: 92px;
+  overflow-y: auto;
+  background: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 5px 7px;
+  font: 10.5px/1.35 ui-monospace, Consolas, monospace;
+  color: var(--calm);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------- Full-screen Guided Calibration Wizard (Dot + Flash) ---------- */
+.calib-wiz {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(9, 10, 18, 0.96);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  padding: 16px 24px;
+  gap: 12px;
+}
+.calib-wiz[hidden] { display: none !important; }
+.calib-wiz-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  max-width: 980px;
+  width: 100%;
+  margin: 0 auto;
+}
+.calib-wiz-step {
+  font: 700 11px var(--pixel);
+  color: var(--focus);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.calib-wiz-top h2 { margin: 2px 0 4px; font: 700 24px var(--pixel); color: var(--bone); }
+.calib-wiz-top p { margin: 0; font-size: 13px; color: var(--muted); }
+.calib-wiz-actions { display: flex; gap: 8px; align-items: center; }
+.calib-wiz-stage {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+}
+.calib-wiz-canvas {
+  width: min(960px, 100%);
+  max-height: 100%;
+  aspect-ratio: 960 / 500;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+}
+.calib-wiz-bottom {
+  max-width: 980px;
+  width: 100%;
+  margin: 0 auto;
+  display: grid;
+  gap: 6px;
+}
+.calib-wiz-stats {
+  font: 600 13px var(--pixel);
+  color: var(--bone);
+}
+.calib-wiz-log {
+  margin: 0;
+  max-height: 76px;
+  overflow-y: auto;
+  background: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font: 11px/1.35 ui-monospace, Consolas, monospace;
+  color: var(--calm);
+  white-space: pre-wrap;
+}
