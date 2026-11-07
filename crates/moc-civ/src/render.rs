@@ -68,10 +68,10 @@ impl World {
         let walk = &self.terrain.walk;
         let data = &mut self.view.data;
         for sy in 0..VH {
-            let py = (cy + sy as i32).clamp(0, ph as i32 - 1) as usize;
+            let py = d.wrap_y(cy + sy as i32) as usize;
             let row = py * pw;
-            let up = if py > 0 { row - pw } else { row };
-            let down = if py + 1 < ph { row + pw } else { row };
+            let up = (py + ph - 1) % ph * pw;
+            let down = (py + 1) % ph * pw;
             for sx in 0..VW {
                 let px = d.wrap_x(cx + sx as i32) as usize;
                 let o = owner[row + px];
@@ -463,7 +463,6 @@ impl World {
 
     /// Owner of the tile at a planet point (NO_F = nobody).
     pub fn owner_at(&self, x: f32, y: f32) -> u8 {
-        let y = (y.floor() as i32).clamp(0, self.d.h as i32 - 1);
-        self.owner[self.d.idx(x.floor() as i32, y)]
+        self.owner[self.d.idx(x.floor() as i32, y.floor() as i32)]
     }
 }

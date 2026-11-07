@@ -1,5 +1,8 @@
 //! Planet maths for a planet of any size.
 //!
+//! The planet is a torus (#111): it wraps east–west *and* north–south, so every distance,
+//! neighbour, field, walk and camera takes the short way round in both axes.
+//!
 //! `moc_planet` fixes the planet at `PW`×`PH` (640×320) in its wrap helpers, `Camera`,
 //! `Framebuffer::blit_planet` and `Field`. The civilisation sandbox runs on a bigger planet
 //! (default 1280×640, #50), so this module carries the same maths with the size as a value:
@@ -61,6 +64,44 @@ impl Dims {
         d
     }
 
+    #[inline]
+    pub fn wrap_y(&self, y: i32) -> i32 {
+        y.rem_euclid(self.h as i32)
+    }
+
+    #[inline]
+    pub fn wrap_yf(&self, y: f32) -> f32 {
+        let h = self.h as f32;
+        let r = y.rem_euclid(h);
+        if r >= h {
+            0.0
+        } else {
+            r
+        }
+    }
+
+    /// Shortest signed north–south distance from `a` to `b`.
+    #[inline]
+    pub fn dy(&self, a: f32, b: f32) -> f32 {
+        let h = self.h as f32;
+        let mut d = (b - a).rem_euclid(h);
+        if d > h / 2.0 {
+            d -= h;
+        }
+        d
+    }
+
+    /// Shortest signed north–south tile difference from `a` to `b`.
+    #[inline]
+    pub fn dyi(&self, a: i32, b: i32) -> i32 {
+        let h = self.h as i32;
+        let mut d = (b - a).rem_euclid(h);
+        if d > h / 2 {
+            d -= h;
+        }
+        d
+    }
+
     /// Shortest signed east–west tile difference from `a` to `b`.
     #[inline]
     pub fn dxi(&self, a: i32, b: i32) -> i32 {
@@ -72,38 +113,39 @@ impl Dims {
         d
     }
 
-    /// Distance the short way round.
+    /// Distance the short way round (both ways: the planet is a torus).
     #[inline]
     pub fn dist(&self, ax: f32, ay: f32, bx: f32, by: f32) -> f32 {
         let dx = self.dx(ax, bx);
-        let dy = by - ay;
+        let dy = self.dy(ay, by);
         (dx * dx + dy * dy).sqrt()
     }
 
     /// Chebyshev tile distance the short way round.
     #[inline]
     pub fn cheb(&self, ax: i32, ay: i32, bx: i32, by: i32) -> i32 {
-        self.dxi(ax, bx).abs().max((by - ay).abs())
+        self.dxi(ax, bx).abs().max(self.dyi(ay, by).abs())
     }
 
-    /// Index of a tile (x wraps; y must be on the planet).
+    /// Index of a tile (both coordinates wrap).
     #[inline]
     pub fn idx(&self, x: i32, y: i32) -> usize {
-        y as usize * self.w + self.wrap_x(x) as usize
+        self.wrap_y(y) as usize * self.w + self.wrap_x(x) as usize
     }
 
+    /// Every row is on the planet: it wraps north–south (#111). Kept so callers read the same.
     #[inline]
-    pub fn in_y(&self, y: i32) -> bool {
-        y >= 0 && y < self.h as i32
+    pub fn in_y(&self, _y: i32) -> bool {
+        true
     }
 }
 
-/// The player's 320×180 window onto the planet: pans freely east–west, stops at the poles.
+/// The player's 320×180 window onto the planet: pans freely both ways round the torus.
 #[derive(Clone, Copy, Debug)]
 pub struct Cam {
     /// Planet x of the view's left edge (wraps).
     pub x: f32,
-    /// Planet y of the view's top edge (clamped).
+    /// Planet y of the view's top edge (wraps).
     pub y: f32,
     pub d: Dims,
 }
@@ -117,26 +159,31 @@ impl Cam {
 
     pub fn centre(&mut self, px: f32, py: f32) {
         self.x = self.d.wrap_xf(px - VW as f32 / 2.0);
-        self.y = (py - VH as f32 / 2.0).clamp(0.0, (self.d.h - VH) as f32);
+        self.y = self.d.wrap_yf(py - VH as f32 / 2.0);
     }
 
     pub fn pan(&mut self, dx: f32, dy: f32) {
         self.x = self.d.wrap_xf(self.x + dx);
-        self.y = (self.y + dy).clamp(0.0, (self.d.h - VH) as f32);
+        self.y = self.d.wrap_yf(self.y + dy);
     }
 
-    /// Planet → screen. Points up to a view-width west of the view come out negative.
+    /// Planet → screen. Points up to a view-width west (or a view-height north) of the view
+    /// come out negative.
     pub fn to_screen(&self, px: f32, py: f32) -> (f32, f32) {
         let mut sx = self.d.dx(self.x, px);
         if sx < -(VW as f32) {
             sx += self.d.w as f32;
         }
-        (sx, py - self.y)
+        let mut sy = self.d.dy(self.y, py);
+        if sy < -(VH as f32) {
+            sy += self.d.h as f32;
+        }
+        (sx, sy)
     }
 
     /// Screen → planet.
     pub fn to_planet(&self, sx: f32, sy: f32) -> (f32, f32) {
-        (self.d.wrap_xf(self.x + sx), (self.y + sy).clamp(0.0, self.d.h as f32 - 1.0))
+        (self.d.wrap_xf(self.x + sx), self.d.wrap_yf(self.y + sy))
     }
 
     pub fn ix(&self) -> i32 {
@@ -148,12 +195,12 @@ impl Cam {
     }
 }
 
-/// Copy the window the camera sees out of a full-planet RGBA layer, across the seam.
+/// Copy the window the camera sees out of a full-planet RGBA layer, across both seams.
 pub fn blit(fb: &mut Framebuffer, layer: &[u8], d: Dims, cam: &Cam) {
     debug_assert_eq!(layer.len(), d.n() * 4);
     let (cx, cy) = (cam.ix(), cam.iy());
     for y in 0..fb.h {
-        let py = (cy + y as i32).clamp(0, d.h as i32 - 1) as usize;
+        let py = d.wrap_y(cy + y as i32) as usize;
         let src_row = &layer[py * d.w * 4..(py + 1) * d.w * 4];
         let dst_row = &mut fb.data[y * fb.w * 4..(y + 1) * fb.w * 4];
         let mut x = 0usize;
@@ -183,7 +230,7 @@ impl LocalField {
     /// The target itself is always the source, even if impassable (a village on a coast).
     pub fn build(d: Dims, tx: i32, ty: i32, r: i32, passable: impl Fn(i32, i32) -> bool) -> LocalField {
         let tx = d.wrap_x(tx);
-        let ty = ty.clamp(0, d.h as i32 - 1);
+        let ty = d.wrap_y(ty);
         let side = (2 * r + 1) as usize;
         let mut dist = vec![UNREACHED; side * side];
         let mut queue = std::collections::VecDeque::with_capacity(side * 4);
@@ -195,8 +242,8 @@ impl LocalField {
             let nd = dist[i] + 1;
             for oy in -1..=1 {
                 let ny = ly + oy;
-                let py = ty - r + ny;
-                if ny < 0 || ny >= side as i32 || py < 0 || py >= d.h as i32 {
+                let py = d.wrap_y(ty - r + ny);
+                if ny < 0 || ny >= side as i32 {
                     continue;
                 }
                 for ox in -1..=1 {
@@ -219,7 +266,7 @@ impl LocalField {
     #[inline]
     fn local(&self, x: i32, y: i32) -> Option<usize> {
         let lx = self.d.dxi(self.tx, x) + self.r;
-        let ly = y - self.ty + self.r;
+        let ly = self.d.dyi(self.ty, y) + self.r;
         if lx < 0 || ly < 0 || lx >= self.side as i32 || ly >= self.side as i32 {
             return None;
         }
@@ -249,7 +296,7 @@ impl LocalField {
             for ox in -1..=1 {
                 let v = self.at(x + ox, y + oy);
                 if v >= 0 && v < best.0 {
-                    best = (v, Some((self.d.wrap_x(x + ox), y + oy)));
+                    best = (v, Some((self.d.wrap_x(x + ox), self.d.wrap_y(y + oy))));
                 }
             }
         }
@@ -287,7 +334,7 @@ impl Paths {
 
     /// The field toward (x, y): cached, or built now if this step's budget allows.
     pub fn get(&mut self, d: Dims, walk: &[bool], x: i32, y: i32) -> Option<&LocalField> {
-        let (x, y) = (d.wrap_x(x), y);
+        let (x, y) = (d.wrap_x(x), d.wrap_y(y));
         let tick = self.tick;
         if let Some(i) = self.fields.iter().position(|(f, _)| f.tx == x && f.ty == y) {
             self.fields[i].1 = tick;
@@ -308,7 +355,7 @@ impl Paths {
     }
 
     pub fn has(&self, d: Dims, x: i32, y: i32) -> bool {
-        let x = d.wrap_x(x);
+        let (x, y) = (d.wrap_x(x), d.wrap_y(y));
         self.fields.iter().any(|(f, _)| f.tx == x && f.ty == y)
     }
 }
@@ -326,13 +373,13 @@ mod tests {
     }
 
     #[test]
-    fn camera_pans_round_and_stops_at_the_poles() {
+    fn camera_pans_round_both_ways() {
         let d = Dims::DEFAULT;
         let mut c = Cam::centred_on(d, 5.0, 0.0);
         assert!(c.x > (d.w - VW) as f32);
-        assert_eq!(c.y, 0.0);
-        c.pan(0.0, 1e6);
-        assert_eq!(c.y, (d.h - VH) as f32);
+        assert!(c.y > (d.h - VH) as f32, "centred on the top row, the view starts below the seam ({})", c.y);
+        c.pan(0.0, d.h as f32 * 3.0 + 10.0);
+        assert!((c.y - d.wrap_yf(d.h as f32 - VH as f32 / 2.0 + 10.0)).abs() < 1e-3, "{}", c.y);
         let c = Cam { x: d.w as f32 - 20.0, y: 40.0, d };
         let (sx, sy) = c.to_screen(10.0, 100.0);
         assert!((sx - 30.0).abs() < 1e-4 && (sy - 60.0).abs() < 1e-4);

@@ -708,12 +708,15 @@ impl Grid {
     /// Call `f` with every agent index in cells overlapping the square of radius `r` round (x, y).
     pub fn near(&self, x: f32, y: f32, r: f32, mut f: impl FnMut(usize)) {
         let (gw, gh) = (self.gw, self.gh);
+        // Wraps both ways (the planet is a torus). The last cell row or column may be partial.
         let x0 = ((x - r).floor() as i32).div_euclid(GRID);
         let x1 = ((x + r).floor() as i32).div_euclid(GRID);
-        let y0 = (((y - r).floor() as i32).max(0) / GRID).clamp(0, gh - 1);
-        let y1 = (((y + r).floor() as i32).max(0) / GRID).clamp(0, gh - 1);
+        let y0 = ((y - r).floor() as i32).div_euclid(GRID);
+        let y1 = ((y + r).floor() as i32).div_euclid(GRID);
         let span = (x1 - x0 + 1).min(gw);
-        for cy in y0..=y1 {
+        let rows = (y1 - y0 + 1).min(gh);
+        for j in 0..rows {
+            let cy = (y0 + j).rem_euclid(gh);
             for k in 0..span {
                 let cx = (x0 + k).rem_euclid(gw);
                 let c = (cy * gw + cx) as usize;
@@ -1059,7 +1062,7 @@ impl World {
 
     /// Found a village and claim the land round it.
     pub fn found_village(&mut self, f: u8, x: i32, y: i32, food: f32, log: bool) -> u16 {
-        let (x, y) = (self.d.wrap_x(x), y.clamp(0, self.d.h as i32 - 1));
+        let (x, y) = (self.d.wrap_x(x), self.d.wrap_y(y));
         // Reuse a slot that has been dead a while (nothing points at it any more), so long
         // runs don't grow the village list without bound.
         let reuse = self.villages.iter().position(|v| !v.alive && v.camp == 0 && self.time - v.died > 30.0);
@@ -1201,7 +1204,7 @@ impl World {
         let life = self.rng.range(75.0, 115.0);
         let timer = self.rng.range(0.0, 0.6);
         let x = self.d.wrap_x(x);
-        let y = y.clamp(0, self.d.h as i32 - 1);
+        let y = self.d.wrap_y(y);
         // Born into a family of the village: mostly its founding clan, sometimes another
         // (marriage); with a share of the goats the village's dead left behind.
         let (clan, family, goats) = match self.villages.get(home as usize) {

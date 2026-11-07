@@ -385,8 +385,10 @@ export class CivSandbox {
       const cx = civ.camX * kx, cy = civ.camY * ky, cw = W * kx, ch = H * ky;
       ctx.strokeStyle = '#ffe066';
       ctx.lineWidth = 0.5;
-      ctx.strokeRect(x0 + cx, y0 + cy, Math.min(cw, mw - cx), ch);
-      if (cx + cw > mw) ctx.strokeRect(x0, y0 + cy, cx + cw - mw, ch);
+      // The camera's window, split where it crosses either seam (the planet is a torus, #111).
+      for (const [rx, rw] of cx + cw > mw ? [[cx, mw - cx], [0, cx + cw - mw]] : [[cx, cw]]) {
+        for (const [ry, rh] of cy + ch > mh ? [[cy, mh - cy], [0, cy + ch - mh]] : [[cy, ch]]) ctx.strokeRect(x0 + rx, y0 + ry, rw, rh);
+      }
     }
     // Founding the civilisations (#98): the words come from Rust.
     if (this.setupActive()) {

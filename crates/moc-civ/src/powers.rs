@@ -26,7 +26,7 @@ fn ignite_round(w: &mut World, x: f32, y: f32, r: i32) {
     for oy in -r..=r {
         for ox in -r..=r {
             let yy = cy + oy;
-            if ox * ox + oy * oy > r * r || yy < 0 || yy >= w.d.h as i32 {
+            if ox * ox + oy * oy > r * r {
                 continue;
             }
             let i = w.d.idx(cx + ox, yy);
@@ -53,7 +53,7 @@ fn strike(w: &mut World, x: f32, y: f32, kill_r: f32, p: f32, scare_r: f32, caus
             let a = &mut w.agents[i];
             let (cx, cy) = tile(a, dm);
             let ox = dm.dx(x, a.x).signum() as i32;
-            let oy = (a.y - y).signum() as i32;
+            let oy = dm.dy(y, a.y).signum() as i32;
             a.state = State::Flee;
             a.timer = 1.4;
             a.engage = None;
@@ -76,7 +76,7 @@ fn villages_within(w: &World, x: f32, y: f32, r: f32) -> Vec<u16> {
 /// fire, and frightens nearby villages back into line (unrest falls).
 pub fn lightning(w: &mut World, x: f32, y: f32) -> i32 {
     let x = w.d.wrap_x(x.floor() as i32) as f32 + 0.5;
-    let y = y.clamp(0.0, w.d.h as f32 - 1.0);
+    let y = w.d.wrap_yf(y);
     let killed = strike(w, x, y, 2.0, 1.0, 9.0, Cause::Smitten);
     ignite_round(w, x, y, 1);
     for v in villages_within(w, x, y, 2.5) {
@@ -115,7 +115,7 @@ pub fn lightning(w: &mut World, x: f32, y: f32) -> i32 {
 /// A camera cast at a planet point. Returns how many it affected (agents or villages).
 pub fn cast(w: &mut World, kind: u32, x: f32, y: f32) -> i32 {
     let x = w.d.wrap_x(x.floor() as i32) as f32 + 0.5;
-    let y = y.clamp(0.0, w.d.h as f32 - 1.0);
+    let y = w.d.wrap_yf(y);
     let n = match kind {
         CAST_FIREBALL => {
             let k = strike(w, x, y, 4.0, 1.0, 11.0, Cause::Smitten);
@@ -135,7 +135,7 @@ pub fn cast(w: &mut World, kind: u32, x: f32, y: f32) -> i32 {
             for oy in -7..=7 {
                 for ox in -7..=7 {
                     let yy = cy + oy;
-                    if ox * ox + oy * oy <= 49 && yy >= 0 && yy < w.d.h as i32 && w.terrain.walkable(cx + ox, yy) {
+                    if ox * ox + oy * oy <= 49 && w.terrain.walkable(cx + ox, yy) {
                         let i = w.d.idx(cx + ox, yy);
                         w.food.set(i, 1.5, w.time);
                     }
@@ -228,7 +228,7 @@ pub fn cast(w: &mut World, kind: u32, x: f32, y: f32) -> i32 {
             for oy in -30..=30 {
                 for ox in -30..=30 {
                     let yy = cy + oy;
-                    if yy >= 0 && yy < w.d.h as i32 && ox * ox + oy * oy <= 900 && w.terrain.walkable(cx + ox, yy) {
+                    if ox * ox + oy * oy <= 900 && w.terrain.walkable(cx + ox, yy) {
                         let i = w.d.idx(cx + ox, yy);
                         let k = w.terrain.kind[i];
                         let lvl = w.food.level(i, k, w.time, 1.0);

@@ -74,13 +74,12 @@ fn a_bigger_planet_takes_more_peoples_and_more_people() {
     assert_eq!(w.d, d);
     assert_eq!(w.setup.slots.len() + w.setup.rivals.len(), 12);
     assert!(w.cap_agents > MAX_AGENTS && w.cap_villages > MAX_VILLAGES, "{} agents, {} villages", w.cap_agents, w.cap_villages);
-    // The camera reaches every part of it: clamped at the poles, wrapping east–west.
+    // The camera reaches every part of it, wrapping both ways (#111).
     let mut c = Cam::centred_on(d, 10.0, 0.0);
-    assert_eq!(c.y, 0.0);
-    c.pan(0.0, 1e7);
-    assert_eq!(c.y, (d.h - moc_planet::VH) as f32);
-    c.pan(d.w as f32 - 5.0, 0.0);
-    assert!(c.x >= 0.0 && c.x < d.w as f32);
-    let (px, _) = c.to_planet(moc_planet::VW as f32 - 1.0, 0.0);
-    assert!(px >= 0.0 && px < d.w as f32);
+    for _ in 0..40 {
+        c.pan(97.0, 61.0);
+        assert!(c.x >= 0.0 && c.x < d.w as f32 && c.y >= 0.0 && c.y < d.h as f32);
+        let (px, py) = c.to_planet(moc_planet::VW as f32 - 1.0, moc_planet::VH as f32 - 1.0);
+        assert!(px >= 0.0 && px < d.w as f32 && py >= 0.0 && py < d.h as f32);
+    }
 }

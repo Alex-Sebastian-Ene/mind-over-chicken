@@ -128,7 +128,7 @@ fn too_close(w: &World, x: i32, y: i32, spacing: f32) -> bool {
 }
 
 fn site_ok(w: &World, f: u8, x: i32, y: i32) -> bool {
-    if y < 3 || y > w.d.h as i32 - 4 || !w.terrain.walkable(x, y) {
+    if !w.terrain.walkable(x, y) {
         return false;
     }
     let o = w.owner[w.d.idx(x, y)];
@@ -143,8 +143,8 @@ pub fn pick_site(w: &mut World, f: u8, ox: i32, oy: i32, fx: i32, fy: i32) -> Op
         let ang = w.rng.range(0.0, TAU);
         let d = w.rng.range(13.0, 30.0);
         let sx = w.d.wrap_x((ox as f32 + ang.cos() * d).round() as i32);
-        let sy = (oy as f32 + ang.sin() * d).round() as i32;
-        if sy < 3 || sy > w.d.h as i32 - 4 || !w.terrain.walkable(sx, sy) {
+        let sy = w.d.wrap_y((oy as f32 + ang.sin() * d).round() as i32);
+        if !w.terrain.walkable(sx, sy) {
             continue;
         }
         if w.terrain.kind_at(sx, sy) == SAND && w.rng.chance(0.6) {
@@ -674,8 +674,8 @@ fn scan_borders(w: &mut World) {
                     border[o as usize * MAX_FACTIONS + e as usize] += 1;
                     border[e as usize * MAX_FACTIONS + o as usize] += 1;
                 }
-                if d.in_y(y + 1) {
-                    let s = w.owner[i + d.w];
+                {
+                    let s = w.owner[d.idx(v.x + ox, y + 1)];
                     if s != NO_F && s != o {
                         border[o as usize * MAX_FACTIONS + s as usize] += 1;
                         border[s as usize * MAX_FACTIONS + o as usize] += 1;
@@ -1093,7 +1093,7 @@ fn plan_marches(w: &mut World) {
 /// Unit vector from village `from` toward (x, y).
 fn heading(w: &World, from: u16, x: i32, y: i32) -> (f32, f32) {
     let Some(v) = w.villages.get(from as usize) else { return (1.0, 0.0) };
-    let (dx, dy) = (w.d.dxi(v.x, x) as f32, (y - v.y) as f32);
+    let (dx, dy) = (w.d.dxi(v.x, x) as f32, w.d.dyi(v.y, y) as f32);
     let len = (dx * dx + dy * dy).sqrt();
     if len < 1e-3 {
         (1.0, 0.0)
@@ -1109,8 +1109,8 @@ pub fn pick_overseas(w: &mut World, f: u8, ox: i32, oy: i32) -> Option<(i32, i32
         let ang = w.rng.range(0.0, TAU);
         let d = w.rng.range(25.0, 90.0);
         let sx = w.d.wrap_x((ox as f32 + ang.cos() * d).round() as i32);
-        let sy = (oy as f32 + ang.sin() * d).round() as i32;
-        if sy < 4 || sy > w.d.h as i32 - 5 || !w.terrain.walkable(sx, sy) || w.terrain.land(sx, sy) == home {
+        let sy = w.d.wrap_y((oy as f32 + ang.sin() * d).round() as i32);
+        if !w.terrain.walkable(sx, sy) || w.terrain.land(sx, sy) == home {
             continue;
         }
         let o = w.owner[w.d.idx(sx, sy)];

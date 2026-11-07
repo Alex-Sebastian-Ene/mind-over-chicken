@@ -207,7 +207,7 @@ impl World {
             }
             let i = rng.below(d.n());
             let (x, y) = ((i % d.w) as i32, (i / d.w) as i32);
-            if y < 12 || y > d.h as i32 - 13 || !matches!(t.kind[i], crate::terrain::GRASS | crate::terrain::FOREST) || !big(t.land_id[i]) {
+            if !matches!(t.kind[i], crate::terrain::GRASS | crate::terrain::FOREST) || !big(t.land_id[i]) {
                 continue;
             }
             cands.push((x, y));
@@ -304,8 +304,6 @@ impl World {
     fn nearest_start(&self, s: (i32, i32), r: i32) -> Option<(i32, i32)> {
         let ok = |x: i32, y: i32| {
             self.terrain.walkable(x, y)
-                && y >= 6
-                && y <= self.d.h as i32 - 7
                 && self.owner[self.d.idx(x, y)] == NO_F
                 && self.villages.iter().filter(|v| v.alive).all(|v| self.d.dist(x as f32, y as f32, v.x as f32, v.y as f32) >= RIVAL_GAP)
         };
@@ -317,7 +315,7 @@ impl World {
                 let a = k as f32 / (4 * ring) as f32 * std::f32::consts::TAU;
                 let (x, y) = (s.0 + (a.cos() * ring as f32) as i32, s.1 + (a.sin() * ring as f32) as i32);
                 if ok(x, y) {
-                    return Some((self.d.wrap_x(x), y));
+                    return Some((self.d.wrap_x(x), self.d.wrap_y(y)));
                 }
             }
         }
@@ -330,17 +328,11 @@ impl World {
 
     /// May a civilisation begin at (x, y)? Err(reason) if not.
     pub fn start_ok(&self, x: i32, y: i32) -> Result<(), String> {
-        if !self.d.in_y(y) {
-            return Err("off the edge of the world".into());
-        }
         match self.terrain.kind_at(x, y) {
             DEEP | WATER => return Err("that is sea".into()),
             MOUNTAIN => return Err("mountains: nobody can live there".into()),
             ICE => return Err("polar ice: nobody can live there".into()),
             _ => {}
-        }
-        if y < 6 || y > self.d.h as i32 - 7 {
-            return Err("too near the pole".into());
         }
         let o = self.owner[self.d.idx(x, y)];
         if o != NO_F {
@@ -356,7 +348,7 @@ impl World {
     }
 
     fn set_spot(&mut self, x: i32, y: i32) {
-        let (x, y) = (self.d.wrap_x(x), y.clamp(0, self.d.h as i32 - 1));
+        let (x, y) = (self.d.wrap_x(x), self.d.wrap_y(y));
         self.setup.spot = (x, y);
         match self.start_ok(x, y) {
             Ok(()) => {

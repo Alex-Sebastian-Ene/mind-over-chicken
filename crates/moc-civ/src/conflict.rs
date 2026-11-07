@@ -294,8 +294,8 @@ pub fn battle_field(w: &World, a: u8, b: u8) -> (i32, i32) {
     let p = w.near_pairs[a as usize * MAX_FACTIONS + b as usize];
     if p.1 != NO_V && p.2 != NO_V {
         let (va, vb) = (&w.villages[p.1 as usize], &w.villages[p.2 as usize]);
-        let dx = w.d.dxi(va.x, vb.x);
-        (w.d.wrap_x(va.x + dx / 2), (va.y + vb.y) / 2)
+        let (dx, dy) = (w.d.dxi(va.x, vb.x), w.d.dyi(va.y, vb.y));
+        (w.d.wrap_x(va.x + dx / 2), w.d.wrap_y(va.y + dy / 2))
     } else {
         w.factions[a as usize].start
     }
@@ -967,8 +967,8 @@ pub fn strife_marches(w: &mut World) {
             let (tx, ty) = (w.villages[tv as usize].x, w.villages[tv as usize].y);
             let (ox, oy) = own.map(|(_, o)| (w.villages[o as usize].x, w.villages[o as usize].y)).unwrap_or((sx, sy));
             let field = level == BATTLE;
-            let (x, y) = if field { (w.d.wrap_x(ox + w.d.dxi(ox, tx) / 2), (oy + ty) / 2) } else { (tx, ty) };
-            let (ddx, ddy) = (w.d.dxi(ox, tx) as f32, (ty - oy) as f32);
+            let (x, y) = if field { (w.d.wrap_x(ox + w.d.dxi(ox, tx) / 2), w.d.wrap_y(oy + w.d.dyi(oy, ty) / 2)) } else { (tx, ty) };
+            let (ddx, ddy) = (w.d.dxi(ox, tx) as f32, w.d.dyi(oy, ty) as f32);
             let len = (ddx * ddx + ddy * ddy).sqrt().max(1e-3);
             w.marches[civ as usize].push(March {
                 enemy: civ,

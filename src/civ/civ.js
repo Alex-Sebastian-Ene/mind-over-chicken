@@ -134,14 +134,18 @@ export class Civ {
   centre(x, y) { this.ex.civ_cam_centre(this.w, x, y); }
   get camX() { return this.ex.civ_cam_x(this.w); }
   get camY() { return this.ex.civ_cam_y(this.w); }
+  // The planet wraps both ways (#111), as in Rust's `Cam`.
   toScreen(x, y) {
     let sx = (((x - this.camX) % this.pw) + this.pw) % this.pw;
     if (sx > this.pw / 2) sx -= this.pw;
     if (sx < -320) sx += this.pw;
-    return { x: sx, y: y - this.camY };
+    let sy = (((y - this.camY) % this.ph) + this.ph) % this.ph;
+    if (sy > this.ph / 2) sy -= this.ph;
+    if (sy < -180) sy += this.ph;
+    return { x: sx, y: sy };
   }
   toPlanet(sx, sy) {
-    return { x: ((this.camX + sx) % this.pw + this.pw) % this.pw, y: Math.min(this.ph - 1, Math.max(0, this.camY + sy)) };
+    return { x: ((this.camX + sx) % this.pw + this.pw) % this.pw, y: ((this.camY + sy) % this.ph + this.ph) % this.ph };
   }
 
   // ---- the god's hand ----
