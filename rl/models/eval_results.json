@@ -1,0 +1,77 @@
+[
+ {
+  "policy": "random",
+  "episodes": 60,
+  "win_rate": 0.0,
+  "lose_rate": 0.0,
+  "mean_return": -5.191959860696425,
+  "mean_win_seconds": null,
+  "mean_alive_end": 30.0,
+  "mean_deaths": 0.0,
+  "mean_holds": 0.0,
+  "mean_bolts": 153.28333333333333,
+  "mean_smitten": 84.3,
+  "action_share": {
+   "wait": 0.20194444444444445,
+   "strike_fire": 0.196875,
+   "strike_mammoth": 0.20302083333333334,
+   "calm": 0.19690972222222222,
+   "strike_random": 0.20125
+  },
+  "calm_share_during_hold": 0.19820615614595366,
+  "calm_share_outside_hold": 0.19555492437690833,
+  "fire_strike_share_when_out": 0.21447721179624665,
+  "fire_strike_share_when_lit": 0.1966440355999578,
+  "random_strike_share": 0.20125
+ },
+ {
+  "policy": "scripted",
+  "episodes": 60,
+  "win_rate": 1.0,
+  "lose_rate": 0.0,
+  "mean_return": 17.599833333333347,
+  "mean_win_seconds": 36.415749999999996,
+  "mean_alive_end": 15.9,
+  "mean_deaths": 0.2,
+  "mean_holds": 2.033333333333333,
+  "mean_bolts": 3.1666666666666665,
+  "mean_smitten": 0.11666666666666667,
+  "action_share": {
+   "wait": 0.6320420523368758,
+   "strike_fire": 0.006856359273225917,
+   "strike_mammoth": 0.014855445091989487,
+   "calm": 0.3462461432979088,
+   "strike_random": 0.0
+  },
+  "calm_share_during_hold": 1.0,
+  "calm_share_outside_hold": 0.0,
+  "fire_strike_share_when_out": 1.0,
+  "fire_strike_share_when_lit": 0.0,
+  "random_strike_share": 0.0
+ },
+ {
+  "policy": "ppo",
+  "episodes": 60,
+  "win_rate": 0.9666666666666667,
+  "lose_rate": 0.0,
+  "mean_return": 17.554858379613165,
+  "mean_win_seconds": 39.117724137931035,
+  "mean_alive_end": 19.433333333333334,
+  "mean_deaths": 0.13333333333333333,
+  "mean_holds": 1.9333333333333333,
+  "mean_bolts": 8.333333333333334,
+  "mean_smitten": 0.16666666666666666,
+  "action_share": {
+   "wait": 0.32776451869530626,
+   "strike_fire": 0.0065632458233890216,
+   "strike_mammoth": 0.04335719968178202,
+   "calm": 0.6223150357995226,
+   "strike_random": 0.0
+  },
+  "calm_share_during_hold": 1.0,
+  "calm_share_outside_hold": 0.2725531507374066,
+  "fire_strike_share_when_out": 0.23487544483985764,
+  "fire_strike_share_when_lit": 0.0,
+  "random_strike_share": 0.0
+ }
+]
