@@ -1,0 +1,6 @@
+gymnasium>=1.0
+stable-baselines3>=2.3
+numpy>=1.26
+# CPU-only PyTorch keeps the install small:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.2
