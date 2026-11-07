@@ -225,8 +225,10 @@ impl Engine {
         );
     }
 
+    /// Render the uploaded canvas with this frame's lights, then clear them so the next
+    /// frame starts fresh (lights are added per frame with `add_light`).
     pub fn render_uploaded_canvas(
-        &self,
+        &mut self,
         night: f32,
         flash: f32,
         fade: f32,
@@ -245,6 +247,7 @@ impl Engine {
             canvas_w,
             canvas_h,
         );
+        self.lights.clear();
     }
 
     pub fn is_walkable(&self, x: i32, y: i32) -> bool {
