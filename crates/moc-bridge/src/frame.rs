@@ -125,7 +125,7 @@ impl SyntheticGenerator {
             t: (self.time * 10.0).round() / 10.0,
             bands,
             blink,
-            hr: Some((self.hr * 10.0).round() / 10.0),
+            hr: None,
             accel: Some([ax, ay, az]),
             gyro: Some([0.0, 0.0, 0.0]),
             orientation: Some(HeadOrientation {

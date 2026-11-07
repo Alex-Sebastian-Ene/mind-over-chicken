@@ -204,13 +204,74 @@ export class SpaceAge {
     ];
   }
 
-  lights() { return []; }
+  lights() {
+    const L = [];
+    const pad = this.pad;
+    if (pad) {
+      if (this.phase === 'launch') {
+        L.push({ x: pad.x, y: pad.y - this.rocketY, r: 60 });
+      } else if (this.phase === 'countdown' && this.count < 3) {
+        L.push({ x: pad.x, y: pad.y, r: 35 + Math.sin(this.t * 20) * 5 });
+      } else {
+        L.push({ x: pad.x, y: pad.y, r: 24 });
+      }
+    }
+    return L;
+  }
+
+  draw3d(engine, _dt) {
+    if (this.phase === 'voyage') return;
+    const pad = this.pad;
+    if (!pad) return;
+
+    // 3D Point Lights: pad beacons and launch ignition
+    if (this.phase === 'launch') {
+      engine.add_3d_light(pad.x, 10.0 + this.rocketY, pad.y, 65.0, 3.0);
+    } else if (this.phase === 'countdown' && this.count < 3) {
+      engine.add_3d_light(pad.x, 8.0, pad.y, 40.0 + Math.sin(this.t * 20.0) * 5.0, 2.0);
+    } else {
+      engine.add_3d_light(pad.x, 8.0, pad.y, 24.0, 1.2);
+    }
+
+    // Billboards
+    // Rocket (SPRITE_ROCKET = 12)
+    engine.add_billboard(12, pad.x, pad.y, 1, Math.floor(this.progress * 100), this.phase === 'launch' ? 1 : 0);
+
+    // Engineers (SPRITE_VILLAGER = 0)
+    for (const e of this.engineers) {
+      engine.add_billboard(0, e.x, e.y, e.facing || 1, e.frame || 0, 0);
+    }
+
+    // Citizens (SPRITE_VILLAGER = 0)
+    for (const c of this.citizens) {
+      if (c.state === 'aboard') continue;
+      const pose = c.state === 'cheer' ? 1 : c.state === 'flee' ? 2 : 0;
+      engine.add_billboard(0, c.x, c.y, c.facing || 1, c.frame || 0, pose);
+    }
+
+    // Chicken (SPRITE_CHICKEN = 3)
+    if (this.chicken.state !== 'aboard') {
+      engine.add_billboard(3, this.chicken.x, this.chicken.y, this.chicken.facing || 1, this.chicken.frame || 0, 1);
+    }
+
+    // Aim reticle (SPRITE_RETICLE = 13)
+    const aim = this.G.brain?.aim;
+    if (aim) {
+      engine.add_billboard(13, aim.x * (W - 1), aim.y * (H - 1), 1, 0, 0);
+    }
+  }
 
   draw(ctx) {
     if (this.phase === 'voyage') return this.drawVoyage(ctx);
     const G = this.G;
-    ctx.drawImage(this.layer, 0, 0);
-    G.world.drawWater(ctx, this.t);
+    const base = G.render3d ? (G.world?.layers3d?.space || this.layer) : this.layer;
+    ctx.drawImage(base, 0, 0);
+    if (!G.render3d) G.world.drawWater(ctx, this.t);
+    // In 3D, draw3d stands rocket, pad, engineers, citizens and chicken up as billboards
+    if (G.render3d) {
+      this.particles.draw(ctx);
+      return;
+    }
     const pad = this.pad;
     const actors = [];
     actors.push({ y: pad.y - 0.5, d: () => drawGantry(ctx, pad.x + 5, pad.y, 24) });

@@ -4,7 +4,9 @@ pub const T_DEEP: u8 = 0;
 pub const T_SHALLOW: u8 = 1;
 pub const T_SAND: u8 = 2;
 pub const T_GRASS: u8 = 3;
+#[allow(dead_code)]
 pub const T_FOREST: u8 = 4;
+#[allow(dead_code)]
 pub const T_HILL: u8 = 5;
 pub const T_MOUNTAIN: u8 = 6;
 pub const T_SNOW: u8 = 7;
@@ -22,10 +24,8 @@ pub struct Point {
 pub struct Sites {
     pub village: Point,
     pub pad: Point,
-    pub ridge: Point,
     pub cave: Point,
     pub cave_mouth: Point,
-    pub fire: Point,
     pub factory: Point,
     pub exchange: Point,
     pub hangar: Point,
@@ -51,194 +51,49 @@ impl Mulberry32 {
     }
 }
 
-pub struct ValueNoise {
-    grid: [f32; 33 * 33],
-}
-
-impl ValueNoise {
-    pub fn new(rng: &mut Mulberry32) -> Self {
-        let mut grid = [0.0f32; 33 * 33];
-        for val in grid.iter_mut() {
-            *val = rng.next();
-        }
-        Self { grid }
-    }
-
-    #[inline]
-    fn at(&self, x: i32, y: i32) -> f32 {
-        let gx = ((x % 33) + 33) % 33;
-        let gy = ((y % 33) + 33) % 33;
-        self.grid[(gy * 33 + gx) as usize]
-    }
-
-    #[inline]
-    fn sm(t: f32) -> f32 {
-        t * t * (3.0 - 2.0 * t)
-    }
-
-    pub fn value(&self, x: f32, y: f32) -> f32 {
-        let xi = x.floor() as i32;
-        let yi = y.floor() as i32;
-        let xf = Self::sm(x - xi as f32);
-        let yf = Self::sm(y - yi as f32);
-
-        let v00 = self.at(xi, yi);
-        let v10 = self.at(xi + 1, yi);
-        let v01 = self.at(xi, yi + 1);
-        let v11 = self.at(xi + 1, yi + 1);
-
-        let top = v00 + (v10 - v00) * xf;
-        let bot = v01 + (v11 - v01) * xf;
-        top + (bot - top) * yf
-    }
-
-    pub fn noise(&self, x: f32, y: f32, octaves: usize) -> f32 {
-        let mut sum = 0.0;
-        let mut amp = 0.5;
-        let mut freq = 1.0;
-        let mut norm = 0.0;
-        for _ in 0..octaves {
-            sum += amp * self.value(x * freq, y * freq);
-            norm += amp;
-            amp *= 0.5;
-            freq *= 2.0;
-        }
-        sum / norm
-    }
-}
-
 pub struct Terrain {
     pub seed: u32,
     pub h: Vec<f32>,
     pub base_type: Vec<u8>,
     pub tile_type: Vec<u8>,
+    /// The base colour layer from moc-terrain (no per-tile random colour).
+    pub base_pixels: Vec<u8>,
     pub pixels: Vec<u8>, // RGBA 320x180x4
     pub sites: Sites,
 }
 
 impl Terrain {
+    /// The home world for a seed, from `moc-terrain` (#109). The old single-island generator
+    /// is gone: the engine shows the same world the JS `World` (and the eras) use.
     pub fn new(seed: u32) -> Self {
-        let mut t = Self {
-            seed,
-            h: vec![0.0; W * H],
-            base_type: vec![0; W * H],
-            tile_type: vec![0; W * H],
-            pixels: vec![0; W * H * 4],
-            sites: Sites::default(),
-        };
-        t.generate();
-        t.bake_era(0); // Stone Age default
-        t
+        Self::from_map(&moc_terrain::TerrainMap::generate_home_world(seed))
     }
 
-    pub fn generate(&mut self) {
-        let mut rng = Mulberry32::new(self.seed);
-        let noise = ValueNoise::new(&mut rng);
-        let mut moist_rng = Mulberry32::new(self.seed ^ 0x9e3779b9);
-        let moist = ValueNoise::new(&mut moist_rng);
-
-        let cx = 160.0f32;
-        let cy = 92.0f32;
-        let v = Point { x: 150, y: 102 };
-        let p = Point { x: 262, y: 104 };
-        self.sites.village = v;
-        self.sites.pad = p;
-
-        let ridge_a = Point {
-            x: (cx - 62.0 + rng.next() * 10.0) as i32,
-            y: (cy - 34.0 + rng.next() * 8.0) as i32,
+    /// The engine's copy of a generated home world (it must be the engine's W×H).
+    pub fn from_map(map: &moc_terrain::TerrainMap) -> Self {
+        assert_eq!((map.width, map.height), (W, H), "the engine draws a {W}x{H} world");
+        let p = |q: (usize, usize)| Point { x: q.0 as i32, y: q.1 as i32 };
+        let s = map.campaign_sites.clone().unwrap_or_default();
+        let sites = Sites {
+            village: p(s.village),
+            pad: p(s.pad),
+            cave: p(s.cave),
+            cave_mouth: p(s.cave_mouth),
+            factory: p(s.factory),
+            exchange: p(s.exchange),
+            hangar: p(s.hangar),
         };
-        let ridge_b = Point {
-            x: (cx + 34.0 + rng.next() * 14.0) as i32,
-            y: (cy - 46.0 + rng.next() * 6.0) as i32,
+        let mut t = Self {
+            seed: map.seed,
+            h: map.heights.clone(),
+            base_type: map.types.clone(),
+            tile_type: map.types.clone(),
+            base_pixels: map.rgba.clone(),
+            pixels: map.rgba.clone(),
+            sites,
         };
-        self.sites.ridge = ridge_a;
-
-        for y in 0..H {
-            for x in 0..W {
-                let rx = (x as f32 - cx) / 138.0;
-                let ry = (y as f32 - cy) / 80.0;
-                let r2 = rx * rx + ry * ry;
-                let mut h = (1.0 - r2) * 0.56 + (noise.noise(x as f32 / 26.0, y as f32 / 26.0, 4) - 0.5) * 0.56 + 0.12;
-
-                let dx_a = x as f32 - ridge_a.x as f32;
-                let dy_a = y as f32 - ridge_a.y as f32;
-                h += 0.3 * (-((dx_a * dx_a + dy_a * dy_a) / (2.0 * 17.0 * 17.0))).exp();
-
-                let dx_b = x as f32 - ridge_b.x as f32;
-                let dy_b = y as f32 - ridge_b.y as f32;
-                h += 0.2 * (-((dx_b * dx_b + dy_b * dy_b) / (2.0 * 12.0 * 12.0))).exp();
-
-                let dv = (((x as i32 - v.x).pow(2) + (y as i32 - v.y).pow(2)) as f32).sqrt();
-                if dv < 30.0 {
-                    let factor = ((dv - 18.0) / 12.0).clamp(0.0, 1.0);
-                    h = 0.5 + (h - 0.5) * factor;
-                }
-
-                let dp = (((x as i32 - p.x).pow(2) + (y as i32 - p.y).pow(2)) as f32).sqrt();
-                if dp < 18.0 {
-                    let factor = ((dp - 10.0) / 8.0).clamp(0.0, 1.0);
-                    h = 0.47 + (h - 0.47) * factor;
-                }
-
-                let p_vx = (p.x - v.x) as f32;
-                let p_vy = (p.y - v.y) as f32;
-                let len_sq = p_vx * p_vx + p_vy * p_vy;
-                let t_line = (((x as f32 - v.x as f32) * p_vx + (y as f32 - v.y as f32) * p_vy) / len_sq).clamp(0.0, 1.0);
-                let lx = v.x as f32 + p_vx * t_line;
-                let ly = v.y as f32 + p_vy * t_line + (t_line * 9.0 + self.seed as f32).sin() * 5.0;
-                let dl = ((x as f32 - lx).powi(2) + (y as f32 - ly).powi(2)).sqrt();
-                if dl < 4.0 {
-                    h = h.clamp(0.42, 0.66);
-                }
-
-                let idx = y * W + x;
-                self.h[idx] = h;
-
-                let ty = if h < 0.24 {
-                    T_DEEP
-                } else if h < 0.33 {
-                    T_SHALLOW
-                } else if h < 0.37 {
-                    T_SAND
-                } else if h < 0.66 {
-                    if moist.noise(x as f32 / 18.0, y as f32 / 18.0, 4) > 0.56 && dv > 26.0 && dp > 16.0 && dl > 4.0 {
-                        T_FOREST
-                    } else {
-                        T_GRASS
-                    }
-                } else if h < 0.76 {
-                    T_HILL
-                } else if h < 0.90 {
-                    T_MOUNTAIN
-                } else {
-                    T_SNOW
-                };
-                self.tile_type[idx] = ty;
-            }
-        }
-        self.base_type = self.tile_type.clone();
-
-        // Cave location
-        self.sites.cave = Point { x: v.x - 20, y: v.y - 20 };
-        for i in 0..=200 {
-            let t = i as f32 / 200.0;
-            let cx = (v.x as f32 + (ridge_a.x as f32 - v.x as f32) * t).round() as i32;
-            let cy = (v.y as f32 + (ridge_a.y as f32 - v.y as f32) * t).round() as i32;
-            if self.get(cx, cy) >= T_HILL {
-                let back = (i as i32 - 3).max(0) as f32 / 200.0;
-                self.sites.cave = Point {
-                    x: (v.x as f32 + (ridge_a.x as f32 - v.x as f32) * back).round() as i32,
-                    y: (v.y as f32 + (ridge_a.y as f32 - v.y as f32) * back).round() as i32,
-                };
-                self.sites.cave_mouth = Point { x: cx, y: cy };
-                break;
-            }
-        }
-        self.sites.fire = v;
-        self.sites.factory = self.nearest_walkable(v.x - 46, v.y + 26, 60);
-        self.sites.exchange = self.nearest_walkable(v.x + 18, v.y - 10, 60);
-        self.sites.hangar = self.nearest_walkable(p.x - 26, p.y + 10, 60);
+        t.bake_era(0);
+        t
     }
 
     #[inline]
@@ -254,22 +109,6 @@ impl Terrain {
     pub fn walkable(&self, x: i32, y: i32) -> bool {
         let t = self.get(x, y);
         t >= T_SAND && t != T_MOUNTAIN && t != T_SNOW
-    }
-
-    pub fn nearest_walkable(&self, x: i32, y: i32, max_r: i32) -> Point {
-        for r in 0..=max_r {
-            for dy in -r..=r {
-                for dx in -r..=r {
-                    if dx.abs().max(dy.abs()) != r {
-                        continue;
-                    }
-                    if self.walkable(x + dx, y + dy) && self.get(x + dx, y + dy) != T_FOREST {
-                        return Point { x: x + dx, y: y + dy };
-                    }
-                }
-            }
-        }
-        Point { x, y }
     }
 
     pub fn bake_era(&mut self, era: u8) {
@@ -316,77 +155,8 @@ impl Terrain {
             }
         }
 
-        // Rasterize terrain to RGBA pixel buffer
-        let mut color_rng = Mulberry32::new(self.seed + 3);
-        for y in 0..H {
-            for x in 0..W {
-                let i = y * W + x;
-                let t = self.tile_type[i];
-                let (mut r, mut g, mut b) = match t {
-                    T_DEEP => (22, 44, 92),
-                    T_SHALLOW => (40, 86, 146),
-                    T_SAND => (214, 196, 136),
-                    T_GRASS => {
-                        let pick = (color_rng.next() * 3.0) as i32;
-                        if pick == 0 { (96, 156, 62) } else if pick == 1 { (88, 147, 57) } else { (104, 163, 68) }
-                    }
-                    T_FOREST => {
-                        let pick = (color_rng.next() * 3.0) as i32;
-                        if pick == 0 { (46, 98, 46) } else if pick == 1 { (58, 116, 52) } else { (38, 84, 40) }
-                    }
-                    T_HILL => (124, 132, 74),
-                    T_MOUNTAIN => (118, 110, 100),
-                    T_SNOW => (232, 232, 228),
-                    T_FARM => if (y >> 1) % 2 == 0 { (196, 170, 74) } else { (120, 158, 60) },
-                    T_ROAD => (150, 128, 98),
-                    T_PAVED => (146, 146, 152),
-                    _ => (0, 0, 0),
-                };
-
-                // Relief shading
-                if t >= T_SAND && t != T_ROAD && t != T_PAVED && t != T_FARM {
-                    let h_left = if x > 0 { self.h[i - 1] } else { self.h[i] };
-                    let h_up = if y > 0 { self.h[i - W] } else { self.h[i] };
-                    let dx = self.h[i] - h_left;
-                    let dy = self.h[i] - h_up;
-                    let shade = (1.0 + (dx + dy) * 7.0).clamp(0.78, 1.20);
-                    r = ((r as f32) * shade).min(255.0) as u8;
-                    g = ((g as f32) * shade).min(255.0) as u8;
-                    b = ((b as f32) * shade).min(255.0) as u8;
-                }
-
-                // Foam on shallow water
-                if t == T_SHALLOW && (
-                    self.get(x as i32 + 1, y as i32) == T_SAND
-                    || self.get(x as i32 - 1, y as i32) == T_SAND
-                    || self.get(x as i32, y as i32 + 1) == T_SAND
-                    || self.get(x as i32, y as i32 - 1) == T_SAND
-                ) {
-                    r = 120;
-                    g = 170;
-                    b = 205;
-                }
-
-                let p_idx = i * 4;
-                self.pixels[p_idx] = r;
-                self.pixels[p_idx + 1] = g;
-                self.pixels[p_idx + 2] = b;
-                self.pixels[p_idx + 3] = 255;
-            }
-        }
-
-        // Tree crowns on forest pixels
-        let mut trng = Mulberry32::new(self.seed + 5);
-        for y in (1..H).step_by(2) {
-            let start_x = ((y >> 1) % 2) as usize;
-            for x in (start_x..W).step_by(2) {
-                if self.tile_type[y * W + x] == T_FOREST && trng.next() <= 0.7 {
-                    put_pixel(&mut self.pixels, x as i32, y as i32, 0x2c, 0x5a, 0x2a, 255);
-                    let col = if trng.next() > 0.5 { (0x6a, 0xa8, 0x4f) } else { (0x4f, 0x8d, 0x3e) };
-                    put_pixel(&mut self.pixels, x as i32, (y - 1) as i32, col.0, col.1, col.2, 255);
-                }
-            }
-        }
+        // The base colour layer, with the era's land use painted over it.
+        self.pixels = paint_land_use(&self.base_pixels, &self.tile_type, &self.base_type, W, "temperate");
 
         // Cave mouth
         if era <= 1 {
@@ -440,6 +210,37 @@ impl Terrain {
             self.tile_type[(y as usize) * W + (x as usize)] = t;
         }
     }
+}
+
+/// Farm, road and paved colours per planet biome (the JS `BIOMES` palettes).
+fn land_use_colours(biome: &str) -> [[u8; 3]; 6] {
+    // farm A, farm B, road A, road B, paved A, paved B
+    match biome {
+        "alien" => [[230, 140, 210], [150, 100, 190], [150, 128, 98], [142, 121, 92], [146, 146, 152], [136, 136, 144]],
+        _ => [[196, 170, 74], [120, 158, 60], [150, 128, 98], [142, 121, 92], [146, 146, 152], [136, 136, 144]],
+    }
+}
+
+/// The base colour layer with land use painted on: tiles whose type differs from the base type
+/// (farms in stripes, roads, paving) get their colours, everything else keeps the terrain's.
+pub fn paint_land_use(base: &[u8], types: &[u8], base_types: &[u8], w: usize, biome: &str) -> Vec<u8> {
+    let c = land_use_colours(biome);
+    let mut out = base.to_vec();
+    for (i, (&t, &b)) in types.iter().zip(base_types.iter()).enumerate() {
+        if t == b {
+            continue;
+        }
+        let (x, y) = (i % w, i / w);
+        let k = match t {
+            T_FARM => (y >> 1) % 2,
+            T_ROAD => 2 + (x + y) % 2,
+            T_PAVED => 4 + (x + y) % 2,
+            _ => continue,
+        };
+        out[i * 4..i * 4 + 3].copy_from_slice(&c[k]);
+        out[i * 4 + 3] = 255;
+    }
+    out
 }
 
 #[cfg(test)]

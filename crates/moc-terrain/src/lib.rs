@@ -51,7 +51,7 @@ use palette::{Bands, BiomePalette};
 
 pub use grid::Dims;
 pub use rng::Rng;
-pub use sites::{Continent, Site};
+pub use sites::{CampaignSites, Continent, GameContinent, Site};
 
 /// Pin continent 0 (the "home" continent) to a place.
 #[derive(Clone, Debug)]
@@ -126,6 +126,8 @@ pub struct TerrainParams {
     pub bands: Bands,
     /// Smallest landmass, as a share of the map area (Alex: 0.5%). Smaller ones are removed.
     pub min_island: f32,
+    /// Lay out the main game's campaign (village, pad, cave, harbours) on this map.
+    pub campaign: bool,
 }
 
 impl TerrainParams {
@@ -157,6 +159,7 @@ impl TerrainParams {
             max_sites: 32,
             bands: Bands::default(),
             min_island: 0.005,
+            campaign: false,
         }
     }
 
@@ -164,21 +167,30 @@ impl TerrainParams {
     /// ones across the sea. Gameplay paths don't cross the seams, so a band of ocean runs
     /// along them (the terrain itself is still a seamless torus).
     pub fn home_world(seed: u32) -> Self {
-        let (w, h) = (320, 180);
+        Self::home_world_sized(seed, 320, 180)
+    }
+
+    /// The home world at any size (#129: 640×360, at least five continents; 320×180 until the
+    /// game switches). Tile distances scale with the map.
+    pub fn home_world_sized(seed: u32, w: usize, h: usize) -> Self {
+        let k = ((w * h) as f32 / (320.0 * 180.0)).sqrt();
         let mut r = Rng::stream(seed, 0x40E);
         let mut p = TerrainParams::base(w, h, seed);
-        p.continents = 3 + (r.f32() < 0.35) as usize;
+        p.continents = 5 + (r.f32() < 0.4) as usize;
         p.land_fraction = 0.40;
-        p.size_spread = 0.25;
-        p.anchor = Some(Anchor { x: w as f32 * r.range(0.36, 0.5), y: h as f32 * r.range(0.47, 0.55), share: 2.2, bounds: Some([14.0, 16.0, w as f32 - 14.0, h as f32 - 16.0]) });
-        p.gap = 9.0;
-        p.seam_margin = 9.0;
-        p.islands = 0.35;
-        p.plates = 9;
+        p.size_spread = 0.35;
+        let m = 14.0 * k;
+        p.anchor = Some(Anchor { x: w as f32 * r.range(0.36, 0.5), y: h as f32 * r.range(0.45, 0.55), share: 2.0, bounds: Some([m, m * 1.1, w as f32 - m, h as f32 - m * 1.1]) });
+        p.gap = 8.0 * k;
+        p.seam_margin = 8.0 * k;
+        p.islands = 0.4;
+        p.plates = (9.0 * k * k.sqrt()).round() as usize;
         p.climate = ClimateParams { warm: 25.0, cold: -5.0, bands: 1.0, moisture: 1.0, lapse: 30.0 };
-        p.max_sites = 24;
-        // The heavy stages run on 160×90; the detail step brings it to 320×180 (< 50 ms).
+        p.max_sites = (24.0 * k * k) as usize;
+        // The heavy stages run on a grid half the size; the detail step brings it to full size
+        // (< 50 ms for 320×180).
         p.sim_cell = 2;
+        p.campaign = true;
         p
     }
 
@@ -427,6 +439,10 @@ pub struct TerrainMap {
     pub continents: Vec<Continent>,
     /// Settlement sites, best first.
     pub sites: Vec<Site>,
+    /// The main game's places, when the params asked for a campaign (#112's name).
+    pub campaign_sites: Option<CampaignSites>,
+    /// The landmasses the campaign uses: home first, then those boats can reach.
+    pub game_continents: Vec<GameContinent>,
     /// The DLA mountain clusters (for inspection and tests).
     pub ranges: Vec<dla::ClusterStats>,
     /// River network on the simulation grid: (cell, receiver) and its size, for tests.
@@ -451,8 +467,141 @@ pub struct SimInfo {
 }
 
 impl TerrainMap {
+    /// The main game's home world, 320×180 (#112's entry point).
+    pub fn generate_home_world(seed: u32) -> Self {
+        generate(&TerrainParams::home_world(seed))
+    }
+
+    /// A galaxy planet's surface, 640×360, for a planet biome (temperate, desert, ice, jungle,
+    /// alien).
+    pub fn generate_planet_surface(seed: u32, biome: &str) -> Self {
+        generate(&TerrainParams::galaxy_surface(seed, biome))
+    }
+
+    /// The civ sandbox planet (#112's entry point; #101 sizes at 2560×1280 and up).
+    pub fn generate_civ_planet(seed: u32, width: usize, height: usize) -> Self {
+        generate(&TerrainParams::civ_planet(seed, width, height))
+    }
+
+    /// #112's general entry point: `continental_ratio` (0..1) sets how much of the map is land.
+    pub fn generate(seed: u32, width: usize, height: usize, num_plates: usize, continental_ratio: f32, palette: BiomePalette) -> Self {
+        let mut p = TerrainParams::civ_planet(seed, width, height);
+        p.plates = num_plates;
+        p.continent_area = 0.0;
+        p.land_fraction = (0.2 + 0.3 * continental_ratio).clamp(0.2, 0.5);
+        p.palette = palette;
+        generate(&p)
+    }
+
+    /// The campaign sites as JSON, with the JS `World.sites` names.
+    pub fn sites_json(&self) -> String {
+        let Some(s) = &self.campaign_sites else { return "{}".into() };
+        let pt = |p: (usize, usize)| format!("{{\"x\":{},\"y\":{}}}", p.0, p.1);
+        format!(
+            "{{\"village\":{},\"pad\":{},\"ridge\":{},\"cave\":{},\"caveMouth\":{},\"fire\":{},\"factory\":{},\"exchange\":{},\"picket\":{},\"hangar\":{},\"crowd\":{},\"harbour\":{}}}",
+            pt(s.village), pt(s.pad), pt(s.ridge), pt(s.cave), pt(s.cave_mouth), pt(s.fire), pt(s.factory), pt(s.exchange), pt(s.picket), pt(s.hangar), pt(s.crowd), pt(s.harbour)
+        )
+    }
+
+    /// The campaign's landmasses as JSON, as the JS `World.continents` expects them: id, centre,
+    /// radii, a village, and harbours ({land, dock}) facing home.
+    pub fn continents_json(&self) -> String {
+        let pt = |p: (i32, i32)| format!("{{\"x\":{},\"y\":{}}}", p.0, p.1);
+        let hb = |h: &Option<((i32, i32), (i32, i32))>| match h {
+            Some((l, d)) => format!("{{\"land\":{},\"dock\":{}}}", pt(*l), pt(*d)),
+            None => "null".into(),
+        };
+        let items: Vec<String> = self
+            .game_continents
+            .iter()
+            .map(|c| {
+                format!(
+                    "{{\"id\":\"{}\",\"cx\":{:.1},\"cy\":{:.1},\"rx\":{:.1},\"ry\":{:.1},\"area\":{},\"village\":{},\"harbor\":{},\"homeHarbor\":{}}}",
+                    c.id, c.cx, c.cy, c.rx, c.ry, self.continents[c.index].area, pt(c.village), hb(&c.harbor), hb(&c.home_harbor)
+                )
+            })
+            .collect();
+        format!("[{}]", items.join(","))
+    }
+
+    /// Per tile, which campaign landmass it belongs to (index into `game_continents`), 255 for
+    /// water and landmasses the campaign doesn't use.
+    pub fn owner(&self) -> Vec<u8> {
+        let mut map = vec![255u8; self.continents.len() + 1];
+        for (k, c) in self.game_continents.iter().enumerate() {
+            map[c.index + 1] = k as u8;
+        }
+        self.continent.iter().map(|&c| map[c as usize]).collect()
+    }
+
     pub fn dims(&self) -> Dims {
         Dims { w: self.width, h: self.height, wrap_x: self.wrap_x, wrap_y: self.wrap_y }
+    }
+
+    /// A `w`×`h` window at (x0, y0) as a map of its own (no wrap: a region of a bigger
+    /// planet, like the galaxy capital the AI tribe lives on). Landmasses, sites and, with
+    /// `campaign`, the campaign layout are worked out again for the window.
+    pub fn crop(&self, x0: i32, y0: i32, w: usize, h: usize, campaign: bool) -> TerrainMap {
+        let d = self.dims();
+        let n = w * h;
+        let src: Vec<usize> = (0..n).map(|i| d.idx(x0 + (i % w) as i32, y0 + (i / w) as i32).unwrap_or(0)).collect();
+        let pick = |v: &[f32]| src.iter().map(|&j| v[j]).collect::<Vec<f32>>();
+        let pick8 = |v: &[u8]| src.iter().map(|&j| v[j]).collect::<Vec<u8>>();
+        let pickb = |v: &[bool]| src.iter().map(|&j| v[j]).collect::<Vec<bool>>();
+        let biome_map = pick8(&self.biome);
+        let types = pick8(&self.types);
+        let cd = Dims::new(w, h, false);
+        let (cont_id, continents) = sites::continents(cd, &biome_map, (self.stats.min_island / 2).max(1));
+        let (region, _) = sites::regions(cd, &types);
+        let in_win = |s: &Site| {
+            let (dx, dy) = (d.dx(x0 as f32, s.x as f32), d.dy(y0 as f32, s.y as f32));
+            let (dx, dy) = (if dx < 0.0 { dx + d.w as f32 } else { dx }, if dy < 0.0 { dy + d.h as f32 } else { dy });
+            (dx as usize) < w && (dy as usize) < h
+        };
+        let site_list: Vec<Site> = self
+            .sites
+            .iter()
+            .filter(|s| in_win(s))
+            .filter_map(|s| {
+                let x = (s.x - x0).rem_euclid(d.w as i32);
+                let y = (s.y - y0).rem_euclid(d.h as i32);
+                let i = y as usize * w + x as usize;
+                (cont_id[i] > 0 && region[i] > 0).then(|| Site { x, y, continent: cont_id[i] as usize - 1, region: region[i], ..s.clone() })
+            })
+            .collect();
+        let heights = pick(&self.heights);
+        let hf: Vec<f32> = heights.iter().map(|&v| if v >= self.sea_level { (v - self.sea_level) / (1.0 - self.sea_level) } else { v / self.sea_level - 1.0 }).collect();
+        let (campaign_sites, game_continents) = if campaign && !continents.is_empty() {
+            let (cs, gc) = sites::campaign(&sites::CampaignInput { w, h, heights: &hf, types: &types, biome: &biome_map, continent: &cont_id, continents: &continents, sites: &site_list });
+            (Some(cs), gc)
+        } else {
+            (None, Vec::new())
+        };
+        TerrainMap {
+            seed: self.seed,
+            width: w,
+            height: h,
+            wrap_x: false,
+            wrap_y: false,
+            sea_level: self.sea_level,
+            heights,
+            biome: biome_map,
+            relief: pick8(&self.relief),
+            types,
+            river_mask: pickb(&self.river_mask),
+            lake_mask: pickb(&self.lake_mask),
+            temperature: pick(&self.temperature),
+            moisture: pick(&self.moisture),
+            rgba: src.iter().flat_map(|&j| self.rgba[j * 4..j * 4 + 4].iter().copied()).collect(),
+            continent: cont_id,
+            continents,
+            sites: site_list,
+            campaign_sites,
+            game_continents,
+            ranges: Vec::new(),
+            sim: SimInfo::default(),
+            stats: self.stats.clone(),
+        }
     }
     #[inline]
     pub fn idx(&self, x: i32, y: i32) -> Option<usize> {
@@ -1017,6 +1166,12 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
     );
     clock.lap("sites");
 
+    let (campaign_sites, game_continents) = if p.campaign {
+        let (cs_, gc) = sites::campaign(&sites::CampaignInput { w: p.w, h: p.h, heights: &hf, types: &tiles, biome: &biome_map, continent: &cont_id, continents: &continents, sites: &site_list });
+        (Some(cs_), gc)
+    } else {
+        (None, Vec::new())
+    };
     // Output heights: sea level at `sea_level`, peaks at 1, sea floor at 0.
     let sl = p.sea_level;
     let height: Vec<f32> = hf.iter().map(|&v| if v >= 0.0 { sl + (1.0 - sl) * v.min(1.0) } else { sl * (1.0 + v.max(-1.0)) }).collect();
@@ -1040,6 +1195,8 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
         continent: cont_id,
         continents,
         sites: site_list,
+        campaign_sites,
+        game_continents,
         ranges: info.ranges.clone(),
         sim: SimInfo { w: sd.w, h: sd.h, cell: cs, height: h, recv: dr.recv, river: river_s, lake: lake_s, ocean: ocean_s, dla: info.dla, corridor: info.corridor },
         stats,

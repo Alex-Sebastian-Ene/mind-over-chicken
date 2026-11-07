@@ -1,7 +1,15 @@
 //! The god's hand: lightning from a blink, and the camera casts (#33/#49). Coordinates are
 //! planet pixels.
+//!
+//! On the battlefield (#69): lightning breaks a charge (fighters within 12 tiles lose heart,
+//! the side that was struck most: −0.45 morale, everyone else −0.12); fireball and disaster
+//! strike armies as well as land (the same shock, harder); the peace cast forces a truce round
+//! the aim point, between civilisations and inside them. Lightning near a temple is read as a
+//! miracle (faith), on a mine it bares ore (goods), over the sea it raises a storm.
 
-use crate::agents::{set_goal, tile};
+use crate::agents::{calm_round, set_goal, shock, tile};
+use crate::conflict;
+use crate::jobs::{has, Building};
 use crate::politics::{make_peace, raze};
 use crate::terrain::flammable;
 use crate::world::*;
@@ -18,7 +26,7 @@ fn ignite_round(w: &mut World, x: f32, y: f32, r: i32) {
     for oy in -r..=r {
         for ox in -r..=r {
             let yy = cy + oy;
-            if ox * ox + oy * oy > r * r || yy < 0 || yy >= w.d.h as i32 {
+            if ox * ox + oy * oy > r * r {
                 continue;
             }
             let i = w.d.idx(cx + ox, yy);
@@ -45,7 +53,7 @@ fn strike(w: &mut World, x: f32, y: f32, kill_r: f32, p: f32, scare_r: f32, caus
             let a = &mut w.agents[i];
             let (cx, cy) = tile(a, dm);
             let ox = dm.dx(x, a.x).signum() as i32;
-            let oy = (a.y - y).signum() as i32;
+            let oy = dm.dy(y, a.y).signum() as i32;
             a.state = State::Flee;
             a.timer = 1.4;
             a.engage = None;
@@ -68,7 +76,7 @@ fn villages_within(w: &World, x: f32, y: f32, r: f32) -> Vec<u16> {
 /// fire, and frightens nearby villages back into line (unrest falls).
 pub fn lightning(w: &mut World, x: f32, y: f32) -> i32 {
     let x = w.d.wrap_x(x.floor() as i32) as f32 + 0.5;
-    let y = y.clamp(0.0, w.d.h as f32 - 1.0);
+    let y = w.d.wrap_yf(y);
     let killed = strike(w, x, y, 2.0, 1.0, 9.0, Cause::Smitten);
     ignite_round(w, x, y, 1);
     for v in villages_within(w, x, y, 2.5) {
@@ -77,8 +85,27 @@ pub fn lightning(w: &mut World, x: f32, y: f32) -> i32 {
         vil.food = (vil.food - 2.0).max(0.0);
     }
     for v in villages_within(w, x, y, 16.0) {
+        let age = w.factions[w.villages[v as usize].owner as usize].age;
         let vil = &mut w.villages[v as usize];
         vil.unrest = (vil.unrest - 0.15).max(0.0);
+        // Read as a miracle where there are temples; a strike on a mine bares ore.
+        if has(vil, Building::Temple, age) || has(vil, Building::Shrine, age) {
+            vil.faith = (vil.faith + 0.1).min(1.0);
+        }
+        if has(vil, Building::Mine, age) && w.d.dist(x, y, vil.x as f32, vil.y as f32) < 10.0 {
+            vil.goods += 3.0;
+        }
+    }
+    // A charge breaks.
+    shock(w, x, y, 12.0, 0.45, 0.12);
+    // A storm at sea.
+    if matches!(w.terrain.kind_at(x as i32, y as i32), crate::terrain::WATER | crate::terrain::DEEP) {
+        let dm = w.d;
+        let lost: Vec<usize> = (0..w.agents.len()).filter(|&i| w.agents[i].alive && w.agents[i].state == State::Sail && dm.dist(x, y, w.agents[i].x, w.agents[i].y) < 14.0).collect();
+        for i in lost {
+            w.kill(i, Cause::Disaster);
+        }
+        w.effect(x, y, 2, 1.5, 12.0);
     }
     w.effect(x, y, 1, 0.6, 5.0);
     w.log(ev::SMITE, NO_F, NO_F, x as i32, y as i32, killed);
@@ -88,10 +115,11 @@ pub fn lightning(w: &mut World, x: f32, y: f32) -> i32 {
 /// A camera cast at a planet point. Returns how many it affected (agents or villages).
 pub fn cast(w: &mut World, kind: u32, x: f32, y: f32) -> i32 {
     let x = w.d.wrap_x(x.floor() as i32) as f32 + 0.5;
-    let y = y.clamp(0.0, w.d.h as f32 - 1.0);
+    let y = w.d.wrap_yf(y);
     let n = match kind {
         CAST_FIREBALL => {
             let k = strike(w, x, y, 4.0, 1.0, 11.0, Cause::Smitten);
+            shock(w, x, y, 16.0, 0.6, 0.2);
             ignite_round(w, x, y, 3);
             for v in villages_within(w, x, y, 4.5) {
                 w.villages[v as usize].hp -= 0.6;
@@ -107,7 +135,7 @@ pub fn cast(w: &mut World, kind: u32, x: f32, y: f32) -> i32 {
             for oy in -7..=7 {
                 for ox in -7..=7 {
                     let yy = cy + oy;
-                    if ox * ox + oy * oy <= 49 && yy >= 0 && yy < w.d.h as i32 && w.terrain.walkable(cx + ox, yy) {
+                    if ox * ox + oy * oy <= 49 && w.terrain.walkable(cx + ox, yy) {
                         let i = w.d.idx(cx + ox, yy);
                         w.food.set(i, 1.5, w.time);
                     }
@@ -140,14 +168,32 @@ pub fn cast(w: &mut World, kind: u32, x: f32, y: f32) -> i32 {
                     }
                 }
             }
-            for a in w.agents.iter_mut() {
-                a.engage = None;
+            // Inside civilisations too: every strife round the aim ends in a truce.
+            for k in 0..w.strifes.len() {
+                let s = &w.strifes[k];
+                if s.alive && (sides.contains(&s.civ) || w.d.dist(x, y, s.x as f32, s.y as f32) <= 60.0) {
+                    let (c, sx, sy, kind) = (s.civ, s.x, s.y, s.kind as i32);
+                    w.log_x(ev::TRUCE, c, c, sx, sy, 0, kind);
+                    conflict::end(w, k, None);
+                    ended += 1;
+                }
             }
+            for &a in &sides {
+                for b in 0..MAX_FACTIONS as u8 {
+                    if a != b {
+                        w.rel_mut(a, b).level = conflict::NONE;
+                        w.rel_mut(b, a).level = conflict::NONE;
+                    }
+                }
+            }
+            calm_round(w, x, y, 60.0);
+            conflict::refresh(w);
             w.effect(x, y, 5, 2.0, 30.0);
             ended
         }
         CAST_DISASTER => {
             let k = strike(w, x, y, 14.0, 0.6, 20.0, Cause::Disaster);
+            shock(w, x, y, 24.0, 0.5, 0.25);
             ignite_round(w, x, y, 2);
             for v in villages_within(w, x, y, 14.0) {
                 let vil = &mut w.villages[v as usize];
@@ -182,7 +228,7 @@ pub fn cast(w: &mut World, kind: u32, x: f32, y: f32) -> i32 {
             for oy in -30..=30 {
                 for ox in -30..=30 {
                     let yy = cy + oy;
-                    if yy >= 0 && yy < w.d.h as i32 && ox * ox + oy * oy <= 900 && w.terrain.walkable(cx + ox, yy) {
+                    if ox * ox + oy * oy <= 900 && w.terrain.walkable(cx + ox, yy) {
                         let i = w.d.idx(cx + ox, yy);
                         let k = w.terrain.kind[i];
                         let lvl = w.food.level(i, k, w.time, 1.0);
@@ -210,16 +256,16 @@ pub fn set_player_traits(w: &mut World, friendliness: f32, aggressiveness: f32, 
 }
 
 /// The mind read: the player's first ten seconds of brain data shape their civilisation.
-/// Calm → friendliness, pulse → aggressiveness, blinks → chaos (violence up, cohesion down),
+/// Calm → friendliness, stress → aggressiveness, blinks → chaos (violence up, cohesion down),
 /// focus → fertility (industry).
-pub fn seed_player_mind(w: &mut World, calm: f32, focus: f32, hr_delta: f32, blinks: f32) -> bool {
+pub fn seed_player_mind(w: &mut World, calm: f32, focus: f32, stress: f32, blinks: f32) -> bool {
     let Some(p) = w.player() else { return false };
-    let pulse = (hr_delta / 25.0).clamp(0.0, 1.0);
+    let agitation = Inputs { calm, focus, stress, anger: 0.0, joy: 0.0 }.agitation();
     let chaos = (blinks / 8.0).clamp(0.0, 1.0);
     let f = &mut w.factions[p as usize];
     f.traits = Traits {
         friendliness: 0.2 + 0.7 * calm.clamp(0.0, 1.0),
-        aggressiveness: 0.15 + 0.75 * pulse,
+        aggressiveness: 0.15 + 0.75 * agitation,
         violence: 0.2 + 0.6 * chaos,
         fertility: 0.3 + 0.6 * focus.clamp(0.0, 1.0),
         cohesion: 0.8 - 0.5 * chaos,

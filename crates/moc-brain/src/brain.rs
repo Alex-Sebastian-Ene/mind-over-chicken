@@ -10,6 +10,25 @@ use crate::sim_source::BrainFrame;
 pub const WINDOW_SIZE: usize = 6;
 pub const TRAIN_EVERY_SECS: f32 = 2.5;
 
+pub const REST_STRESS: f32 = 0.15;
+pub const STRESSED: f32 = 0.5;
+pub const AG_MARGIN: f32 = 0.12;
+pub const AG_SPAN: f32 = 0.4;
+pub const AG_WARMUP: usize = 30;
+pub const AG_HISTORY: usize = 300;
+pub const AG_RUNNING_TAU: f32 = 60.0;
+
+/// Global stress computation: neutral at rest (~0.15), rising on agitation or anger.
+pub fn stress_from(calm: f32, anger: f32, agitation: f32) -> f32 {
+    let base = REST_STRESS * (1.0 - clamp(calm, 0.0, 1.0));
+    clamp(clamp(agitation, 0.0, 1.0).max(clamp(anger, 0.0, 1.0)).max(base), 0.0, 1.0)
+}
+
+/// Agitation index from log-spectral EEG features: ln(gamma/beta) + 0.2 * ln(beta/(alpha+theta))
+pub fn agitation_index(f: &[f32; NUM_FEATURES]) -> f32 {
+    f[4] - f[3] + 0.2 * f[6]
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BrainStats {
     pub blinks: u32,
@@ -31,8 +50,15 @@ pub struct Brain {
     pub generic_calm: f32,
     pub generic_focus: f32,
     pub personal: Option<Predictions>,
+    pub anger: f32,
+    pub agitation: f32,
+    pub agitation_raw: f32,
+    pub ag_history: Vec<f32>,
+    pub ag_baseline: Option<f32>,
+    pub ag_running: Option<f32>,
+    pub stress: f32,
     pub hr: Option<f32>,
-    hr_history: Vec<(f32, f32)>, // (time, hr)
+    hr_history: Vec<(f32, f32)>, // (time, hr) - legacy compatibility
     pub rest_hr: Option<f32>,
     pub aim: (f32, f32),
     pub motion: f32,
@@ -65,6 +91,13 @@ impl Brain {
             generic_calm: 0.0,
             generic_focus: 0.0,
             personal: None,
+            anger: 0.0,
+            agitation: 0.0,
+            agitation_raw: 0.0,
+            ag_history: Vec::with_capacity(AG_HISTORY),
+            ag_baseline: None,
+            ag_running: None,
+            stress: REST_STRESS,
             hr: None,
             hr_history: Vec::new(),
             rest_hr: None,
@@ -86,11 +119,18 @@ impl Brain {
     }
 
     pub fn update(&mut self, dt: f32) -> bool {
+        self.update_with_mood(dt, 0.0)
+    }
+
+    pub fn update_with_mood(&mut self, dt: f32, anger: f32) -> bool {
         self.time += dt;
 
         // Smooth outputs to prevent noise spikes from accidentally tripping mechanics
         self.calm = smooth(self.calm, self.calm_raw, 4.0, dt);
         self.focus = smooth(self.focus, self.focus_raw, 4.0, dt);
+        self.agitation = smooth(self.agitation, self.agitation_raw, 3.0, dt);
+        self.anger = anger;
+        self.stress = stress_from(self.calm, self.anger, self.agitation);
 
         if self.calm > 0.6 {
             self.stats.calm_seconds += dt;
@@ -169,6 +209,7 @@ impl Brain {
             }
         }
         self.feat = Some(f_avg);
+        self.update_agitation(agitation_index(&f_avg));
 
         if let Some(cue) = self.cue {
             self.model.add(cue, f_avg);
@@ -225,7 +266,37 @@ impl Brain {
         clamp(base + 0.14 * self.model.trust(kind), 0.0, 0.85)
     }
 
-    /// Heart rate delta above resting baseline
+    /// One feature window's agitation index -> agitation_raw, against the player's resting level.
+    pub fn update_agitation(&mut self, ag: f32) {
+        self.ag_history.push(ag);
+        if self.ag_history.len() > AG_HISTORY {
+            self.ag_history.remove(0);
+        }
+
+        // Slow running average (one window ~0.1 s, time constant AG_RUNNING_TAU): fallback baseline
+        if self.ag_history.len() <= AG_WARMUP {
+            self.ag_running = Some(median(&self.ag_history));
+        } else {
+            let running = self.ag_running.unwrap_or(ag);
+            let alpha = 1.0 - (-0.1 / AG_RUNNING_TAU).exp();
+            self.ag_running = Some(running + (ag - running) * alpha);
+        }
+
+        let base = self.ag_baseline.or(self.ag_running).unwrap_or(0.0);
+        self.agitation_raw = clamp((ag - base - AG_MARGIN) / AG_SPAN, 0.0, 1.0);
+    }
+
+    /// Locks the resting agitation level from recent feature windows during calibration (#54).
+    pub fn lock_agitation_baseline(&mut self, seconds: f32) {
+        let count = (seconds * 10.0).round().max(10.0) as usize;
+        let start = self.ag_history.len().saturating_sub(count);
+        let recent = &self.ag_history[start..];
+        if recent.len() >= 10 {
+            self.ag_baseline = Some(median(recent));
+        }
+    }
+
+    /// Heart rate delta above resting baseline (legacy compatibility)
     pub fn hr_delta(&self) -> f32 {
         match (self.hr, self.rest_hr) {
             (Some(hr), Some(rest_hr)) => round3(hr - rest_hr),

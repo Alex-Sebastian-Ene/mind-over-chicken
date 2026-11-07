@@ -230,3 +230,307 @@ fn near_lake(d: Dims, b: &[u8], x: i32, y: i32, r: i32) -> bool {
     }
     false
 }
+
+/// The main game's places on the home world (the eras and pathfinding use these; the names
+/// match the JS `World.sites`). Gameplay paths don't cross the map's seams, so everything here
+/// works on the plain rectangle.
+#[derive(Clone, Debug, Default)]
+pub struct CampaignSites {
+    pub village: (usize, usize),
+    pub pad: (usize, usize),
+    pub ridge: (usize, usize),
+    pub cave: (usize, usize),
+    pub cave_mouth: (usize, usize),
+    pub fire: (usize, usize),
+    pub factory: (usize, usize),
+    pub exchange: (usize, usize),
+    pub picket: (usize, usize),
+    pub hangar: (usize, usize),
+    pub crowd: (usize, usize),
+    pub harbour: (usize, usize),
+}
+
+/// A landmass as the game sees it: home first, then the others boats can reach.
+#[derive(Clone, Debug)]
+pub struct GameContinent {
+    pub id: String,
+    /// `TerrainMap::continents` index.
+    pub index: usize,
+    pub cx: f32,
+    pub cy: f32,
+    pub rx: f32,
+    pub ry: f32,
+    pub village: (i32, i32),
+    /// (quay on land, dock on water) facing home, and home's facing this one.
+    pub harbor: Option<((i32, i32), (i32, i32))>,
+    pub home_harbor: Option<((i32, i32), (i32, i32))>,
+}
+
+/// Inputs for [`campaign`].
+pub struct CampaignInput<'a> {
+    pub w: usize,
+    pub h: usize,
+    pub heights: &'a [f32],
+    pub types: &'a [u8],
+    pub biome: &'a [u8],
+    pub continent: &'a [u16],
+    pub continents: &'a [Continent],
+    pub sites: &'a [Site],
+}
+
+/// Lay out the campaign on a home world: the village on the home continent's best roomy site,
+/// a coastal launch pad 45–120 tiles away on the same walkable land, the cave on the first
+/// hill towards the nearest high ground, and a village and harbours on each other landmass,
+/// with docks on open sea that boats can sail between.
+pub fn campaign(inp: &CampaignInput) -> (CampaignSites, Vec<GameContinent>) {
+    let (w, h) = (inp.w as i32, inp.h as i32);
+    let d = Dims::new(inp.w, inp.h, false);
+    let inside = |x: i32, y: i32| x >= 0 && y >= 0 && x < w && y < h;
+    let walk = |x: i32, y: i32| inside(x, y) && tile::walkable(inp.types[(y * w + x) as usize]);
+    let sea = |x: i32, y: i32| inside(x, y) && matches!(inp.biome[(y * w + x) as usize], biome::OCEAN | biome::SHELF);
+    let (region, region_size) = regions(d, inp.types);
+    let reg = |x: i32, y: i32| if inside(x, y) { region[(y * w + x) as usize] } else { 0 };
+    let roomy = |x: i32, y: i32, r: i32| {
+        let mut k = 0;
+        let mut t = 0;
+        for oy in (-r..=r).step_by(2) {
+            for ox in (-r..=r).step_by(2) {
+                t += 1;
+                if walk(x + ox, y + oy) {
+                    k += 1;
+                }
+            }
+        }
+        k as f32 / t as f32
+    };
+    // Nearest walkable, non-forest tile in region `rg` (any walkable region when 0).
+    let nearest = |x: i32, y: i32, rg: u32| -> (i32, i32) {
+        for r in 0..80i32 {
+            for oy in -r..=r {
+                for ox in -r..=r {
+                    if ox.abs().max(oy.abs()) != r {
+                        continue;
+                    }
+                    let (px, py) = (x + ox, y + oy);
+                    if walk(px, py) && inp.types[(py * w + px) as usize] != tile::FOREST && (rg == 0 || reg(px, py) == rg) {
+                        return (px, py);
+                    }
+                }
+            }
+        }
+        (x.clamp(0, w - 1), y.clamp(0, h - 1))
+    };
+    let home = 0usize;
+    // Village: the best-ranked site on the home continent with room round it.
+    let mut village = None;
+    let mut best = f32::NEG_INFINITY;
+    for s in inp.sites.iter().filter(|s| s.continent == home) {
+        let room = roomy(s.x, s.y, 14);
+        let rs = region_size.get(reg(s.x, s.y).max(1) as usize - 1).copied().unwrap_or(0) as f32;
+        let score = s.score + room * 2.0 + (rs / 4000.0).min(1.0);
+        if room > 0.55 && score > best {
+            best = score;
+            village = Some((s.x, s.y));
+        }
+    }
+    let c0 = &inp.continents[home.min(inp.continents.len().saturating_sub(1))];
+    let v = village.unwrap_or_else(|| nearest(c0.cx as i32, c0.cy as i32, 0));
+    let v = nearest(v.0, v.1, 0);
+    let vr = reg(v.0, v.1);
+    // Launch pad: coastal, roomy, on the village's land, 45–120 tiles away (80 is best).
+    let mut pad = None;
+    let mut best = f32::NEG_INFINITY;
+    for y in (2..h - 2).step_by(2) {
+        for x in (2..w - 2).step_by(2) {
+            if !walk(x, y) || reg(x, y) != vr {
+                continue;
+            }
+            let dist = (((x - v.0).pow(2) + (y - v.1).pow(2)) as f32).sqrt();
+            if !(45.0..=120.0).contains(&dist) {
+                continue;
+            }
+            let coast = (1..=5).any(|r| sea(x + r, y) || sea(x - r, y) || sea(x, y + r) || sea(x, y - r));
+            let room = roomy(x, y, 8);
+            let score = -(dist - 80.0).abs() / 40.0 + if coast { 1.5 } else { 0.0 } + room * 2.0;
+            if score > best {
+                best = score;
+                pad = Some((x, y));
+            }
+        }
+    }
+    let pad = pad.unwrap_or_else(|| nearest(v.0 + 70, v.1, vr));
+    // Ridge: the highest ground near the village; the cave is where the walk there meets hills.
+    let mut ridge = (v.0, (v.1 - 20).max(0));
+    let mut top = f32::NEG_INFINITY;
+    for y in (0..h).step_by(2) {
+        for x in (0..w).step_by(2) {
+            let dist = (((x - v.0).pow(2) + (y - v.1).pow(2)) as f32).sqrt();
+            if !(12.0..=90.0).contains(&dist) {
+                continue;
+            }
+            let i = (y * w + x) as usize;
+            if inp.continent[i] as usize != home + 1 {
+                continue;
+            }
+            let score = inp.heights[i] - dist * 0.0015;
+            if score > top {
+                top = score;
+                ridge = (x, y);
+            }
+        }
+    }
+    let mut cave = nearest(v.0 - 20, v.1 - 20, vr);
+    let mut cave_mouth = cave;
+    let steps = 200;
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        let (x, y) = ((v.0 as f32 + (ridge.0 - v.0) as f32 * t).round() as i32, (v.1 as f32 + (ridge.1 - v.1) as f32 * t).round() as i32);
+        if !inside(x, y) {
+            break;
+        }
+        if inp.types[(y * w + x) as usize] >= tile::HILL {
+            let b = (i as i32 - 3).max(0) as f32 / steps as f32;
+            cave = ((v.0 as f32 + (ridge.0 - v.0) as f32 * b).round() as i32, (v.1 as f32 + (ridge.1 - v.1) as f32 * b).round() as i32);
+            cave_mouth = (x, y);
+            break;
+        }
+    }
+    let factory = nearest(v.0 - 46, v.1 + 26, vr);
+    let exchange = nearest(v.0 + 18, v.1 - 10, vr);
+    let picket = nearest(factory.0 + 2, factory.1 + 9, vr);
+    let hangar = nearest(pad.0 - 26, pad.1 + 10, vr);
+    let crowd = nearest(pad.0 - 30, pad.1 - 10, vr);
+
+    // Other landmasses, nearest to home first, up to four.
+    let mut others: Vec<usize> = (0..inp.continents.len()).filter(|&k| k != home).collect();
+    let dist_home = |k: usize| {
+        let c = &inp.continents[k];
+        ((c.cx - v.0 as f32).powi(2) + (c.cy - v.1 as f32).powi(2)).sqrt()
+    };
+    others.sort_by(|&a, &b| dist_home(a).total_cmp(&dist_home(b)));
+    others.truncate(4);
+    // Water a boat can reach from a dock (8-neighbour, no wrap, like the JS seaField).
+    let water_field = |x: i32, y: i32| -> Vec<bool> {
+        let mut seen = vec![false; inp.w * inp.h];
+        let mut q = std::collections::VecDeque::new();
+        if sea(x, y) {
+            seen[(y * w + x) as usize] = true;
+            q.push_back((x, y));
+        }
+        while let Some((cx, cy)) = q.pop_front() {
+            for &(ox, oy) in crate::grid::N8.iter() {
+                let (nx, ny) = (cx + ox, cy + oy);
+                if inside(nx, ny) && !seen[(ny * w + nx) as usize] && matches!(inp.types[(ny * w + nx) as usize], tile::DEEP | tile::SHALLOW) {
+                    seen[(ny * w + nx) as usize] = true;
+                    q.push_back((nx, ny));
+                }
+            }
+        }
+        seen
+    };
+    // Walk from `from` towards `to`: the last walkable tile of the landmass before open sea is
+    // the quay, the first sea tile is the dock. Falls back to the coast tile of the landmass
+    // nearest `to` whose sea `ok` accepts.
+    let coast_toward = |from: (i32, i32), to: (i32, i32), land_of: usize, ok: &dyn Fn(i32, i32) -> bool| -> ((i32, i32), (i32, i32)) {
+        let n = ((to.0 - from.0).abs().max((to.1 - from.1).abs())).max(1);
+        let mut last = from;
+        for i in 0..=n {
+            let t = i as f32 / n as f32;
+            let (x, y) = ((from.0 as f32 + (to.0 - from.0) as f32 * t).round() as i32, (from.1 as f32 + (to.1 - from.1) as f32 * t).round() as i32);
+            if sea(x, y) {
+                if ok(x, y) {
+                    return (last, (x, y));
+                }
+                break;
+            }
+            if walk(x, y) && inp.continent[(y * w + x) as usize] as usize == land_of + 1 {
+                last = (x, y);
+            }
+        }
+        let mut best = (from, from);
+        let mut bd = f32::INFINITY;
+        for y in 0..h {
+            for x in 0..w {
+                if !walk(x, y) || inp.continent[(y * w + x) as usize] as usize != land_of + 1 {
+                    continue;
+                }
+                for &(ox, oy) in crate::grid::N4.iter() {
+                    if sea(x + ox, y + oy) && ok(x + ox, y + oy) {
+                        let dd = ((x - to.0).pow(2) + (y - to.1).pow(2)) as f32;
+                        if dd < bd {
+                            bd = dd;
+                            best = ((x, y), (x + ox, y + oy));
+                        }
+                    }
+                }
+            }
+        }
+        best
+    };
+    let mut out = vec![GameContinent { id: "home".into(), index: home, cx: c0.cx, cy: c0.cy, rx: c0.bw as f32 * 0.5, ry: c0.bh as f32 * 0.5, village: v, harbor: None, home_harbor: None }];
+    let mut harbour = pad;
+    let mut used: Vec<String> = vec!["home".into()];
+    for &k in others.iter() {
+        let c = &inp.continents[k];
+        let guess = inp.sites.iter().find(|s| s.continent == k).map(|s| (s.x, s.y)).unwrap_or((c.cx as i32, c.cy as i32));
+        // Nearest walkable tile on that landmass.
+        let mut cv = None;
+        for r in 0..60i32 {
+            for oy in -r..=r {
+                for ox in -r..=r {
+                    let (x, y) = (guess.0 + ox, guess.1 + oy);
+                    if cv.is_none() && ox.abs().max(oy.abs()) == r && walk(x, y) && inp.continent[(y * w + x) as usize] as usize == k + 1 {
+                        cv = Some((x, y));
+                    }
+                }
+            }
+            if cv.is_some() {
+                break;
+            }
+        }
+        let Some(cv) = cv else { continue };
+        let home_h = coast_toward(v, cv, home, &|_, _| true);
+        if !sea(home_h.1 .0, home_h.1 .1) {
+            continue;
+        }
+        let reach = water_field(home_h.1 .0, home_h.1 .1);
+        let ok = |x: i32, y: i32| reach[(y * w + x) as usize];
+        let col_h = coast_toward(cv, v, k, &ok);
+        if !ok(col_h.1 .0, col_h.1 .1) {
+            continue; // no sea route from home
+        }
+        let (dx, dy) = (c.cx - v.0 as f32, c.cy - v.1 as f32);
+        let mut id = if dy.abs() > dx.abs() {
+            if dy < 0.0 { "north" } else { "south" }
+        } else if dx > 0.0 {
+            "east"
+        } else {
+            "west"
+        }
+        .to_string();
+        if used.contains(&id) {
+            id = format!("{id}{}", out.len());
+        }
+        used.push(id.clone());
+        if out.len() == 1 {
+            harbour = home_h.0;
+        }
+        out.push(GameContinent { id, index: k, cx: c.cx, cy: c.cy, rx: c.bw as f32 * 0.5, ry: c.bh as f32 * 0.5, village: cv, harbor: Some(col_h), home_harbor: Some(home_h) });
+    }
+    let u = |p: (i32, i32)| (p.0.clamp(0, w - 1) as usize, p.1.clamp(0, h - 1) as usize);
+    let sites = CampaignSites {
+        village: u(v),
+        pad: u(pad),
+        ridge: u(ridge),
+        cave: u(cave),
+        cave_mouth: u(cave_mouth),
+        fire: u(v),
+        factory: u(factory),
+        exchange: u(exchange),
+        picket: u(picket),
+        hangar: u(hangar),
+        crowd: u(crowd),
+        harbour: u(harbour),
+    };
+    (sites, out)
+}

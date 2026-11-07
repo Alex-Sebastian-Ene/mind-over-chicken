@@ -52,7 +52,7 @@ const TEMPLATE = `
     <div class="eeg-sec-head">
       <h3>Head Cursor &amp; Motion Calibration</h3>
       <div class="eeg-btn-group">
-        <button type="button" class="btn btn-small" data-eeg-dot-calib disabled title="Follow a moving white dot across the screen to train the Rust 2D head-motion model">⚪ Follow Dot</button>
+        <button type="button" class="btn btn-small" data-eeg-dot-calib disabled title="Calibrate 9 separate dots at the full edges & corners of the screen (Up/Down/Left/Right)">⚪ 9-Dot Edge Calib</button>
         <button type="button" class="btn btn-primary btn-small" data-eeg-recenter title="Look at the center of the screen and click (or press C) to zero Pitch/Yaw and recalibrate gyro drift" disabled>Center <kbd>C</kbd></button>
       </div>
     </div>
@@ -262,6 +262,7 @@ export class EegPanel {
     this.wasStreaming = false;
     this.wiz = null;
     this.buildWizardModal();
+    this.toggle(true);
     this.addLog('EEG & Rust/WASM calibration panel ready.');
 
     this.btn.addEventListener('click', () => this.toggle());
@@ -326,11 +327,12 @@ export class EegPanel {
     modal.innerHTML = `
       <div class="calib-wiz-top">
         <div>
-          <span class="calib-wiz-step" data-wiz-step>STEP 1 OF 2 · HEAD MOTION ML</span>
-          <h2 data-wiz-title>Follow the White Dot with Your Head</h2>
-          <p data-wiz-sub>Keep your eyes &amp; head pointed at the glowing white dot as it travels across the screen.</p>
+          <span class="calib-wiz-step" data-wiz-step>STEP 1 OF 3 · HYBRID SMOOTH-PURSUIT + BOUNDARY + REVERSE CALIBRATION</span>
+          <h2 data-wiz-title>Follow the Moving White Dot Out to Each Edge, Hold, and Reverse Back</h2>
+          <p data-wiz-sub>Smoothly follow the glowing white dot with your head as it sweeps out to each boundary, pauses at the edge, and reverses back through Center. <b>DO NOT BLINK</b>.</p>
         </div>
         <div class="calib-wiz-actions">
+          <button type="button" class="btn btn-small btn-primary" data-wiz-lock hidden>Lock Point</button>
           <button type="button" class="btn btn-small" data-wiz-skip>Skip Step</button>
           <button type="button" class="btn btn-small" data-wiz-close>Close <kbd>Esc</kbd></button>
         </div>
@@ -354,23 +356,78 @@ export class EegPanel {
       subEl: modal.querySelector('[data-wiz-sub]'),
       statsEl: modal.querySelector('[data-wiz-stats]'),
       logEl: modal.querySelector('[data-wiz-log]'),
+      lockBtn: modal.querySelector('[data-wiz-lock]'),
       skipBtn: modal.querySelector('[data-wiz-skip]'),
       closeBtn: modal.querySelector('[data-wiz-close]'),
       active: false,
       mode: 'both',
-      phase: 'motion', // 'motion' | 'blink' | 'sandbox'
+      phase: 'motion', // 'motion' | 'noise' | 'blink' | 'sandbox'
       t0: 0,
+      lastFrameNow: 0,
       lastSampleAt: 0,
-      taredAtStart: false,
-      dotHistory: [],
+      lastNoiseSampleAt: 0,
+      dotIdx: 0,
+      dotEnteredAt: 0,
+      dotHoldSec: 0,
+      dotSamplesTaken: 0,
+      taredAtCenter: false,
       flashIdx: -1,
       flashRestRecorded: false,
       flashTriggered: false,
       sandboxBolts: [],
       lastBlinkCount: 0,
+      dots: [
+        { x: 0.50, y: 0.50, short: 'CENTER',       holdReq: 1.5, prompt: '1/9 · Look at CENTER & HOLD STILL — DO NOT BLINK' },
+        { x: 0.50, y: 0.04, short: 'TOP EDGE ↑',   holdReq: 1.6, prompt: '2/9 · Tilt Head UP to FULL TOP EDGE & HOLD — DO NOT BLINK' },
+        { x: 0.50, y: 0.96, short: 'BOTTOM EDGE ↓',holdReq: 1.6, prompt: '3/9 · Tilt Head DOWN to FULL BOTTOM EDGE & HOLD — DO NOT BLINK' },
+        { x: 0.04, y: 0.50, short: 'LEFT EDGE ←',  holdReq: 1.5, prompt: '4/9 · Turn Head LEFT to FULL LEFT EDGE & HOLD — DO NOT BLINK' },
+        { x: 0.96, y: 0.50, short: 'RIGHT EDGE →', holdReq: 1.5, prompt: '5/9 · Turn Head RIGHT to FULL RIGHT EDGE & HOLD — DO NOT BLINK' },
+        { x: 0.06, y: 0.06, short: 'TOP-LEFT ↖',   holdReq: 1.4, prompt: '6/9 · Tilt UP-LEFT to Corner & HOLD — DO NOT BLINK' },
+        { x: 0.94, y: 0.06, short: 'TOP-RIGHT ↗',  holdReq: 1.4, prompt: '7/9 · Tilt UP-RIGHT to Corner & HOLD — DO NOT BLINK' },
+        { x: 0.06, y: 0.94, short: 'BOT-LEFT ↙',   holdReq: 1.4, prompt: '8/9 · Tilt DOWN-LEFT to Corner & HOLD — DO NOT BLINK' },
+        { x: 0.94, y: 0.94, short: 'BOT-RIGHT ↘',  holdReq: 1.4, prompt: '9/9 · Tilt DOWN-RIGHT to Corner & HOLD — DO NOT BLINK' },
+      ],
     };
-    this.wiz.closeBtn.addEventListener('click', () => this.closeWizard());
-    this.wiz.skipBtn.addEventListener('click', () => this.advanceWizardPhase());
+    this.wiz.closeBtn?.addEventListener('click', () => this.closeWizard());
+    this.wiz.skipBtn?.addEventListener('click', () => this.advanceWizardPhase());
+    this.wiz.lockBtn?.addEventListener('click', () => this.lockCurrentDotManually());
+    this.wiz.canvas?.addEventListener('click', () => {
+      if (this.wiz?.active && this.wiz.phase === 'motion' && this.wiz.lockBtn && !this.wiz.lockBtn.hidden) {
+        this.lockCurrentDotManually();
+      }
+    });
+  }
+
+  lockCurrentDotManually() {
+    if (!this.wiz || !this.wiz.active || this.wiz.phase !== 'motion') return;
+    const src = this.getSource();
+    const b = this.getBrain();
+    const dot = this.wiz.dots[this.wiz.dotIdx];
+    if (!dot) return;
+    if (this.wiz.dotIdx === 0 && !this.wiz.taredAtCenter) {
+      this.wiz.taredAtCenter = true;
+      src?.beginMotionCalibration?.();
+    }
+    if (src?.addMotionCalibPoint) {
+      for (let k = 0; k < 6; k++) src.addMotionCalibPoint(dot.x, dot.y);
+    }
+    if (src?.recordBaselineSample) {
+      src.recordBaselineSample();
+    }
+    const rel = b?.relOrientation || { yaw: 0, pitch: 0 };
+    this.addLog(`Locked Dot #${this.wiz.dotIdx + 1}/9 (${dot.short}) at ΔYaw=${rel.yaw.toFixed(1)}° ΔPitch=${rel.pitch.toFixed(1)}° (no-blink baseline saved)`);
+    this.advanceToNextDot();
+  }
+
+  advanceToNextDot() {
+    if (!this.wiz) return;
+    this.wiz.dotIdx += 1;
+    this.wiz.dotEnteredAt = performance.now();
+    this.wiz.dotHoldSec = 0;
+    this.wiz.dotSamplesTaken = 0;
+    if (this.wiz.dotIdx >= this.wiz.dots.length) {
+      this.advanceWizardPhase();
+    }
   }
 
   startWizard(mode = 'both') {
@@ -383,7 +440,7 @@ export class EegPanel {
     this.wiz.lastBlinkCount = b?.stats?.blinks ?? 0;
     this.wiz.sandboxBolts = [];
     if (mode === 'blink') {
-      this.enterWizardPhase('blink');
+      this.enterWizardPhase('noise');
     } else {
       this.enterWizardPhase('motion');
     }
@@ -395,34 +452,52 @@ export class EegPanel {
   enterWizardPhase(phase) {
     if (!this.wiz) return;
     const src = this.getSource();
+    const now = performance.now();
     this.wiz.phase = phase;
-    this.wiz.t0 = performance.now();
+    this.wiz.t0 = now;
+    this.wiz.lastFrameNow = now;
     this.wiz.lastSampleAt = 0;
-    this.wiz.taredAtStart = false;
-    this.wiz.dotHistory = [];
+    this.wiz.lastNoiseSampleAt = 0;
+    this.wiz.dotIdx = 0;
+    this.wiz.dotEnteredAt = now;
+    this.wiz.dotHoldSec = 0;
+    this.wiz.dotSamplesTaken = 0;
+    this.wiz.taredAtCenter = false;
     this.wiz.flashIdx = -1;
     this.wiz.flashRestRecorded = false;
     this.wiz.flashTriggered = false;
 
     if (phase === 'motion') {
-      this.wiz.stepEl.textContent = this.wiz.mode === 'both' ? 'STEP 1 OF 2 · HEAD MOTION ML (RUST RIDGE REGRESSION)' : 'HEAD MOTION CALIBRATION (RUST ML)';
-      this.wiz.titleEl.textContent = 'Follow the White Dot with Your Head';
-      this.wiz.subEl.textContent = 'Point your nose at the glowing white dot as it moves: Center → Left → Right → Top → Bottom → Circle.';
-      this.wiz.skipBtn.textContent = this.wiz.mode === 'both' ? 'Skip to Eye Blinks →' : 'Finish';
-      this.addLog('Started Guided Head Motion Calibration: look at the white dot and follow it with your head.');
+      this.wiz.stepEl.textContent = this.wiz.mode === 'both'
+        ? 'STEP 1 OF 3 · HYBRID PURSUIT + BOUNDARY HOLD + REVERSE CALIBRATION'
+        : 'HYBRID PURSUIT + BOUNDARY + REVERSE HEAD CALIBRATION (RUST ML)';
+      this.wiz.titleEl.textContent = 'Follow the White Dot Out to Each Boundary, Pause at Edge & Reverse Back';
+      this.wiz.subEl.textContent = 'Follow the white dot smoothly with your head: Center → Left Edge (hold) → Reverse to Center → Right Edge (hold) → Top Edge (hold) → Bottom Edge (hold) → 4-Corner Figure-8. Keep eyes open (DO NOT BLINK).';
+      if (this.wiz.lockBtn) this.wiz.lockBtn.hidden = true;
+      this.wiz.skipBtn.textContent = this.wiz.mode === 'both' ? 'Skip to Noise Canceler →' : 'Finish';
+      this.addLog('Started Hybrid Smooth-Pursuit + Boundary-Hold + Reverse Head Calibration (24.5s).');
+    } else if (phase === 'noise') {
+      this.wiz.stepEl.textContent = 'STEP 2 OF 3 · HEAD-MOTION EEG NOISE CANCELLATION (DO NOT BLINK)';
+      this.wiz.titleEl.textContent = 'Move Your Head Around Freely — DO NOT BLINK!';
+      this.wiz.subEl.textContent = 'For 4.5 seconds, nod UP/DOWN and turn LEFT/RIGHT while keeping your eyes open (NO BLINKING). This teaches Rust to reject muscle & motion noise!';
+      if (this.wiz.lockBtn) this.wiz.lockBtn.hidden = true;
+      this.wiz.skipBtn.textContent = 'Next: Flash Blink Cues →';
+      this.addLog('Recording 4.5s of head-motion non-blink EEG noise so head movement never triggers random blinks...');
     } else if (phase === 'blink') {
-      this.wiz.stepEl.textContent = this.wiz.mode === 'both' ? 'STEP 2 OF 2 · EYE BLINK ML (4-CH EEG LOGISTIC REGRESSION)' : 'EYE BLINK FLASH CALIBRATION (RUST ML)';
-      this.wiz.titleEl.textContent = 'Blink When the Sacred Eye Flashes Gold!';
-      this.wiz.subEl.textContent = 'Keep your eyes relaxed while the ring contracts. When the screen FLASHES GOLD ("⚡ BLINK NOW!"), do one natural blink.';
+      this.wiz.stepEl.textContent = 'STEP 3 OF 3 · EYE BLINK FLASH CALIBRATION (RUST 4-CH EEG)';
+      this.wiz.titleEl.textContent = 'Hold Eyes Open… Then BLINK When the Screen Flashes Gold!';
+      this.wiz.subEl.textContent = 'During the blue ring ("HOLD — DO NOT BLINK"), keep eyes still. When the screen FLASHES GOLD ("⚡ BLINK NOW!"), do one clear blink.';
+      if (this.wiz.lockBtn) this.wiz.lockBtn.hidden = true;
       this.wiz.skipBtn.textContent = 'Test in Sandbox →';
-      this.addLog('Started Guided Eye Blink Flash Calibration (5 visual flash cues across TP9/AF7/AF8/TP10).');
+      this.addLog('Started 6-Cue Eye Blink Flash Calibration.');
     } else {
-      this.wiz.stepEl.textContent = 'CALIBRATION COMPLETE · LIVE SANDBOX TEST';
-      this.wiz.titleEl.textContent = 'Test Your Calibrated Head Cursor & Eye Blinks!';
-      this.wiz.subEl.textContent = 'Move your head to steer the green cursor across the targets, and BLINK to strike lightning bolts!';
+      this.wiz.stepEl.textContent = 'CALIBRATION COMPLETE · FULL-EDGE SANDBOX TEST';
+      this.wiz.titleEl.textContent = 'Test Full Screen Edges (Up/Down/Left/Right) & Eye Blinks!';
+      this.wiz.subEl.textContent = 'Steer the green head cursor to the TOP, BOTTOM, LEFT, and RIGHT edge targets, and BLINK to strike lightning!';
+      if (this.wiz.lockBtn) this.wiz.lockBtn.hidden = true;
       this.wiz.skipBtn.textContent = 'Done — Return to Game';
       if (src?.cancelMotionCalibration) src.cancelMotionCalibration();
-      this.addLog('Calibration Sandbox ready: move head to aim cursor, blink to strike lightning.');
+      this.addLog('Calibration Sandbox ready: test reaching full Top/Bottom/Left/Right edges and blinking.');
     }
   }
 
@@ -440,10 +515,12 @@ export class EegPanel {
         }
       }
       if (this.wiz.mode === 'both') {
-        this.enterWizardPhase('blink');
+        this.enterWizardPhase('noise');
       } else {
         this.enterWizardPhase('sandbox');
       }
+    } else if (this.wiz.phase === 'noise') {
+      this.enterWizardPhase('blink');
     } else if (this.wiz.phase === 'blink') {
       this.enterWizardPhase('sandbox');
     } else {
@@ -462,52 +539,13 @@ export class EegPanel {
     this.addLog('Closed Guided Calibration Wizard.');
   }
 
-  computeDotTarget(elapsedSec) {
-    // Smooth piecewise trajectory across 10.5 seconds:
-    // 0..1.5s: Center (0.5, 0.5) — lock 3D neutral tare
-    // 1.5..3.2s: Center -> Left (0.14, 0.5)
-    // 3.2..5.2s: Left -> Right (0.86, 0.5)
-    // 5.2..6.2s: Right -> Center (0.5, 0.5)
-    // 6.2..7.8s: Center -> Top (0.5, 0.15)
-    // 7.8..9.4s: Top -> Bottom (0.5, 0.85)
-    // 9.4..10.5s: Bottom -> Center (0.5, 0.5)
-    const ease = (u) => 0.5 - 0.5 * Math.cos(Math.max(0, Math.min(1, u)) * Math.PI);
-    const lerp = (a, b, u) => a + (b - a) * ease(u);
-    if (elapsedSec < 1.5) {
-      return { x: 0.5, y: 0.5, label: 'HOLD CENTER (Locking 3D Gravity Tare…)' };
-    }
-    if (elapsedSec < 3.2) {
-      const u = (elapsedSec - 1.5) / 1.7;
-      return { x: lerp(0.5, 0.14, u), y: 0.5, label: 'TURN HEAD LEFT ←' };
-    }
-    if (elapsedSec < 5.2) {
-      const u = (elapsedSec - 3.2) / 2.0;
-      return { x: lerp(0.14, 0.86, u), y: 0.5, label: 'TURN HEAD RIGHT →' };
-    }
-    if (elapsedSec < 6.2) {
-      const u = (elapsedSec - 5.2) / 1.0;
-      return { x: lerp(0.86, 0.5, u), y: 0.5, label: 'RETURN TO CENTER' };
-    }
-    if (elapsedSec < 7.8) {
-      const u = (elapsedSec - 6.2) / 1.6;
-      return { x: 0.5, y: lerp(0.5, 0.15, u), label: 'TILT HEAD UP ↑' };
-    }
-    if (elapsedSec < 9.4) {
-      const u = (elapsedSec - 7.8) / 1.6;
-      return { x: 0.5, y: lerp(0.15, 0.85, u), label: 'TILT HEAD DOWN ↓' };
-    }
-    if (elapsedSec < 10.5) {
-      const u = (elapsedSec - 9.4) / 1.1;
-      return { x: 0.5, y: lerp(0.85, 0.5, u), label: 'RETURN TO CENTER' };
-    }
-    return { x: 0.5, y: 0.5, label: 'SOLVING RUST RIDGE REGRESSION…', done: true };
-  }
-
   updateWizard(hasRealStream) {
     if (!this.wiz || !this.wiz.active) return;
     const src = this.getSource();
     const b = this.getBrain();
     const now = performance.now();
+    const frameDt = Math.max(0.008, Math.min(0.25, (now - (this.wiz.lastFrameNow || now)) / 1000));
+    this.wiz.lastFrameNow = now;
     const elapsed = (now - this.wiz.t0) / 1000;
     const ctx = this.wiz.ctx;
     const w = this.wiz.canvas.width;
@@ -515,100 +553,240 @@ export class EegPanel {
 
     ctx.clearRect(0, 0, w, h);
 
-    // Subtle grid
+    // Subtle crosshair & full-edge border guide
     ctx.strokeStyle = 'rgba(44, 49, 82, 0.45)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h);
     ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2);
     ctx.stroke();
+    ctx.strokeRect(w * 0.04, h * 0.04, w * 0.92, h * 0.92);
 
     const rel = b?.relOrientation || { yaw: 0, pitch: 0, roll: 0 };
     const bm = b?.blinkModel;
     const mm = b?.motionModel;
+    const motionVal = b?.motion ?? 0;
 
     if (this.wiz.phase === 'motion') {
-      const target = this.computeDotTarget(elapsed);
-      this.wiz.dotHistory.push({ t: now, x: target.x, y: target.y });
-      while (this.wiz.dotHistory.length > 40) this.wiz.dotHistory.shift();
+      // Hybrid Smooth-Pursuit + Boundary-Hold + Center-Reverse Trajectory (24.5s total)
+      // Keyframes: [t_sec, x, y, label, isBoundaryHold]
+      const keyframes = [
+        { t: 0.0,  x: 0.50, y: 0.50, label: '1/7 · Look at CENTER & Hold Still (Locking 3D Gyro Zero)', hold: true },
+        { t: 1.8,  x: 0.50, y: 0.50, label: '2/7 · Follow Dot Smoothly LEFT to Full Left Boundary ←', hold: false },
+        { t: 3.3,  x: 0.04, y: 0.50, label: '2/7 · HOLD LEFT BOUNDARY ← (Do NOT Blink)', hold: true },
+        { t: 4.5,  x: 0.04, y: 0.50, label: '2/7 · REVERSE Smoothly Back to CENTER →', hold: false },
+        { t: 5.8,  x: 0.50, y: 0.50, label: 'Center Checkpoint — Re-Anchoring Zero', hold: true },
+        { t: 6.2,  x: 0.50, y: 0.50, label: '3/7 · Follow Dot Smoothly RIGHT to Full Right Boundary →', hold: false },
+        { t: 7.7,  x: 0.96, y: 0.50, label: '3/7 · HOLD RIGHT BOUNDARY → (Do NOT Blink)', hold: true },
+        { t: 8.9,  x: 0.96, y: 0.50, label: '3/7 · REVERSE Smoothly Back to CENTER ←', hold: false },
+        { t: 10.2, x: 0.50, y: 0.50, label: 'Center Checkpoint — Re-Anchoring Zero', hold: true },
+        { t: 10.6, x: 0.50, y: 0.50, label: '4/7 · Follow Dot Smoothly UP to Full Top Boundary ↑', hold: false },
+        { t: 12.0, x: 0.50, y: 0.04, label: '4/7 · HOLD TOP BOUNDARY ↑ (Do NOT Blink)', hold: true },
+        { t: 13.3, x: 0.50, y: 0.04, label: '4/7 · REVERSE Smoothly Down to CENTER ↓', hold: false },
+        { t: 14.5, x: 0.50, y: 0.50, label: 'Center Checkpoint — Re-Anchoring Zero', hold: true },
+        { t: 14.9, x: 0.50, y: 0.50, label: '5/7 · Follow Dot Smoothly DOWN to Full Bottom Boundary ↓', hold: false },
+        { t: 16.3, x: 0.50, y: 0.96, label: '5/7 · HOLD BOTTOM BOUNDARY ↓ (Do NOT Blink)', hold: true },
+        { t: 17.6, x: 0.50, y: 0.96, label: '5/7 · REVERSE Smoothly Up to CENTER ↑', hold: false },
+        { t: 18.8, x: 0.50, y: 0.50, label: '6/7 · Follow Full-Corner Figure-8 Sweep (Top-Left ↖)', hold: false },
+        { t: 19.9, x: 0.06, y: 0.06, label: '6/7 · Sweep Left Boundary to Bottom-Left Corner ↙', hold: false },
+        { t: 21.0, x: 0.06, y: 0.94, label: '6/7 · Cross Diagonally Through Center to Top-Right ↗', hold: false },
+        { t: 22.3, x: 0.94, y: 0.06, label: '6/7 · Sweep Right Boundary to Bottom-Right Corner ↘', hold: false },
+        { t: 23.4, x: 0.94, y: 0.94, label: '7/7 · Return Smoothly to CENTER & Hold', hold: false },
+        { t: 24.4, x: 0.50, y: 0.50, label: '7/7 · Locking Final Center Reference…', hold: true },
+        { t: 25.0, x: 0.50, y: 0.50, label: 'Complete!', hold: true },
+      ];
 
-      if (!this.wiz.taredAtStart && elapsed >= 1.35) {
-        this.wiz.taredAtStart = true;
+      const totalDur = keyframes[keyframes.length - 1].t;
+      if (elapsed >= totalDur) {
+        this.advanceWizardPhase();
+        return;
+      }
+
+      // Find active keyframe segment and cosine-smooth interpolate
+      let segIdx = 0;
+      for (let i = 0; i < keyframes.length - 1; i++) {
+        if (elapsed >= keyframes[i].t && elapsed <= keyframes[i + 1].t) {
+          segIdx = i;
+          break;
+        }
+      }
+      const k0 = keyframes[segIdx];
+      const k1 = keyframes[segIdx + 1];
+      const segSpan = Math.max(0.01, k1.t - k0.t);
+      const rawU = Math.max(0, Math.min(1, (elapsed - k0.t) / segSpan));
+      // Smooth cosine ease-in-out on moving segments so turnaround velocity is natural
+      const smoothU = 0.5 - 0.5 * Math.cos(rawU * Math.PI);
+      const dotX = k0.x + (k1.x - k0.x) * smoothU;
+      const dotY = k0.y + (k1.y - k0.y) * smoothU;
+      const isHold = Math.hypot(k1.x - k0.x, k1.y - k0.y) < 0.01;
+
+      if (!this.wiz.taredAtCenter && elapsed >= 1.2) {
+        this.wiz.taredAtCenter = true;
         if (src?.beginMotionCalibration) {
           src.beginMotionCalibration();
-          this.addLog(`3D Neutral Tare locked at Center (raw P:${b?.orientation?.pitch?.toFixed(1) ?? 0}° Y:${b?.orientation?.yaw?.toFixed(1) ?? 0}°). Recording trajectory...`);
+          this.addLog(`3D Center Tare locked (raw P:${b?.orientation?.pitch?.toFixed(1) ?? 0}° Y:${b?.orientation?.yaw?.toFixed(1) ?? 0}°). Recording hybrid pursuit + boundary holds + reverse sweeps...`);
         }
       }
 
-      if (elapsed >= 1.5 && !target.done && now - this.wiz.lastSampleAt >= 95) {
+      if (this.wiz.taredAtCenter && now - this.wiz.lastSampleAt >= 75) {
         this.wiz.lastSampleAt = now;
-        // Compensate ~160ms human visual pursuit reaction time
-        const lagged = this.wiz.dotHistory.find((p) => now - p.t <= 180) || target;
+        this.wiz.dotSamplesTaken += 1;
         if (src?.addMotionCalibPoint) {
-          const nPts = src.addMotionCalibPoint(lagged.x, lagged.y);
-          if (nPts % 20 === 0) {
-            this.addLog(`Motion sample #${nPts}: dot=(${lagged.x.toFixed(2)}, ${lagged.y.toFixed(2)}) head=(ΔY:${rel.yaw.toFixed(1)}° ΔP:${rel.pitch.toFixed(1)}°)`);
-          }
+          src.addMotionCalibPoint(dotX, dotY);
+        }
+        // Record non-blink baseline during holds so eye classifier rejects stationary & edge hum
+        if (isHold && this.wiz.dotSamplesTaken % 3 === 0 && src?.recordBaselineSample) {
+          src.recordBaselineSample();
         }
       }
 
-      // Draw trajectory guide lines
-      ctx.strokeStyle = 'rgba(137, 180, 250, 0.22)';
-      ctx.setLineDash([6, 6]);
-      ctx.beginPath();
-      ctx.moveTo(w * 0.14, h * 0.5); ctx.lineTo(w * 0.86, h * 0.5);
-      ctx.moveTo(w * 0.5, h * 0.15); ctx.lineTo(w * 0.5, h * 0.85);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Draw user's live head aim cursor preview
-      if (b?.aim) {
-        const ux = b.aim.x * w;
-        const uy = b.aim.y * h;
-        ctx.strokeStyle = '#7ee08a';
-        ctx.lineWidth = 2;
+      // Draw boundary anchor guides at Left, Right, Top, Bottom, Center, and 4 Corners
+      const anchors = [
+        [0.50, 0.50, 'CENTER'],
+        [0.04, 0.50, 'LEFT'],
+        [0.96, 0.50, 'RIGHT'],
+        [0.50, 0.04, 'TOP'],
+        [0.50, 0.96, 'BOTTOM'],
+        [0.06, 0.06, 'TL'],
+        [0.94, 0.06, 'TR'],
+        [0.06, 0.94, 'BL'],
+        [0.94, 0.94, 'BR'],
+      ];
+      for (const [ax, ay, alabel] of anchors) {
+        const px = ax * w;
+        const py = ay * h;
+        const near = Math.hypot(dotX - ax, dotY - ay) < 0.06;
+        ctx.strokeStyle = near ? '#7ee08a' : 'rgba(163, 166, 196, 0.28)';
+        ctx.lineWidth = near ? 2.5 : 1.2;
         ctx.beginPath();
-        ctx.arc(ux, uy, 14, 0, Math.PI * 2);
+        ctx.arc(px, py, 12, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.fillStyle = '#7ee08a';
-        ctx.font = '12px "Pixelify Sans", monospace';
+        ctx.fillStyle = near ? '#7ee08a' : 'rgba(163, 166, 196, 0.45)';
+        ctx.font = '10px "Pixelify Sans", monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('YOUR HEAD', ux, uy - 20);
+        ctx.fillText(alabel, px, py + (ay < 0.15 ? 24 : -16));
       }
 
-      // Draw glowing WHITE DOT
-      const dx = target.x * w;
-      const dy = target.y * h;
-      const pulse = 1 + 0.15 * Math.sin(now * 0.01);
+      // Draw trajectory direction arrow from current dot to next target
+      if (!isHold) {
+        ctx.strokeStyle = 'rgba(255, 207, 74, 0.40)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.moveTo(dotX * w, dotY * h);
+        ctx.lineTo(k1.x * w, k1.y * h);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      const dx = dotX * w;
+      const dy = dotY * h;
+      const pulse = 1 + 0.14 * Math.sin(now * 0.012);
       const grad = ctx.createRadialGradient(dx, dy, 4, dx, dy, 42 * pulse);
       grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
-      grad.addColorStop(0.35, 'rgba(255, 230, 150, 0.85)');
+      grad.addColorStop(0.45, isHold ? 'rgba(126, 224, 138, 0.88)' : 'rgba(255, 230, 150, 0.88)');
       grad.addColorStop(1, 'rgba(255, 207, 74, 0)');
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(dx, dy, 42 * pulse, 0, Math.PI * 2);
       ctx.fill();
 
+      if (isHold) {
+        ctx.strokeStyle = '#7ee08a';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(dx, dy, 22, -Math.PI / 2, -Math.PI / 2 + rawU * Math.PI * 2);
+        ctx.stroke();
+      }
+
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.arc(dx, dy, 13, 0, Math.PI * 2);
+      ctx.arc(dx, dy, 12, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Draw live head cursor preview
+      if (b?.aim) {
+        const ux = b.aim.x * w;
+        const uy = b.aim.y * h;
+        ctx.strokeStyle = '#59d8c8';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(ux, uy, 11, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // Instruction banner at bottom-center so it never blocks top/center targets
+      const bannerY = dotY > 0.62 ? h * 0.16 : h * 0.76;
+      ctx.fillStyle = 'rgba(9, 10, 18, 0.84)';
+      ctx.fillRect(w * 0.16, bannerY, w * 0.68, 64);
+      ctx.strokeStyle = isHold ? '#7ee08a' : '#ffcf4a';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(w * 0.16, bannerY, w * 0.68, 64);
+
+      ctx.fillStyle = '#f4f0e4';
+      ctx.font = '700 19px "Pixelify Sans", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(k0.label, w / 2, bannerY + 26);
+
+      const overallPct = Math.round((elapsed / totalDur) * 100);
+      ctx.fillStyle = isHold ? '#7ee08a' : '#ffcf4a';
+      ctx.font = '14px "Atkinson Hyperlegible", sans-serif';
+      ctx.fillText(
+        isHold
+          ? `HOLD BOUNDARY STEADY (DO NOT BLINK)… ${overallPct}% total (${this.wiz.dotSamplesTaken} pts)`
+          : `FOLLOW WHITE DOT SMOOTHLY WITH YOUR HEAD (DO NOT BLINK)… ${overallPct}% total (${this.wiz.dotSamplesTaken} pts)`,
+        w / 2,
+        bannerY + 50,
+      );
+
+      this.wiz.statsEl.textContent = `Hybrid Calib: ${overallPct}% (${this.wiz.dotSamplesTaken} pts) · Target: (${dotX.toFixed(2)}, ${dotY.toFixed(2)}) · Head ΔYaw: ${rel.yaw.toFixed(1)}° · ΔPitch: ${rel.pitch.toFixed(1)}° · Rest EEG: ${bm?.baselines ?? 0}`;
+    } else if (this.wiz.phase === 'noise') {
+      // 4.5-second "Move Head Around Without Blinking" noise-rejection stage
+      const totalDur = 4.5;
+      const frac = Math.min(1, elapsed / totalDur);
+      if (now - this.wiz.lastNoiseSampleAt >= 120) {
+        this.wiz.lastNoiseSampleAt = now;
+        if (src?.recordBaselineSample) {
+          src.recordBaselineSample();
+        }
+      }
+
+      const cx = w / 2;
+      const cy = h * 0.36;
+      const orbitX = cx + Math.sin(elapsed * 2.6) * 160;
+      const orbitY = cy + Math.cos(elapsed * 3.4) * 85;
+
+      ctx.strokeStyle = 'rgba(89, 216, 200, 0.35)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, 160, 85, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = '#59d8c8';
+      ctx.beginPath();
+      ctx.arc(orbitX, orbitY, 16, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = '#f4f0e4';
-      ctx.font = '700 20px "Pixelify Sans", sans-serif';
+      ctx.font = '700 24px "Pixelify Sans", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(target.label, w / 2, 42);
+      ctx.fillText('MOVE HEAD UP / DOWN / AROUND — DO NOT BLINK!', cx, 48);
 
-      const pct = Math.min(100, Math.round((elapsed / 10.5) * 100));
-      this.wiz.statsEl.textContent = `Progress: ${pct}% · Head ΔYaw: ${rel.yaw.toFixed(1)}° · ΔPitch: ${rel.pitch.toFixed(1)}° · ΔRoll: ${rel.roll.toFixed(1)}°`;
+      ctx.fillStyle = '#7ee08a';
+      ctx.font = '16px "Atkinson Hyperlegible", sans-serif';
+      ctx.fillText(`Recording Head-Motion Non-Blink Noise… ${Math.round(frac * 100)}% (${bm?.baselines ?? 0} negative samples)`, cx, 78);
 
-      if (target.done) {
+      this.drawWizardEegStrip(ctx, b?.eegWave, 80, h - 155, w - 160, 130);
+      this.wiz.statsEl.textContent = `Noise Rejection: ${Math.round(frac * 100)}% · Negative (Non-Blink) Samples: ${bm?.baselines ?? 0} · Head ΔYaw: ${rel.yaw.toFixed(1)}° ΔPitch: ${rel.pitch.toFixed(1)}°`;
+
+      if (elapsed >= totalDur) {
+        this.addLog(`Finished Head-Motion Noise Rejection (${bm?.baselines ?? 0} total non-blink EEG windows recorded).`);
         this.advanceWizardPhase();
       }
     } else if (this.wiz.phase === 'blink') {
-      // 5 Flash cycles, each 2.5 seconds long (1.6s countdown ring -> 0.9s BRIGHT FLASH)
-      const cycleDur = 2.5;
-      const totalFlashes = 5;
+      // 6 Flash cycles, each 2.8 seconds long (1.8s HOLD DO NOT BLINK -> 1.0s BRIGHT GOLD FLASH)
+      const cycleDur = 2.8;
+      const totalFlashes = 6;
       const idx = Math.floor(elapsed / cycleDur);
       const phaseT = (elapsed % cycleDur) / cycleDur; // 0..1
 
@@ -623,16 +801,15 @@ export class EegPanel {
         this.wiz.flashTriggered = false;
       }
 
-      // At 40% of cycle (quiet eyes-open interval), record clean resting EEG sample
-      if (!this.wiz.flashRestRecorded && phaseT > 0.35 && phaseT < 0.55) {
+      // At 35% of cycle (during HOLD DO NOT BLINK), record another clean non-blink EEG sample
+      if (!this.wiz.flashRestRecorded && phaseT > 0.30 && phaseT < 0.50) {
         this.wiz.flashRestRecorded = true;
-        if (src?.recordBaselineSample && (bm?.effUv || 0) < 95) {
+        if (src?.recordBaselineSample) {
           src.recordBaselineSample();
-          this.addLog(`Cue #${idx + 1}/${totalFlashes}: Recorded eyes-open resting baseline (${Math.round(bm?.effUv || 0)}uV).`);
         }
       }
 
-      const isFlash = phaseT >= 0.62;
+      const isFlash = phaseT >= 0.64;
       if (isFlash && !this.wiz.flashTriggered) {
         this.wiz.flashTriggered = true;
         if (src?.armBlinkFlashWindow) {
@@ -643,15 +820,13 @@ export class EegPanel {
         this.addLog(`⚡ FLASH #${idx + 1}/${totalFlashes} — BLINK NOW! (Armed 1.15s 4-channel EEG capture)`);
       }
 
-      // Flash background & imagery
       const cx = w / 2;
       const cy = h * 0.38;
       if (isFlash) {
-        const flashAlpha = Math.max(0, 1 - (phaseT - 0.62) / 0.38);
-        ctx.fillStyle = `rgba(255, 215, 90, ${0.42 * flashAlpha})`;
+        const flashAlpha = Math.max(0, 1 - (phaseT - 0.64) / 0.36);
+        ctx.fillStyle = `rgba(255, 215, 90, ${0.44 * flashAlpha})`;
         ctx.fillRect(0, 0, w, h);
 
-        // Lightning & Open/Blink Eye Sigil
         ctx.strokeStyle = '#ffcf4a';
         ctx.lineWidth = 5;
         ctx.beginPath();
@@ -663,7 +838,7 @@ export class EegPanel {
         ctx.textAlign = 'center';
         ctx.fillText('⚡ BLINK NOW! ⚡', cx, cy + 12);
       } else {
-        const ringFrac = 1 - (phaseT / 0.62); // 1 -> 0
+        const ringFrac = 1 - (phaseT / 0.64);
         const radius = 36 + ringFrac * 110;
         ctx.strokeStyle = 'rgba(89, 216, 200, 0.85)';
         ctx.lineWidth = 4;
@@ -684,15 +859,14 @@ export class EegPanel {
         ctx.fillStyle = '#f4f0e4';
         ctx.font = '700 22px "Pixelify Sans", sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(`Flash ${idx + 1} of ${totalFlashes} — Hold Eyes Open…`, cx, 42);
+        ctx.fillText(`Cue ${idx + 1} of ${totalFlashes} — HOLD EYES OPEN (DO NOT BLINK)…`, cx, 42);
       }
 
-      // Draw live 4-channel EEG waveforms right at the bottom of the wizard canvas so user sees their blink peaks!
       this.drawWizardEegStrip(ctx, b?.eegWave, 80, h - 155, w - 160, 130);
 
-      this.wiz.statsEl.textContent = `Flash ${idx + 1}/${totalFlashes} · Blinks Learned: ${bm?.blinks ?? 0} · Rest: ${bm?.baselines ?? 0} · Peak: ${Math.round(bm?.effUv ?? 0)} µV · Thr: ${Math.round(bm?.thresholdUv ?? 155)} µV`;
+      this.wiz.statsEl.textContent = `Flash ${idx + 1}/${totalFlashes} · Blinks Learned: ${bm?.blinks ?? 0} · Non-Blink Rest/Noise: ${bm?.baselines ?? 0} · Surge: ${Math.round(bm?.effUv ?? 0)} µV · Thr: ${Math.round(bm?.thresholdUv ?? 175)} µV`;
     } else {
-      // Sandbox phase: test head cursor + blink lightning
+      // Sandbox phase: test full-edge head cursor + blink lightning
       const curBlinks = b?.stats?.blinks ?? 0;
       if (curBlinks > this.wiz.lastBlinkCount) {
         this.wiz.lastBlinkCount = curBlinks;
@@ -703,13 +877,16 @@ export class EegPanel {
         });
       }
 
-      // Draw target circles
       const targets = [
-        { x: 0.2, y: 0.3, lbl: 'TOP LEFT' },
-        { x: 0.8, y: 0.3, lbl: 'TOP RIGHT' },
-        { x: 0.5, y: 0.5, lbl: 'CENTER' },
-        { x: 0.2, y: 0.75, lbl: 'BOTTOM LEFT' },
-        { x: 0.8, y: 0.75, lbl: 'BOTTOM RIGHT' },
+        { x: 0.50, y: 0.06, lbl: 'TOP EDGE' },
+        { x: 0.50, y: 0.94, lbl: 'BOTTOM EDGE' },
+        { x: 0.06, y: 0.50, lbl: 'LEFT EDGE' },
+        { x: 0.94, y: 0.50, lbl: 'RIGHT EDGE' },
+        { x: 0.50, y: 0.50, lbl: 'CENTER' },
+        { x: 0.12, y: 0.14, lbl: 'TOP LEFT' },
+        { x: 0.88, y: 0.14, lbl: 'TOP RIGHT' },
+        { x: 0.12, y: 0.86, lbl: 'BOT LEFT' },
+        { x: 0.88, y: 0.86, lbl: 'BOT RIGHT' },
       ];
       for (const t of targets) {
         const tx = t.x * w, ty = t.y * h;
@@ -717,15 +894,14 @@ export class EegPanel {
         ctx.strokeStyle = dist < 0.09 ? '#7ee08a' : 'rgba(163, 166, 196, 0.45)';
         ctx.lineWidth = dist < 0.09 ? 3 : 1.5;
         ctx.beginPath();
-        ctx.arc(tx, ty, 34, 0, Math.PI * 2);
+        ctx.arc(tx, ty, 28, 0, Math.PI * 2);
         ctx.stroke();
         ctx.fillStyle = 'rgba(244, 240, 228, 0.75)';
-        ctx.font = '12px "Pixelify Sans", monospace';
+        ctx.font = '11px "Pixelify Sans", monospace';
         ctx.textAlign = 'center';
         ctx.fillText(t.lbl, tx, ty + 4);
       }
 
-      // Draw lightning bolts
       this.wiz.sandboxBolts = this.wiz.sandboxBolts.filter((bolt) => now - bolt.born < 700);
       for (const bolt of this.wiz.sandboxBolts) {
         const age = (now - bolt.born) / 700;
@@ -750,7 +926,7 @@ export class EegPanel {
         ctx.fill();
       }
 
-      this.wiz.statsEl.textContent = `Head Aim: (${(b?.aim?.x ?? 0.5).toFixed(2)}, ${(b?.aim?.y ?? 0.5).toFixed(2)}) · Motion R²: ${Math.round((mm?.r2 ?? 0) * 100)}% · Blink Acc: ${Math.round((bm?.accuracy ?? 0) * 100)}% (Thr ${Math.round(bm?.thresholdUv ?? 155)}µV)`;
+      this.wiz.statsEl.textContent = `Head Aim: (${(b?.aim?.x ?? 0.5).toFixed(2)}, ${(b?.aim?.y ?? 0.5).toFixed(2)}) · Motion R²: ${Math.round((mm?.r2 ?? 0) * 100)}% (PitchEdge: ${(mm?.pitchEdgeDeg ?? 8).toFixed(1)}°) · Blink Acc: ${Math.round((bm?.accuracy ?? 0) * 100)}% (Thr ${Math.round(bm?.thresholdUv ?? 175)}µV)`;
     }
   }
 
@@ -836,6 +1012,20 @@ export class EegPanel {
     const open = force !== undefined ? force : this.panel.hidden;
     this.panel.hidden = !open;
     this.btn.setAttribute('aria-pressed', String(open));
+    if (open && this.doc) {
+      const camP = this.doc.getElementById('camPanel');
+      const camB = this.doc.getElementById('camBtn');
+      if (camP && !camP.hidden) {
+        camP.hidden = true;
+        camB?.setAttribute('aria-pressed', 'false');
+      }
+      const modP = this.doc.getElementById('modelPanel');
+      const modB = this.doc.getElementById('modelBtn');
+      if (modP && !modP.hidden) {
+        modP.hidden = true;
+        modB?.setAttribute('aria-pressed', 'false');
+      }
+    }
   }
 
   async handleConnect() {

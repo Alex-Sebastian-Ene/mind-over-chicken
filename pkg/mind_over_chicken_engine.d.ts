@@ -35,6 +35,15 @@ export class Engine {
     game_restart_era(): void;
     game_start_era(index: number): void;
     game_tick(dt: number, calm: number, focus: number, panic: number, hr: number, rest_hr: number, hr_delta: number, blinks: number): void;
+    /**
+     * Standalone helper to generate a civ planet RGBA texture (#109).
+     */
+    static generate_civ_terrain(seed: number, width: number, height: number): Uint8Array;
+    /**
+     * Generate realistic procedural terrain using moc-terrain (#109).
+     * Updates the engine's internal heightmap, 3D relief mesh, and base pixel texture.
+     */
+    generate_terrain(seed: number): void;
     get_camera_distance(): number;
     get_camera_pitch(): number;
     get_camera_target_x(): number;
@@ -74,6 +83,7 @@ export class Engine {
     constructor(canvas_id: string);
     orbit_camera(delta_yaw: number, delta_pitch: number): void;
     pan_camera(dx: number, dz: number): void;
+    project_to_screen(wx: number, wz: number, cw: number, ch: number): Float32Array;
     render_3d(dt: number, sun_x: number, sun_y: number, sun_z: number, night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
     render_uploaded_canvas(night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
     screen_to_ground(sx: number, sy: number, cw: number, ch: number): Float32Array;
@@ -87,13 +97,41 @@ export class Engine {
     set_era(era: number): void;
     /**
      * Use the JS world's heights (row-major W×H, 0..1, sea level 0.33) for the 3D mesh, the
-     * raycast and where billboards stand. The engine's own `Terrain` is still the old single
-     * island, so without this the relief doesn't match the map the simulation runs on.
-     * Call after `init_world`.
+     * raycast and where billboards stand.
      */
     set_heightmap(heights: Float32Array | number[]): void;
     upload_canvas(canvas: HTMLCanvasElement): void;
     zoom_camera(factor: number): void;
+}
+
+export class PointerGesture {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * A main-button or touch press. `sx, sy` screen pixels; `wx, wy` world units.
+     */
+    down(id: number, sx: number, sy: number, wx: number, wy: number): void;
+    is_panning(): boolean;
+    /**
+     * Pointer moved. Returns true when this move pans the map; read the delta with
+     * `pan_dx()` / `pan_dy()` (world units since the previous move). Returns false while the
+     * press is still a possible tap, or for another pointer.
+     */
+    moved(id: number, sx: number, sy: number, wx: number, wy: number): boolean;
+    /**
+     * `threshold_px`: how far (screen pixels) a press must move before it counts as a drag.
+     */
+    constructor(threshold_px: number);
+    /**
+     * Is this pointer the press being tracked?
+     */
+    owns(id: number): boolean;
+    pan_dx(): number;
+    pan_dy(): number;
+    /**
+     * Press ended. Returns true when it was a tap (blink). A cancelled pointer never taps.
+     */
+    up(id: number, cancelled: boolean): boolean;
 }
 
 export class RustBlinkClassifier {
@@ -120,6 +158,10 @@ export class RustBlinkClassifier {
     learned_af8_uv(): number;
     learned_threshold_uv(): number;
     constructor();
+    /**
+     * Records the latest EEG window as a non-blink negative sample (used during Hold Still
+     * and Move Head Around Without Blinking calibration stages to cancel noise & hum).
+     */
     record_baseline_button(): boolean;
     /**
      * Searches the last ~2.5s of EEG windows for the strongest blink peak if the user blinked
@@ -146,8 +188,15 @@ export class RustImuTracker {
     calib_sample_count(): number;
     cancel_motion_calibration(): void;
     /**
-     * Fits a 2D Ridge Regression model in Rust mapping `[1, rel_yaw, rel_pitch, rel_roll]` -> `(tilt_x, tilt_y)`.
-     * Automatically discovers axis signs, sensitivity/range, center offset, and cross-axis head tilt coupling.
+     * Hybrid Smooth-Pursuit + Boundary-Fixation + Center-Checkpoint Solver:
+     * 1. Extracts Center checkpoints (`|tx| < 0.08 && |ty| < 0.08`) to remove any gyro yaw drift
+     *    accumulated across calibration and guarantee zero-intercept symmetry on reverse.
+     * 2. Searches optimal human smooth-pursuit reaction lag `L in 0..=2` on moving segments while
+     *    weighting stationary boundary-hold anchors (`3.0x`) for exact screen edge locking.
+     * 3. Solves zero-prior 3D sensor-to-head Ridge Regression (`[yaw, pitch, roll] -> (u_x, u_y)`)
+     *    with cross-axis Gram-Schmidt decoupling so vertical nods never leak horizontally.
+     * 4. Computes independent 4-boundary reach envelopes (`scale_left, scale_right, scale_up, scale_down`)
+     *    so 89% of the user's calibrated edge posture reaches 100% of all 4 screen boundaries & corners.
      */
     finish_motion_calibration(): boolean;
     has_motion_model(): boolean;
@@ -171,13 +220,29 @@ export class RustImuTracker {
     update(ax: number, ay: number, az: number, gx: number, gy: number, gz: number, bridge_yaw: number, has_bridge_yaw: boolean, dt: number): void;
 }
 
+/**
+ * Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109)
+ */
+export class RustWorldGen {
+    free(): void;
+    [Symbol.dispose](): void;
+    continents_json(): string;
+    heights(): Float32Array;
+    constructor(seed: number);
+    rgba(): Uint8Array;
+    sites_json(): string;
+    types(): Uint8Array;
+}
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_engine_free: (a: number, b: number) => void;
+    readonly __wbg_pointergesture_free: (a: number, b: number) => void;
     readonly __wbg_rustblinkclassifier_free: (a: number, b: number) => void;
     readonly __wbg_rustimutracker_free: (a: number, b: number) => void;
+    readonly __wbg_rustworldgen_free: (a: number, b: number) => void;
     readonly engine_add_3d_light: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly engine_add_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly engine_add_custom_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
@@ -209,6 +274,8 @@ export interface InitOutput {
     readonly engine_game_restart_era: (a: number) => void;
     readonly engine_game_start_era: (a: number, b: number) => void;
     readonly engine_game_tick: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+    readonly engine_generate_civ_terrain: (a: number, b: number, c: number) => [number, number];
+    readonly engine_generate_terrain: (a: number, b: number) => [number, number];
     readonly engine_get_camera_distance: (a: number) => number;
     readonly engine_get_camera_pitch: (a: number) => number;
     readonly engine_get_camera_target_x: (a: number) => number;
@@ -248,6 +315,7 @@ export interface InitOutput {
     readonly engine_new: (a: number, b: number) => [number, number, number];
     readonly engine_orbit_camera: (a: number, b: number, c: number) => void;
     readonly engine_pan_camera: (a: number, b: number, c: number) => void;
+    readonly engine_project_to_screen: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly engine_render_3d: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
     readonly engine_render_uploaded_canvas: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly engine_screen_to_ground: (a: number, b: number, c: number, d: number, e: number) => any;
@@ -258,6 +326,14 @@ export interface InitOutput {
     readonly engine_set_heightmap: (a: number, b: number, c: number) => [number, number];
     readonly engine_upload_canvas: (a: number, b: any) => [number, number];
     readonly engine_zoom_camera: (a: number, b: number) => void;
+    readonly pointergesture_down: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly pointergesture_is_panning: (a: number) => number;
+    readonly pointergesture_moved: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly pointergesture_new: (a: number) => number;
+    readonly pointergesture_owns: (a: number, b: number) => number;
+    readonly pointergesture_pan_dx: (a: number) => number;
+    readonly pointergesture_pan_dy: (a: number) => number;
+    readonly pointergesture_up: (a: number, b: number, c: number) => number;
     readonly rustblinkclassifier_accuracy: (a: number) => number;
     readonly rustblinkclassifier_arm_flash_window: (a: number, b: number) => void;
     readonly rustblinkclassifier_baseline_samples: (a: number) => number;
@@ -308,6 +384,12 @@ export interface InitOutput {
     readonly rustimutracker_tilt_x: (a: number) => number;
     readonly rustimutracker_tilt_y: (a: number) => number;
     readonly rustimutracker_update: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
+    readonly rustworldgen_continents_json: (a: number) => [number, number];
+    readonly rustworldgen_heights: (a: number) => any;
+    readonly rustworldgen_new: (a: number) => number;
+    readonly rustworldgen_rgba: (a: number) => any;
+    readonly rustworldgen_sites_json: (a: number) => [number, number];
+    readonly rustworldgen_types: (a: number) => any;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

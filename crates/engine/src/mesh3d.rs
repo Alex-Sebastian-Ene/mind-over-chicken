@@ -20,8 +20,10 @@ impl TerrainMesh {
         height_scale: f32,
         water_level: f32,
     ) -> Self {
-        let cols = 64;
-        let rows = 36;
+        // High-density 1:1 tile grid (320x180): 58,101 vertices (fits within u16::MAX 65535)
+        // Coastlines, cliffs and mountain ridges are sharp and accurate to the simulation grid.
+        let cols = grid_w.min(320);
+        let rows = grid_h.min(180);
         let total_verts = (cols + 1) * (rows + 1);
         let mut vertices = Vec::with_capacity(total_verts * VERTEX_STRIDE);
         let mut indices = Vec::with_capacity(cols * rows * 6);
@@ -32,8 +34,8 @@ impl TerrainMesh {
         let sample_h = |gx: usize, gy: usize| -> f32 {
             let px = (gx * (grid_w - 1)) / cols;
             let py = (gy * (grid_h - 1)) / rows;
-            let idx = (py * grid_w + px).min(heights.len() - 1);
-            heights[idx]
+            let idx = (py * grid_w + px).min(heights.len().saturating_sub(1));
+            heights.get(idx).copied().unwrap_or(0.33)
         };
 
         for r in 0..=rows {
@@ -46,9 +48,11 @@ impl TerrainMesh {
                 let u = c as f32 / cols as f32;
                 let v = r as f32 / rows as f32;
 
-                // Compute normal from neighbors
-                let h_l = if c > 0 { sample_h(c - 1, r) } else { h };
-                let h_r = if c < cols { sample_h(c + 1, r) } else { h };
+                // Compute normal from neighbors with east-west planetary wrapping
+                let c_left = if c > 0 { c - 1 } else { cols - 1 };
+                let c_right = if c < cols { c + 1 } else { 0 };
+                let h_l = sample_h(c_left, r);
+                let h_r = sample_h(c_right, r);
                 let h_u = if r > 0 { sample_h(c, r - 1) } else { h };
                 let h_d = if r < rows { sample_h(c, r + 1) } else { h };
 
@@ -84,23 +88,26 @@ impl TerrainMesh {
             }
         }
 
-        // Animated water grid (32 cols x 18 rows) at y = water_level * height_scale
+        // Extended water grid: spans past north and south edges (z: -60..world_h+60)
+        // Eliminates pole band clipping so horizon seamlessly fades into ocean.
         let wy = water_level * height_scale;
-        let w_cols = 32;
-        let w_rows = 18;
+        let w_cols = 160;
+        let w_rows = 100;
+        let z_pad = 60.0f32;
         let total_water_verts = (w_cols + 1) * (w_rows + 1);
         let mut water_vertices = Vec::with_capacity(total_water_verts * VERTEX_STRIDE);
         let mut water_indices = Vec::with_capacity(w_cols * w_rows * 6);
 
         let w_dx = world_w / w_cols as f32;
-        let w_dz = world_h / w_rows as f32;
+        let total_z_span = world_h + z_pad * 2.0;
+        let w_dz = total_z_span / w_rows as f32;
 
         for r in 0..=w_rows {
             for c in 0..=w_cols {
                 let x = c as f32 * w_dx;
-                let z = r as f32 * w_dz;
+                let z = -z_pad + r as f32 * w_dz;
                 let u = c as f32 / w_cols as f32;
-                let v = r as f32 / w_rows as f32;
+                let v = (z / world_h).clamp(0.0, 1.0);
                 water_vertices.extend_from_slice(&[
                     x, wy, z,
                     u, v,

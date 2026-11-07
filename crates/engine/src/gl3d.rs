@@ -16,7 +16,7 @@ pub struct Light3D {
 #[derive(Clone, Copy, Debug)]
 pub struct BillboardVertex {
     pub center: [f32; 3],
-    pub offset: [f32; 2],
+    pub offset: [f32; 3],
     pub uv: [f32; 2],
 }
 
@@ -51,9 +51,10 @@ pub struct WebGl3DRenderer {
     // Terrain uniforms
     pub u_terrain_vp: WebGlUniformLocation,
     pub u_terrain_sun_dir: WebGlUniformLocation,
-    pub u_terrain_ambient: WebGlUniformLocation,
+    pub u_terrain_ambient: Option<WebGlUniformLocation>,
     pub u_terrain_night: WebGlUniformLocation,
     pub u_terrain_time: Option<WebGlUniformLocation>,
+    pub u_terrain_cam_pos: Option<WebGlUniformLocation>,
     pub u_terrain_light_count: WebGlUniformLocation,
     pub u_terrain_light_pos: WebGlUniformLocation,
     pub u_terrain_light_rad: WebGlUniformLocation,
@@ -64,6 +65,7 @@ pub struct WebGl3DRenderer {
     pub u_water_sun_dir: WebGlUniformLocation,
     pub u_water_night: WebGlUniformLocation,
     pub u_water_time: WebGlUniformLocation,
+    pub u_water_cam_pos: Option<WebGlUniformLocation>,
     pub u_water_light_count: WebGlUniformLocation,
     pub u_water_light_pos: WebGlUniformLocation,
     pub u_water_light_rad: WebGlUniformLocation,
@@ -72,8 +74,14 @@ pub struct WebGl3DRenderer {
     // Billboard uniforms
     pub u_billboard_vp: WebGlUniformLocation,
     pub u_billboard_cam_right: WebGlUniformLocation,
+    pub u_billboard_cam_up: WebGlUniformLocation,
+    pub u_billboard_ground_forward: WebGlUniformLocation,
     pub u_billboard_night: WebGlUniformLocation,
-    pub u_billboard_up_scale: WebGlUniformLocation,
+    pub u_billboard_sun_dir: Option<WebGlUniformLocation>,
+    pub u_billboard_light_count: Option<WebGlUniformLocation>,
+    pub u_billboard_light_pos: Option<WebGlUniformLocation>,
+    pub u_billboard_light_rad: Option<WebGlUniformLocation>,
+    pub u_billboard_light_int: Option<WebGlUniformLocation>,
     pub u_terrain_offset_x: WebGlUniformLocation,
     pub u_water_offset_x: WebGlUniformLocation,
     pub u_billboard_offset_x: WebGlUniformLocation,
@@ -96,10 +104,11 @@ varying vec3 v_normal;
 varying vec3 v_worldPos;
 
 void main() {
-    v_worldPos = a_position;
+    vec3 wpos = a_position + vec3(u_offsetX, 0.0, 0.0);
+    v_worldPos = wpos;
     v_normal = a_normal;
     v_texCoord = a_texCoord;
-    gl_Position = u_viewProjection * vec4(a_position + vec3(u_offsetX, 0.0, 0.0), 1.0);
+    gl_Position = u_viewProjection * vec4(wpos, 1.0);
 }
 "#;
 
@@ -112,6 +121,7 @@ varying vec3 v_worldPos;
 
 uniform sampler2D u_texture;
 uniform vec3 u_sunDir;
+uniform vec3 u_camPos;
 uniform float u_ambient;
 uniform float u_night;
 uniform int u_lightCount;
@@ -122,28 +132,49 @@ uniform float u_lightInt[16];
 void main() {
     vec4 albedo = texture2D(u_texture, v_texCoord);
     vec3 norm = normalize(v_normal);
+    vec3 sun = normalize(u_sunDir);
 
-    // Quantized diffuse lighting for pixel-art aesthetic
-    float nDotL = max(0.0, dot(norm, normalize(u_sunDir)));
-    float diffuse = floor(nDotL * 4.0 + 0.5) / 4.0;
+    // Dynamic sun elevation determines warm golden twilight vs noon sun
+    float sunElevation = clamp(sun.y * 1.5, 0.0, 1.0);
+    vec3 sunColor = mix(vec3(1.0, 0.58, 0.28), vec3(1.0, 0.96, 0.88), sunElevation);
 
-    // Ambient day vs night
-    vec3 nightTint = vec3(0.08, 0.12, 0.28);
-    vec3 ambientCol = mix(vec3(u_ambient), nightTint, u_night);
+    // Directional diffuse lighting with quantized half-Lambert wrap
+    float nDotL = max(0.0, dot(norm, sun));
+    float directLight = floor(nDotL * 5.0 + 0.5) / 5.0;
+    float sunVisible = max(0.0, sun.y) * (1.0 - u_night);
 
-    vec3 lightAccum = ambientCol + vec3(diffuse * (1.0 - u_night * 0.75));
+    // Ambient occlusion based on surface slope / upward normal
+    float ao = clamp(norm.y * 0.70 + 0.30, 0.40, 1.0);
+
+    // Day sky ambient vs moonlit night
+    vec3 dayAmbient = vec3(0.18, 0.26, 0.38) * ao;
+    vec3 nightAmbient = vec3(0.04, 0.07, 0.18) * ao;
+    vec3 ambientCol = mix(dayAmbient, nightAmbient, u_night);
+
+    // Moon directional highlight at night
+    vec3 moonDir = normalize(vec3(-sun.x, 0.75, -sun.z));
+    float moonLight = max(0.0, dot(norm, moonDir)) * u_night * 0.35;
+    vec3 moonCol = vec3(0.15, 0.22, 0.45) * moonLight;
+
+    vec3 lightAccum = ambientCol + sunColor * (directLight * sunVisible) + moonCol;
 
     // Dynamic 3D point lights (fires, torches, lightning)
     for (int i = 0; i < 16; i++) {
         if (i >= u_lightCount) break;
         float d = distance(v_worldPos, u_lightPos[i]);
         if (d < u_lightRad[i]) {
-            float atten = (1.0 - d / u_lightRad[i]) * u_lightInt[i];
-            lightAccum += vec3(1.0, 0.65, 0.3) * atten;
+            float atten = clamp(1.0 - d / u_lightRad[i], 0.0, 1.0);
+            atten = atten * atten * u_lightInt[i];
+            lightAccum += vec3(1.0, 0.68, 0.28) * atten;
         }
     }
 
-    vec3 finalColor = albedo.rgb * lightAccum;
+    // Atmospheric horizon haze
+    float camDist = distance(v_worldPos, u_camPos);
+    float haze = clamp((camDist - 240.0) / 420.0, 0.0, 0.50);
+    vec3 hazeCol = mix(vec3(0.09, 0.17, 0.36), vec3(0.03, 0.05, 0.12), u_night);
+
+    vec3 finalColor = mix(albedo.rgb * lightAccum, hazeCol, haze);
     gl_FragColor = vec4(clamp(finalColor, 0.0, 1.0), albedo.a);
 }
 "#;
@@ -162,11 +193,15 @@ varying vec3 v_worldPos;
 
 void main() {
     vec3 pos = a_position;
-    // Dynamic 3D wave ripples
-    pos.y += sin(pos.x * 0.18 + u_time * 2.8) * cos(pos.z * 0.18 + u_time * 2.2) * 0.45;
-    v_worldPos = pos;
+    // Two-octave animated 3D wave ripples
+    float w1 = sin(pos.x * 0.14 + u_time * 2.4) * cos(pos.z * 0.14 + u_time * 1.9) * 0.36;
+    float w2 = sin(pos.x * 0.28 - u_time * 3.1) * cos(pos.z * 0.24 + u_time * 2.7) * 0.14;
+    pos.y += w1 + w2;
+
+    vec3 wpos = pos + vec3(u_offsetX, 0.0, 0.0);
+    v_worldPos = wpos;
     v_texCoord = a_texCoord;
-    gl_Position = u_viewProjection * vec4(pos + vec3(u_offsetX, 0.0, 0.0), 1.0);
+    gl_Position = u_viewProjection * vec4(wpos, 1.0);
 }
 "#;
 
@@ -177,6 +212,7 @@ varying vec2 v_texCoord;
 varying vec3 v_worldPos;
 
 uniform vec3 u_sunDir;
+uniform vec3 u_camPos;
 uniform float u_night;
 uniform float u_time;
 uniform int u_lightCount;
@@ -185,21 +221,39 @@ uniform float u_lightRad[16];
 uniform float u_lightInt[16];
 
 void main() {
-    // A thin dark glaze: the 2D map's own sea (shallows, foam, animation) shows through.
-    vec3 dayWater = vec3(0.08, 0.17, 0.36);
-    vec3 nightWater = vec3(0.03, 0.06, 0.16);
-    vec3 col = mix(dayWater, nightWater, u_night);
+    // Rich ocean base color: turquoise coast to deep oceanic navy
+    vec3 dayWaterDeep = vec3(0.05, 0.14, 0.32);
+    vec3 dayWaterShallow = vec3(0.12, 0.42, 0.58);
+    vec3 nightWater = vec3(0.02, 0.05, 0.14);
 
-    // Sun height brightens the water in steps (pixel-art lighting, like the terrain)
-    float sunUp = max(0.0, normalize(u_sunDir).y);
-    col += vec3(0.04, 0.06, 0.08) * (floor(sunUp * 3.0 + 0.5) / 3.0) * (1.0 - u_night);
+    // Depth / latitude variation
+    float depthGrad = clamp(abs(v_worldPos.z - 90.0) / 90.0, 0.0, 1.0);
+    vec3 baseWater = mix(dayWaterShallow, dayWaterDeep, depthGrad * 0.8 + 0.2);
+    vec3 col = mix(baseWater, nightWater, u_night);
 
-    // Sparse twinkles (one in ~60 two-unit cells, each blinking on its own phase) instead of
-    // the old full-screen diagonal foam stripes.
+    // Analytical wave normal from wave derivatives
+    float dw_dx = 0.14 * cos(v_worldPos.x * 0.14 + u_time * 2.4) * cos(v_worldPos.z * 0.14 + u_time * 1.9) * 0.36
+                + 0.28 * cos(v_worldPos.x * 0.28 - u_time * 3.1) * cos(v_worldPos.z * 0.24 + u_time * 2.7) * 0.14;
+    float dw_dz = -0.14 * sin(v_worldPos.x * 0.14 + u_time * 2.4) * sin(v_worldPos.z * 0.14 + u_time * 1.9) * 0.36
+                - 0.24 * sin(v_worldPos.x * 0.28 - u_time * 3.1) * sin(v_worldPos.z * 0.24 + u_time * 2.7) * 0.14;
+    vec3 norm = normalize(vec3(-dw_dx, 1.0, -dw_dz));
+
+    // Specular sunlight and moonlight glint (Fresnel / Blinn-Phong)
+    vec3 viewDir = normalize(u_camPos - v_worldPos);
+    vec3 sunDir = normalize(u_sunDir);
+    vec3 halfDir = normalize(sunDir + viewDir);
+    float nDotH = max(0.0, dot(norm, halfDir));
+    float spec = pow(nDotH, 28.0);
+    float glint = floor(spec * 4.0 + 0.5) / 4.0;
+    float sunVis = max(0.0, sunDir.y) * (1.0 - u_night);
+    vec3 glintColor = mix(vec3(1.0, 0.85, 0.55), vec3(0.5, 0.7, 1.0), u_night);
+    col += glintColor * (glint * (sunVis + u_night * 0.3));
+
+    // Sparkling foam crests
     vec2 cell = floor(v_worldPos.xz * 0.5);
     float h = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
-    if (h > 0.984 && sin(u_time * 2.5 + h * 60.0) > 0.6) {
-        col += vec3(0.30, 0.38, 0.45) * (1.0 - u_night * 0.6);
+    if (h > 0.975 && sin(u_time * 3.0 + h * 40.0) > 0.5) {
+        col += vec3(0.35, 0.50, 0.65) * (1.0 - u_night * 0.5);
     }
 
     // Dynamic point lights reflection on water
@@ -207,48 +261,90 @@ void main() {
         if (i >= u_lightCount) break;
         float d = distance(v_worldPos, u_lightPos[i]);
         if (d < u_lightRad[i]) {
-            float atten = (1.0 - d / u_lightRad[i]) * u_lightInt[i];
-            col += vec3(1.0, 0.65, 0.3) * atten;
+            float atten = clamp(1.0 - d / u_lightRad[i], 0.0, 1.0);
+            atten = atten * atten * u_lightInt[i];
+            col += vec3(1.0, 0.68, 0.28) * atten * 1.2;
         }
     }
 
-    gl_FragColor = vec4(clamp(col, 0.0, 1.0), 0.34);
+    // Atmospheric horizon haze for water
+    float camDist = distance(v_worldPos, u_camPos);
+    float haze = clamp((camDist - 240.0) / 420.0, 0.0, 0.55);
+    vec3 hazeCol = mix(vec3(0.09, 0.17, 0.36), vec3(0.03, 0.05, 0.12), u_night);
+    col = mix(col, hazeCol, haze);
+
+    gl_FragColor = vec4(clamp(col, 0.0, 1.0), 0.72);
 }
 "#;
 
 const BILLBOARD_VS: &str = r#"
 attribute vec3 a_center;
-attribute vec2 a_offset;
+attribute vec3 a_offset;
 attribute vec2 a_texCoord;
 
 uniform mat4 u_viewProjection;
 uniform vec3 u_camRight;
-uniform float u_upScale; // 1 / cos(pitch): an upright sprite keeps its pixel height when seen from above
+uniform vec3 u_camUp;
+uniform vec3 u_groundForward;
 uniform float u_offsetX;
 
 varying vec2 v_texCoord;
+varying vec3 v_worldPos;
 
 void main() {
     v_texCoord = a_texCoord;
-    vec3 camUp = vec3(0.0, u_upScale, 0.0);
-    vec3 worldPos = a_center + vec3(u_offsetX, 0.0, 0.0) + u_camRight * a_offset.x + camUp * a_offset.y;
+    // Diorama cylindrical tilt: blend world-up with camera-up so sprites face the player comfortably
+    vec3 spriteUp = normalize(mix(vec3(0.0, 1.0, 0.0), u_camUp, 0.68));
+
+    // a_offset.x is along camRight
+    // a_offset.y is along spriteUp (height)
+    // a_offset.z is along groundForward (ground contact shadow)
+    vec3 worldPos = a_center + vec3(u_offsetX, 0.0, 0.0)
+                  + u_camRight * (a_offset.x * 1.25)
+                  + spriteUp * (a_offset.y * 1.25)
+                  + u_groundForward * (a_offset.z * 1.25);
+
+    v_worldPos = worldPos;
     gl_Position = u_viewProjection * vec4(worldPos, 1.0);
 }
 "#;
 
 const BILLBOARD_FS: &str = r#"
 precision mediump float;
+
 varying vec2 v_texCoord;
+varying vec3 v_worldPos;
+
 uniform sampler2D u_texture;
+uniform vec3 u_sunDir;
 uniform float u_night;
+uniform int u_lightCount;
+uniform vec3 u_lightPos[16];
+uniform float u_lightRad[16];
+uniform float u_lightInt[16];
 
 void main() {
     vec4 c = texture2D(u_texture, v_texCoord);
-    if (c.a < 0.1) discard;
+    if (c.a < 0.02) discard;
 
-    vec3 nightTint = vec3(0.18, 0.24, 0.45);
-    vec3 lit = mix(c.rgb, c.rgb * nightTint, u_night * 0.75);
+    // Sprite day vs night lighting
+    vec3 nightTint = vec3(0.20, 0.28, 0.50);
+    float sunVis = max(0.0, normalize(u_sunDir).y) * (1.0 - u_night);
+    vec3 ambient = mix(vec3(0.75 + 0.25 * sunVis), nightTint, u_night * 0.85);
 
+    // Point lights illuminate sprites
+    vec3 lightAdd = vec3(0.0);
+    for (int i = 0; i < 16; i++) {
+        if (i >= u_lightCount) break;
+        float d = distance(v_worldPos, u_lightPos[i]);
+        if (d < u_lightRad[i]) {
+            float atten = clamp(1.0 - d / u_lightRad[i], 0.0, 1.0);
+            atten = atten * atten * u_lightInt[i];
+            lightAdd += vec3(1.0, 0.70, 0.30) * atten * 1.3;
+        }
+    }
+
+    vec3 lit = clamp(c.rgb * ambient + lightAdd, 0.0, 1.0);
     gl_FragColor = vec4(lit, c.a);
 }
 "#;
@@ -393,13 +489,15 @@ impl WebGl3DRenderer {
             .get_uniform_location(&terrain_program, "u_sunDir")
             .ok_or("Missing u_sunDir in terrain shader")?;
         let u_terrain_ambient = gl
-            .get_uniform_location(&terrain_program, "u_ambient")
-            .ok_or("Missing u_ambient in terrain shader")?;
+            // Optional: the redesigned terrain shader lights from sun/moon colour and AO, so the
+            // compiler strips u_ambient. A required lookup made 3D silently fall back to 2D.
+            .get_uniform_location(&terrain_program, "u_ambient");
         let u_terrain_night = gl
             .get_uniform_location(&terrain_program, "u_night")
             .ok_or("Missing u_night in terrain shader")?;
-        // Optional: the terrain shader doesn't animate today.
+        // Optional uniforms
         let u_terrain_time = gl.get_uniform_location(&terrain_program, "u_time");
+        let u_terrain_cam_pos = gl.get_uniform_location(&terrain_program, "u_camPos");
         let u_terrain_light_count = gl
             .get_uniform_location(&terrain_program, "u_lightCount")
             .ok_or("Missing u_lightCount in terrain shader")?;
@@ -426,6 +524,7 @@ impl WebGl3DRenderer {
         let u_water_time = gl
             .get_uniform_location(&water_program, "u_time")
             .ok_or("Missing u_time in water shader")?;
+        let u_water_cam_pos = gl.get_uniform_location(&water_program, "u_camPos");
         let u_water_light_count = gl
             .get_uniform_location(&water_program, "u_lightCount")
             .ok_or("Missing u_lightCount in water shader")?;
@@ -446,12 +545,20 @@ impl WebGl3DRenderer {
         let u_billboard_cam_right = gl
             .get_uniform_location(&billboard_program, "u_camRight")
             .ok_or("Missing u_camRight in billboard shader")?;
+        let u_billboard_cam_up = gl
+            .get_uniform_location(&billboard_program, "u_camUp")
+            .ok_or("Missing u_camUp in billboard shader")?;
+        let u_billboard_ground_forward = gl
+            .get_uniform_location(&billboard_program, "u_groundForward")
+            .ok_or("Missing u_groundForward in billboard shader")?;
         let u_billboard_night = gl
             .get_uniform_location(&billboard_program, "u_night")
             .ok_or("Missing u_night in billboard shader")?;
-        let u_billboard_up_scale = gl
-            .get_uniform_location(&billboard_program, "u_upScale")
-            .ok_or("Missing u_upScale in billboard shader")?;
+        let u_billboard_sun_dir = gl.get_uniform_location(&billboard_program, "u_sunDir");
+        let u_billboard_light_count = gl.get_uniform_location(&billboard_program, "u_lightCount");
+        let u_billboard_light_pos = gl.get_uniform_location(&billboard_program, "u_lightPos");
+        let u_billboard_light_rad = gl.get_uniform_location(&billboard_program, "u_lightRad");
+        let u_billboard_light_int = gl.get_uniform_location(&billboard_program, "u_lightInt");
         let u_terrain_offset_x = gl
             .get_uniform_location(&terrain_program, "u_offsetX")
             .ok_or("Missing u_offsetX in terrain shader")?;
@@ -484,6 +591,7 @@ impl WebGl3DRenderer {
             u_terrain_ambient,
             u_terrain_night,
             u_terrain_time,
+            u_terrain_cam_pos,
             u_terrain_light_count,
             u_terrain_light_pos,
             u_terrain_light_rad,
@@ -492,14 +600,21 @@ impl WebGl3DRenderer {
             u_water_sun_dir,
             u_water_night,
             u_water_time,
+            u_water_cam_pos,
             u_water_light_count,
             u_water_light_pos,
             u_water_light_rad,
             u_water_light_int,
             u_billboard_vp,
             u_billboard_cam_right,
+            u_billboard_cam_up,
+            u_billboard_ground_forward,
             u_billboard_night,
-            u_billboard_up_scale,
+            u_billboard_sun_dir,
+            u_billboard_light_count,
+            u_billboard_light_pos,
+            u_billboard_light_rad,
+            u_billboard_light_int,
             u_terrain_offset_x,
             u_water_offset_x,
             u_billboard_offset_x,
@@ -615,19 +730,32 @@ impl WebGl3DRenderer {
         let aspect = 320.0 / 180.0;
         let (_view, _proj, view_proj) = camera.compute_matrices(aspect);
         let cam_right = Vec3::new(camera.yaw.cos(), 0.0, -camera.yaw.sin());
+        let ground_forward = Vec3::new(-camera.yaw.sin(), 0.0, -camera.yaw.cos());
+        let cam_up = Vec3::new(
+            -camera.yaw.sin() * camera.pitch.sin(),
+            camera.pitch.cos(),
+            -camera.yaw.cos() * camera.pitch.sin(),
+        );
 
         gl.enable(WebGlRenderingContext::DEPTH_TEST);
         gl.depth_func(WebGlRenderingContext::LEQUAL);
         gl.depth_mask(true);
 
+        let cam_pos = camera.eye_position();
+
         // 2. Render Terrain Mesh
         gl.use_program(Some(&self.terrain_program));
         gl.uniform_matrix4fv_with_f32_array(Some(&self.u_terrain_vp), false, &view_proj.m);
         gl.uniform3f(Some(&self.u_terrain_sun_dir), sun_dir.x, sun_dir.y, sun_dir.z);
-        gl.uniform1f(Some(&self.u_terrain_ambient), 0.38);
+        if let Some(loc) = self.u_terrain_ambient.as_ref() {
+            gl.uniform1f(Some(loc), 0.38);
+        }
         gl.uniform1f(Some(&self.u_terrain_night), night);
         if let Some(loc) = self.u_terrain_time.as_ref() {
             gl.uniform1f(Some(loc), time);
+        }
+        if let Some(loc) = self.u_terrain_cam_pos.as_ref() {
+            gl.uniform3f(Some(loc), cam_pos.x, cam_pos.y, cam_pos.z);
         }
 
         let count = lights.len().min(16);
@@ -676,6 +804,9 @@ impl WebGl3DRenderer {
         gl.uniform3f(Some(&self.u_water_sun_dir), sun_dir.x, sun_dir.y, sun_dir.z);
         gl.uniform1f(Some(&self.u_water_night), night);
         gl.uniform1f(Some(&self.u_water_time), time);
+        if let Some(loc) = self.u_water_cam_pos.as_ref() {
+            gl.uniform3f(Some(loc), cam_pos.x, cam_pos.y, cam_pos.z);
+        }
         gl.uniform1i(Some(&self.u_water_light_count), count as i32);
         gl.uniform3fv_with_f32_array(Some(&self.u_water_light_pos), &pos_arr);
         gl.uniform1fv_with_f32_array(Some(&self.u_water_light_rad), &rad_arr);
@@ -719,8 +850,34 @@ impl WebGl3DRenderer {
                 cam_right.y,
                 cam_right.z,
             );
+            gl.uniform3f(
+                Some(&self.u_billboard_cam_up),
+                cam_up.x,
+                cam_up.y,
+                cam_up.z,
+            );
+            gl.uniform3f(
+                Some(&self.u_billboard_ground_forward),
+                ground_forward.x,
+                ground_forward.y,
+                ground_forward.z,
+            );
             gl.uniform1f(Some(&self.u_billboard_night), night);
-            gl.uniform1f(Some(&self.u_billboard_up_scale), 1.0 / camera.pitch.cos().max(0.4));
+            if let Some(loc) = self.u_billboard_sun_dir.as_ref() {
+                gl.uniform3f(Some(loc), sun_dir.x, sun_dir.y, sun_dir.z);
+            }
+            if let Some(loc) = self.u_billboard_light_count.as_ref() {
+                gl.uniform1i(Some(loc), count as i32);
+            }
+            if let Some(loc) = self.u_billboard_light_pos.as_ref() {
+                gl.uniform3fv_with_f32_array(Some(loc), &pos_arr);
+            }
+            if let Some(loc) = self.u_billboard_light_rad.as_ref() {
+                gl.uniform1fv_with_f32_array(Some(loc), &rad_arr);
+            }
+            if let Some(loc) = self.u_billboard_light_int.as_ref() {
+                gl.uniform1fv_with_f32_array(Some(loc), &int_arr);
+            }
 
             gl.active_texture(WebGlRenderingContext::TEXTURE0);
             gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&self.atlas_texture));
@@ -741,8 +898,8 @@ impl WebGl3DRenderer {
             let b_stride = std::mem::size_of::<BillboardVertex>() as i32;
             let billboard_attrs = [
                 bind_attr(gl, &self.billboard_program, "a_center", 3, b_stride, 0),
-                bind_attr(gl, &self.billboard_program, "a_offset", 2, b_stride, 3 * 4),
-                bind_attr(gl, &self.billboard_program, "a_texCoord", 2, b_stride, 5 * 4),
+                bind_attr(gl, &self.billboard_program, "a_offset", 3, b_stride, 3 * 4),
+                bind_attr(gl, &self.billboard_program, "a_texCoord", 2, b_stride, 6 * 4),
             ];
 
             for off in WRAP_OFFSETS {
