@@ -347,3 +347,97 @@ pub extern "C" fn civ_owner_at(p: *mut World, x: f32, y: f32) -> i32 {
 pub extern "C" fn civ_time(p: *mut World) -> f32 {
     w(p).map(|w| w.time).unwrap_or(0.0)
 }
+
+// ---- Words for the sandbox (#69): Rust writes them, JS draws them. ----
+
+/// ×1 → ×4 → ×16 → ×1; returns the new speed.
+#[no_mangle]
+pub extern "C" fn civ_cycle_speed(p: *mut World) -> f32 {
+    w(p).map(|w| w.cycle_speed()).unwrap_or(1.0)
+}
+
+/// The number the next news line will get (lines `civ_news_first`..this exist).
+#[no_mangle]
+pub extern "C" fn civ_news_next(p: *mut World) -> u32 {
+    w(p).map(|w| w.news.next).unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn civ_news_first(p: *mut World) -> u32 {
+    w(p).and_then(|w| w.news.lines.front().map(|l| l.seq)).unwrap_or(0)
+}
+
+/// A news line's number fields: 0 event kind, 1 tone (0 info, 1 good, 2 bad, 3 warning), 2 in
+/// the log (1/0), 3 advisor priority, 4 advisor cooldown (s), 5 x, 6 y. -1 if gone.
+#[no_mangle]
+pub extern "C" fn civ_news_meta(p: *mut World, seq: u32, field: u32) -> i32 {
+    let Some(l) = w(p).and_then(|w| w.news.get(seq)) else { return -1 };
+    match field {
+        0 => l.kind,
+        1 => l.tone as i32,
+        2 => l.log as i32,
+        3 => l.priority as i32,
+        4 => l.cooldown as i32,
+        5 => l.x,
+        6 => l.y,
+        _ => -1,
+    }
+}
+
+fn news_str<'a>(w: &'a World, seq: u32, which: u32) -> &'a str {
+    match w.news.get(seq) {
+        Some(l) => match which {
+            0 => &l.text,
+            1 => &l.log_text,
+            2 => &l.say,
+            3 => &l.key,
+            _ => "",
+        },
+        None => "",
+    }
+}
+
+/// A news line's text: 0 headline, 1 log line, 2 advisor line, 3 advisor key (UTF-8).
+#[no_mangle]
+pub extern "C" fn civ_news_str_ptr(p: *mut World, seq: u32, which: u32) -> *const u8 {
+    w(p).map(|w| news_str(w, seq, which).as_ptr()).unwrap_or(std::ptr::null())
+}
+
+#[no_mangle]
+pub extern "C" fn civ_news_str_len(p: *mut World, seq: u32, which: u32) -> usize {
+    w(p).map(|w| news_str(w, seq, which).len()).unwrap_or(0)
+}
+
+/// Write the HUD rows (a line per people: label, value, bad, tab-separated, with its age)
+/// and return their
+/// length; read them at `civ_text_buf_ptr`.
+#[no_mangle]
+pub extern "C" fn civ_hud_build(p: *mut World) -> usize {
+    w(p).map(|w| {
+        w.text_buf = w.hud_rows();
+        w.text_buf.len()
+    })
+    .unwrap_or(0)
+}
+
+/// Write the label over civilisation `f`'s capital and return its length.
+#[no_mangle]
+pub extern "C" fn civ_label_build(p: *mut World, f: u32) -> usize {
+    w(p).filter(|_| (f as usize) < MAX_FACTIONS)
+        .map(|w| {
+            w.text_buf = w.capital_label(f as u8);
+            w.text_buf.len()
+        })
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn civ_text_buf_ptr(p: *mut World) -> *const u8 {
+    w(p).map(|w| w.text_buf.as_ptr()).unwrap_or(std::ptr::null())
+}
+
+/// How many steps the last `civ_advance` took.
+#[no_mangle]
+pub extern "C" fn civ_last_steps(p: *mut World) -> u32 {
+    w(p).map(|w| w.last_steps).unwrap_or(0)
+}

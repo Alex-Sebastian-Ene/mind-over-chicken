@@ -780,6 +780,12 @@ pub struct World {
     pub tick: u32,
     /// A war-and-peace policy replacing the rules of `politics::decide` (#100); None = rules.
     pub policy: Option<Box<dyn crate::politics::Policy>>,
+    /// Headlines, log lines and advisor lines for the sandbox (`news`).
+    pub news: crate::news::News,
+    /// Text handed to JS (`civ_hud_*`, `civ_label_*`).
+    pub text_buf: String,
+    /// Steps the last `advance` took (for per-step timing).
+    pub last_steps: u32,
     #[cfg(not(target_arch = "wasm32"))]
     pub prof: [f64; 8],
 }
@@ -888,6 +894,9 @@ impl World {
             scratch: Vec::new(),
             tick: 0,
             policy: None,
+            news: crate::news::News::default(),
+            text_buf: String::new(),
+            last_steps: 0,
             #[cfg(not(target_arch = "wasm32"))]
             prof: [0.0; 8],
             terrain,
@@ -1018,6 +1027,7 @@ impl World {
             self.events.drain(..256);
         }
         self.events.push(e);
+        self.news_of(&e);
     }
 
     pub fn alive_factions(&self) -> impl Iterator<Item = &Faction> {
@@ -1245,6 +1255,7 @@ impl World {
         for _ in 0..n as usize {
             self.step_core(total / n);
         }
+        self.last_steps = n as u32;
         self.refresh_info();
     }
 
@@ -1286,6 +1297,7 @@ impl World {
             self.slow_acc -= SLOW_DT / 2.0;
             #[cfg(not(target_arch = "wasm32"))]
             let p0 = std::time::Instant::now();
+            #[cfg(not(target_arch = "wasm32"))]
             let ph = (self.slow_n % 4) as usize;
             crate::politics::phase_tick(self);
             #[cfg(not(target_arch = "wasm32"))]

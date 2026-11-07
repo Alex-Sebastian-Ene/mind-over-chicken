@@ -11,7 +11,13 @@ let compiled = null;
 export const EVENT = {
   CONTACT: 1, WAR: 2, PEACE: 3, CAPTURE: 4, REBELLION: 5, WIPED: 6, FOUNDED: 7, RAID: 8,
   FAMINE: 9, SMITE: 10, TRADE: 11, CAPITAL: 12, RAZED: 13, CAST: 14,
+  // The ages and conflict (#69).
+  AGE_UP: 15, COLLAPSE: 16, ESCALATE: 17, DEESCALATE: 18, STRIFE: 19, CIVIL_WAR: 20, CRUSHED: 21,
+  REVOLUTION: 22, VASSAL: 23, TRUCE: 24, CRISIS: 25, PLAGUE: 26, CAPTIVES: 27, BATTLE: 28,
+  FESTIVAL: 29, COLONY: 30, INDEPENDENCE: 31, SUCCESSION: 32,
 };
+// News line tones (Rust `news::TONE_*`).
+export const TONE = { info: 0, good: 1, bad: 2, warn: 3 };
 export const CAST = { fireball: 1, spawn: 2, peace: 3, disaster: 4, bless: 5, rain: 6 };
 export const SEED_SOURCE = ['the run seed', 'calibration', 'your mind', 'rebellion'];
 
@@ -51,11 +57,45 @@ export class Civ {
     this.decoder = new TextDecoder();
   }
 
+  // UTF-8 text out of wasm memory.
+  str(ptr, len) { return len ? this.decoder.decode(new Uint8Array(this.mem, ptr, len).slice()) : ''; }
+
   get mem() { return this.ex.memory.buffer; }
 
-  // stress = max(1 - calm, anger): the brain's `stress` when it has one.
+  // stress: 0..1, 0 at rest (the brain's `stress`, or the sandbox's fallback from calm and anger).
   setInputs(calm, focus, stress, anger) { this.ex.civ_set_inputs(this.w, calm || 0, focus || 0, stress || 0, anger || 0); }
   step(dt) { this.ex.civ_step(this.w, dt); }
+  // Real seconds at the world's speed (×1, ×4, ×16), in steps of at most 0.1 s.
+  advance(dt) { this.ex.civ_advance(this.w, dt); }
+  cycleSpeed() { return this.ex.civ_cycle_speed(this.w); }
+  get lastSteps() { return this.ex.civ_last_steps(this.w); }
+  get speed() { return this.ex.civ_speed(this.w); }
+  setJoy(j) { this.ex.civ_set_joy(this.w, j || 0); }
+
+  // ---- words, written by the Rust side (news.rs) ----
+  // News lines numbered from `from` up: {seq, kind, tone, log, priority, cooldown, x, y, text, logText, say, key}.
+  news(from) {
+    const ex = this.ex, w = this.w, next = ex.civ_news_next(w), out = [];
+    for (let s = Math.max(from, ex.civ_news_first(w)); s < next; s++) {
+      if (ex.civ_news_meta(w, s, 0) < 0) continue;
+      const str = (k) => this.str(ex.civ_news_str_ptr(w, s, k), ex.civ_news_str_len(w, s, k));
+      out.push({
+        seq: s, kind: ex.civ_news_meta(w, s, 0), tone: ex.civ_news_meta(w, s, 1), log: ex.civ_news_meta(w, s, 2) > 0,
+        priority: ex.civ_news_meta(w, s, 3), cooldown: ex.civ_news_meta(w, s, 4), x: ex.civ_news_meta(w, s, 5), y: ex.civ_news_meta(w, s, 6),
+        text: str(0), logText: str(1), say: str(2), key: str(3),
+      });
+    }
+    return { lines: out, next };
+  }
+  // The HUD rows: [{label, value, bad}], each people with its age.
+  hudRows() {
+    const len = this.ex.civ_hud_build(this.w);
+    return this.str(this.ex.civ_text_buf_ptr(this.w), len).split('\n').filter(Boolean).map((r) => {
+      const [label, value, bad] = r.split('\t');
+      return { label, value, bad: bad === '1' };
+    });
+  }
+  capitalLabel(f) { const len = this.ex.civ_label_build(this.w, f); return this.str(this.ex.civ_text_buf_ptr(this.w), len); }
   get time() { return this.ex.civ_time(this.w); }
   get agents() { return this.ex.civ_agent_count(this.w); }
 
@@ -114,6 +154,7 @@ export class Civ {
         friendliness: f[o + 8], aggressiveness: f[o + 9], violence: f[o + 10], fertility: f[o + 11], cohesion: f[o + 12],
         parent: f[o + 13], wars: f[o + 14], raids: f[o + 15], food: f[o + 16], kills: f[o + 17], losses: f[o + 18],
         unrest: f[o + 19], seedSource: SEED_SOURCE[f[o + 20]] || '?', region: f[o + 21], isPlayer: f[o + 22] > 0, warriors: f[o + 23],
+        age: f[o + 24], dark: f[o + 36], strife: f[o + 38],
         name: this.decoder.decode(end < 0 ? raw : raw.subarray(0, end)),
         seed: this.ex.civ_faction_seed(this.w, i) >>> 0,
         start: { x: this.ex.civ_faction_start_x(this.w, i), y: this.ex.civ_faction_start_y(this.w, i) },
@@ -151,7 +192,9 @@ export class Civ {
   stats() {
     const s = new Float32Array(this.mem, this.ex.civ_stats_ptr(this.w), this.statsLen);
     const keys = ['time', 'agents', 'villages', 'wars', 'peaces', 'raids', 'captures', 'rebellions', 'contacts', 'wiped', 'founded',
-      'births', 'deaths', 'starved', 'oldAge', 'killed', 'trades', 'fieldBuilds', 'civs', 'fires', 'rain', 'peakAgents', 'smitten', 'warriors'];
+      'births', 'deaths', 'starved', 'oldAge', 'killed', 'trades', 'fieldBuilds', 'civs', 'fires', 'rain', 'peakAgents', 'smitten', 'warriors',
+      'ageUps', 'collapses', 'recoveries', 'strifes', 'civilWars', 'crushed', 'revolutions', 'escalations', 'battles', 'captives', 'vassals',
+      'plagues', 'crises', 'festivals', 'brawls', 'routs', 'maxAge', 'speed', 'night', 'buildings'];
     return Object.fromEntries(keys.map((k, i) => [k, s[i]]));
   }
 

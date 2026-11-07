@@ -31,6 +31,7 @@ pub mod conflict;
 pub mod ffi;
 pub mod jobs;
 pub mod life;
+pub mod news;
 pub mod planet;
 pub mod politics;
 pub mod powers;
