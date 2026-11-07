@@ -4,13 +4,18 @@
 use moc_planet::fb::Framebuffer;
 use moc_planet::rng::Rng;
 
+pub use crate::jobs::{Building, Job};
+use crate::conflict::Strife;
+use crate::jobs::{Fx, CATS};
 use crate::planet::{Cam, Dims, Paths};
 use crate::terrain::{self, food_max, Terrain};
 
-pub const MAX_FACTIONS: usize = 16;
+/// Civilisation slots: up to 12 at the start (#101) and room for rebels.
+pub const MAX_FACTIONS: usize = 24;
 pub const NO_F: u8 = 255;
 pub const NO_V: u16 = u16::MAX;
 pub const NO_TILE: i32 = i32::MIN;
+/// Agent and village limits on the default planet; a bigger planet gets more (`World::cap_agents`).
 pub const MAX_AGENTS: usize = 2400;
 pub const MAX_VILLAGES: usize = 480;
 /// Civilisations and agents per civilisation at the start (#52).
@@ -55,6 +60,46 @@ pub mod ev {
     pub const CAPITAL: i32 = 12;
     pub const RAZED: i32 = 13;
     pub const CAST: i32 = 14;
+    // The ages and conflict (#69).
+    /// a enters age n (extra 1: climbing back after a Dark Age).
+    pub const AGE_UP: i32 = 15;
+    /// a falls back to age n, a Dark Age (extra 1: stability, 2: population).
+    pub const COLLAPSE: i32 = 16;
+    /// A conflict climbs to level n (`conflict::LEVELS`); a == b inside one civilisation
+    /// (extra: the strife kind + 1, 0 between civilisations).
+    pub const ESCALATE: i32 = 17;
+    pub const DEESCALATE: i32 = 18;
+    /// A fight inside civilisation a begins at level n (extra: `conflict::StrifeKind`).
+    pub const STRIFE: i32 = 19;
+    /// A strife inside a reaches civil war (n rebel villages, extra the kind).
+    pub const CIVIL_WAR: i32 = 20;
+    /// The rebels inside a are crushed.
+    pub const CRUSHED: i32 = 21;
+    /// The rebels inside a take over: a revolution (no split).
+    pub const REVOLUTION: i32 = 22;
+    /// a becomes b's vassal (extra 0 defeat, 1 treaty, 2 rebel province).
+    pub const VASSAL: i32 = 23;
+    /// A truce between a and b (a == b: inside one civilisation).
+    pub const TRUCE: i32 = 24;
+    /// A crisis of a's age strikes a (extra: index into `ages_table::CRISES`).
+    pub const CRISIS: i32 = 25;
+    pub const PLAGUE: i32 = 26;
+    /// a takes n captives from b.
+    pub const CAPTIVES: i32 = 27;
+    /// a battle between a and b ends: a holds the field (n dead).
+    pub const BATTLE: i32 = 28;
+    pub const FESTIVAL: i32 = 29;
+    /// a founds a colony across the sea.
+    pub const COLONY: i32 = 30;
+    /// Vassal a breaks free of b.
+    pub const INDEPENDENCE: i32 = 31;
+    /// a's chief dies; extra 1 if the succession is disputed.
+    pub const SUCCESSION: i32 = 32;
+    // Staggered starts (#98).
+    /// Civilisation a is founded, n-th, with traits `setup::unpack_traits(extra)`.
+    pub const CIV_FOUNDED: i32 = 33;
+    /// The player picks civilisation a to set up (n 0) or starts seeding it (n 1).
+    pub const SETUP: i32 = 34;
 }
 
 /// One log entry: what happened, between which civilisations, where, how much.
@@ -69,53 +114,6 @@ pub struct Event {
     pub n: i32,
     pub t_ms: i32,
     pub extra: i32,
-}
-
-/// What an agent does. Extensible: the ages (#69) add more jobs (farmer, builder, priest,
-/// trader, sailor, scholar, ...); each new one needs a behaviour in `agents::update`, a spawn
-/// rule in `politics::update_villages` and a sprite in `render`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Job {
-    /// Fetches food from the land round its village.
-    Gatherer = 0,
-    /// Guards or scouts in peace; marches, fights and besieges in war.
-    Warrior = 1,
-    /// Walks out to found a new village.
-    Settler = 2,
-}
-
-impl Job {
-    /// The job's name in `data/ages.json`.
-    pub fn key(self) -> &'static str {
-        match self {
-            Job::Gatherer => "forage",
-            Job::Warrior => "guard",
-            Job::Settler => "settle",
-        }
-    }
-
-    /// Base fighting strength (per-agent combat; morale, wounds and terrain modify it).
-    pub fn strength(self) -> f32 {
-        match self {
-            Job::Warrior => 1.0,
-            Job::Gatherer | Job::Settler => 0.3,
-        }
-    }
-
-    pub fn fights(self) -> bool {
-        self == Job::Warrior
-    }
-}
-
-/// What stands in a village. Extensible for the ages (#69: granary, walls, temple, market,
-/// workshop, harbour, ...); walls are meant to feed the terrain/defence modifier in combat.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Building {
-    Hut = 0,
-    /// The capital's hall.
-    Hall = 1,
 }
 
 /// An agent's injuries: fighting wounds before it kills.
@@ -145,6 +143,14 @@ pub enum State {
     March,
     Siege,
     ToSite,
+    /// Asleep at home (night, from the Hearth Clans on).
+    Sleep,
+    /// Working in and around the village.
+    Work,
+    /// On the road to another settlement (`Agent::target`).
+    Haul,
+    /// At sea, in a boat (sailors, colonists).
+    Sail,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,6 +163,7 @@ pub enum Cause {
     Fire,
     Smitten,
     Disaster,
+    Plague,
 }
 
 /// Where a civilisation's traits came from.
@@ -246,6 +253,10 @@ pub struct Metrics {
 
 /// Seconds in a day (the sandbox's day–night cycle).
 pub const DAY_SECONDS: f32 = 80.0;
+/// Night above which agents (from the Hearth Clans on) sleep: about a quarter of each day.
+pub const SLEEP_NIGHT: f32 = 0.82;
+/// The longest single step `World::advance` takes when the speed control runs it faster.
+pub const MAX_SUBSTEP: f32 = 0.1;
 
 #[derive(Clone, Debug)]
 pub struct Faction {
@@ -284,6 +295,45 @@ pub struct Faction {
     pub famine_cd: f32,
     pub homeless_t: f32,
     pub last_attacker: u8,
+    // ---- the ages (#69) ----
+    /// Seconds in the current age.
+    pub age_t: f32,
+    /// Seconds the next age's entry conditions have held.
+    pub ready_t: f32,
+    /// Seconds of stability below the collapse line, and of population below its share.
+    pub low_stab_t: f32,
+    pub low_pop_t: f32,
+    /// A Dark Age: no climbing until it runs out.
+    pub dark_t: f32,
+    pub collapse_cd: f32,
+    pub peak_age: u8,
+    pub ups: u32,
+    pub falls: u32,
+    /// Goats in the treasury (taxes, tribute, ransom).
+    pub treasury: f32,
+    /// Goods made since the last metrics tick, and their smoothed rate (per second).
+    pub prod_acc: f32,
+    pub prod_rate: f32,
+    /// Overlord this civilisation pays tribute to (NO_F = free).
+    pub overlord: u8,
+    /// Agents per kind of work (`jobs::Cat`), refreshed with the tallies.
+    pub cat_counts: [u16; CATS],
+    /// Clans (family lines) among its people.
+    pub clans: u8,
+    /// Crisis timers: drought, strike, censorship, blackout.
+    pub drought_t: f32,
+    pub strike_t: f32,
+    pub censor_t: f32,
+    pub blackout_t: f32,
+    pub tax_t: f32,
+    pub strife_cd: f32,
+    pub crisis_cd: f32,
+    /// The chief died and nobody has taken the chair yet.
+    pub succession: bool,
+    /// Seconds of manning the walls left (`politics::Decision::Fortify`).
+    pub fortify_t: f32,
+    /// Waiting to be founded by the player (#98): not alive yet, and its slot is kept.
+    pub pending: bool,
 }
 
 impl Faction {
@@ -319,6 +369,31 @@ impl Faction {
             famine_cd: 0.0,
             homeless_t: 0.0,
             last_attacker: NO_F,
+            age_t: 0.0,
+            ready_t: 0.0,
+            low_stab_t: 0.0,
+            low_pop_t: 0.0,
+            dark_t: 0.0,
+            collapse_cd: 0.0,
+            peak_age: 1,
+            ups: 0,
+            falls: 0,
+            treasury: 0.0,
+            prod_acc: 0.0,
+            prod_rate: 0.0,
+            overlord: NO_F,
+            cat_counts: [0; CATS],
+            clans: 2,
+            drought_t: 0.0,
+            strike_t: 0.0,
+            censor_t: 0.0,
+            blackout_t: 0.0,
+            tax_t: 0.0,
+            strife_cd: 20.0,
+            crisis_cd: 30.0,
+            succession: false,
+            fortify_t: 0.0,
+            pending: false,
         }
     }
 }
@@ -338,6 +413,16 @@ pub struct Rel {
     pub trade_t: f32,
     pub trade_news_t: f32,
     pub raid_looted: bool,
+    /// Conflict level between the two (`conflict::LEVELS`: 0 none … 5 war), same both ways.
+    pub level: u8,
+    /// Battles fought since the last peace (several battles make a war, #69).
+    pub battles: u8,
+    /// Seconds of the current battle.
+    pub battle_t: f32,
+    /// Old wrongs: losses, captures, conquest. Decays slowly; restarts feuds.
+    pub grudge: f32,
+    /// Seconds since a's people last traded with b's (a link while recent).
+    pub traded_t: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -360,7 +445,32 @@ pub struct Village {
     pub siege: f32,
     pub besieger: u8,
     pub empty_t: f32,
-    pub buildings: Vec<Building>,
+    /// Buildings standing (bit `Building as u8`); those of a lost age stay but go dormant.
+    pub built: u64,
+    /// Effects of the active buildings (`jobs::village_fx`).
+    pub fx: Fx,
+    /// Goods made here, spent on buildings.
+    pub goods: f32,
+    /// Goats left by the dead, inherited by the newborn.
+    pub goats: f32,
+    /// Devotion 0..1.
+    pub faith: f32,
+    /// Plague 0..1.
+    pub plague: f32,
+    /// When a hauler last arrived (a route is a link while it is recent).
+    pub linked_t: f32,
+    /// Strife it is in (index + 1, 0 none) and its side (0 loyal, 1 rebel).
+    pub camp: u8,
+    pub side: u8,
+    pub mourn_t: f32,
+    pub festival_t: f32,
+    /// The founding clan.
+    pub clan: u8,
+    /// When it died (dead slots are reused after a while).
+    pub died: f32,
+    pub coast: bool,
+    pub hills: bool,
+    pub raided_t: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -399,6 +509,20 @@ pub struct Agent {
     pub alive: bool,
     pub cause: Cause,
     pub tries: u8,
+    /// Family line within the civilisation (clan feuds), and household.
+    pub clan: u8,
+    pub family: u32,
+    /// Strife it is in (index + 1, 0 none) and its side.
+    pub camp: u8,
+    pub side: u8,
+    /// Goats it owns (wealth, inequality).
+    pub goats: f32,
+    /// Seconds of a non-lethal scuffle left.
+    pub brawl: f32,
+    /// Seconds of forced labour left as a captive (0 free).
+    pub prisoner: f32,
+    /// Civilisation it was born into (ransom).
+    pub origin: u8,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -426,6 +550,13 @@ pub struct March {
     pub x: i32,
     pub y: i32,
     pub raid: bool,
+    /// A pitched battle on open ground (no capture), not a march on a village.
+    pub field: bool,
+    /// For a strife inside the civilisation: its index + 1 and the side marching.
+    pub camp: u8,
+    pub side: u8,
+    /// Unit vector from home toward the target (formations face along it).
+    pub dir: (f32, f32),
 }
 
 /// What the player's brain and face are doing this step.
@@ -433,18 +564,31 @@ pub struct March {
 pub struct Inputs {
     pub calm: f32,
     pub focus: f32,
-    pub hr_delta: f32,
+    /// 0..1, 0 at rest: the brain's `stress` (neutral at rest), or, without one, the
+    /// formula `max(1 − calm, anger)` measured from its resting level (`Inputs::with_stress`).
+    pub stress: f32,
     pub anger: f32,
+    /// A smile on camera (festivals).
+    pub joy: f32,
 }
 
+/// Where `max(1 − calm, anger)` sits when the player is doing nothing (resting calm is low).
+pub const STRESS_REST: f32 = 0.8;
+
 impl Inputs {
-    /// A racing pulse, 0..1 (+25 bpm over resting is fully racing).
-    pub fn pulse(&self) -> f32 {
-        (self.hr_delta / 25.0).clamp(0.0, 1.0)
+    /// Inputs from calm, focus and anger alone, with stress from the formula
+    /// `max(1 − calm, anger)` measured from its resting level (0.8 → 0, 1 → 1).
+    pub fn with_stress(calm: f32, focus: f32, anger: f32) -> Inputs {
+        let raw = (1.0 - calm).max(anger);
+        Inputs { calm, focus, stress: ((raw - STRESS_REST) / (1.0 - STRESS_REST)).clamp(0.0, 1.0), anger, joy: 0.0 }
     }
-    /// The god's mood pushed onto every chief: + pulse and anger, - calm.
+    /// Stress, 0..1: the player is tense rather than merely not calm.
+    pub fn agitation(&self) -> f32 {
+        self.stress.clamp(0.0, 1.0)
+    }
+    /// The god's mood pushed onto every chief: + agitation and anger, − calm.
     pub fn hostility(&self) -> f32 {
-        0.7 * self.pulse() + 0.6 * self.anger.clamp(0.0, 1.0) - 0.75 * self.calm.clamp(0.0, 1.0)
+        0.7 * self.agitation() + 0.6 * self.anger.clamp(0.0, 1.0) - 0.75 * self.calm.clamp(0.0, 1.0)
     }
 }
 
@@ -468,6 +612,24 @@ pub struct Stats {
     pub trades: u32,
     pub field_builds: u32,
     pub peak_agents: u32,
+    pub age_ups: u32,
+    pub collapses: u32,
+    pub recoveries: u32,
+    pub strifes: u32,
+    pub civil_wars: u32,
+    pub crushed: u32,
+    pub revolutions: u32,
+    pub escalations: u32,
+    pub battles: u32,
+    pub captives: u32,
+    pub vassals: u32,
+    pub plagues: u32,
+    pub crises: u32,
+    pub festivals: u32,
+    pub brawls: u32,
+    pub routs: u32,
+    pub max_age: u32,
+    pub buildings: u32,
 }
 
 /// Lazily regrowing food on every tile.
@@ -546,12 +708,15 @@ impl Grid {
     /// Call `f` with every agent index in cells overlapping the square of radius `r` round (x, y).
     pub fn near(&self, x: f32, y: f32, r: f32, mut f: impl FnMut(usize)) {
         let (gw, gh) = (self.gw, self.gh);
+        // Wraps both ways (the planet is a torus). The last cell row or column may be partial.
         let x0 = ((x - r).floor() as i32).div_euclid(GRID);
         let x1 = ((x + r).floor() as i32).div_euclid(GRID);
-        let y0 = (((y - r).floor() as i32).max(0) / GRID).clamp(0, gh - 1);
-        let y1 = (((y + r).floor() as i32).max(0) / GRID).clamp(0, gh - 1);
+        let y0 = ((y - r).floor() as i32).div_euclid(GRID);
+        let y1 = ((y + r).floor() as i32).div_euclid(GRID);
         let span = (x1 - x0 + 1).min(gw);
-        for cy in y0..=y1 {
+        let rows = (y1 - y0 + 1).min(gh);
+        for j in 0..rows {
+            let cy = (y0 + j).rem_euclid(gh);
             for k in 0..span {
                 let cx = (x0 + k).rem_euclid(gw);
                 let c = (cy * gw + cx) as usize;
@@ -609,14 +774,46 @@ pub struct World {
     /// Walkable tiles on the planet, and tiles owned per civilisation (refreshed every second).
     pub land_tiles: u32,
     pub owned_tiles: Vec<u32>,
+    // ---- the ages and conflict (#69) ----
+    /// Fights inside civilisations (clan feuds, revolts, civil wars).
+    pub strifes: Vec<Strife>,
+    /// Time speed (1, 4 or 16): `advance` runs this many seconds per real second.
+    pub speed: f32,
+    /// How a's people treat b's (MAX_FACTIONS²): 0 leave alone, 1 scuffle (no killing),
+    /// 2 feud (fighters kill), 3 raid, battle or war (`hostile`).
+    pub stance: Vec<u8>,
+    /// Highest conflict level each civilisation is in (with others or itself).
+    pub fight_level: Vec<u8>,
+    /// Any fighting at all (combat runs for its agents).
+    pub busy: Vec<bool>,
+    /// 0 midday … 1 midnight (the sandbox's day–night cycle).
+    pub night: f32,
+    pub(crate) scratch: Vec<f32>,
+    /// Steps taken (combat staggers its searches by it; the rules' dice roll on it).
+    pub tick: u32,
+    /// A war-and-peace policy replacing the rules of `politics::decide` (#100); None = rules.
+    pub policy: Option<Box<dyn crate::politics::Policy>>,
+    /// Headlines, log lines and advisor lines for the sandbox (`news`).
+    pub news: crate::news::News,
+    /// Text handed to JS (`civ_hud_*`, `civ_label_*`).
+    pub text_buf: String,
+    /// Steps the last `advance` took (for per-step timing).
+    pub last_steps: u32,
+    /// The player's founding of civilisations one by one (#98; `Phase::Off` when all start at once).
+    pub setup: crate::setup::Setup,
+    /// Agent and village limits for this planet: the defaults, more on a bigger one (#101).
+    pub cap_agents: usize,
+    pub cap_villages: usize,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub prof: [f64; 8],
 }
 
-pub const FSTRIDE: usize = 24;
-pub const VSTRIDE: usize = 8;
+pub const FSTRIDE: usize = 46;
+pub const VSTRIDE: usize = 12;
 pub const NAME_LEN: usize = 24;
-pub const STATS_LEN: usize = 24;
+pub const STATS_LEN: usize = 44;
 
-const PALETTE: [[u8; 3]; 16] = [
+const PALETTE: [[u8; 3]; 24] = [
     [232, 70, 62],   // red
     [66, 136, 246],  // blue
     [246, 198, 54],  // gold
@@ -633,6 +830,14 @@ const PALETTE: [[u8; 3]; 16] = [
     [255, 210, 160], // peach
     [110, 110, 120], // slate
     [140, 40, 40],   // maroon
+    [255, 120, 90],  // coral
+    [0, 150, 130],   // teal
+    [210, 170, 255], // lavender
+    [180, 140, 20],  // ochre
+    [90, 200, 255],  // sky
+    [255, 80, 200],  // magenta
+    [200, 230, 160], // sage
+    [100, 70, 160],  // indigo
 ];
 
 const SYL_A: [&str; 24] = [
@@ -706,8 +911,29 @@ impl World {
             minimap: Vec::new(),
             land_tiles: terrain.walk.iter().filter(|&&b| b).count() as u32,
             owned_tiles: vec![0; MAX_FACTIONS],
+            strifes: Vec::new(),
+            speed: 1.0,
+            stance: vec![0; MAX_FACTIONS * MAX_FACTIONS],
+            fight_level: vec![0; MAX_FACTIONS],
+            busy: vec![false; MAX_FACTIONS],
+            night: 0.0,
+            scratch: Vec::new(),
+            tick: 0,
+            policy: None,
+            news: crate::news::News::default(),
+            text_buf: String::new(),
+            last_steps: 0,
+            setup: crate::setup::Setup::default(),
+            cap_agents: MAX_AGENTS,
+            cap_villages: MAX_VILLAGES,
+            #[cfg(not(target_arch = "wasm32"))]
+            prof: [0.0; 8],
             terrain,
         };
+        // More land, more people: the limits grow with the land (about 50 tiles a person).
+        let land = w.land_tiles as usize;
+        w.cap_agents = (land / 50).clamp(MAX_AGENTS, 9000);
+        w.cap_villages = (land / 250).clamp(MAX_VILLAGES, 2000);
         w.refresh_info();
         w
     }
@@ -716,20 +942,7 @@ impl World {
     /// seed; each civilisation's traits come from its own seed alone. Seeds are redrawn until
     /// the four temperaments differ enough to make a story (one hot head, one cool head).
     pub fn populate(&mut self) {
-        let mut run = Rng::new(self.seed ^ 0x2545_f491);
-        let mut seeds = [0u32; START_CIVS];
-        for _ in 0..64 {
-            for s in seeds.iter_mut() {
-                *s = run.next_u32();
-            }
-            let tr: Vec<Traits> = seeds.iter().map(|&s| Traits::from_seed(s)).collect();
-            let amax = tr.iter().map(|t| t.aggressiveness).fold(0.0, f32::max);
-            let amin = tr.iter().map(|t| t.aggressiveness).fold(1.0, f32::min);
-            let fmax = tr.iter().map(|t| t.friendliness).fold(0.0, f32::max);
-            if amax >= 0.62 && amin <= 0.4 && fmax >= 0.55 {
-                break;
-            }
-        }
+        let seeds = self.civ_seeds(START_CIVS);
         for (i, &s) in seeds.iter().enumerate() {
             let region = i % self.terrain.regions.len().max(1);
             let start = self.terrain.regions.get(region).map(|r| r.start).unwrap_or((80 + 160 * i as i32, self.d.h as i32 / 2));
@@ -739,13 +952,17 @@ impl World {
             self.factions[f as usize].is_player = i == 0;
             let v = self.found_village(f, start.0, start.1, 6.0, false);
             self.factions[f as usize].capital = v;
+            self.villages[v as usize].built |= 1u64 << Building::Campfire as u8;
             for k in 0..START_AGENTS {
                 let (ox, oy) = [(1, 0), (-1, 0), (0, 1), (0, -1)][k % 4];
                 let (x, y) = if self.terrain.walkable(start.0 + ox, start.1 + oy) { (start.0 + ox, start.1 + oy) } else { start };
-                if let Some(a) = self.spawn_agent(f, v, Job::Gatherer, x, y) {
+                // Two foragers and two hunters, of two clans.
+                let job = if k % 2 == 0 { Job::Forage } else { Job::Hunt };
+                if let Some(a) = self.spawn_agent(f, v, job, x, y) {
                     // The founders are adults of mixed ages.
                     let age = self.rng.range(0.0, 20.0);
                     self.agents[a].age = age;
+                    self.agents[a].clan = (k / 2) as u8;
                 }
             }
         }
@@ -758,7 +975,13 @@ impl World {
 
     /// Create a civilisation in the first free slot. Returns its id.
     pub fn add_faction(&mut self, seed: u32, source: SeedSource, traits: Traits, parent: u8, name: Option<(String, String)>) -> u8 {
-        let slot = self.factions.iter().position(|f| !f.used).or_else(|| self.factions.iter().position(|f| !f.alive)).unwrap_or(MAX_FACTIONS - 1);
+        // Never a slot kept for a civilisation waiting to be founded (#98).
+        let slot = self
+            .factions
+            .iter()
+            .position(|f| !f.used)
+            .or_else(|| self.factions.iter().position(|f| !f.alive && !f.pending))
+            .unwrap_or(MAX_FACTIONS - 1);
         let (name, stem) = name.unwrap_or_else(|| make_name(seed));
         let used: Vec<[u8; 3]> = self.factions.iter().filter(|f| f.alive).map(|f| f.color).collect();
         let color = if slot < START_CIVS && !used.contains(&PALETTE[slot]) {
@@ -807,21 +1030,15 @@ impl World {
     }
 
     pub(crate) fn refresh_hostility(&mut self) {
-        for a in 0..MAX_FACTIONS {
-            self.at_war[a] = false;
-        }
-        for a in 0..MAX_FACTIONS {
-            for b in 0..MAX_FACTIONS {
-                let h = a != b && (self.rel[a * MAX_FACTIONS + b].war > 0 || self.rel[b * MAX_FACTIONS + a].war > 0);
-                self.hostile[a * MAX_FACTIONS + b] = h;
-                if h {
-                    self.at_war[a] = true;
-                }
-            }
-        }
+        crate::conflict::refresh(self);
     }
 
     pub fn log(&mut self, kind: i32, a: u8, b: u8, x: i32, y: i32, n: i32) {
+        self.log_x(kind, a, b, x, y, n, 0);
+    }
+
+    /// Log an event with an `extra` value (an age's sub-kind, a crisis, a strife kind).
+    pub fn log_x(&mut self, kind: i32, a: u8, b: u8, x: i32, y: i32, n: i32, extra: i32) {
         let e = Event {
             kind,
             a: if a == NO_F { -1 } else { a as i32 },
@@ -830,12 +1047,13 @@ impl World {
             y,
             n,
             t_ms: (self.time * 1000.0) as i32,
-            extra: 0,
+            extra,
         };
         if self.events.len() >= 1024 {
             self.events.drain(..256);
         }
         self.events.push(e);
+        self.news_of(&e);
     }
 
     pub fn alive_factions(&self) -> impl Iterator<Item = &Faction> {
@@ -844,10 +1062,17 @@ impl World {
 
     /// Found a village and claim the land round it.
     pub fn found_village(&mut self, f: u8, x: i32, y: i32, food: f32, log: bool) -> u16 {
-        let id = self.villages.len() as u16;
-        self.villages.push(Village {
-            x: self.d.wrap_x(x),
-            y: y.clamp(0, self.d.h as i32 - 1),
+        let (x, y) = (self.d.wrap_x(x), self.d.wrap_y(y));
+        // Reuse a slot that has been dead a while (nothing points at it any more), so long
+        // runs don't grow the village list without bound.
+        let reuse = self.villages.iter().position(|v| !v.alive && v.camp == 0 && self.time - v.died > 30.0);
+        let id = reuse.unwrap_or(self.villages.len()) as u16;
+        let coast = self.terrain.near_water(x, y, 3);
+        let hills = (-8..=8).any(|oy| (-8..=8).any(|ox| matches!(self.terrain.kind_at(x + ox, y + oy), terrain::HILLS | terrain::MOUNTAIN)));
+        let clan = self.factions[f as usize].clans.saturating_sub(1).min(7);
+        let village = Village {
+            x,
+            y,
             owner: f,
             alive: true,
             food,
@@ -864,8 +1089,28 @@ impl World {
             siege: 0.0,
             besieger: NO_F,
             empty_t: 0.0,
-            buildings: vec![Building::Hut],
-        });
+            built: 0,
+            fx: Fx::default(),
+            goods: 0.0,
+            goats: 0.0,
+            faith: 0.2,
+            plague: 0.0,
+            linked_t: -1e9,
+            camp: 0,
+            side: 0,
+            mourn_t: 0.0,
+            festival_t: 0.0,
+            clan,
+            died: 0.0,
+            coast,
+            hills,
+            raided_t: -1e9,
+        };
+        if reuse.is_some() {
+            self.villages[id as usize] = village;
+        } else {
+            self.villages.push(village);
+        }
         self.villages[id as usize].cap = self.village_cap(id);
         self.claim_land(id, START_RADIUS);
         self.stats.founded += 1;
@@ -879,7 +1124,7 @@ impl World {
         let vil = &self.villages[v as usize];
         let f = &self.factions[vil.owner as usize];
         let capital = f.capital == v;
-        (6.0 + 4.0 * f.traits.fertility + if capital { 4.0 } else { 0.0 } + (vil.radius - START_RADIUS) as f32 * 0.5).round() as u16
+        (6.0 + 4.0 * f.traits.fertility + if capital { 4.0 } else { 0.0 } + (vil.radius - START_RADIUS) as f32 * 0.5 + vil.fx.cap).round() as u16
     }
 
     /// Claim unowned land (and land of this civilisation's dead villages) within `r` tiles.
@@ -953,13 +1198,27 @@ impl World {
     }
 
     pub fn spawn_agent(&mut self, f: u8, home: u16, job: Job, x: i32, y: i32) -> Option<usize> {
-        if self.agents.len() >= MAX_AGENTS {
+        if self.agents.len() >= self.cap_agents {
             return None;
         }
         let life = self.rng.range(75.0, 115.0);
         let timer = self.rng.range(0.0, 0.6);
         let x = self.d.wrap_x(x);
-        let y = y.clamp(0, self.d.h as i32 - 1);
+        let y = self.d.wrap_y(y);
+        // Born into a family of the village: mostly its founding clan, sometimes another
+        // (marriage); with a share of the goats the village's dead left behind.
+        let (clan, family, goats) = match self.villages.get(home as usize) {
+            Some(v) if v.alive => {
+                let clans = self.factions[f as usize].clans.max(1);
+                let clan = if self.rng.chance(0.72) { v.clan } else { self.rng.below(clans as usize) as u8 };
+                let family = ((home as u32) << 3) | self.rng.below(4) as u32;
+                (clan, family, (v.goats * 0.1).min(3.0))
+            }
+            _ => (0, 0, 0.0),
+        };
+        if goats > 0.0 {
+            self.villages[home as usize].goats -= goats;
+        }
         self.agents.push(Agent {
             id: self.next_id,
             x: x as f32 + 0.5,
@@ -991,6 +1250,14 @@ impl World {
             alive: true,
             cause: Cause::Alive,
             tries: 0,
+            clan,
+            family,
+            camp: 0,
+            side: 0,
+            goats,
+            brawl: 0.0,
+            prisoner: 0.0,
+            origin: f,
         });
         self.next_id += 1;
         self.stats.births += 1;
@@ -1003,28 +1270,86 @@ impl World {
         }
     }
 
+    /// Run `real_dt` seconds of real time at the world's speed (×1, ×4, ×16), in steps of at
+    /// most `MAX_SUBSTEP`; refresh the buffers JS reads once at the end.
+    pub fn advance(&mut self, real_dt: f32) {
+        // Seeding a civilisation from the mind runs on real time (#98).
+        self.setup_tick(real_dt.max(0.0));
+        let total = (real_dt.max(0.0) * self.speed).min(2.0);
+        if total <= 0.0 {
+            self.refresh_info();
+            return;
+        }
+        let n = (total / MAX_SUBSTEP).ceil().max(1.0);
+        for _ in 0..n as usize {
+            self.step_core(total / n);
+        }
+        self.last_steps = n as u32;
+        self.refresh_info();
+    }
+
+    /// Set the time speed (clamped to 0.25..32; the sandbox offers 1, 4 and 16).
+    pub fn set_speed(&mut self, k: f32) {
+        self.speed = if k.is_finite() { k.clamp(0.25, 32.0) } else { 1.0 };
+    }
+
     /// Advance the world by `dt` seconds (clamped to 0.1).
     pub fn step(&mut self, dt: f32) {
+        self.step_core(dt);
+        self.refresh_info();
+    }
+
+    fn step_core(&mut self, dt: f32) {
         let dt = dt.clamp(0.0, 0.1);
         if dt <= 0.0 {
             return;
         }
         self.time += dt;
+        self.tick = self.tick.wrapping_add(1);
+        // Rival civilisations arrive on their own, at staggered times (#101).
+        if !self.setup.rivals.is_empty() {
+            self.rivals_tick();
+        }
+        let phase = (self.time / DAY_SECONDS).fract();
+        self.night = 0.5 - 0.5 * (phase * std::f32::consts::TAU).cos();
         self.rain_t = (self.rain_t - dt).max(0.0);
         self.paths.refill(2);
         self.update_fires(dt);
         self.update_effects(dt);
+        #[cfg(not(target_arch = "wasm32"))]
+        let t0 = std::time::Instant::now();
         crate::agents::update(self, dt);
+        #[cfg(not(target_arch = "wasm32"))]
+        let t1 = std::time::Instant::now();
         self.grid.build(&self.agents);
         crate::agents::combat(self, dt);
+        #[cfg(not(target_arch = "wasm32"))]
+        let t2 = std::time::Instant::now();
         self.slow_acc += dt;
         while self.slow_acc >= SLOW_DT / 2.0 {
             self.slow_acc -= SLOW_DT / 2.0;
+            #[cfg(not(target_arch = "wasm32"))]
+            let p0 = std::time::Instant::now();
+            #[cfg(not(target_arch = "wasm32"))]
+            let ph = (self.slow_n % 4) as usize;
             crate::politics::phase_tick(self);
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.prof[3 + ph] += p0.elapsed().as_secs_f64() * 1000.0;
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.prof[0] += (t1 - t0).as_secs_f64() * 1000.0;
+            self.prof[1] += (t2 - t1).as_secs_f64() * 1000.0;
         }
         self.agents.retain(|a| a.alive);
         self.stats.peak_agents = self.stats.peak_agents.max(self.agents.len() as u32);
-        self.refresh_info();
+    }
+
+    /// Rebuild the neighbour grid from the agents (tests and tools that run `agents::combat` alone).
+    pub fn grid_rebuild(&mut self) {
+        self.grid.build(&self.agents);
     }
 
     fn update_effects(&mut self, dt: f32) {
@@ -1124,20 +1449,23 @@ impl World {
             f.villages = 0;
             f.warriors = 0;
             f.food = 0.0;
+            f.cat_counts = [0; CATS];
         }
         for a in self.agents.iter().filter(|a| a.alive) {
             let f = &mut self.factions[a.faction as usize];
             f.pop += 1;
-            if a.job == Job::Warrior {
+            let fights = a.job.fights() && a.job != Job::Hunt;
+            if a.job.fights() {
                 f.warriors += 1;
             }
+            f.cat_counts[crate::jobs::cat_of(a.job, f.age) as usize] += 1;
             if a.food < 0.25 {
                 hungry[a.faction as usize] += 1;
             }
             if let Some(v) = self.villages.get_mut(a.home as usize) {
                 if v.alive && v.owner == a.faction {
                     v.pop += 1;
-                    if a.job == Job::Warrior {
+                    if fights {
                         v.warriors += 1;
                     }
                     if a.food < 0.25 {
@@ -1186,7 +1514,21 @@ impl World {
         a.alive = false;
         a.cause = cause;
         let f = a.faction as usize;
+        let (home, goats, chief) = (a.home, a.goats, a.job == Job::Chief);
         self.stats.deaths += 1;
+        if let Some(v) = self.villages.get_mut(home as usize) {
+            if v.alive {
+                v.goats += goats;
+                // The village mourns a violent or untimely death.
+                if !matches!(cause, Cause::OldAge) {
+                    v.mourn_t = v.mourn_t.max(8.0);
+                    v.faith = (v.faith + 0.01).min(1.0);
+                }
+            }
+        }
+        if chief {
+            self.factions[f].succession = true;
+        }
         match cause {
             Cause::Starved => {
                 self.stats.starved += 1;
@@ -1200,6 +1542,7 @@ impl World {
             }
             Cause::Fire => self.stats.burned += 1,
             Cause::Smitten | Cause::Disaster => self.stats.smitten += 1,
+            Cause::Plague => {}
             Cause::Alive => {}
         }
     }
@@ -1238,7 +1581,15 @@ impl World {
                 }
             };
             let vals = [
-                if f.alive { 1.0 } else if f.used { -1.0 } else { 0.0 },
+                if f.alive {
+                    1.0
+                } else if f.pending {
+                    2.0
+                } else if f.used {
+                    -1.0
+                } else {
+                    0.0
+                },
                 f.pop as f32,
                 f.villages as f32,
                 f.color[0] as f32,
@@ -1262,6 +1613,28 @@ impl World {
                 f.region as f32,
                 if f.is_player { 1.0 } else { 0.0 },
                 f.warriors as f32,
+                f.age as f32,
+                f.age_t,
+                f.metrics.stability,
+                f.metrics.knowledge,
+                f.metrics.wealth,
+                f.metrics.faith,
+                f.metrics.production,
+                f.metrics.links as f32,
+                f.metrics.territory,
+                f.metrics.inequality,
+                f.metrics.vassals as f32,
+                f.metrics.colonies as f32,
+                f.dark_t,
+                if f.overlord == NO_F { -1.0 } else { f.overlord as f32 },
+                self.strifes.iter().filter(|s| s.alive && s.civ == f.id).map(|s| s.level).max().unwrap_or(0) as f32,
+                self.fight_level[i] as f32,
+                f.peak_age as f32,
+                f.metrics.food_days,
+                f.metrics.coastal as u8 as f32,
+                f.metrics.contact as u8 as f32,
+                f.falls as f32,
+                f.ready_t,
             ];
             self.info_f[o..o + FSTRIDE].copy_from_slice(&vals);
             let nb = &mut self.names[i * NAME_LEN..(i + 1) * NAME_LEN];
@@ -1282,6 +1655,10 @@ impl World {
                 v.unrest,
                 if capital { 1.0 } else { 0.0 },
                 if !v.alive { 0.0 } else if v.siege > 0.0 { 2.0 } else { 1.0 },
+                v.built.count_ones() as f32,
+                v.plague,
+                if v.camp == 0 { 0.0 } else { 1.0 + v.side as f32 },
+                if v.festival_t > 0.0 { 1.0 } else if v.mourn_t > 0.0 { -1.0 } else { 0.0 },
             ]);
         }
         let s = &self.stats;
@@ -1309,7 +1686,27 @@ impl World {
             self.rain_t,
             s.peak_agents as f32,
             s.burned as f32 + s.smitten as f32,
-            self.agents.iter().filter(|a| a.job == Job::Warrior).count() as f32,
+            self.agents.iter().filter(|a| a.job.fights()).count() as f32,
+            s.age_ups as f32,
+            s.collapses as f32,
+            s.recoveries as f32,
+            s.strifes as f32,
+            s.civil_wars as f32,
+            s.crushed as f32,
+            s.revolutions as f32,
+            s.escalations as f32,
+            s.battles as f32,
+            s.captives as f32,
+            s.vassals as f32,
+            s.plagues as f32,
+            s.crises as f32,
+            s.festivals as f32,
+            s.brawls as f32,
+            s.routs as f32,
+            s.max_age as f32,
+            self.speed,
+            self.night,
+            s.buildings as f32,
         ];
         self.stats_buf.copy_from_slice(&vals);
     }

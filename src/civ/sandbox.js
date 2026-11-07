@@ -1,20 +1,24 @@
-// civ (#50): "Sandbox: four civilisations". Four peoples start on a big wrapping planet with
-// one village and four agents each; they grow, claim land, trade, raid, go to war and rebel.
+// civ (#50): "Sandbox: four civilisations". Four peoples on a big wrapping planet; the player
+// founds them one at a time (#98): choose one, place it, seed its temper from the mind for 5 s,
+// and it begins while the others wait. They grow, claim land, trade, raid, go to war and rebel.
 // The simulation is Rust (crates/moc-civ, loaded by ./civ.js); this scene feeds it the brain,
 // draws its view, and turns its event log into news and advisor lines.
 //
-// The player is a god, not a general: calm cools every chief, a racing pulse and an angry
-// face heat them up, focus fattens harvests, blinks throw lightning, and the camera casts
-// (#33: onCast/onMood) act on the world. The player's own civilisation (★) is seeded by the
+// The player is a god, not a general: calm cools every chief, stress and an angry face heat
+// them up, focus fattens harvests, blinks throw lightning, and the camera casts (#33:
+// onCast/onMood) act on the world. Each civilisation climbs the twenty ages of
+// data/ages.json (#69) on its own, and its people fight each other as well as their neighbours.
+// The words on screen (headlines, the age and conflict log, advisor lines, HUD rows, capital
+// labels) and the speed control (Period or the ×1 button: ×1/×4/×16) live in the Rust crate;
+// this file forwards input and draws. The player's own civilisation (★) is seeded by the
 // calibration window (#54, G.calibration): from the mind read with ?calib_mode=sensor, at
 // random (reproducible from ?seed=) in the default dummy run. The run seed also picks the
 // planet and the other three civilisations.
 
 import { W, H, clamp } from '../sim/util.js';
 import { makeBolt, drawBolt, drawReticle } from '../render/sprites.js';
-import { createCiv, EVENT, CAST } from './civ.js';
+import { createCiv, EVENT, CAST, TONE, SETUP } from './civ.js';
 
-const MIND_SECONDS = 10;
 const DAY = 80;            // seconds per day–night cycle (DAY_SECONDS in the Rust sim)
 const PAN_SPEED = 140;     // planet pixels per second
 const NEWS_HOLD = 4;       // seconds each headline stays on the ticker
@@ -29,8 +33,22 @@ let active = null;
 const held = new Set();
 const playing = () => active && active.G?.scene === active;
 window.addEventListener('keydown', (e) => {
-  if (!PAN_KEYS[e.code] || e.ctrlKey || e.metaKey || e.altKey || !playing()) return;
+  if (e.ctrlKey || e.metaKey || e.altKey || !playing()) return;
   if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+  if (e.code === 'Period' && !e.repeat) {
+    active.cycleSpeed();
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    return;
+  }
+  // Tab offers the next civilisation while founding them (#98).
+  if (e.code === 'Tab' && active.setupActive()) {
+    active.civ.setupNext();
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    return;
+  }
+  if (!PAN_KEYS[e.code]) return;
   held.add(e.code);
   e.preventDefault();
   e.stopImmediatePropagation();
@@ -51,7 +69,6 @@ function label(ctx, x, y, text, color, size = 6, align = 'center') {
 }
 
 const smoothstep = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
-const pct = (v) => `${Math.round(v * 100)}%`;
 
 export class CivSandbox {
   constructor({ cosmos = null, seed = null } = {}) {
@@ -60,16 +77,17 @@ export class CivSandbox {
     this.label = 'Sandbox · Four civilisations';
     this.intro = {
       title: 'Four civilisations',
-      goal: 'Four peoples share one big planet. Watch them grow, fight for land and split. Your mind tilts war and peace.',
+      goal: 'Found four peoples on one big planet, one at a time: choose one, place it, and seed its temper from your mind for 5 seconds. Then watch them climb twenty ages, fight and split. Your mind tilts war and peace.',
       how: [
         ['Calm', 'Hold Space: friendlier chiefs, trade, peace treaties, fewer rebels.'],
-        ['Pulse', 'Hold Shift: a racing pulse (and an angry face) brings raids, wars and rebellions.'],
+        ['Stress', 'Hold Shift (or frown at the camera): stress and anger bring raids, wars and rebellions.'],
         ['Focus', 'Hold F: richer harvests, faster growth.'],
         ['Blink', 'Click or B: lightning where you look. It scares rebels back into line.'],
         ['Look around', 'A/D/W/S or the arrow keys pan the planet; right-drag works too.'],
+        ['Time', 'Period (.) or the ×1 button: run the world at ×1, ×4 or ×16. Each people climbs twenty ages on its own.'],
       ],
     };
-    this.powers = ['blink', 'calm', 'focus', 'heart'];
+    this.powers = ['blink', 'calm', 'focus', 'stress'];
     this.darkness = 0.1;
     this.flash = 0;
     this.cosmos = cosmos;
@@ -88,10 +106,37 @@ export class CivSandbox {
     this.mini = null;
     this.miniTimer = 0;
     this.infoTimer = 0;
-    this.mind = { t: 0, calm: 0, focus: 0, hr: 0, n: 0, blinks0: null, done: false, shownUntil: 0, text: '' };
-    this.moodHold = { calm: 0, pulse: 0, anger: 0 };
+    this.moodHold = { calm: 0, stress: 0, anger: 0 };
     this.mood = null;
-    this.perf = { stepMs: 0, renderMs: 0, worstStepMs: 0, samples: 0, sumStep: 0, sumRender: 0 };
+    this.perf = { stepMs: 0, renderMs: 0, worstStepMs: 0, samples: 0, sumStep: 0, sumRender: 0, ring: new Float32Array(600), per: new Float32Array(600), n: 0, avg: 0, p95: 0, stepAvg: 0, stepP95: 0, at: 0 };
+    this.log = [];           // the age and conflict log (lines from Rust)
+    this.newsSeq = 0;
+    this.speedBtn = null;
+  }
+
+  cycleSpeed() {
+    if (!this.civ) return;
+    const k = this.civ.cycleSpeed();
+    if (this.speedBtn) this.speedBtn.textContent = `×${k}`;
+  }
+
+  // A small button over the planet (bottom left) for the time speed.
+  makeSpeedButton() {
+    const frame = document.querySelector('.frame');
+    if (!frame) return;
+    let b = frame.querySelector('.civ-speed');
+    if (!b) {
+      b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'zbtn civ-speed';
+      b.title = 'Time speed (.)';
+      b.setAttribute('aria-label', 'Time speed (.)');
+      Object.assign(b.style, { position: 'absolute', left: '8px', bottom: '8px', width: 'auto', padding: '0 8px', fontSize: '14px' });
+      frame.appendChild(b);
+    }
+    b.onclick = () => { if (active) active.cycleSpeed(); };
+    b.textContent = `×${this.civ?.speed ?? 1}`;
+    this.speedBtn = b;
   }
 
   // ---------- lifecycle ----------
@@ -103,16 +148,18 @@ export class CivSandbox {
     G.advisor.say('civ-intro', 'Four peoples, one planet, my lord. They will grow, squabble and split. Your moods are now everyone\'s problem.', { priority: 3, cooldown: 999 });
     // calibration (#54): one run seed for the planet, the civilisations and the dummy seed.
     this.seed = (this.seedArg ?? G.calibration?.config?.seed ?? Math.random() * 2 ** 32) >>> 0;
-    createCiv(this.seed)
+    // ?civs=8..12 (#101): the player's four and rivals that arrive on their own (default 10 in all).
+    const civs = Math.max(4, Math.min(16, Number(new URLSearchParams(location.search).get('civs')) || 10));
+    createCiv(this.seed, { staged: true, rivals: civs - 4 })
       .then((civ) => {
         if (G.scene !== this) { civ.free(); return; }
         this.civ = civ;
+        this.makeSpeedButton();
         this.refresh();
         this.mini = civ.minimap();
         this.miniCanvas = Object.assign(document.createElement('canvas'), { width: civ.miniW, height: civ.miniH });
         this.miniCanvas.getContext('2d').putImageData(this.mini, 0, 0);
         console.info(`[civ] planet ${civ.pw}×${civ.ph}, seed ${this.seed}`);
-        G.calibration?.onDone((result) => { if (G.scene === this) this.applyCalibration(result); });
       })
       .catch((err) => {
         this.error = err;
@@ -145,20 +192,35 @@ export class CivSandbox {
     if (px || py) civ.pan(px * PAN_SPEED * dt, py * PAN_SPEED * dt);
 
     // The brain (and the face, if the camera is on) tilts every chief this step.
-    const calm = b.calm || 0, focus = b.focus || 0, hr = b.hrDelta() || 0;
+    const calm = b.calm || 0, focus = b.focus || 0;
     const anger = G.mood && G.mood.active !== false ? (G.mood.anger || 0) : (this.mood?.anger || 0);
-    civ.setInputs(calm, focus, hr, anger);
-    if (!this.G.calibration) this.readMind(dt, calm, focus, hr);
+    const stress = stressOf(b, calm, anger);
+    civ.setInputs(calm, focus, stress, anger);
+    civ.setJoy(G.mood && G.mood.active !== false ? (G.mood.joy || 0) : (this.mood?.joy || 0));
+    if (this.speedBtn) this.speedBtn.hidden = !playing();
+    // Founding (#98): the aim shows where the civilisation being placed may begin.
+    if (civ.setupPhase === SETUP.place) { const p = this.aimPlanet(b.aim); civ.setupHover(p.x, p.y); }
 
+    // The world runs at its own speed (×1/×4/×16) in steps of at most 0.1 s.
     const t0 = performance.now();
-    civ.step(Math.min(dt, 0.05));
+    civ.advance(Math.min(dt, 0.05));
     const ms = performance.now() - t0;
     const p = this.perf;
     p.stepMs = ms; p.sumStep += ms; p.samples++; p.worstStepMs = Math.max(p.worstStepMs, ms);
+    p.per[p.n % p.per.length] = ms / Math.max(1, civ.lastSteps);
+    p.ring[p.n++ % p.ring.length] = ms;
+    if (this.t - p.at > 1) {
+      // Mean and p95 of the sim's milliseconds per frame, and per step, over the last 600 frames.
+      p.at = this.t;
+      const k = Math.min(p.n, p.ring.length);
+      const stat = (arr) => { const v = Array.from(arr.subarray(0, k)).sort((x, y) => x - y); return [v.reduce((s, x) => s + x, 0) / Math.max(1, k), v[Math.min(k - 1, Math.floor(k * 0.95))] || 0]; };
+      [p.avg, p.p95] = stat(p.ring);
+      [p.stepAvg, p.stepP95] = stat(p.per);
+      window.__civPerf = { frameAvg: p.avg, frameP95: p.p95, stepAvg: p.stepAvg, stepP95: p.stepP95, steps: civ.lastSteps, worst: p.worstStepMs, frames: p.n, agents: civ.agents, speed: civ.speed, time: civ.time };
+    }
 
     const events = civ.events();
-    if (events.length) this.refresh();
-    for (const e of events) this.onEvent(e);
+    if (events.length) { this.refresh(); this.readNews(); }
     this.infoTimer -= dt;
     if (this.infoTimer <= 0) { this.infoTimer = 0.25; this.refresh(); }
     this.miniTimer -= dt;
@@ -178,122 +240,41 @@ export class CivSandbox {
     if (!this.shown) {
       let next = null;   // the oldest headline not yet shown (news is newest first)
       for (const n of this.news) if (!n.seen) next = n;
-      if (next) { next.seen = true; this.shown = { text: next.text, kind: next.kind, until: this.t + NEWS_HOLD }; }
+      if (next) { next.seen = true; this.shown = { text: next.text, tone: next.tone, until: this.t + NEWS_HOLD }; }
     }
-    this.reactToMood(dt, calm, hr, anger);
+    this.reactToMood(dt, calm, stress, anger);
   }
 
-  // calibration (#54): the window's result seeds the player's civilisation. In sensor mode the
-  // mind read sets all five traits (calm → friendliness, pulse → aggressiveness, blinks →
-  // violence and less cohesion, focus → fertility), with #54's formula for the README three.
-  // The dummy run leaves the player's civilisation as the run seed made it.
-  applyCalibration(r) {
-    const m = this.mind;
-    if (m.done || !this.civ) return;
-    m.done = true;
-    const f = r.features || {};
-    const sensor = r.source === 'sensor';
-    if (sensor) {
-      this.civ.seedMind(f.calm ?? 0, f.focus ?? 0, f.hrDelta ?? 0, ((f.blinkRate ?? 0) * r.seconds) / 10);
-      this.civ.setPlayerTraits(r.friendliness, r.aggressiveness, r.violence);
-    }
-    this.refresh();
-    const me = this.player();
-    if (!me) return;
-    const words = describe(me);
-    m.text = sensor
-      ? `Read from your first ${r.seconds} s: calm ${pct(f.calm ?? 0)}, focus ${pct(f.focus ?? 0)}, pulse ${(f.hrDelta ?? 0) >= 0 ? '+' : ''}${Math.round(f.hrDelta ?? 0)} → ${me.name}: ${words.join(', ')}.`
-      : `Dummy run (seed ${r.seed}): the ${me.name} were born at random: ${words.join(', ')}. Add ?calib_mode=sensor to seed them from your mind.`;
-    m.shownUntil = this.t + 9;
-    this.G.advisor.say('civ-mind', sensor
-      ? `I have read your mind, my lord. The ${me.name} are made in your image: ${words.join(', ')}.`
-      : `The ${me.name} are yours, my lord: ${words.join(', ')}. The stars chose them, not your mind. Not yet.`, { mood: 'happy', priority: 3, cooldown: 999 });
-  }
-
-  // Without the calibration module: the first ten seconds of play shape the player's civilisation.
-  readMind(dt, calm, focus, hr) {
-    const m = this.mind;
-    if (m.done) return;
-    if (m.blinks0 == null) m.blinks0 = this.G.brain.stats.blinks;
-    m.t += dt; m.n++;
-    m.calm += calm; m.focus += focus; m.hr += hr;
-    if (m.t < MIND_SECONDS) return;
-    m.done = true;
-    const c = m.calm / m.n, f = m.focus / m.n, h = m.hr / m.n, blinks = this.G.brain.stats.blinks - m.blinks0;
-    this.civ.seedMind(c, f, h, blinks);
-    this.refresh();
-    const me = this.player();
-    if (!me) return;
-    const words = describe(me);
-    m.text = `Read from your first ${MIND_SECONDS} s: calm ${pct(c)}, focus ${pct(f)}, pulse ${h >= 0 ? '+' : ''}${Math.round(h)}, ${blinks} blinks → ${me.name}: ${words.join(', ')}.`;
-    m.shownUntil = this.t + 9;
-    this.G.advisor.say('civ-mind', `I have read your mind, my lord. The ${me.name} are made in your image: ${words.join(', ')}.`, { mood: 'happy', priority: 3, cooldown: 999 });
-  }
-
-  reactToMood(dt, calm, hr, anger) {
+  reactToMood(dt, calm, stress, anger) {
     const h = this.moodHold, say = this.G.advisor.say.bind(this.G.advisor);
     h.calm = calm > 0.65 ? h.calm + dt : 0;
-    h.pulse = hr > 12 ? h.pulse + dt : 0;
+    h.stress = stress > 0.6 ? h.stress + dt : 0;
     h.anger = anger > 0.4 ? h.anger + dt : 0;
     const wars = this.factions.reduce((s, f) => s + (f.alive ? f.wars : 0), 0) / 2;
     if (h.calm > 4) say('civ-calm', wars ? 'Your calm spreads, my lord. The chiefs are tired of war and want soup.' : 'Your calm spreads, my lord. Chiefs unclench their fists and swap grain.', { mood: 'happy', priority: 1, cooldown: 25 });
-    if (h.pulse > 3) say('civ-pulse', 'Your pulse is racing, my lord, and so are the war drums.', { mood: 'panic', priority: 2, cooldown: 25 });
+    if (h.stress > 3) say('civ-stress', 'You are tense, my lord, and so are the war drums.', { mood: 'panic', priority: 2, cooldown: 25 });
     if (h.anger > 3) say('civ-anger', 'That scowl, my lord. Every village is grumbling now. Rebels are sharpening sticks.', { mood: 'panic', priority: 2, cooldown: 25 });
   }
 
-  // ---------- news ----------
-  onEvent(e) {
-    const A = this.name(e.a), B = this.name(e.b), say = this.G.advisor.say.bind(this.G.advisor);
-    const hot = (this.G.brain.hrDelta() || 0) > 10;
-    let text = null;
-    switch (e.kind) {
-      case EVENT.CONTACT:
-        text = `First contact: the ${A} meet the ${B}`;
-        say('civ-contact', `The ${A} have met the ${B}. They are measuring each other's spears.`, { priority: 1, cooldown: 20 });
-        break;
-      case EVENT.WAR:
-        text = `WAR: the ${A} declare war on the ${B}`;
-        say('civ-war', `The ${A} have declared war on the ${B}!${hot ? ' Your racing pulse is not helping, my lord.' : ''}`, { mood: 'panic', priority: 2, cooldown: 10 });
-        this.G.audio?.bad?.();
-        break;
-      case EVENT.PEACE:
-        text = `Peace between the ${A} and the ${B}`;
-        say('civ-peace', `The ${A} and the ${B} made peace. Someone brought soup.`, { mood: 'happy', priority: 1, cooldown: 15 });
-        break;
-      case EVENT.CAPTURE:
-        text = `The ${A} capture a village from the ${B}`;
-        say('civ-capture', `The ${A} took a village from the ${B}. The villagers have new opinions now.`, { priority: 1, cooldown: 20 });
-        break;
-      case EVENT.REBELLION:
-        text = `REBELLION: the ${B} break away from the ${A} (${e.n} village${e.n === 1 ? '' : 's'})`;
-        say('civ-rebel', `Rebellion! The ${B} have split from the ${A}. Family dinners will be awkward.`, { mood: 'panic', priority: 3, cooldown: 8 });
-        this.G.audio?.bad?.();
-        break;
-      case EVENT.WIPED:
-        text = `The ${A} are no more${e.b >= 0 ? `, swallowed by the ${B}` : ''}`;
-        say('civ-wiped', `The ${A} are gone, my lord. History will be written by the ${e.b >= 0 ? B : 'survivors'}.`, { mood: 'panic', priority: 3, cooldown: 10 });
-        break;
-      case EVENT.RAID:
-        text = `The ${A} raid the ${B} for ${e.n} food`;
-        say('civ-raid', `The ${A} raided the ${B} and ran off with the grain.`, { priority: 1, cooldown: 20 });
-        break;
-      case EVENT.FAMINE:
-        text = `Famine among the ${A}`;
-        say('civ-famine', `The ${A} are starving, my lord. A bounty (open palm) would help.`, { mood: 'panic', priority: 2, cooldown: 30 });
-        break;
-      case EVENT.TRADE:
-        text = `The ${A} send grain to the ${B}`;
-        if ((this.G.brain.calm || 0) > 0.55) say('civ-trade', `Your calm is catching, my lord: the ${A} are sharing grain with the ${B}.`, { mood: 'happy', priority: 1, cooldown: 30 });
-        break;
-      case EVENT.CAPITAL: text = `The ${A} have a new capital`; break;
-      case EVENT.RAZED: text = e.b >= 0 ? `A village of the ${A} is razed` : null; break;
-      default: break;
-    }
-    if (text) {
-      this.news.unshift({ text, t: this.t, kind: e.kind, seen: false });
-      // Keep a short backlog; skip stale headlines rather than queue them for minutes.
-      for (const n of this.news.slice(4)) n.seen = true;
-      if (this.news.length > 40) this.news.length = 40;
+  // ---------- news (the words come from Rust: crates/moc-civ/src/news.rs) ----------
+  readNews() {
+    const { lines, next } = this.civ.news(this.newsSeq);
+    this.newsSeq = next;
+    const say = this.G.advisor.say.bind(this.G.advisor);
+    for (const l of lines) {
+      if (l.text) {
+        this.news.unshift({ text: l.text, t: this.t, tone: l.tone, seen: false });
+        // Keep a short backlog; skip stale headlines rather than queue them for minutes.
+        for (const n of this.news.slice(4)) n.seen = true;
+        if (this.news.length > 40) this.news.length = 40;
+      }
+      if (l.log) {
+        this.log.unshift({ text: l.logText, t: this.t, tone: l.tone });
+        if (this.log.length > 4) this.log.length = 4;
+      }
+      if (l.say) say(l.key, l.say, { mood: l.tone === TONE.bad ? 'panic' : l.tone === TONE.good ? 'happy' : undefined, priority: l.priority, cooldown: l.cooldown });
+      if (l.kind === EVENT.WAR || l.kind === EVENT.REBELLION || l.kind === EVENT.CIVIL_WAR) this.G.audio?.bad?.();
+      if (l.kind === EVENT.AGE_UP) this.G.audio?.good?.();
     }
   }
 
@@ -302,10 +283,18 @@ export class CivSandbox {
     return this.civ.toPlanet(aim.x * (W - 1), aim.y * (H - 1));
   }
 
+  // Still founding the civilisations (#98)?
+  setupActive() {
+    const ph = this.civ?.setupPhase;
+    return ph === SETUP.choose || ph === SETUP.place || ph === SETUP.seed;
+  }
+
   onBlink(aim) {
     const civ = this.civ, G = this.G;
     if (!civ) return;
     const p = this.aimPlanet(aim);
+    // While founding, a click or blink chooses, places, or (seeding) makes the people wilder.
+    if (this.setupActive()) { civ.setupClick(p.x, p.y); this.refresh(); return; }
     const killed = civ.lightning(p.x, p.y);
     const s = civ.toScreen(p.x, p.y);
     this.bolts.push({ x: p.x, y: p.y, pts: makeBolt(s.x, s.y), sx: s.x, sy: s.y, life: 0.35 });
@@ -382,13 +371,12 @@ export class CivSandbox {
       label(ctx, W / 2, H / 2, this.error ? 'The planet failed to form.' : 'Forming a planet…', this.error ? '#ff5a72' : '#ffe066', 8);
       return;
     }
-    // Names at capitals.
+    // Names (and ages) at capitals.
     for (const f of this.factions) {
       if (!f.alive || !f.capital) continue;
       const s = civ.toScreen(f.capital.x + 0.5, f.capital.y);
       if (s.x < -30 || s.x > W + 30 || s.y < 4 || s.y > H + 4) continue;
-      const tag = f.isPlayer ? `★ ${f.name}` : f.name;
-      label(ctx, s.x, s.y - 9, f.wars ? `${tag} ⚔` : tag, f.css, 5);
+      label(ctx, s.x, s.y - 9, civ.capitalLabel(f.id), f.css, 5);
     }
     // Overview map with the camera's window.
     if (this.miniCanvas) {
@@ -401,20 +389,29 @@ export class CivSandbox {
       const cx = civ.camX * kx, cy = civ.camY * ky, cw = W * kx, ch = H * ky;
       ctx.strokeStyle = '#ffe066';
       ctx.lineWidth = 0.5;
-      ctx.strokeRect(x0 + cx, y0 + cy, Math.min(cw, mw - cx), ch);
-      if (cx + cw > mw) ctx.strokeRect(x0, y0 + cy, cx + cw - mw, ch);
+      // The camera's window, split where it crosses either seam (the planet is a torus, #111).
+      for (const [rx, rw] of cx + cw > mw ? [[cx, mw - cx], [0, cx + cw - mw]] : [[cx, cw]]) {
+        for (const [ry, rh] of cy + ch > mh ? [[cy, mh - cy], [0, cy + ch - mh]] : [[cy, ch]]) ctx.strokeRect(x0 + rx, y0 + ry, rw, rh);
+      }
     }
-    // Mind read.
-    const m = this.mind;
-    const cal = this.G.calibration;
-    const left = cal ? cal.remaining : MIND_SECONDS - m.t;
-    if (!m.done) label(ctx, 4, 9, `${cal?.config?.mode === 'random' ? 'Seeding your civilisation' : 'Reading your mind'}… ${Math.max(0, Math.ceil(left))} s`, '#59d8c8', 5, 'left');
-    else if (this.t < m.shownUntil) wrapLabel(ctx, 4, 9, m.text, '#59d8c8', 5, W - 80);
+    // Founding the civilisations (#98): the words come from Rust.
+    if (this.setupActive()) {
+      let y = 9;
+      for (const [i, line] of civ.setupLines().entries()) y = wrapLabel(ctx, 4, y, line, i === 0 ? '#59d8c8' : '#e8e4d8', 5, W - 80) + 1;
+    } else {
+      // The age and conflict log: the last few age-ups, Dark Ages and escalations.
+      let y = 9;
+      for (const l of this.log) {
+        if (this.t - l.t > 40) continue;
+        label(ctx, 4, y, l.text, TONE_COLOUR[l.tone], 5, 'left');
+        y += 6;
+      }
+    }
     // News ticker.
     ctx.fillStyle = 'rgba(8,10,24,0.72)';
     ctx.fillRect(0, H - 9, W, 9);
     const n = this.shown;
-    const color = !n ? '#a3a6c4' : [EVENT.WAR, EVENT.REBELLION, EVENT.WIPED, EVENT.FAMINE].includes(n.kind) ? '#ff8a7a' : n.kind === EVENT.PEACE || n.kind === EVENT.TRADE ? '#9be38a' : '#ffe066';
+    const color = n ? TONE_COLOUR[n.tone] : '#a3a6c4';
     const s = this.stats;
     ctx.font = '5px "Pixelify Sans", monospace';
     ctx.fillStyle = color;
@@ -423,7 +420,7 @@ export class CivSandbox {
     if (s) {
       ctx.textAlign = 'right';
       ctx.fillStyle = '#7d80a0';
-      ctx.fillText(`${Math.round(s.agents)} people · wars ${s.wars} · rebellions ${s.rebellions} · sim ${this.perf.stepMs.toFixed(1)} ms`, W - 3, H - 2.6);
+      ctx.fillText(`×${s.speed} · ${Math.round(s.agents)} people · wars ${s.wars} · civil wars ${s.civilWars} · sim ${this.perf.avg.toFixed(1)} ms`, W - 3, H - 2.6);
     }
     ctx.textAlign = 'left';
   }
@@ -443,34 +440,26 @@ export class CivSandbox {
     return L.slice(0, 16);
   }
 
-  // The HUD scoreboard: population and villages per civilisation.
+  // The HUD scoreboard: each people's age, size and trouble (rows written by Rust).
   objectives() {
     if (!this.civ) return [{ label: 'Planet', value: this.error ? 'failed' : 'forming…', plain: true }];
-    const alive = this.factions.filter((f) => f.alive).sort((p, q) => q.pop - p.pop);
-    const top = alive.slice(0, 6);
-    const me = this.player();
-    if (me && !top.includes(me)) top[top.length - 1] = me;
-    const rows = top.map((f) => ({
-      label: f.isPlayer ? `★ ${f.name}` : f.name,
-      value: `${Math.round(f.pop)} · ${Math.round(f.villages)} vil${f.wars ? ' · war' : f.raids ? ' · raid' : ''}`,
-      bad: f.wars > 0,
-      plain: !f.wars,
-    }));
-    if (alive.length > top.length) rows.push({ label: 'Others', value: `${alive.length - top.length}`, plain: true });
-    return rows;
+    if (this.t - (this.hudAt ?? -1) > 0.25) { this.hudAt = this.t; this.hud = this.civ.hudRows().map((r) => ({ ...r, plain: !r.bad })); }
+    return this.hud;
   }
 
-  skip() {}
+  // Enter: while founding, take the civilisation offered or begin it in its homeland.
+  skip() { if (this.setupActive()) { this.civ.setupEnter(); this.refresh(); } }
 }
 
-function describe(f) {
-  return [
-    f.friendliness > 0.6 ? 'friendly' : f.friendliness < 0.35 ? 'suspicious' : 'wary',
-    f.aggressiveness > 0.55 ? 'quick to fight' : f.aggressiveness < 0.3 ? 'slow to anger' : 'proud',
-    f.violence > 0.55 ? 'ruthless' : 'merciful',
-    f.fertility > 0.6 ? 'and very fertile' : 'and hard-working',
-  ];
+// Stress, 0..1 and 0 at rest: the brain's own reading when it has one (neutral at rest), else
+// max(1 - calm, anger) measured from where it sits at rest (0.8; resting calm is low).
+const STRESS_REST = 0.8;
+function stressOf(brain, calm, anger) {
+  if (typeof brain?.stress === 'number') return clamp(brain.stress);
+  return clamp((Math.max(1 - calm, anger) - STRESS_REST) / (1 - STRESS_REST));
 }
+
+const TONE_COLOUR = ['#ffe066', '#9be38a', '#ff8a7a', '#ffb36b'];
 
 function wrapLabel(ctx, x, y, text, color, size, maxW) {
   ctx.font = `${size}px "Pixelify Sans", monospace`;
@@ -484,4 +473,5 @@ function wrapLabel(ctx, x, y, text, color, size, maxW) {
     } else line = test;
   }
   if (line) label(ctx, x, y, line, color, size, 'left');
+  return y + size;
 }

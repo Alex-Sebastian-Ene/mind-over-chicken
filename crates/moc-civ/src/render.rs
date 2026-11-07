@@ -5,13 +5,13 @@
 use moc_planet::color::Rgba;
 use moc_planet::{VH, VW};
 
+use crate::jobs::{binfo, info, Building, Role};
 use crate::planet::blit;
 use crate::world::*;
 
 const SKIN: Rgba = [236, 200, 160, 255];
 const WALL: Rgba = [150, 108, 68, 255];
 const DOOR: Rgba = [58, 38, 28, 255];
-const SPEAR: Rgba = [214, 214, 226, 255];
 const PACK: Rgba = [140, 92, 52, 255];
 const GRAIN: Rgba = [242, 220, 96, 255];
 
@@ -45,6 +45,7 @@ impl World {
         self.draw_villages();
         self.draw_agents();
         self.draw_effects();
+        self.draw_setup();
         if self.rain_t > 0.0 {
             self.draw_rain();
         }
@@ -67,10 +68,10 @@ impl World {
         let walk = &self.terrain.walk;
         let data = &mut self.view.data;
         for sy in 0..VH {
-            let py = (cy + sy as i32).clamp(0, ph as i32 - 1) as usize;
+            let py = d.wrap_y(cy + sy as i32) as usize;
             let row = py * pw;
-            let up = if py > 0 { row - pw } else { row };
-            let down = if py + 1 < ph { row + pw } else { row };
+            let up = (py + ph - 1) % ph * pw;
+            let down = (py + 1) % ph * pw;
             for sx in 0..VW {
                 let px = d.wrap_x(cx + sx as i32) as usize;
                 let o = owner[row + px];
@@ -138,6 +139,8 @@ impl World {
             let capital = f.capital as usize == vi;
             let big = capital || v.pop >= 6;
             let siege = v.siege > 0.0;
+            let age = f.age;
+            let (built, plague, camp, side, fest, mourn) = (v.built, v.plague, v.camp, v.side, v.festival_t > 0.0, v.mourn_t > 0.0);
             let px = |s: &mut Self, x: i32, y: i32, c: Rgba| s.view.px(sx + x, sy + y, c);
             if big {
                 px(self, 0, -3, roof);
@@ -170,6 +173,90 @@ impl World {
                     px(self, k, 2, [255, 60, 50, 230]);
                 }
             }
+            // The age's buildings round the village, newest last (grey while dormant).
+            self.draw_buildings(sx, sy, built, age, roof);
+            // A rebel flag over a village that has risen against its own crown.
+            if camp != 0 && side == 1 {
+                for y in -8..=-4 {
+                    px(self, -3, y, [60, 40, 30, 255]);
+                }
+                px(self, -2, -8, [220, 30, 40, 255]);
+                px(self, -1, -8, [220, 30, 40, 255]);
+                px(self, -2, -7, [20, 20, 20, 255]);
+                px(self, -1, -7, [220, 30, 40, 255]);
+            }
+            if mourn {
+                px(self, 2, -4, [20, 20, 24, 255]);
+                px(self, 2, -5, [20, 20, 24, 255]);
+            }
+            if plague > 0.2 {
+                let h = hash(vi as u32 ^ (self.time * 3.0) as u32);
+                px(self, (h % 7) as i32 - 3, -(((h >> 4) % 3) as i32) - 1, [120, 200, 60, 220]);
+                px(self, ((h >> 8) % 7) as i32 - 3, ((h >> 12) % 2) as i32, [150, 220, 70, 200]);
+            }
+            if fest {
+                let t = (self.time * 8.0) as u32;
+                for k in 0..4u32 {
+                    let h = hash(vi as u32 * 31 + k + t);
+                    let c = [[255, 220, 80, 255], [255, 120, 200, 255], [120, 220, 255, 255], [170, 255, 120, 255]][(h % 4) as usize];
+                    px(self, ((h >> 3) % 9) as i32 - 4, -(((h >> 7) % 6) as i32) - 2, c);
+                }
+            }
+        }
+    }
+
+    /// Up to eight of a village's buildings, 4x4 sprites in a ring round it.
+    fn draw_buildings(&mut self, sx: i32, sy: i32, built: u64, age: u8, roof: Rgba) {
+        const SLOTS: [(i32, i32); 8] = [(-8, -3), (4, -3), (-8, 2), (4, 2), (-2, 3), (-13, -1), (9, -1), (-2, -9)];
+        if built == 0 {
+            return;
+        }
+        let mut list = [0usize; 8];
+        let mut n = 0;
+        // The newest eight (highest bits), drawn oldest first.
+        let mut bits = built;
+        while bits != 0 && n < 8 {
+            let k = 63 - bits.leading_zeros() as usize;
+            bits &= !(1u64 << k);
+            list[n] = k;
+            n += 1;
+        }
+        for s in 0..n {
+            let b = Building::ALL[list[n - 1 - s]];
+            let dormant = b.unlock_age() > age;
+            let (ox, oy) = SLOTS[s];
+            let spr = binfo(b).sprite;
+            for (ry, row) in spr.iter().enumerate() {
+                for (rx, ch) in row.bytes().enumerate() {
+                    let c: Rgba = match ch {
+                        b'r' => roof,
+                        b'w' => WALL,
+                        b'd' => DOOR,
+                        b's' => [150, 150, 160, 255],
+                        b'f' => [255, 150, 40, 255],
+                        b'y' => [240, 210, 90, 255],
+                        b'g' => [90, 170, 70, 255],
+                        b'b' => [80, 140, 220, 255],
+                        b'k' => [50, 50, 60, 255],
+                        b'l' => [255, 240, 170, 255],
+                        b'm' => [200, 205, 215, 255],
+                        b'o' => [190, 100, 60, 255],
+                        b'p' => [150, 90, 190, 255],
+                        b'h' => [240, 240, 240, 255],
+                        b'c' => [90, 220, 230, 255],
+                        b'n' => [120, 80, 45, 255],
+                        b'R' => [210, 50, 40, 255],
+                        _ => continue,
+                    };
+                    let c = if dormant {
+                        let g = ((c[0] as u32 + c[1] as u32 + c[2] as u32) / 3 / 2 + 40) as u8;
+                        [g, g, g, 255]
+                    } else {
+                        c
+                    };
+                    self.view.px(sx + ox + rx as i32, sy + oy + ry as i32, c);
+                }
+            }
         }
     }
 
@@ -185,18 +272,43 @@ impl World {
                 continue;
             }
             let c = self.factions[a.faction as usize].color;
-            let body: Rgba = [c[0], c[1], c[2], 255];
-            let (job, fight, carry) = (a.job, a.fight, a.carry);
+            let (job, fight, carry, state, prisoner, side, camp) = (a.job, a.fight, a.carry, a.state, a.prisoner, a.side, a.camp);
+            let body: Rgba = if prisoner > 0.0 {
+                [120, 120, 120, 255]
+            } else if camp != 0 && side == 1 {
+                // Rebels: their people's colour, darkened.
+                [c[0] / 2 + 20, c[1] / 2, c[2] / 2, 255]
+            } else {
+                [c[0], c[1], c[2], 255]
+            };
+            if state == State::Sleep {
+                // Asleep: lying down.
+                self.view.px(sx, sy, [body[0] / 2, body[1] / 2, body[2] / 2, 255]);
+                self.view.px(sx + 1, sy, [SKIN[0] / 2, SKIN[1] / 2, SKIN[2] / 2, 255]);
+                continue;
+            }
+            if state == State::Sail {
+                for k in -1..=1 {
+                    self.view.px(sx + k, sy + 1, [110, 72, 40, 255]);
+                }
+                self.view.px(sx, sy - 2, [240, 240, 240, 255]);
+            }
             self.view.px(sx, sy, body);
-            self.view.px(sx, sy - 1, SKIN);
-            match job {
-                Job::Warrior => self.view.px(sx + 1, sy - 1, SPEAR),
-                Job::Settler => self.view.px(sx - 1, sy, PACK),
-                Job::Gatherer => {
+            self.view.px(sx, sy - 1, if camp != 0 && side == 1 { [220, 40, 40, 255] } else { SKIN });
+            let ji = info(job);
+            let t = ji.tool;
+            match ji.role {
+                Role::Fight | Role::Hunt => self.view.px(sx + 1, sy - 1, [t[0], t[1], t[2], 255]),
+                Role::Settle => self.view.px(sx - 1, sy, PACK),
+                Role::Gather | Role::Haul => {
                     if carry > 0.0 {
-                        self.view.px(sx + 1, sy, GRAIN);
+                        self.view.px(sx + 1, sy, if ji.out == crate::jobs::Out::Food { GRAIN } else { [t[0], t[1], t[2], 255] });
                     }
                 }
+                Role::Work | Role::Lead => self.view.px(sx + 1, sy, [t[0], t[1], t[2], 255]),
+            }
+            if job == crate::jobs::Job::Chief {
+                self.view.px(sx, sy - 2, [250, 210, 70, 255]);
             }
             if fight > 0.0 && blink {
                 self.view.px(sx, sy - 2, [255, 255, 255, 255]);
@@ -265,6 +377,55 @@ impl World {
         }
     }
 
+    /// The founding flow (#98): waiting homelands glow in their people's colour; the spot being
+    /// chosen shows green (yes) or red (no); seeding fills a ring round it.
+    fn draw_setup(&mut self) {
+        use crate::setup::Phase;
+        let s = self.setup.clone();
+        if matches!(s.phase, Phase::Off | Phase::Done) {
+            return;
+        }
+        let pulse = 0.5 + 0.5 * (self.time * 4.0).sin();
+        for &f in &s.slots {
+            let fac = &self.factions[f as usize];
+            if !fac.pending {
+                continue;
+            }
+            let c = fac.color;
+            let a = if f == s.slot { 200 + (55.0 * pulse) as u8 } else { 110 };
+            let (x, y) = (fac.start.0 as f32 + 0.5, fac.start.1 as f32 + 0.5);
+            self.ring(x, y, 6.0 + if f == s.slot { pulse } else { 0.0 }, [c[0], c[1], c[2], a]);
+        }
+        if matches!(s.phase, Phase::Place | Phase::Seed) {
+            let (x, y) = (s.spot.0 as f32 + 0.5, s.spot.1 as f32 + 0.5);
+            let c: Rgba = if s.phase == Phase::Seed {
+                let k = self.factions[s.slot as usize].color;
+                [k[0], k[1], k[2], 255]
+            } else if s.spot_ok {
+                [120, 255, 140, 255]
+            } else {
+                [255, 80, 70, 255]
+            };
+            self.ring(x, y, 3.0, c);
+            let (sx, sy) = self.cam.to_screen(x, y);
+            let (sx, sy) = (sx.floor() as i32, sy.floor() as i32);
+            for k in -1..=1 {
+                self.view.px(sx + k, sy, c);
+                self.view.px(sx, sy + k, c);
+            }
+            if s.phase == Phase::Seed {
+                // The seeding ring fills clockwise from the top.
+                let p = (s.t / crate::setup::SEED_SECONDS).clamp(0.0, 1.0);
+                let n = 64;
+                for k in 0..(p * n as f32) as i32 {
+                    let ang = -std::f32::consts::FRAC_PI_2 + k as f32 / n as f32 * std::f32::consts::TAU;
+                    let (rx, ry) = (sx as f32 + ang.cos() * 8.0, sy as f32 + ang.sin() * 8.0);
+                    self.view.px(rx.round() as i32, ry.round() as i32, [255, 230, 120, 255]);
+                }
+            }
+        }
+    }
+
     fn draw_rain(&mut self) {
         let a = (self.rain_t.min(2.0) / 2.0 * 150.0) as u8;
         let t = self.time;
@@ -302,7 +463,6 @@ impl World {
 
     /// Owner of the tile at a planet point (NO_F = nobody).
     pub fn owner_at(&self, x: f32, y: f32) -> u8 {
-        let y = (y.floor() as i32).clamp(0, self.d.h as i32 - 1);
-        self.owner[self.d.idx(x.floor() as i32, y)]
+        self.owner[self.d.idx(x.floor() as i32, y.floor() as i32)]
     }
 }
