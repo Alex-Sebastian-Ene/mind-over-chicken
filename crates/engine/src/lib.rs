@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod app;
 pub mod audio;
 pub mod biosignal;
 pub mod camera;
@@ -15,6 +16,7 @@ pub mod shell;
 mod sprites;
 mod terrain;
 
+pub use app::RustApp;
 pub use biosignal::{RustBlinkClassifier, RustImuTracker};
 use camera3d::OrbitCamera;
 use gl::{Light, WebGlRenderer};
@@ -1185,6 +1187,10 @@ impl Engine {
 
     pub fn get_game_restarts_stat(&self) -> u32 {
         self.game.stats.restarts
+    }
+
+    pub fn get_game_darkness(&self) -> f32 {
+        self.game.era.darkness()
     }
 
     pub fn is_game_era_complete(&self) -> bool {

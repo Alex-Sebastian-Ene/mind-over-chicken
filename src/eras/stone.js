@@ -92,7 +92,7 @@ export class StoneAge {
     this.particles.burst(14, () => ({ x, y, vx: rand(-30, 30), vy: rand(-40, 5), g: 60, life: 0.6, maxLife: 0.6, size: 1, color: pick(['#fff4c2', '#ffd166', '#ffffff']) }));
 
     // Fire pit & tutorial label (generous target area so clicking label or pit lights fire)
-    if (dist(x, y, this.fire.x, this.fire.y) < 18 || dist(x, y, this.fire.x, this.fire.y - 12) < 14) {
+    if (dist(x, y, this.fire.x, this.fire.y) < 24 || dist(x, y, this.fire.x, this.fire.y - 12) < 20) {
       const first = !this.fire.everLit;
       this.fire.lit = true; this.fire.everLit = true;
       this.fire.heat = Math.max(this.fire.heat, 0.7);
@@ -107,7 +107,7 @@ export class StoneAge {
     }
     // Mammoths (generous hit radius for lightning strike)
     for (const m of this.mammoths) {
-      if (m.alive && dist(x, y, m.x, m.y - 2) < 14) {
+      if (m.alive && dist(x, y, m.x, m.y - 2) < 18) {
         m.alive = false; m.dead = true;
         this.meat.push({ x: m.x, y: m.y, amount: 5, cooked: true, claimed: 0 });
         floater(this.particles, m.x, m.y - 8, 'barbecue', '#ff9a2e', 7);
@@ -119,7 +119,7 @@ export class StoneAge {
     for (const p of this.people) {
       if (!p.alive) continue;
       const d = dist(x, y, p.x, p.y - 2);
-      if (d < 8) {
+      if (d < 12) {
         p.alive = false;
         p.dead = true;
         p.deadT = 0;
@@ -529,12 +529,14 @@ export class StoneAge {
       engine.add_billboard(1, m.x, m.y, m.facing || 1, m.frame, m.dead ? 1 : 0);
     }
 
-    // People
-    for (const p of this.people) {
-      if (!p.alive && (p.deadT || 0) > 12) continue;
-      if (p.state === 'aboard') continue;
-      const pose = !p.alive ? 3 : p.state === 'dance' || p.state2 === 'dance' ? 1 : p.state === 'cower' ? 2 : p.halo && p.state === 'warm' ? 1 : 0;
-      engine.add_billboard(0, p.x, p.y, p.facing || 1, p.frame, pose);
+    // People (tribe stays inside the dark cave until the fire is lit)
+    if (f.lit) {
+      for (const p of this.people) {
+        if (!p.alive && (p.deadT || 0) > 12) continue;
+        if (p.state === 'aboard') continue;
+        const pose = !p.alive ? 3 : p.state === 'dance' || p.state2 === 'dance' ? 1 : p.state === 'cower' ? 2 : p.halo && p.state === 'warm' ? 1 : 0;
+        engine.add_billboard(0, p.x, p.y, p.facing || 1, p.frame, pose);
+      }
     }
 
     // Chicken
@@ -565,11 +567,13 @@ export class StoneAge {
     for (const m of this.mammoths) actors.push({ y: m.y, d: () => drawMammoth(ctx, m.x, m.y, m) });
     for (const b of this.boats) actors.push({ y: b.y, d: () => drawBoat(ctx, b.x, b.y, b) });
     for (const c of Object.values(this.colonies)) actors.push({ y: c.y, d: () => drawFire(ctx, c.x, c.y, 0.7, this.t + 3) });
-    for (const p of this.people) {
-      if (!p.alive && (p.deadT = (p.deadT || 0) + 1 / 60) > 12) continue;
-      if (p.state === 'aboard') continue;
-      const pose = !p.alive ? 'dead' : p.state === 'dance' || p.state2 === 'dance' ? 'dance' : p.state === 'cower' ? 'panic' : p.halo && p.state === 'warm' ? 'pray' : 'walk';
-      actors.push({ y: p.y, d: () => drawPerson(ctx, p.x, p.y, { ...p, pose, hat: p.halo ? '#ffe066' : null }) });
+    if (this.fire.lit) {
+      for (const p of this.people) {
+        if (!p.alive && (p.deadT = (p.deadT || 0) + 1 / 60) > 12) continue;
+        if (p.state === 'aboard') continue;
+        const pose = !p.alive ? 'dead' : p.state === 'dance' || p.state2 === 'dance' ? 'dance' : p.state === 'cower' ? 'panic' : p.halo && p.state === 'warm' ? 'pray' : 'walk';
+        actors.push({ y: p.y, d: () => drawPerson(ctx, p.x, p.y, { ...p, pose, hat: p.halo ? '#ffe066' : null }) });
+      }
     }
     actors.push({ y: this.chicken.y, d: () => drawChicken(ctx, this.chicken.x, this.chicken.y, this.chicken) });
     actors.push({ y: this.fire.y, d: () => drawFire(ctx, this.fire.x, this.fire.y, this.fire.lit ? this.fire.heat : 0, this.t) });

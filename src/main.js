@@ -14,6 +14,7 @@ import { Industry } from './eras/industry.js';
 import { SpaceAge } from './eras/space.js';
 import initEngine, {
   Engine,
+  RustApp,
   RustImuTracker,
   RustBlinkClassifier,
   PointerGesture,
@@ -32,6 +33,7 @@ import initEngine, {
 import { Cosmos } from './cosmos/cosmos.js';
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel, setRustGalaxy } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
+import { initCameraAdapter } from './camera/adapter.js';
 import { setRustCastController } from './camera/casts.js';
 import { setRustFingerController } from './camera/fingers.js';
 import { setRustEmotionTracker } from './camera/emotion.js';
@@ -128,6 +130,15 @@ try {
 } catch (err) {
   console.error('Failed to initialize Rust WebGL engine:', err);
   loading.fail('engine', 'no WebGL here: using the 2D fallback');
+}
+
+export async function startRustApp() {
+  await initEngine();
+  const app = new RustApp('screen');
+  initCameraAdapter(app);
+  app.start();
+  window.__moc = { app };
+  return app;
 }
 // Without WebGL, fall back to a plain 2D upscale so the game still shows.
 const fallback2d = engine ? null : screen.getContext('2d');
@@ -291,7 +302,7 @@ function newGame(source, startIndex = 0) {
     if (cosmos.galaxy?.attended) audio.thunder();
     if (aiPlanet) aiPlanet.humanBlink(aim);
     const view = cosmos.viewScene(G); // planets (#68): another world's surface when you're on it
-    if (!banner && !cosmos.active && view?.onBlink) view.onBlink(aim);
+    if (!banner && view?.onBlink) view.onBlink(aim);
   });
   // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
   cosmos.ensureGalaxy(G);
@@ -523,9 +534,14 @@ function render() {
   // 3D only on the surface itself: once the globe zoom starts, the flat 2D map takes over (the
   // 3D camera has already tipped over to that exact frame, so the hand-over is seamless).
   G.render3d = in3dSurface();
+  globalThis.__moc_render3d = G.render3d;
   if (G.render3d) {
     // The 3D camera follows the same east–west pan as the 2D map (A/D, Shift+scroll, drag).
-    engine.set_camera_target(cosmos.mapX(W / 2), engine.get_camera_target_z());
+    if (scene && scene !== G.scene && typeof scene.centerColumn === 'function') {
+      engine.set_camera_target(W / 2, H / 2);
+    } else {
+      engine.set_camera_target(cosmos.mapX(W / 2), engine.get_camera_target_z());
+    }
     stepCam3dTween();
   }
   // In 3D, scenes with draw3d stand their actors up as sprites, so they skip painting them flat.
@@ -551,14 +567,19 @@ function render() {
   if (engine) {
     try {
       if (surface && G.render3d) {
+        sync3dWorldMesh(scene);
         engine.begin_frame();
         engine.upload_canvas(low);
-        G.world?.draw3d?.(engine);
-        if (typeof engine.draw_era_3d === 'function' && !G.sandbox && G.scene?.era) {
-          engine.draw_era_3d();
-        } else if (scene.draw3d) {
+        if (scene === G.scene) {
+          G.world?.draw3d?.(engine);
+          if (typeof engine.draw_era_3d === 'function' && !G.sandbox && G.scene?.era) {
+            engine.draw_era_3d();
+          } else if (scene.draw3d) {
+            scene.draw3d(engine, 0.016);
+          }
+        } else if (scene?.draw3d) {
           scene.draw3d(engine, 0.016);
-        } else if (scene.lights) {
+        } else if (scene?.lights) {
           for (const l of scene.lights()) {
             engine.add_3d_light(l.x, 10.0, l.y, l.r, 1.2);
           }
@@ -732,8 +753,32 @@ let orbitDrag = null;
 const CAM3D = { blendFrom: 300, topDown: 344, topPitch: 1.55 };
 let cam3dBase = null;   // the player's own angle when the tip-over began
 let cam3dTween = null;  // a keyboard/button zoom-out animates the tip-over, then hands over
-// 3D is the home world's relief; other worlds' surfaces (planets #68) stay 2D until they get their own mesh.
-function in3dSurface() { return !!(engine && engine.is_3d_mode() && !cosmos.active && !((cosmos.z || 0) > 0) && (!G || !cosmos.viewScene || cosmos.viewScene(G) === G.scene) && !(G?.scene instanceof CivSandbox)); } // civ (#50) runs on its own planet: 2D
+let current3dWorldKey = '';
+function sync3dWorldMesh(scene) {
+  if (!engine) return;
+  const isOther = scene && scene !== G?.scene && typeof scene.getVisibleHeightmap === 'function';
+  const world = isOther ? scene.world : G?.world;
+  if (!world) return;
+  const qx = Math.round((scene.sx || 0) / 2) * 2;
+  const qy = Math.round((scene.sy || 0) / 2) * 2;
+  const key = isOther ? `${world.seed}_${qx}_${qy}` : `${world.seed}`;
+  if (key === current3dWorldKey) return;
+  current3dWorldKey = key;
+
+  const h = isOther ? scene.getVisibleHeightmap() : world.h;
+  if (h && engine.set_heightmap) {
+    try { engine.set_heightmap(h); } catch (e) { console.warn('set_heightmap failed:', e); }
+  }
+  const deep = world.palette?.[0]?.[0];
+  if (deep && engine.set_backdrop) {
+    engine.set_backdrop(deep[0], deep[1], deep[2]);
+  }
+}
+
+// 3D world: enabled whenever looking at any planet's surface at z <= 0.
+function in3dSurface() {
+  return !!(engine && engine.is_3d_mode() && !cosmos.active && !((cosmos.z || 0) > 0));
+}
 function applyCam3dBlend() {
   const d = engine.get_camera_distance();
   const t = clamp((d - CAM3D.blendFrom) / (CAM3D.topDown - CAM3D.blendFrom));
@@ -816,10 +861,10 @@ function triggerAimClick(e) {
   const s = sim();
   if (s) {
     s.setAim(a.x, a.y);
-    s.blink();
-  } else if (!isEegLive()) {
+  }
+  if (!isEegLive()) {
     G.brain.stats.blinks++;
-    G.brain.blinkListeners.forEach((fn) => fn(G.brain.aim));
+    G.brain.blinkListeners.forEach((fn) => fn(a));
   }
 }
 
@@ -937,7 +982,7 @@ window.addEventListener('keydown', (e) => {
   if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { zoomInOnSurface(); return; }
   if (G && !cosmos.active && (e.code === 'KeyA' || e.code === 'KeyD')) { cosmos.panVel = e.code === 'KeyA' ? 140 : -140; return; }
   if (G && !cosmos.active && cosmos.surfaceInView && (e.code === 'KeyW' || e.code === 'KeyS')) { cosmos.panVelY = e.code === 'KeyW' ? 110 : -110; return; } // planets (#68)
-  if (G && e.code === 'KeyN' && !e.repeat) { if (cosmos.visitNextWorld(G)) audio.blip(); return; } // planets (#68, #43): visit the next AI world (G is the AI God toggle)
+  if (G && e.code === 'KeyN' && !e.repeat) { cam3dBase = null; cam3dTween = null; if (cosmos.visitNextWorld(G)) audio.blip(); return; } // planets (#68, #43): visit the next AI world (G is the AI God toggle)
   if (e.code === 'Enter') {
     if (banner) dismissBanner();
     else if (!$('failScreen').hidden) retryEra();
@@ -1044,7 +1089,7 @@ function updateCosmosUi(dt) {
   if (uiTimer > 0 || !G) return;
   uiTimer = 0.2;
   $('zoomLabel').textContent = cosmos.levelLabel();
-  $('zoomIn').disabled = cosmos.target <= cosmos.minLevel();
+  $('zoomIn').disabled = in3dSurface() ? (engine?.get_camera_distance?.() <= 14) : (cosmos.target <= cosmos.minLevel());
   $('zoomOut').disabled = cosmos.target >= 2;
   const gal = cosmos.galaxy;
   const show = !!gal && (cosmos.target >= 1 || cosmos.z > 0.5 || G.sandbox);
@@ -1104,7 +1149,7 @@ $('planetList').addEventListener('click', (e) => {
   if (!b || !G || !cosmos.galaxy) return;
   const p = cosmos.galaxy.planets[Number(b.dataset.index)];
   if (p && p.forming) { cosmos.say('Still forming. Give it a second.'); return; }
-  if (p) { cosmos.focusPlanet(p, G); audio.blip(); lastListKey = ''; }
+  if (p) { cam3dBase = null; cam3dTween = null; cosmos.focusPlanet(p, G); audio.blip(); lastListKey = ''; }
 });
 
 function openGalaxy({ fromEnding = false } = {}) {
