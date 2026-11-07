@@ -639,16 +639,18 @@ pub struct Stats {
 pub struct FoodMap {
     pub amt: Vec<f32>,
     pub t: Vec<f32>,
+    /// Fertility of each tile, 128 as the planet made it (#165, `develop`): food scales with it.
+    pub fert: Vec<u8>,
 }
 
 impl FoodMap {
     fn new(t: &Terrain) -> FoodMap {
-        FoodMap { amt: t.kind.iter().map(|&k| food_max(k)).collect(), t: vec![0.0; t.d.n()] }
+        FoodMap { amt: t.kind.iter().map(|&k| food_max(k)).collect(), t: vec![0.0; t.d.n()], fert: vec![crate::develop::NAT; t.d.n()] }
     }
 
     #[inline]
     pub fn level(&self, i: usize, kind: u8, now: f32, regen: f32) -> f32 {
-        let max = food_max(kind);
+        let max = food_max(kind) * crate::develop::mul(self.fert[i]);
         (self.amt[i] + (now - self.t[i]) * REGEN * regen * max).min(max.max(self.amt[i]))
     }
 
@@ -747,6 +749,10 @@ pub struct World {
     /// Village claiming each tile (NO_V = none).
     pub claim: Vec<u16>,
     pub food: FoodMap,
+    /// Deposits and who wants them; pacts; the land's development (#165).
+    pub res: crate::resources::Resources,
+    pub pacts: crate::pacts::Pacts,
+    pub land: crate::develop::Land,
     /// 1 where a tile is burning.
     pub burning: Vec<u8>,
     pub fires: Vec<Fire>,
@@ -879,6 +885,7 @@ impl World {
         let d = terrain.d;
         let n = d.n();
         let food = FoodMap::new(&terrain);
+        let res = crate::resources::Resources::place(&terrain, seed);
         let mut w = World {
             seed,
             d,
@@ -891,6 +898,9 @@ impl World {
             owner: vec![NO_F; n],
             claim: vec![NO_V; n],
             food,
+            res,
+            pacts: crate::pacts::Pacts::default(),
+            land: crate::develop::Land::new(seed),
             burning: vec![0; n],
             fires: Vec::new(),
             scorched: Vec::new(),
@@ -942,6 +952,7 @@ impl World {
         let land = w.land_tiles as usize;
         w.cap_agents = (land / 50).clamp(MAX_AGENTS, 9000);
         w.cap_villages = (land / 250).clamp(MAX_VILLAGES, 2000);
+        crate::resources::init(&mut w);
         w.refresh_info();
         w
     }

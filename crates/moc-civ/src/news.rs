@@ -120,6 +120,8 @@ impl World {
                 log(&mut l, format!("War: {a} / {b}"));
                 let hot = if self.player_stressed() { " Your stress is not helping, my lord." } else { "" };
                 say(&mut l, "civ-war", format!("The {a} have declared war on the {b}!{hot}"), 2, 10);
+                // #165: a war for a deposit, or for an ally, says why.
+                crate::resources::war_reason(self, e, &a, &b, &mut l);
             }
             ev::PEACE => {
                 l.tone = TONE_GOOD;
@@ -166,6 +168,8 @@ impl World {
             }
             ev::CAPITAL => l.text = format!("The {a} have a new capital"),
             ev::RAZED if e.b >= 0 => l.text = format!("A village of the {a} is razed"),
+            // #165: resources, pacts and the land.
+            40..=49 => crate::resources::news(self, e, &a, &b, &mut l),
             // ---- the ages ----
             ev::AGE_UP => {
                 l.tone = TONE_GOOD;

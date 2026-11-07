@@ -26,6 +26,9 @@ fn main() {
     let civs: usize = flag("--civs").and_then(|i| all.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(0);
     let quiet = flag("--quiet").is_some();
     let duel = flag("--duel").is_some();
+    // #165: print the resource, pact and land headlines (and wars' reasons) as they happen.
+    let res_news = flag("--res").is_some();
+    let mut news_seq = 0u32;
     let mut args: Vec<String> = Vec::new();
     let mut skip = false;
     for (i, a) in all.iter().enumerate() {
@@ -71,6 +74,11 @@ fn main() {
     }, w.cap_agents, w.cap_villages);
     let (PW, PH) = (w.d.w, w.d.h);
     println!("seed {seed}, {mode}, x{speed}: world built in {:.1} ms", t0.elapsed().as_secs_f64() * 1000.0);
+    {
+        let t = Instant::now();
+        let r = moc_civ::resources::Resources::place(&w.terrain, seed);
+        println!("  (#165: {} deposits placed in {:.1} ms)", r.deps.len(), t.elapsed().as_secs_f64() * 1000.0);
+    }
     for f in w.alive_factions() {
         let t = f.traits;
         println!(
@@ -144,13 +152,19 @@ fn main() {
                 println!("  {:7.1}s {}", at, l);
             }
         }
+        while news_seq < w.news.next {
+            if let Some(l) = w.news.get(news_seq).filter(|l| res_news && ((40..=49).contains(&l.kind) || (l.kind == ev::WAR && !l.key.is_empty() && l.key != "civ-war"))) {
+                println!("  {:7.1}s news       {}", w.time, l.text);
+            }
+            news_seq += 1;
+        }
         if w.time >= next_line {
             next_line += 60.0;
             let mut line = format!("t={:5.0}s agents {:4} |", w.time, w.agents.len());
             for f in w.alive_factions() {
                 let m = f.metrics;
                 line += &format!(
-                    " {}:{} {}p/{}v s{:.2} fd{:.1} k{:.0} g{:.0} f{:.2} pr{:.0} L{} t{:.3} i{:.2}{}",
+                    " {}:{} {}p/{}v s{:.2} fd{:.1} k{:.0} g{:.0} f{:.2} pr{:.0} L{} t{:.3} i{:.2} fe{:.0}{}",
                     f.name,
                     f.age,
                     f.pop,
@@ -164,6 +178,7 @@ fn main() {
                     m.links,
                     m.territory,
                     m.inequality,
+                    w.land.cfert[f.id as usize],
                     if f.dark_t > 0.0 { " DARK" } else { "" }
                 );
             }
@@ -175,6 +190,19 @@ fn main() {
                     let food: f32 = vs.iter().map(|v| v.food).sum();
                     let cap: u32 = vs.iter().map(|v| v.cap as u32).sum();
                     println!("    {} cats {:?} food {:.0} cap {} full {} hungry {:.2} built {}", f.name, f.cat_counts, food, cap, full, f.hungry, vs.iter().map(|v| v.built.count_ones()).sum::<u32>());
+                    let fi = f.id as usize;
+                    let (mut best, mut on) = (0.0f32, NO_F);
+                    for o in 0..MAX_FACTIONS {
+                        let c = w.res.covet[fi * MAX_FACTIONS + o];
+                        if c > best {
+                            best = c;
+                            on = o as u8;
+                        }
+                    }
+                    let want = if on != NO_F { w.res.want[fi * MAX_FACTIONS + on as usize] } else { u16::MAX };
+                    let held: Vec<&str> = moc_civ::resources::Res::ALL.iter().filter(|k| w.res.held[fi][**k as usize] > 0).map(|k| k.key()).collect();
+                    let needs: Vec<String> = moc_civ::resources::Res::ALL.iter().filter(|k| w.res.need[fi][**k as usize] > 0.0).map(|k| format!("{}{:.2}", k.key(), w.res.need[fi][*k as usize])).collect();
+                    println!("      res: covet {:.2} on {} for {} | held {:?} | need {:?} | arms {:.2}", best, if on != NO_F { w.factions[on as usize].name.as_str() } else { "-" }, if want != u16::MAX { w.res.deps[want as usize].kind.key() } else { "-" }, held, needs, w.res.arms[fi]);
                 }
             }
         }
@@ -201,6 +229,15 @@ fn main() {
         render_total / (frames / 4).max(1) as f64
     );
     println!("profile ms total: agents {:.0}, grid+combat {:.0}, village phases {:.0}+{:.0}, contacts {:.0}, politics {:.0}; field builds {}", w.prof[0], w.prof[1], w.prof[3], w.prof[5], w.prof[4], w.prof[6], w.paths.builds);
+    let (r, p, l) = (w.res.stats, w.pacts.stats, w.land.stats);
+    println!(
+        "resources (#165): {} deposits, {} held, {} run dry | resource wars {} (seized {}, ceded {}, given up {}), trades {} | pacts {} (refused {}), betrayals {}, lapses {}, joined an ally's war {} (coalitions {}) | land improved {} worn {}: stripped {} dust {} irrigated {} terraced {} replanted {} reclaimed {} | {:.0} ms",
+        w.res.deps.len(),
+        w.res.deps.iter().filter(|d| d.owner != NO_F).count(),
+        w.res.deps.iter().filter(|d| d.spent).count(),
+        r.claims, r.seized, r.ceded, r.goals_given_up, r.trades, p.formed, p.refused, p.betrayed, p.lapsed, p.joined, p.coalitions,
+        l.improved, l.worn, l.stripped, l.eroded, l.irrigated, l.terraced, l.reforested, l.reclaimed, w.res.prof_ms
+    );
     println!("politics parts ms: borders {:.0}, economy {:.0}, metrics+ages {:.0}, diplomacy {:.0}, strife {:.0}, crises {:.0}, jobs {:.0}, marches {:.0}, trade {:.0}, rebellion {:.0}", w.prof2[0], w.prof2[1], w.prof2[2], w.prof2[3], w.prof2[4], w.prof2[5], w.prof2[6], w.prof2[7], w.prof2[8], w.prof2[9]);
     if duel {
         duels();

@@ -40,8 +40,10 @@ impl World {
     pub fn render(&mut self) {
         let cam = self.cam;
         blit(&mut self.view, &self.terrain.rgba, self.d, &cam);
+        self.draw_land();
         self.draw_territory();
         self.draw_fires();
+        self.draw_deposits();
         self.draw_villages();
         self.draw_agents();
         self.draw_effects();
@@ -459,6 +461,7 @@ impl World {
                 }
             }
         }
+        self.draw_deposits_minimap();
     }
 
     /// Owner of the tile at a planet point (NO_F = nobody).

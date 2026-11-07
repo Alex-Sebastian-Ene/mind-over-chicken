@@ -223,7 +223,7 @@ pub fn update(w: &mut World, dt: f32) {
     let mut loot: Vec<(usize, u16, u8)> = Vec::new();
     let mut arrivals: Vec<Arrival> = Vec::new();
     {
-        let World { agents, terrain, paths, villages, factions, food, burning, rng, marches, owner, strifes, rel, busy, fight_level, .. } = w;
+        let World { agents, terrain, paths, villages, factions, food, burning, rng, marches, owner, strifes, rel, busy, fight_level, res, .. } = w;
         for i in 0..agents.len() {
             let a = &mut agents[i];
             if !a.alive {
@@ -405,6 +405,8 @@ pub fn update(w: &mut World, dt: f32) {
                                 Out::Food => food.take(ti, terrain.kind[ti], now, regen, CARRY_MAX) * ji.rate * dry,
                                 _ => ji.rate * if fac.strike_t > 0.0 { 0.3 } else { 1.0 } * (1.0 + 0.5 * focus * (age == 3 || age == 8) as u8 as f32),
                             };
+                            // #165: a deposit of the kind this job works pays more (and drains).
+                            let got = got * crate::resources::harvest(res, &mut food.fert, terrain, ti, cx, cy, job, age);
                             a.carry += got * yield_mul * (0.8 + 0.4 * fert);
                             a.state = State::ToHome;
                         }
@@ -456,6 +458,18 @@ pub fn update(w: &mut World, dt: f32) {
                         };
                         let mut best = None;
                         let mut bs = f32::MIN;
+                        // #165: the deposit the village works for this job comes first, if it is fit to work.
+                        if let Some((x, y)) = crate::resources::gather_spot(res, a.home, site, rng, dm) {
+                            let ti = dm.idx(x, y);
+                            let o = owner[ti];
+                            if terrain.walk[ti] && site_fits(terrain, site, x, y) && o == a.faction && burning[ti] == 0 && los(terrain, cx, cy, x, y) {
+                                let lvl = if ji.out == Out::Food && site != Site::Coast { food.level(ti, terrain.kind[ti], now, regen) } else { 0.5 };
+                                if lvl >= 0.12 {
+                                    bs = lvl.min(CARRY_MAX) + 0.25;
+                                    best = Some((x, y));
+                                }
+                            }
+                        }
                         for _ in 0..8 {
                             let ox = rng.below((2 * r + 1) as usize) as i32 - r;
                             let oy = rng.below((2 * r + 1) as usize) as i32 - r;
@@ -1104,7 +1118,7 @@ pub fn combat(w: &mut World, dt: f32) {
             let across = w.terrain.river_at(atx, aty) || (w.terrain.river_at(mx, my) && !w.terrain.river_at(btx, bty));
             let river = if across { terrain_mul::RIVER_CROSSING } else { 1.0 };
             let flank = if age >= crate::ages_table::FORMATIONS_FROM_AGE && is_flank(id) && w.agents[j].fight > 0.0 { 1.3 } else { 1.0 };
-            let power = if fighter { weapon.power.powf(0.35) } else { 1.0 };
+            let power = if fighter { weapon.power.powf(0.35) * crate::resources::arms(w, fa) } else { 1.0 };
             let armour = crate::ages::def(bage_civ).weapon.power.powf(0.25);
             let hit = job.strength() * prowess(id ^ w.seed) * (0.55 + 0.9 * violence) * (0.6 + 0.4 * morale) * hurt * w.rng.range(0.6, 1.4) * power / armour * river * flank / cover;
             let leader_hit;

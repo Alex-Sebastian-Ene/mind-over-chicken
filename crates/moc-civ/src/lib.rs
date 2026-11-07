@@ -21,6 +21,10 @@
 //! and its crises; fights run up and down an escalation ladder, between civilisations and
 //! inside one ([`conflict`]).
 //!
+//! **Resources and development (#165).** Deposits on the map ([`resources`]) feed jobs and
+//! production; peoples covet, trade and fight over them, swear and break pacts ([`pacts`]),
+//! and tend or wear out their land ([`develop`]).
+//!
 //! The browser loads this crate as a plain `extern "C"` WebAssembly module ([`ffi`]); build
 //! it with `crates/moc-civ/build-wasm.sh` (no wasm-bindgen needed).
 
@@ -28,14 +32,18 @@ pub mod ages;
 pub mod ages_table;
 pub mod agents;
 pub mod conflict;
+pub mod develop;
 pub mod ffi;
 pub mod jobs;
 pub mod life;
 pub mod news;
+pub mod pacts;
 pub mod planet;
 pub mod politics;
 pub mod powers;
 pub mod render;
+pub mod res_ffi;
+pub mod resources;
 pub mod setup;
 pub mod terrain;
 pub mod world;

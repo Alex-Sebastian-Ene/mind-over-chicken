@@ -101,6 +101,10 @@ fn politics_tick(w: &mut World, rebels: bool, survey: bool) {
     };
     w.recount();
     scan_borders(w, survey);
+    // #165: deposits (who holds, works, trades and covets them), pacts, the land.
+    crate::resources::tick(w, dt);
+    crate::pacts::tick(w, dt);
+    crate::develop::tick(w, dt);
     lap(w, 0);
     crate::ages::economy(w, dt);
     lap(w, 1);
@@ -192,6 +196,8 @@ pub fn pick_site(w: &mut World, f: u8, ox: i32, oy: i32, fx: i32, fy: i32) -> Op
             }
         }
         s += w.rng.f32() * 0.6 - d * 0.01;
+        // #165: settlers make for deposits nobody holds that their people need.
+        s += crate::resources::site_bonus(w, f, sx, sy);
         if s > bs {
             bs = s;
             best = Some((sx, sy));
@@ -522,6 +528,7 @@ pub fn capture(w: &mut World, v: u16, by: u8) {
     }
     w.rel_mut(old, by).grudge += 0.3;
     w.transfer_land(v, by);
+    crate::resources::on_capture(w, v, old, by);
     let violence = w.factions[by as usize].traits.violence;
     let has_other = w.villages.iter().enumerate().any(|(i, o)| i != v as usize && o.alive && o.owner == old);
     let mut taken = 0;
@@ -786,6 +793,7 @@ pub fn declare_war(w: &mut World, a: u8, b: u8) {
         r.tension = r.tension.max(0.6);
     }
     w.stats.wars += 1;
+    crate::pacts::on_war(w, a, b);
     let p = w.near_pairs[a as usize * MAX_FACTIONS + b as usize];
     let (x, y) = if p.2 != NO_V { (w.villages[p.2 as usize].x, w.villages[p.2 as usize].y) } else { w.factions[a as usize].start };
     w.log(ev::WAR, a, b, x, y, 0);
@@ -807,8 +815,11 @@ pub fn make_peace(w: &mut World, a: u8, b: u8) {
         r.cooldown = 30.0;
     }
     if was_war {
+        // #165: a deposit fought for may change hands with the peace.
+        crate::resources::on_peace(w, a, b);
         conflict::on_peace(w, a, b, battles);
     }
+    crate::pacts::on_peace(w, a, b);
     if was_war {
         w.stats.peaces += 1;
         let p = w.near_pairs[a as usize * MAX_FACTIONS + b as usize];
@@ -834,6 +845,8 @@ fn diplomacy(w: &mut World, dt: f32) {
             let grudge = if fa.parent == b || w.factions[b as usize].parent == a { 0.35 } else { 0.0 };
             // A vassal and its lord don't come to blows lightly.
             let bound = fa.overlord == b || w.factions[b as usize].overlord == a;
+            // #165: wanting what b holds heats; trading with b, or an alliance, cools.
+            let wants = crate::resources::pressure(w, a, b) + crate::pacts::pressure(w, a, b);
             let r = w.rel_mut(a, b);
             let grudge = grudge + 0.5 * r.grudge.min(1.0) - if bound { 0.4 } else { 0.0 };
             r.cooldown -= dt;
@@ -843,7 +856,7 @@ fn diplomacy(w: &mut World, dt: f32) {
                 continue;
             }
             if r.near {
-                let pressure = tr.aggressiveness + fa.hungry * 0.8 + (r.border as f32 / 60.0).min(0.6) + grudge + hostility * weight
+                let pressure = tr.aggressiveness + fa.hungry * 0.8 + (r.border as f32 / 60.0).min(0.6) + grudge + hostility * weight + wants
                     - tr.friendliness * 0.8
                     - 0.25;
                 r.tension += TENSION_RATE * pressure * dt;
@@ -941,6 +954,17 @@ pub enum Decision {
     CrushRebels(u16),
     /// Let the rebels of strife `s` go with what they hold (a truce before civil war).
     ConcedeToRebels(u16),
+    // ---- #165: resources and pacts (appended; a trained council that never emits them
+    // ---- leaves them to the rules' peoples) ----
+    /// Open war on `on` to take deposit `deposit` (`World::res`) from it: `DeclareWar` with a
+    /// goal. Taking the deposit's village ends the war; a peace the claimant was winning cedes it.
+    ClaimDeposit { on: u8, deposit: u16 },
+    /// Offer `k` a defensive pact (`pacts::accepts` decides `k`'s answer).
+    ProposePact(u8),
+    /// Go to war on `against` for ally `ally` (a defensive pact called, or a coalition).
+    JoinWar { ally: u8, against: u8 },
+    /// Break the pact with `k`: a betrayal if it covets `k`'s land or has outgrown it, else a lapse.
+    BreakPact(u8),
 }
 
 /// A war-and-peace policy: given the world, what civilisation `civ` does this second.
@@ -957,7 +981,7 @@ pub fn decide(w: &World, civ: u8) -> Vec<Decision> {
 
 /// A deterministic die for the rules (so `decide` needs no mutable state): 0..1, different for
 /// every second, pair and question.
-fn roll(w: &World, a: u8, b: u8, salt: u32) -> f32 {
+pub(crate) fn roll(w: &World, a: u8, b: u8, salt: u32) -> f32 {
     let mut h = w.seed ^ w.tick.wrapping_mul(0x9e37_79b9) ^ ((a as u32) << 8 | b as u32).wrapping_mul(0x85eb_ca6b) ^ salt.wrapping_mul(0xc2b2_ae35);
     h ^= h >> 16;
     h = h.wrapping_mul(0x7feb_352d);
@@ -985,16 +1009,32 @@ pub fn decide_into(w: &World, a: u8, out: &mut Vec<Decision>) {
         }
         let (r, rb) = (*w.rel(a, b), *w.rel(b, a));
         threatened |= rb.met && rb.near && (rb.tension >= 0.8 || rb.war > 0);
-        let bound = fa.overlord == b || fb.overlord == a;
+        let bound = fa.overlord == b || fb.overlord == a || crate::pacts::allied(w, a, b);
         if r.war == 0 && rb.war != 2 && r.cooldown <= 0.0 && r.near && r.met && !bound {
+            // #165: a deposit wanted badly from a weaker neighbour starts a war before tension alone would.
+            if conflict::may_declare(w, a, b) {
+                if let Some(d) = crate::resources::war_target(w, a, b).filter(|_| roll(w, a, b, 4) < 0.15) {
+                    out.push(Decision::ClaimDeposit { on: b, deposit: d });
+                    continue;
+                }
+            }
             if r.tension >= WAR_TENSION && conflict::may_declare(w, a, b) {
-                out.push(Decision::DeclareWar(b));
+                // A war over what b holds names it as the goal.
+                out.push(match crate::resources::claim_for(w, a, b) {
+                    Some(d) => Decision::ClaimDeposit { on: b, deposit: d },
+                    None => Decision::DeclareWar(b),
+                });
                 continue;
             }
             if r.tension >= RAID_TENSION && ta.aggressiveness >= 0.45 && rb.war == 0 && (fa.hungry > 0.2 || roll(w, a, b, 1) < 0.1 * ta.aggressiveness + 0.1 * agitation) {
                 out.push(Decision::Raid(b));
                 continue;
             }
+        }
+        // #165: the deposit it went to war for is taken: offer peace and keep it.
+        if r.war == 2 && r.war_t > 10.0 && crate::resources::goal_won(w, a, b) {
+            out.push(Decision::SueForPeace { with: b, vassal: false });
+            continue;
         }
         if r.war == 2 && r.war_t > 20.0 {
             // Beaten: sue for peace and pay tribute.
@@ -1031,6 +1071,8 @@ pub fn decide_into(w: &World, a: u8, out: &mut Vec<Decision>) {
     if threatened && fa.fortify_t <= 0.0 && fa.age >= 5 {
         out.push(Decision::Fortify);
     }
+    // #165: pacts: offer them, answer an ally's call, break them.
+    crate::pacts::decide(w, a, out);
     // Rebels: a civil war nobody can win is conceded; a rising the crown outnumbers two to
     // one, it sets out to crush.
     for (k, s) in w.strifes.iter().enumerate() {
@@ -1086,6 +1128,28 @@ pub fn apply(w: &mut World, a: u8, d: Decision) {
         }
         Decision::CrushRebels(k) => conflict::crush_rebels(w, a, k as usize),
         Decision::ConcedeToRebels(k) => conflict::concede(w, a, k as usize),
+        Decision::ClaimDeposit { on, deposit } => {
+            if ok(w, on) && !crate::pacts::allied(w, a, on) && crate::resources::claimable(w, on, deposit) {
+                crate::resources::set_goal(w, a, on, deposit);
+                declare_war(w, a, on);
+            }
+        }
+        Decision::ProposePact(b) => {
+            if ok(w, b) {
+                crate::pacts::propose(w, a, b);
+            }
+        }
+        Decision::JoinWar { ally, against } => {
+            if ok(w, ally) && ok(w, against) && crate::pacts::may_join(w, a, ally, against) {
+                crate::pacts::mark_joined(w, a, against, ally);
+                declare_war(w, a, against);
+            }
+        }
+        Decision::BreakPact(b) => {
+            if ok(w, b) {
+                crate::pacts::break_pact(w, a, b);
+            }
+        }
     }
 }
 
@@ -1261,6 +1325,10 @@ pub fn split(w: &mut World, parent: u8, seed: u16) -> u8 {
     if pp > 2 * pc.max(1) && w.factions[parent as usize].overlord == NO_F && w.rng.chance(0.25 + 0.3 * pf.traits.cohesion) {
         conflict::make_vassal(w, c, parent, 2);
     } else if w.rng.chance(0.45 + 0.5 * t.aggressiveness) {
+        // #165: rebels rise for something: the parent's best deposit near them.
+        if let Some(d) = crate::resources::rebel_claim(w, c, parent) {
+            crate::resources::set_goal(w, c, parent, d);
+        }
         declare_war(w, c, parent);
     }
     w.recount();
