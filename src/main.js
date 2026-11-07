@@ -667,8 +667,11 @@ function updateCosmosUi(dt) {
     }));
   }
   const m = gal.mind;
+  const pulseStr = (G?.brain?.hr && G.brain.hr > 0)
+    ? `pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, `
+    : (m.stress ? `tension ${Math.round(m.stress * 100)}%, ` : '');
   $('mindLine').textContent = m.done
-    ? `Read from your first 10 s: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, pulse ${m.hrDelta >= 0 ? '+' : ''}${Math.round(m.hrDelta)}, ${m.blinks} blinks.`
+    ? `Read from your first 10 s: calm ${Math.round(m.calm * 100)}%, focus ${Math.round(m.focus * 100)}%, ${pulseStr}${m.blinks} blinks.`
     : `Reading your mind: ${Math.max(0, Math.ceil(SIM.MIND_SECONDS - m.t))} s of play left.`;
   $('galaxyLog').replaceChildren(...gal.log.slice(0, 4).map((l) => { const li = document.createElement('li'); li.textContent = l.text; return li; }));
 }
@@ -708,7 +711,7 @@ $('galaxyBtn').addEventListener('click', () => {
   $('endScreen').hidden = true;
   audio.unlock();
   openGalaxy({ fromEnding: true });
-  advisor.say('galaxy', 'Behold, my lord: the galaxy. Make planets. Keep your pulse down near them.', { mood: 'happy', priority: 3, cooldown: 999 });
+  advisor.say('galaxy', 'Behold, my lord: the galaxy. Make planets. Keep your calm and focus near them.', { mood: 'happy', priority: 3, cooldown: 999 });
 });
 
 // ---------- title screen ----------

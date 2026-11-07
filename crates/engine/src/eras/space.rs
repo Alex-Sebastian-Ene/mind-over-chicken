@@ -50,7 +50,7 @@ impl Era for SpaceAge {
     }
 
     fn powers(&self) -> &[&str] {
-        &["focus", "calm", "heart"]
+        &["focus", "calm"]
     }
 
     fn darkness(&self) -> f32 {
@@ -106,8 +106,9 @@ impl Era for SpaceAge {
                 let build_rate = 0.05 + 0.15 * brain.focus;
                 self.progress = (self.progress + build_rate * dt).min(1.0);
 
-                // Stress/high pulse drops parts
-                if brain.hr_delta > 15.0 && self.progress > 0.05 {
+                // Stress/agitation drops parts (pulse contributes optionally if present)
+                let stress = brain.panic.max((1.0 - brain.calm) * 0.8).max(if brain.hr_delta > 0.0 { brain.hr_delta / 25.0 } else { 0.0 });
+                if stress > 0.6 && self.progress > 0.05 {
                     self.progress = (self.progress - dt * 0.04).max(0.0);
                 }
 
@@ -140,7 +141,7 @@ impl Era for SpaceAge {
                     events.push(EraEvent::PlaySound(SoundKind::Bell));
                     events.push(EraEvent::AdvisorSay {
                         key: "countdown-start".to_string(),
-                        text: "All passengers aboard! Hold focus and steady pulse for the final 10s countdown!"
+                        text: "All passengers aboard! Hold focus and maintain calm for the final 10s countdown!"
                             .to_string(),
                         mood: "nervous".to_string(),
                         priority: 4,
@@ -150,9 +151,9 @@ impl Era for SpaceAge {
             }
             "countdown" => {
                 let focus_ok = brain.focus >= 0.45;
-                let hr_ok = brain.hr_delta <= 12.0;
+                let steady_ok = brain.calm >= 0.35 && brain.panic <= 0.35 && (brain.hr_delta <= 0.0 || brain.hr_delta <= 14.0);
 
-                if focus_ok && hr_ok {
+                if focus_ok && steady_ok {
                     self.countdown -= dt;
                     self.hold_time = 0.0;
                     if (self.countdown % 1.0) < dt {
@@ -223,11 +224,11 @@ mod tests {
     fn test_space_age_flow_and_countdown() {
         let mut space = SpaceAge::new();
 
-        // Build with high focus
+        // Build with high focus and calm, zero pulse dependency
         let focus_brain = BrainInput {
             focus: 0.9,
             calm: 0.8,
-            hr_delta: 2.0,
+            hr_delta: 0.0,
             ..Default::default()
         };
         while space.phase == "build" {

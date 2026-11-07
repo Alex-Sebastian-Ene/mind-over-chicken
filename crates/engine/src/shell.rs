@@ -314,6 +314,7 @@ impl HudDriver {
         rest_hr: f32,
         hr_delta: f32,
         blinks: u32,
+        panic: f32,
     ) {
         #[cfg(target_arch = "wasm32")]
         {
@@ -347,26 +348,37 @@ impl HudDriver {
                 );
             }
             if let Some(el) = self.powers.get("heart") {
-                let d_norm = (hr_delta / 30.0).clamp(0.0, 1.0);
-                let text = if hr > 0.0 {
-                    format!("{} bpm", hr.round() as i32)
-                } else {
-                    "no pulse".to_string()
-                };
-                set_meter(el, d_norm, None, &text);
-                if hr_delta > 10.0 {
-                    let _ = el.class_list().add_1("is-hot");
-                } else {
-                    let _ = el.class_list().remove_1("is-hot");
-                }
-                if let Ok(Some(sub_el)) = el.query_selector(".power-sub") {
-                    let sub_text = if hr > 0.0 && rest_hr > 0.0 {
-                        let sign = if hr_delta >= 0.0 { "+" } else { "" };
-                        format!("{}{} vs resting", sign, hr_delta.round() as i32)
+                if hr > 0.0 {
+                    let d_norm = (hr_delta / 30.0).clamp(0.0, 1.0);
+                    let text = format!("{} bpm", hr.round() as i32);
+                    set_meter(el, d_norm, None, &text);
+                    if hr_delta > 10.0 {
+                        let _ = el.class_list().add_1("is-hot");
                     } else {
-                        "Heart rate".to_string()
-                    };
-                    sub_el.set_text_content(Some(&sub_text));
+                        let _ = el.class_list().remove_1("is-hot");
+                    }
+                    if let Ok(Some(sub_el)) = el.query_selector(".power-sub") {
+                        let sub_text = if rest_hr > 0.0 {
+                            let sign = if hr_delta >= 0.0 { "+" } else { "" };
+                            format!("{}{} vs resting", sign, hr_delta.round() as i32)
+                        } else {
+                            "Pulse".to_string()
+                        };
+                        sub_el.set_text_content(Some(&sub_text));
+                    }
+                } else {
+                    // No pulse hardware: display biometric tension/arousal from EEG panic & agitation
+                    let tension = panic.max((1.0 - calm) * 0.7).clamp(0.0, 1.0);
+                    let text = format!("{}%", (tension * 100.0).round() as i32);
+                    set_meter(el, tension, None, &text);
+                    if tension > 0.5 {
+                        let _ = el.class_list().add_1("is-hot");
+                    } else {
+                        let _ = el.class_list().remove_1("is-hot");
+                    }
+                    if let Ok(Some(sub_el)) = el.query_selector(".power-sub") {
+                        sub_el.set_text_content(Some("Tension"));
+                    }
                 }
             }
             if let Some(el) = self.powers.get("blink") {
@@ -376,7 +388,7 @@ impl HudDriver {
             }
         }
         let _ = (
-            calm, calm_thr, focus, focus_thr, hr, rest_hr, hr_delta, blinks,
+            calm, calm_thr, focus, focus_thr, hr, rest_hr, hr_delta, blinks, panic,
         );
     }
 }

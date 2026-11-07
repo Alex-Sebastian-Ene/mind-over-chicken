@@ -109,8 +109,11 @@ impl Era for IndustryEra {
             self.crash_cooldown -= dt;
         }
 
-        // Arousal from heart rate delta above resting
-        let arousal = (brain.hr_delta / 22.0).clamp(0.0, 1.8);
+        // Arousal: emergent market agitation derived from EEG panic and lack of calm,
+        // with optional pulse boost if PPG hardware is present (never a hard dependency).
+        let agitation = brain.panic.max((1.0 - brain.calm) * 0.7);
+        let pulse_arousal = if brain.hr_delta > 0.0 { (brain.hr_delta / 22.0).clamp(0.0, 1.8) } else { 0.0 };
+        let arousal = pulse_arousal.max(agitation * 1.5).clamp(0.0, 1.8);
         let herding = 1.0 + 1.6 * arousal;
 
         // Fundamental economy value grows with GDP
@@ -157,9 +160,10 @@ impl Era for IndustryEra {
             self.momentum *= 0.5;
         }
 
-        // IPO countdown hold
+        // IPO countdown hold: steady mind (calm & low panic) completes IPO; pulse is optional
         if self.gdp >= GDP_TARGET && !self.ipo_done {
-            if brain.calm >= 0.5 && brain.hr_delta < 8.0 {
+            let steady = brain.calm >= 0.5 && brain.panic < 0.3 && (brain.hr_delta <= 0.0 || brain.hr_delta < 15.0);
+            if steady {
                 self.ipo_progress += dt;
                 if self.ipo_progress >= IPO_HOLD_SECONDS {
                     self.ipo_done = true;
@@ -228,10 +232,11 @@ mod tests {
         assert!(ind.gdp > 50.0);
         assert_eq!(ind.recessions, 0);
 
-        // Pulse spike triggers panic & emergent crash
+        // Panic & agitation alone triggers emergent crash without needing any pulse sensor
         let panic_brain = BrainInput {
             calm: 0.0,
-            hr_delta: 28.0, // High arousal
+            panic: 1.0,
+            hr_delta: 0.0, // No heart rate dependency!
             ..Default::default()
         };
         // Introduce downward momentum
@@ -244,7 +249,7 @@ mod tests {
                 break;
             }
         }
-        assert!(crashed, "Arousal spike must trigger an emergent market crash");
+        assert!(crashed, "Agitation/panic must trigger an emergent market crash without pulse");
         assert!(ind.recessions >= 1);
         assert!(ind.general_strike > 0.0);
 
