@@ -71,8 +71,10 @@ void main() {
         }
     }
 
-    // Light restores daylight in radius and adds warm fire tint
-    vec3 finalRgb = texColor.rgb * (ambient + lightGlow * u_night) + (lightGlow * 0.30);
+    // Light restores daylight inside its radius (never brighter than day) and adds a
+    // warm tint that only shows at night.
+    vec3 light = clamp(lightGlow, 0.0, 1.0);
+    vec3 finalRgb = texColor.rgb * mix(ambient, vec3(1.0), light) + vec3(1.0, 0.55, 0.2) * light.r * 0.18 * u_night;
     finalRgb += vec3(u_flash * 0.9);
     finalRgb = mix(finalRgb, vec3(0.02, 0.02, 0.06), u_fade);
 

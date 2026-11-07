@@ -18,6 +18,8 @@ const $ = (id) => document.getElementById(id);
 
 // ---------- canvases & WebGL engine ----------
 const screen = $('screen');
+const textLayer = $('textLayer');
+const textCtx = textLayer.getContext('2d');
 const low = Object.assign(document.createElement('canvas'), { width: W, height: H });
 const lowCtx = low.getContext('2d');
 let K = 3;
@@ -29,12 +31,15 @@ try {
 } catch (err) {
   console.error('Failed to initialize Rust WebGL engine:', err);
 }
+// Without WebGL, fall back to a plain 2D upscale so the game still shows.
+const fallback2d = engine ? null : screen.getContext('2d');
 
 function resize() {
   const rect = screen.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
   K = Math.max(2, Math.round((rect.width * dpr) / W));
   if (screen.width !== W * K) { screen.width = W * K; screen.height = H * K; }
+  if (textLayer.width !== W * K) { textLayer.width = W * K; textLayer.height = H * K; }
 }
 new ResizeObserver(resize).observe(screen);
 
@@ -177,6 +182,8 @@ function showEnd() {
 // ---------- render ----------
 function render() {
   const scene = G?.scene;
+  textCtx.setTransform(1, 0, 0, 1, 0, 0);
+  textCtx.clearRect(0, 0, textLayer.width, textLayer.height);
   if (!scene) {
     if (engine) {
       engine.begin_frame();
@@ -188,7 +195,6 @@ function render() {
   lowCtx.setTransform(1, 0, 0, 1, 0, 0);
   scene.draw(lowCtx);
   scene.drawAfterLight?.(lowCtx);
-  scene.drawOverlay?.(lowCtx);
 
   const dark = scene.darkness || 0;
   const flash = scene.flash || 0;
@@ -198,6 +204,8 @@ function render() {
 
   if (engine) {
     try {
+      // begin_frame clears last frame's lights; without it they pile up every frame.
+      engine.begin_frame();
       engine.upload_canvas(low);
       if (scene.lights) {
         for (const l of scene.lights()) {
@@ -208,7 +216,18 @@ function render() {
     } catch (e) {
       console.error('WebGL render error:', e);
     }
+  } else if (fallback2d) {
+    fallback2d.imageSmoothingEnabled = false;
+    fallback2d.drawImage(low, 0, 0, screen.width, screen.height);
+    if (dark > 0) { fallback2d.fillStyle = `rgba(6, 10, 32, ${dark})`; fallback2d.fillRect(0, 0, screen.width, screen.height); }
+    if (fade > 0) { fallback2d.fillStyle = `rgba(5, 6, 15, ${fade})`; fallback2d.fillRect(0, 0, screen.width, screen.height); }
   }
+
+  // Overlay (labels, calm ring, goat chart, countdown) at full resolution, after lighting.
+  textCtx.globalAlpha = 1 - Math.min(1, fade);
+  textCtx.setTransform(K, 0, 0, K, 0, 0);
+  scene.drawOverlay?.(textCtx);
+  textCtx.globalAlpha = 1;
 }
 
 // ---------- loop ----------
