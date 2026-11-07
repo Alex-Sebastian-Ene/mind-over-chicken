@@ -34,6 +34,13 @@ class SiteSmokeTest(unittest.TestCase):
         py_compile.compile(str(ROOT / "bridge" / "muse_bridge.py"), doraise=True)
         py_compile.compile(str(ROOT / "scripts" / "serve.py"), doraise=True)
 
+    def test_pkg_artifacts_exist(self):
+        pkg_dir = ROOT / "pkg"
+        wasm_file = pkg_dir / "mind_over_chicken_engine_bg.wasm"
+        js_file = pkg_dir / "mind_over_chicken_engine.js"
+        self.assertTrue(wasm_file.is_file(), f"Missing {wasm_file}")
+        self.assertTrue(js_file.is_file(), f"Missing {js_file}")
+
 
 if __name__ == "__main__":
     unittest.main()

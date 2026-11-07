@@ -1,0 +1,51 @@
+name: CI & Engine Sync Check
+
+on:
+  push:
+    branches:
+      - main
+      - 'feat/**'
+      - 'fix/**'
+      - 'chore/**'
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-check-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: |
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Run Cargo workspace tests
+        run: cargo test --all --verbose
+
+      - name: Verify pkg/ is in sync with crates/engine (#41)
+        run: |
+          cd crates/engine && wasm-pack build --target web --out-dir ../../pkg
+          cd ../..
+          if ! git diff --exit-code pkg/; then
+            echo "::error::pkg/ is out of sync with crates/engine! Run 'wasm-pack build crates/engine --target web --out-dir ../../pkg' and commit the changes."
+            exit 1
+          fi
+
+      - name: Run Site smoke tests
+        run: python3 tests/test_site.py
