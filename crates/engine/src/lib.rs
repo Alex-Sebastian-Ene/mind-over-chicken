@@ -2,6 +2,7 @@ pub mod audio;
 pub mod biosignal;
 mod camera3d;
 pub mod eras;
+pub mod input; // pointer gestures: tap blinks, drag pans
 mod font;
 mod gl;
 mod gl3d;

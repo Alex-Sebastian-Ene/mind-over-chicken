@@ -12,7 +12,7 @@ import { StoneAge } from './eras/stone.js';
 import { FarmingToKingdoms, InfoAge } from './eras/timeskip.js';
 import { Industry } from './eras/industry.js';
 import { SpaceAge } from './eras/space.js';
-import initEngine, { Engine, RustImuTracker, RustBlinkClassifier } from '../pkg/mind_over_chicken_engine.js';
+import initEngine, { Engine, RustImuTracker, RustBlinkClassifier, PointerGesture } from '../pkg/mind_over_chicken_engine.js';
 import { Cosmos } from './cosmos/cosmos.js';
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
@@ -40,9 +40,11 @@ const low = Object.assign(document.createElement('canvas'), { width: W, height: 
 const lowCtx = low.getContext('2d');
 let K = 3;
 let engine = null;
+let gesture = null; // Rust (input.rs): with the main button or a finger, a tap blinks and a drag pans
 
 try {
   await initEngine();
+  gesture = new PointerGesture(6);
   BridgeSource.setWasmClasses(RustImuTracker, RustBlinkClassifier);
   engine = new Engine('screen');
   engine.bind_dom_shell();
@@ -577,6 +579,14 @@ screen.addEventListener('pointermove', (e) => {
     }
     return;
   }
+  if (gesture?.owns(e.pointerId)) {
+    const q = worldFromEvent(e);
+    if (gesture.moved(e.pointerId, e.clientX, e.clientY, q.x, q.y)) {
+      cosmos.pan(gesture.pan_dx(), gesture.pan_dy()); // left/right (north–south on vast worlds); 3D follows
+      cam3dBase = null;
+      return;
+    }
+  }
   if (panDrag && panDrag.id === e.pointerId) {
     // East–west, plus north–south on the vast worlds (planets #68). In 3D the camera follows the pan.
     const q = worldFromEvent(e);
@@ -622,13 +632,31 @@ screen.addEventListener('pointerdown', (e) => {
     panDrag = { id: e.pointerId, x: q.x, y: q.y };
     return;
   }
-  const s = sim(); if (!s) return;
+  const s = sim();
+  if (gesture && G && e.button === 0) {
+    try { screen.setPointerCapture?.(e.pointerId); } catch {}
+    const q0 = worldFromEvent(e);
+    gesture.down(e.pointerId, e.clientX, e.clientY, q0.x, q0.y);
+    if (s) { const a = surfaceAim(e); s.setAim(a.x, a.y); G.brain.aim.x = a.x; G.brain.aim.y = a.y; }
+    return; // the blink happens on release, if Rust says it was a tap
+  }
+  if (!s) return;
   const a = surfaceAim(e);
   s.setAim(a.x, a.y);
   G.brain.aim.x = a.x; G.brain.aim.y = a.y;
   s.blink();
 });
 const endPointer = (e) => {
+  if (gesture?.owns(e.pointerId)) {
+    const s = sim();
+    if (gesture.up(e.pointerId, e.type === 'pointercancel') && s && G) {
+      const a = surfaceAim(e);
+      s.setAim(a.x, a.y);
+      G.brain.aim.x = a.x; G.brain.aim.y = a.y;
+      s.blink();
+    }
+    return;
+  }
   if (orbitDrag && orbitDrag.id === e.pointerId) { orbitDrag = null; return; }
   if (panDrag && panDrag.id === e.pointerId) { panDrag = null; return; }
   if (!G || !cosmos.pointers.has(e.pointerId)) return;
@@ -726,7 +754,7 @@ function toggle3D() {
   cam3dBase = null; cam3dTween = null;
   sync3dButton();
   const on = engine.is_3d_mode();
-  advisor.say('3d-toggle', on ? '3D view: right-drag to orbit, wheel to zoom.' : '2D classic view.', { mood: 'happy', priority: 2, cooldown: 1 });
+  advisor.say('3d-toggle', on ? '3D view: drag to pan, right-drag to orbit, wheel to zoom.' : '2D classic view.', { mood: 'happy', priority: 2, cooldown: 1 });
 }
 $('mode3dBtn')?.addEventListener('click', toggle3D);
 $('aiGodBtn')?.addEventListener('click', toggleAIGod);

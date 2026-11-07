@@ -2,6 +2,7 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const __wbg_engine_free: (a: number, b: number) => void;
+export const __wbg_pointergesture_free: (a: number, b: number) => void;
 export const __wbg_rustblinkclassifier_free: (a: number, b: number) => void;
 export const __wbg_rustimutracker_free: (a: number, b: number) => void;
 export const engine_add_3d_light: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
@@ -84,6 +85,14 @@ export const engine_set_era: (a: number, b: number) => void;
 export const engine_set_heightmap: (a: number, b: number, c: number) => [number, number];
 export const engine_upload_canvas: (a: number, b: any) => [number, number];
 export const engine_zoom_camera: (a: number, b: number) => void;
+export const pointergesture_down: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+export const pointergesture_is_panning: (a: number) => number;
+export const pointergesture_moved: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+export const pointergesture_new: (a: number) => number;
+export const pointergesture_owns: (a: number, b: number) => number;
+export const pointergesture_pan_dx: (a: number) => number;
+export const pointergesture_pan_dy: (a: number) => number;
+export const pointergesture_up: (a: number, b: number, c: number) => number;
 export const rustblinkclassifier_accuracy: (a: number) => number;
 export const rustblinkclassifier_arm_flash_window: (a: number, b: number) => void;
 export const rustblinkclassifier_baseline_samples: (a: number) => number;

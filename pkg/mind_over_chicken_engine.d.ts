@@ -96,6 +96,36 @@ export class Engine {
     zoom_camera(factor: number): void;
 }
 
+export class PointerGesture {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * A main-button or touch press. `sx, sy` screen pixels; `wx, wy` world units.
+     */
+    down(id: number, sx: number, sy: number, wx: number, wy: number): void;
+    is_panning(): boolean;
+    /**
+     * Pointer moved. Returns true when this move pans the map; read the delta with
+     * `pan_dx()` / `pan_dy()` (world units since the previous move). Returns false while the
+     * press is still a possible tap, or for another pointer.
+     */
+    moved(id: number, sx: number, sy: number, wx: number, wy: number): boolean;
+    /**
+     * `threshold_px`: how far (screen pixels) a press must move before it counts as a drag.
+     */
+    constructor(threshold_px: number);
+    /**
+     * Is this pointer the press being tracked?
+     */
+    owns(id: number): boolean;
+    pan_dx(): number;
+    pan_dy(): number;
+    /**
+     * Press ended. Returns true when it was a tap (blink). A cancelled pointer never taps.
+     */
+    up(id: number, cancelled: boolean): boolean;
+}
+
 export class RustBlinkClassifier {
     free(): void;
     [Symbol.dispose](): void;
@@ -176,6 +206,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_engine_free: (a: number, b: number) => void;
+    readonly __wbg_pointergesture_free: (a: number, b: number) => void;
     readonly __wbg_rustblinkclassifier_free: (a: number, b: number) => void;
     readonly __wbg_rustimutracker_free: (a: number, b: number) => void;
     readonly engine_add_3d_light: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
@@ -258,6 +289,14 @@ export interface InitOutput {
     readonly engine_set_heightmap: (a: number, b: number, c: number) => [number, number];
     readonly engine_upload_canvas: (a: number, b: any) => [number, number];
     readonly engine_zoom_camera: (a: number, b: number) => void;
+    readonly pointergesture_down: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly pointergesture_is_panning: (a: number) => number;
+    readonly pointergesture_moved: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly pointergesture_new: (a: number) => number;
+    readonly pointergesture_owns: (a: number, b: number) => number;
+    readonly pointergesture_pan_dx: (a: number) => number;
+    readonly pointergesture_pan_dy: (a: number) => number;
+    readonly pointergesture_up: (a: number, b: number, c: number) => number;
     readonly rustblinkclassifier_accuracy: (a: number) => number;
     readonly rustblinkclassifier_arm_flash_window: (a: number, b: number) => void;
     readonly rustblinkclassifier_baseline_samples: (a: number) => number;
