@@ -45,6 +45,7 @@ import { setRustAgentHelpers } from './sim/agents.js';
 import { initDebug } from './camera/debug.js'; // camera debug (#67)
 import { Calibration, readCalibrationConfig, saveCalibrationConfig, CALIBRATION_DEFAULTS, setRustCalibration } from './brain/calibration.js';
 import { initSettings, syncCameraIndicator } from './ui/settings.js';
+import { initTitle } from './ui/title.js';   // the title menu: Continue, New Game, Load, Sections, Calibrate, Options
 import { reducedMotion, flashAlpha, shakeAmount as shakeFor } from './ui/motion.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
 import { CivSandbox, initPlanetSizePicker } from './civ/sandbox.js'; // civ (#50)
@@ -60,6 +61,8 @@ import { dayNight } from './render/daynight.js';
 import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
 import { mirrorHud } from './ui/hud-mirror.js';
 import { footprint3d } from './ui/minimap.js';   // the minimap's 3D window (release QA)
+import { listSaves, getSave, latestSave, saveRun, deleteSave, clearSaves, newRunId, nextRunNumber } from './game/saves.js'; // local saves
+import { buildCheckpoint, galaxySummary, restoreBrain } from './game/checkpoint.js';
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
 // mind read uses the same window.
@@ -386,7 +389,9 @@ function updateAIGodAutopilot(dt) {
   }
 }
 
-function newGame(source, startIndex = 0) {
+// mode: 'story' (the eras), 'galaxy' or 'crowded' (the sandboxes). resume: a save to continue
+// (src/game/saves.js): its world seed and size, stats, run time, calibration seed and brain model.
+function newGame(source, startIndex = 0, { mode = 'story', resume = null } = {}) {
   if (previewSource && previewSource !== source) previewSource.disconnect();
   previewSource = null;
   previewBrain = null;
@@ -395,10 +400,12 @@ function newGame(source, startIndex = 0) {
   const brain = new Brain(source);
   cosmos.reset();
   intro.cancel(); introCam = null; delete document.body.dataset.intro;
+  const size = resume?.worldSize;
+  const calibSeed = resume?.calibration?.config?.seed;
   G = {
-    world: new World(undefined, { width: HOME_W, height: HOME_H }), // the bigger home world (#129)
+    world: new World(resume?.seed ?? undefined, { width: size?.width || HOME_W, height: size?.height || HOME_H }), // the bigger home world (#129)
     brain, source, advisor, hud, audio, engine,
-    calibration: new Calibration(calibConfig), // calibration (#54)
+    calibration: new Calibration(Number.isFinite(calibSeed) ? { ...calibConfig, seed: calibSeed >>> 0 } : calibConfig), // calibration (#54)
     scene: null, sceneIndex: startIndex, runTime: 0, shake: 0,
     stats: { lightning: 0, smitten: 0, births: 0, deaths: 0, recessions: 0, restarts: 0 },
     eraTimes: [], eraStart: 0, finished: false,
@@ -408,10 +415,20 @@ function newGame(source, startIndex = 0) {
       pendingTimer = delay;
     },
     fail(reason) { showFail(reason); },
-    finish(extra) { G.finished = true; G.extra = extra; setTimeout(showEnd, 2200); },
+    finish(extra) { G.finished = true; G.extra = extra; patchSave({ finished: true }); setTimeout(showEnd, 2200); },
     // The intro transition for the scene in play (#137), e.g. a new stage inside one scene.
     startTransition(caption) { startTransition(G.scene, caption); },
   };
+  // Local saves: every run has an id and a number ("Run 3 · Stone Age"); continuing a save keeps
+  // its id, so the save moves on with the run.
+  G.run = { id: resume?.id || newRunId(), runNumber: resume?.runNumber || nextRunNumber(), mode: resume?.mode || mode, calibration: resume?.calibration || null };
+  if (resume) {
+    Object.assign(G.stats, resume.stats || {});
+    G.runTime = Number(resume.runTime) || 0;
+    G.eraStart = G.runTime;
+    if (Array.isArray(resume.eraTimes)) G.eraTimes = resume.eraTimes.map((e) => ({ ...e }));
+    restoreBrain(brain.model, resume.brain);
+  }
   // Headset aims are screen positions: map them through the home camera (#129), raycasting in 3D.
   brain.screenToAim = (x, y) => {
     if (cosmos.surfaceInView || !cosmos.view || cosmos.active) return { x, y };
@@ -491,6 +508,35 @@ function startScene(i) {
   $('banner').hidden = true;
   if (scene.intro) startIntro(scene, i);
   else intro.cancel();
+  if (G.run?.mode === 'story') autosave();   // a checkpoint at the start of every era
+}
+
+// ---------- local saves (src/game/saves.js) ----------
+// A checkpoint when a scene starts: continuing it reopens that era on the same world.
+function autosave(extra = {}) {
+  if (!G?.run) return null;
+  let rec = null;
+  try { rec = saveRun(buildCheckpoint(G, G.run, extra)); } catch (err) { console.warn('[saves] autosave failed:', err); }
+  if (rec) savesChanged();
+  return rec;
+}
+// Update fields of this run's save without a new checkpoint (only once it has one).
+function patchSave(fields) {
+  if (!G?.run || !getSave(G.run.id)) return;
+  if (saveRun({ ...fields, id: G.run.id })) savesChanged();
+}
+// The title screen and Settings listen for this to refresh their lists.
+function savesChanged() { try { window.dispatchEvent(new CustomEvent('moc:saves')); } catch {} }
+// Continue a save (or a save id): the same world seed and size, at the era it was saved in, with
+// its stats. A sandbox save starts that sandbox afresh on the same seed.
+function continueRun(save) {
+  const s = typeof save === 'string' ? getSave(save) : save;
+  if (!s || typeof s !== 'object') return false;
+  const source = playSource();
+  if (s.mode === 'galaxy') startGalaxySandbox(source, s);
+  else if (s.mode === 'crowded') startCivSandbox(source, s);
+  else begin(source, { resume: s, startIndex: clamp(Math.floor(Number(s.sceneIndex) || 0), 0, SCENES.length - 1) });
+  return true;
 }
 
 // Each era opens with the camera on its stage: the village, the exchange, the launch crowd (#129).
@@ -1618,6 +1664,7 @@ $('endModelBtn').addEventListener('click', toggleModel);
 // ---------- zoom + galaxy UI ----------
 let revealed = 0;
 cosmos.onEvent = (p, text, kind) => {
+  if (kind === 'born') patchSave({ galaxy: galaxySummary(cosmos.galaxy) });   // the save names the worlds born
   if (kind === 'born' && p.mindSlot) {
     revealed++;
     audio.good();
@@ -1721,17 +1768,18 @@ $('galaxyBtn').addEventListener('click', () => {
 // back to the emulator without one; newGame() disconnects whatever it isn't given (#185).
 function playSource() { return liveBridge(G?.source, previewSource) || new SimSource(); }
 let settingsUi = null;   // the Settings panel (#186), wired after the camera and debug panels
-function begin(source) {
+// startIndex: Sections start a fresh run at any era.
+function begin(source, { startIndex = 0, mode = 'story', resume = null } = {}) {
   audio.unlock();
   $('titleScreen').hidden = true;
   settingsUi?.close();
-  newGame(source);
+  newGame(source, startIndex, { mode, resume });
   // Settings › Camera: the player asked for the webcam with every game (#186).
   if (settingsUi?.settings.cameraOnStart) window.__moc?.camera?.start?.();
 }
 $('playSim').addEventListener('click', () => begin(playSource()));
-$('playSandbox').addEventListener('click', () => {
-  begin(playSource());
+function startGalaxySandbox(source, resume = null) {
+  begin(source, { mode: 'galaxy', resume });
   dismissBanner();
   G.sandbox = true;
   cosmos.sandbox = true;
@@ -1740,21 +1788,26 @@ $('playSandbox').addEventListener('click', () => {
   cosmos.z = 1; cosmos.target = 2;
   advisor.setEra('space');
   advisor.say('sandbox', 'Galaxy sandbox, my lord. Three worlds are forming from your thoughts. Make more planets and let them run.', { mood: 'happy', priority: 3, cooldown: 999 });
-});
+  autosave({ sceneLabel: 'Sandbox · Galaxy', era: 'space' });
+}
+$('playSandbox').addEventListener('click', () => startGalaxySandbox(playSource()));
 // civ (#50): "Sandbox: a crowded planet" runs its own scene (Rust sim in src/civ/) on the connected headset, or the emulated one (#185).
 initPlanetSizePicker($('planetSizePick'));   // Small/Medium/Large/Huge or Random (Alex)
-$('playCiv').addEventListener('click', () => {
-  begin(playSource());
-  const scene = new CivSandbox({ cosmos });
+function startCivSandbox(source, resume = null) {
+  begin(source, { mode: 'crowded', resume });
+  const scene = new CivSandbox({ cosmos, seed: resume?.civSeed ?? null, planet: resume?.planet ?? null });
   G.scene = scene;
   advisor.setEra(scene.era);
   scene.enter(G);
   hud.setScene(scene);
   document.body.dataset.era = scene.era;
   startIntro(scene, -1);
-});
-// Connect a real headset (#174): the run starts on its first EEG frame, not when the socket
-// opens. While it waits the button cancels; after a failure it retries.
+  autosave({ civSeed: scene.seed, planet: scene.planetSize?.name ?? null });
+}
+$('playCiv').addEventListener('click', () => startCivSandbox(playSource()));
+// Calibrate › Connect (#174): the headset counts as connected on its first EEG frame, not when
+// the socket opens. It stays on the title so the player can calibrate; New Game then plays on it.
+// While it waits the button cancels; after a failure it retries.
 let bridgeWait = null;
 $('playBridge').addEventListener('click', async () => {
   const btn = $('playBridge');
@@ -1775,23 +1828,35 @@ $('playBridge').addEventListener('click', async () => {
   try {
     await src.connect();
     if (bridgeWait !== src) return;
-    status.textContent = 'Bridge connected. Waiting for the first EEG from the headset…';
+    status.textContent = 'Bridge connected. Waiting for EEG…';
     await src.waitForFrame(10000);
     if (bridgeWait !== src) return;
     bridgeWait = null;
     btn.textContent = 'Connect';
-    status.textContent = src.status;
-    begin(src);
+    setGameSource(src);
+    status.textContent = 'Muse connected.';
   } catch (err) {
     if (bridgeWait !== src) return;   // cancelled
     bridgeWait = null;
     src.disconnect();
     btn.textContent = 'Retry';
     status.textContent = src.connected || /EEG/.test(err.message)
-      ? `${err.message}. Is the Muse on, charged and paired with the bridge? Retry, or play with the emulated headset.`
-      : `${err.message}. Start the bridge with: python bridge/muse_bridge.py --board muse2 (or --board synthetic to test).`;
+      ? `${err.message}. Is the Muse on and paired?`
+      : `${err.message}. Run python bridge/muse_bridge.py --board muse2`;
   }
 });
+// Continue and Load resume a save (src/game/saves.js) through __moc.continueRun, set below.
+try {
+  initTitle(document, {
+    onContinue: (save) => window.__moc?.continueRun?.(save),
+    onSection: (i) => begin(playSource(), { startIndex: i }),
+    onCalibrate: () => eegPanel?.startWizard('both'),
+    headsetLive: () => !!liveBridge(G?.source, previewSource)?.streaming,
+    isBusy: () => !!(settingsUi?.isOpen() || eegPanel?.wiz?.active || $('moveCalibModal')?.hidden === false),
+  });
+} catch (err) {
+  console.error('Title menu failed to start; its buttons still work:', err);
+}
 
 // Debug handle for the console (and for automated playtests).
 window.__moc = {
@@ -1809,6 +1874,15 @@ window.__moc = {
     for (let i = 0; i < n; i++) { lastFrameAt = 0; lastTs = performance.now() - 16.7; frame(); }
     return (performance.now() - t0) / n;
   },
+};
+// Local saves (src/game/saves.js): continue a run, and the saves for the title screen and console.
+window.__moc.continueRun = (save) => continueRun(save);
+window.__moc.saves = {
+  list: () => listSaves(),
+  get: (id) => getSave(id),
+  latest: () => latestSave(),
+  delete: (id) => { const ok = deleteSave(id); savesChanged(); return ok; },
+  clear: () => { const ok = clearSaves(); savesChanged(); return ok; },
 };
 
 // camera (#33, #116–#123): opt-in webcam. Hands perform actions (pinch-grab, 2-hand zoom, palm, fist)
@@ -1886,6 +1960,7 @@ try {
       write: (c) => { saveCalibrationConfig(c); Object.assign(calibConfig, c); SIM.MIND_SECONDS = c.seconds; },
     },
     defaults: { aim: { sensitivity: 1, invertYaw: false, invertPitch: false }, calibration: { seconds: CALIBRATION_DEFAULTS.seconds, mode: CALIBRATION_DEFAULTS.mode } },
+    saves: { count: () => listSaves().length, clear: () => { clearSaves(); savesChanged(); } },
   });
 } catch (err) {
   console.error('Settings panel failed to start; the game runs without it:', err);

@@ -36,7 +36,8 @@ function systemReducedMotion() {
 //   eegPanel        get/set the head-aim settings (EegPanel.prefs / setAimPrefs)
 //   calibration     { read(): {seconds, mode}, write({seconds, mode}) } for the seed window
 //   defaults        { aim, calibration } to reset to
-export function initSettings(doc, { eegPanel = null, calibration = null, defaults = {} } = {}) {
+//   saves           { count(), clear() } for "Delete all saves" (src/game/saves.js)
+export function initSettings(doc, { eegPanel = null, calibration = null, defaults = {}, saves = null } = {}) {
   const $ = (id) => doc.getElementById(id);
   const panel = $('settingsPanel'), btn = $('settingsBtn');
   if (!panel || !btn) return null;
@@ -45,6 +46,7 @@ export function initSettings(doc, { eegPanel = null, calibration = null, default
     motion: $('setReducedMotion'), sens: $('setAimSens'), sensVal: $('setAimSensVal'),
     invYaw: $('setInvYaw'), invPitch: $('setInvPitch'),
     calibSeconds: $('setCalibSeconds'), calibMode: $('setCalibMode'), cameraOnStart: $('setCameraOnStart'),
+    savesNote: $('setSavesNote'), deleteSaves: $('setDeleteSaves'),
   };
 
   function applyMotion() {
@@ -66,6 +68,16 @@ export function initSettings(doc, { eegPanel = null, calibration = null, default
       if (ui.calibMode) ui.calibMode.value = c.mode;
     }
     if (ui.cameraOnStart) ui.cameraOnStart.checked = settings.cameraOnStart;
+    fillSaves();
+  }
+
+  // Saves: how many runs are kept, and a two-click "Delete all saves" (no dialog to get stuck on).
+  let deleteArmed = false;
+  function fillSaves() {
+    deleteArmed = false;
+    const n = saves?.count?.() ?? 0;
+    if (ui.savesNote) ui.savesNote.textContent = n ? `${n} saved run${n === 1 ? '' : 's'} on this device. Each run saves itself when an era starts.` : 'No saved runs yet. Each run saves itself when an era starts.';
+    if (ui.deleteSaves) { ui.deleteSaves.textContent = 'Delete all saves'; ui.deleteSaves.disabled = !n; }
   }
 
   const isOpen = () => !panel.hidden;
@@ -113,6 +125,11 @@ export function initSettings(doc, { eegPanel = null, calibration = null, default
   ui.cameraOnStart?.addEventListener('change', () => {
     settings.cameraOnStart = !!ui.cameraOnStart.checked;
     saveSettings(settings);
+  });
+  ui.deleteSaves?.addEventListener('click', () => {
+    if (!deleteArmed) { deleteArmed = true; ui.deleteSaves.textContent = 'Click again to delete them all'; return; }
+    saves?.clear?.();
+    fillSaves();
   });
   $('settingsReset')?.addEventListener('click', () => {
     Object.assign(settings, SETTINGS_DEFAULTS);
