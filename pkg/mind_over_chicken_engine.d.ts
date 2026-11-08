@@ -308,7 +308,11 @@ export class RustEmotionTracker {
     [Symbol.dispose](): void;
     constructor(calibrate_seconds: number);
     reset(): void;
-    update_direct(has_face: boolean, mouth_smile_left: number, mouth_smile_right: number, brow_down_left: number, brow_down_right: number, mouth_press_left: number, mouth_press_right: number, jaw_open: number, brow_inner_up: number, eye_wide_left: number, eye_wide_right: number, mouth_frown_left: number, mouth_frown_right: number, dt: number): Array<any>;
+    /**
+     * Arguments follow `INPUTS` in src/camera/emotion.js. Returns
+     * `[dominant, joy, anger, surprise, sadness, neutral, intensity, face, event, surpriseTriggered, calibrating]`.
+     */
+    update_direct(has_face: boolean, mouth_smile_left: number, mouth_smile_right: number, brow_down_left: number, brow_down_right: number, mouth_press_left: number, mouth_press_right: number, jaw_open: number, brow_inner_up: number, brow_outer_up_left: number, brow_outer_up_right: number, eye_wide_left: number, eye_wide_right: number, mouth_frown_left: number, mouth_frown_right: number, dt: number): Array<any>;
 }
 
 /**
@@ -772,7 +776,7 @@ export interface InitOutput {
     readonly rustcastcontroller_update: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly rustemotiontracker_new: (a: number) => number;
     readonly rustemotiontracker_reset: (a: number) => void;
-    readonly rustemotiontracker_update_direct: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => any;
+    readonly rustemotiontracker_update_direct: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number) => any;
     readonly rustfingercontroller_new: () => number;
     readonly rustfingercontroller_reset: (a: number) => void;
     readonly rustfingercontroller_update: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => any;

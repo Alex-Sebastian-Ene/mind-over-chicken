@@ -1706,6 +1706,9 @@ impl RustEmotionTracker {
         self.inner.reset();
     }
 
+    /// Arguments follow `INPUTS` in src/camera/emotion.js. Returns
+    /// `[dominant, joy, anger, surprise, sadness, neutral, intensity, face, event, surpriseTriggered, calibrating]`.
+    #[allow(clippy::too_many_arguments)]
     pub fn update_direct(
         &mut self,
         has_face: bool,
@@ -1717,6 +1720,8 @@ impl RustEmotionTracker {
         mouth_press_right: f64,
         jaw_open: f64,
         brow_inner_up: f64,
+        brow_outer_up_left: f64,
+        brow_outer_up_right: f64,
         eye_wide_left: f64,
         eye_wide_right: f64,
         mouth_frown_left: f64,
@@ -1725,18 +1730,24 @@ impl RustEmotionTracker {
     ) -> js_sys::Array {
         let mut map = std::collections::HashMap::new();
         if has_face {
-            map.insert("mouthSmileLeft".to_string(), mouth_smile_left);
-            map.insert("mouthSmileRight".to_string(), mouth_smile_right);
-            map.insert("browDownLeft".to_string(), brow_down_left);
-            map.insert("browDownRight".to_string(), brow_down_right);
-            map.insert("mouthPressLeft".to_string(), mouth_press_left);
-            map.insert("mouthPressRight".to_string(), mouth_press_right);
-            map.insert("jawOpen".to_string(), jaw_open);
-            map.insert("browInnerUp".to_string(), brow_inner_up);
-            map.insert("eyeWideLeft".to_string(), eye_wide_left);
-            map.insert("eyeWideRight".to_string(), eye_wide_right);
-            map.insert("mouthFrownLeft".to_string(), mouth_frown_left);
-            map.insert("mouthFrownRight".to_string(), mouth_frown_right);
+            for (k, v) in [
+                ("mouthSmileLeft", mouth_smile_left),
+                ("mouthSmileRight", mouth_smile_right),
+                ("browDownLeft", brow_down_left),
+                ("browDownRight", brow_down_right),
+                ("mouthPressLeft", mouth_press_left),
+                ("mouthPressRight", mouth_press_right),
+                ("jawOpen", jaw_open),
+                ("browInnerUp", brow_inner_up),
+                ("browOuterUpLeft", brow_outer_up_left),
+                ("browOuterUpRight", brow_outer_up_right),
+                ("eyeWideLeft", eye_wide_left),
+                ("eyeWideRight", eye_wide_right),
+                ("mouthFrownLeft", mouth_frown_left),
+                ("mouthFrownRight", mouth_frown_right),
+            ] {
+                map.insert(k.to_string(), v);
+            }
         }
 
         let (mood, ev) = self.inner.update(if has_face { Some(&map) } else { None }, dt);
@@ -1750,12 +1761,9 @@ impl RustEmotionTracker {
         arr.push(&JsValue::from_f64(mood.neutral));
         arr.push(&JsValue::from_f64(mood.intensity));
         arr.push(&JsValue::from_bool(mood.face));
-        let ev_str = match ev {
-            Some(camera::emotion::EmotionEvent::Change) => "change",
-            Some(camera::emotion::EmotionEvent::Strong) => "strong",
-            None => "",
-        };
-        arr.push(&JsValue::from_str(ev_str));
+        arr.push(&JsValue::from_str(ev.map_or("", |e| e.as_str())));
+        arr.push(&JsValue::from_bool(mood.surprise_triggered));
+        arr.push(&JsValue::from_bool(mood.calibrating));
         arr
     }
 }

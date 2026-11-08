@@ -191,7 +191,7 @@ export const rustcastcontroller_trigger: (a: number, b: number, c: number, d: nu
 export const rustcastcontroller_update: (a: number, b: number, c: number, d: number, e: number) => any;
 export const rustemotiontracker_new: (a: number) => number;
 export const rustemotiontracker_reset: (a: number) => void;
-export const rustemotiontracker_update_direct: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => any;
+export const rustemotiontracker_update_direct: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number) => any;
 export const rustfingercontroller_new: () => number;
 export const rustfingercontroller_reset: (a: number) => void;
 export const rustfingercontroller_update: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => any;
