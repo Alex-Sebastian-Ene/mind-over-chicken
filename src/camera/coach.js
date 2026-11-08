@@ -60,7 +60,7 @@ export const COACH_MOVES = [
     title: 'Pinch Grab',
     key: '',
     glyph: '🤏',
-    instruction: 'Pinch to pick up a living creature under the cursor, move the cursor (headset or mouse), release to drop.',
+    instruction: 'Pinch to grab a living creature under the cursor (move the cursor, release to drop). Nothing to grab? Move your hand to pan the map; head motion tilts the 3D view.',
     contexts: ['surface', 'civ'],
     sample(phase) {
       // 0..0.25 close into pinch, 0.25..0.75 hold pinch & glide horizontally, 0.75..1.0 open to drop

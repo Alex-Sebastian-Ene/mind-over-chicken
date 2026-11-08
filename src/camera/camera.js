@@ -49,7 +49,7 @@ const TEMPLATE = `
       <strong data-cam-state>Camera off</strong>
       <span class="eeg-qual" data-cam-mode>Idle</span>
     </div>
-    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam for hands and face: pinch to grab a creature or move the map, two hands to pinch-zoom; your expression sets the mood. The webcam does not track your head: the cursor follows the EEG headset's head pose, or the mouse. Frames never leave this device.</p>
+    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam for hands and face: pinch to grab a creature, move your hand to pan the map, head motion tilts the 3D view, two hands to pinch-zoom; your expression sets the mood. The webcam does not track your head: the cursor follows the EEG headset's head pose, or the mouse. Frames never leave this device.</p>
     <div class="eeg-url-row">
       <button type="button" class="btn btn-primary btn-small" data-cam-start>Start Camera</button>
       <button type="button" class="btn btn-small" data-cam-stop disabled>Stop &amp; Clear</button>
@@ -179,6 +179,7 @@ export function initCamera({
   let lastTick = 0;
   let lastFaceAt = 0;
   let gesture = { name: 'None', score: 0 };
+  let lastHeadAim = null;
   let hand = null, handAspect = 4 / 3, faceBox = null;
   let finger = null;
   let multi = null;
@@ -317,6 +318,7 @@ export function initCamera({
     multi = null;
     faceBox = null;
     gesture = { name: 'None', score: 0 };
+    lastHeadAim = null;
     mood = neutralMood();
     strongPending = false;
     surprisePending = false;
@@ -453,6 +455,15 @@ export function initCamera({
     const G = getG();
     const live = canCast() && !!G?.brain;
 
+    // Aim movement while pinched (#270): it is head pose or mouse — never the webcam.
+    // Screen-space keeps the tilt independent of the world camera; screenX/Y map a world aim
+    // back to the screen when screenAim is absent.
+    const headNow = G?.brain?.screenAim
+      || (G?.brain?.aim ? { x: screenX(G.brain.aim.x), y: screenY(G.brain.aim.y) } : null);
+    const headDx = lastHeadAim && headNow ? headNow.x - lastHeadAim.x : 0;
+    const headDy = lastHeadAim && headNow ? headNow.y - lastHeadAim.y : 0;
+    lastHeadAim = headNow ? { x: headNow.x, y: headNow.y } : null;
+
     // Single-hand metrics preserved in headCursorOnly mode so hands NEVER move G.brain.aim (#116, #120)
     finger = fingers.update({
       hand,
@@ -492,19 +503,19 @@ export function initCamera({
       if (multi.grab.started) {
         tryGrabStart(G, now);
         if (!grabbed && onGrabMove) {
-          onGrabMove({ dx: 0, dy: 0, started: true, active: true, aim: G.brain.aim, grab: multi.grab });
+          onGrabMove({ dx: 0, dy: 0, headDx, headDy, started: true, active: true, aim: G.brain.aim, grab: multi.grab });
         }
       } else if (multi.grab.active) {
         if (grabbed) {
           G.scene?.onGrabMove?.({ x: G.brain.aim.x, y: G.brain.aim.y });
         } else if (onGrabMove) {
-          onGrabMove({ dx: multi.grab.dx, dy: multi.grab.dy, started: false, active: true, aim: G.brain.aim, grab: multi.grab });
+          onGrabMove({ dx: multi.grab.dx, dy: multi.grab.dy, headDx, headDy, started: false, active: true, aim: G.brain.aim, grab: multi.grab });
         }
       } else if (multi.grab.released || multi.grab.cancelled) {
         if (grabbed) {
           tryGrabEnd(G, now, !!multi.grab.cancelled);
         } else if (onGrabMove) {
-          onGrabMove({ dx: 0, dy: 0, released: true, cancelled: !!multi.grab.cancelled, active: false, aim: G.brain.aim, grab: multi.grab });
+          onGrabMove({ dx: 0, dy: 0, headDx: 0, headDy: 0, released: true, cancelled: !!multi.grab.cancelled, active: false, aim: G.brain.aim, grab: multi.grab });
         }
       }
     }
@@ -582,6 +593,9 @@ export function initCamera({
     }
     if (grabbed) {
       return `🤏 Holding ${grabbed.label} · move the cursor & release pinch to drop`;
+    }
+    if (multi?.grab?.active) {
+      return 'Pinch: move your hand to pan · head motion tilts the 3D view';
     }
     const aimBy = aimSource(getG(), now).short;
     if (!(stream && engine)) return `Aim with the ${aimBy}.`;
