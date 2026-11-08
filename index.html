@@ -149,8 +149,16 @@
       </div>
       <!-- civ (#50) -->
       <div class="start-sandbox">
-        <button type="button" class="btn" id="playCiv">Sandbox: four civilisations</button>
-        <p class="hint">Four peoples on one big planet grow, fight for land and rebel. Calm makes peace; stress and anger make war.</p>
+        <button type="button" class="btn" id="playCiv">Sandbox: a crowded planet</button>
+        <div class="size-pick" id="planetSizePick" role="radiogroup" aria-label="Planet size">
+          <span class="size-pick-label">Planet</span>
+          <button type="button" role="radio" data-size="random">Random</button>
+          <button type="button" role="radio" data-size="small" title="1280×640, 8 peoples">Small</button>
+          <button type="button" role="radio" data-size="medium" title="1920×960, 12 peoples">Medium</button>
+          <button type="button" role="radio" data-size="large" title="2560×1280, 16 peoples">Large</button>
+          <button type="button" role="radio" data-size="huge" title="3072×1536, 20 peoples">Huge</button>
+        </div>
+        <p class="hint">Your four peoples and their rivals grow, trade, ally, fight for land and rebel. Pick the planet size (more peoples on a bigger planet), or leave it random. Calm makes peace; stress and anger make war.</p>
       </div>
       <details class="start-real">
         <summary>Connect a real headset</summary>

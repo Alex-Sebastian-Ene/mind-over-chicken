@@ -392,8 +392,21 @@ impl ReliefDetail for ProceduralDiffusion {
 }
 
 impl ProceduralDiffusion {
+    /// The procedural diffusion a preset asks for.
+    pub fn from_params(p: &TerrainParams) -> Self {
+        ProceduralDiffusion { dla: p.dla.clone(), erosion: p.erosion.clone(), mountains: p.mountains }
+    }
+
     /// The detail and what it did.
     pub fn run(&self, inp: &DetailInput, rng: &mut Rng) -> (Vec<f32>, DiffusionInfo) {
+        let (h, info) = self.shape(inp, rng);
+        (self.upsample(inp, &h, rng), info)
+    }
+
+    /// The coarse-grid half of [`run`](Self::run): DLA ranges along `uplift`, erosion and
+    /// diffusion, peaks to about 1. Heights on `inp.coarse_dims`. A learned detail model (#110)
+    /// starts from this, so the ranges stay where the plates put them.
+    pub fn shape(&self, inp: &DetailInput, rng: &mut Rng) -> (Vec<f32>, DiffusionInfo) {
         let sd = inp.coarse_dims;
         let n = sd.n();
         let csf = inp.cell as f32;
@@ -449,11 +462,18 @@ impl ProceduralDiffusion {
         for v in h.iter_mut() {
             *v = v.max(-1.0);
         }
+        let info = DiffusionInfo { dla_nodes: ranges.nodes.len(), ranges: ranges.clusters, dla: ranges.height, corridor };
+        (h, info)
+    }
 
-        // Up to the full grid, with two octaves of noise finer than the coarse grid (on a
-        // lattice that repeats across the map, so it stays seamless both ways): stronger in the
-        // mountains and along the coast, so coastlines get finer than the coarse grid.
-        let mut out = if inp.cell <= 1 { h.clone() } else { grid::resample(sd, &h, inp.dims) };
+    /// The full-grid half of [`run`](Self::run): up to the full grid, with two octaves of noise
+    /// finer than the coarse grid (on a lattice that repeats across the map, so it stays
+    /// seamless both ways): stronger in the mountains and along the coast, so coastlines get
+    /// finer than the coarse grid.
+    pub fn upsample(&self, inp: &DetailInput, h: &[f32], rng: &mut Rng) -> Vec<f32> {
+        let sd = inp.coarse_dims;
+        let csf = inp.cell as f32;
+        let mut out = if inp.cell <= 1 { h.to_vec() } else { grid::resample(sd, h, inp.dims) };
         if inp.cell > 1 {
             let (w, hh) = (inp.dims.w, inp.dims.h);
             let wl = (csf * 2.5).max(4.0);
@@ -469,8 +489,7 @@ impl ProceduralDiffusion {
                 }
             }
         }
-        let info = DiffusionInfo { dla_nodes: ranges.nodes.len(), ranges: ranges.clusters, dla: ranges.height, corridor };
-        (out, info)
+        out
     }
 }
 
@@ -1158,7 +1177,7 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
     let input = DetailInput { coarse: &h, coarse_dims: sd, dims: full, cell: cs, uplift: &uplift, land: &land_f, scale };
     let (mut hf, info) = match custom {
         Some(d) => (d.detail(&input, &mut drng), DiffusionInfo::default()),
-        None => ProceduralDiffusion { dla: p.dla.clone(), erosion: p.erosion.clone(), mountains: p.mountains }.run(&input, &mut drng),
+        None => ProceduralDiffusion::from_params(p).run(&input, &mut drng),
     };
     assert_eq!(hf.len(), nf, "ReliefDetail must return one height per tile");
     // The simulation grid sees the detailed relief, averaged back down.

@@ -134,7 +134,8 @@ export class Industry {
       const stress = Math.round((brain.stress ?? 0) * 100);
       this.headlines.push(`GOAT INDEX -${Math.round((1 - this.price / this.peak) * 100)}% AS GOD'S STRESS HITS ${stress}%`);
       G.advisor.say('crash', 'My lord, your stress has caused a goat recession.', { mood: 'panic', priority: 4, cooldown: 6 });
-      floater(this.particles, W / 2, 40, 'GOAT RECESSION', '#ff5a72', 12);
+      const c = G.camera?.viewCenter?.() || G.world.sites.exchange;   // mid-screen (#129)
+      floater(this.particles, c.x, c.y - 50, 'GOAT RECESSION', '#ff5a72', 12);
     }
     if (this.price > this.value * 1.45) {
       if (G.advisor.say('bubble', 'Goats are up forty percent. Nobody knows why. I have put the temple roof up as collateral.', { mood: 'happy', priority: 2, cooldown: 20 }))
@@ -361,7 +362,8 @@ export class Industry {
     // Aim reticle (SPRITE_RETICLE = 13)
     const aim = this.G.brain?.aim;
     if (aim) {
-      engine.add_billboard(13, aim.x * (W - 1), aim.y * (H - 1), 1, 0, 0);
+      const p = this.G.world.aimPoint(aim);
+      engine.add_billboard(13, p.x, p.y, 1, 0, 0);
     }
   }
 
@@ -390,9 +392,10 @@ export class Industry {
     this.particles.draw(ctx);
     // Dusk haze, thicker with smog when the factory is busy.
     ctx.fillStyle = `rgba(255, 140, 60, ${0.08 + clamp(this.gdpRate / 40) * 0.06})`;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, 0, G.world.width, G.world.height);
   }
 
+  // On the map, in world units (repeated at the map's wrap copies, #129).
   drawOverlay(ctx) {
     const G = this.G;
     this.particles.drawText(ctx);
@@ -406,12 +409,14 @@ export class Industry {
       label(ctx, ex.x, ex.y - 21, `IPO · keep stress under ${Math.round((this.ipo.limit ?? STRESSED) * 100)}%`, '#ff8a9c', 6);
     }
     if (this.agents.some((a) => a.state === 'strike' || a.state === 'riot')) label(ctx, G.world.sites.picket.x, G.world.sites.picket.y + 12, 'picket line', '#f2e8d5', 5);
+    // The aim reticle, on the map at the world point aimed at (3D stands it up as a sprite).
     const aim = G.brain?.aim;
-    if (aim) drawReticle(ctx, aim.x * (W - 1), aim.y * (H - 1), this.t, '#ffe066');
+    if (aim && !ctx.__project3d) { const p = G.world.aimPoint(aim); drawReticle(ctx, p.x, p.y, this.t, '#ffe066'); }
   }
 
-  // Dedicated screen UI overlay: stays perfectly static in screen space above the 3D/2D world.
-  drawScreenUI(ctx) {
+  // Fixed to the screen, not the map (#129): the floating goat index window (goatWindowX/Y move
+  // it) and the ticker tape. Drawn once, through main.js's screen-overlay pass.
+  drawScreenOverlay(ctx) {
     const G = this.G;
     // Floating Goat Index Window
     const cw = 90, ch = 42;
@@ -490,7 +495,7 @@ export class Industry {
     const G = this.G;
     if (!G || this.done) return;
     const w = G.world, ex = w.sites.exchange, picket = w.sites.picket;
-    const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
+    const { x, y } = w.aimPoint(aim);   // aims are 0..1 of the world (#129)
     switch (spell) {
       case 'fist':
       case 'fireball': {
@@ -519,7 +524,7 @@ export class Industry {
         // Victory: good rains. Fear eases and the hay harvest adds to GDP.
         for (const a of this.agents) a.fear = clamp(a.fear - 0.2);
         this.gdp += 10;
-        this.castRain(x);
+        this.castRain(x, y);
         floater(this.particles, x, 24, 'good rains · +10 GDP', '#9ec9ff', 6);
         this.headlines.push('GOOD RAINS: HAY FUTURES CALM');
         break;
@@ -540,7 +545,7 @@ export class Industry {
         this.confidence = Math.max(0.5, this.confidence - 0.3);
         this.momentum -= 0.015;
         for (const a of this.agents) if (dist(x, y, a.x, a.y) < 40) a.fear = clamp(a.fear + 0.4);
-        this.castRain(x);
+        this.castRain(x, y);
         this.particles.burst(16, () => ({ x: x + rand(-8, 8), y: y - rand(0, 30), vx: 0, vy: 0, life: 0.25, maxLife: 0.25, size: 1, color: '#ffffff' }));
         floater(this.particles, x, y - 12, 'STORM', '#9ec9ff', 9);
         this.headlines.push('FREAK STORM; BUSINESS CONFIDENCE CRASHES');
@@ -564,8 +569,9 @@ export class Industry {
     }
   }
 
-  castRain(cx) {
-    this.particles.burst(60, () => ({ x: cx + rand(-60, 60), y: rand(-10, H * 0.7), vx: -4, vy: rand(70, 100), life: rand(0.5, 1), maxLife: 1, size: 1, color: 'rgba(158,201,255,0.75)' }));
+  // Rain over a screen-sized patch of sky around (cx, cy) (the world is bigger than the view, #129).
+  castRain(cx, cy = this.G?.camera?.viewCenter?.().y ?? this.G.world.sites.exchange.y) {
+    this.particles.burst(60, () => ({ x: cx + rand(-60, 60), y: cy + rand(-100, 26), vx: -4, vy: rand(70, 100), life: rand(0.5, 1), maxLife: 1, size: 1, color: 'rgba(158,201,255,0.75)' }));
   }
 
   // Face mood. Joy calms the markets, anger adds volatility and unrest, surprise brings

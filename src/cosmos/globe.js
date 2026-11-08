@@ -1,4 +1,4 @@
-// Pixel-art globe: wraps a 320×180 era layer (treated as an equirectangular map) onto a
+// Pixel-art globe: wraps an era layer (any size: 640×360 for the home world, #129) (treated as an equirectangular map) onto a
 // sphere, ray-cast per pixel straight into the low-res world canvas so it stays pixel art.
 // Geometry per (radius, tilt) is cached; per frame only the longitude offset and light change.
 
@@ -21,7 +21,7 @@ export class Globe {
     if (g) return g;
     const pad = 3, half = r + pad, size = half * 2 + 1;
     const n = size * size;
-    g = { r, size, half, mask: new Uint8Array(n), nx: new Float32Array(n), ny: new Float32Array(n), nz: new Float32Array(n), lon: new Float32Array(n), row: new Int16Array(n), rim: new Float32Array(n) };
+    g = { r, size, half, mask: new Uint8Array(n), nx: new Float32Array(n), ny: new Float32Array(n), nz: new Float32Array(n), lon: new Float32Array(n), lat: new Float32Array(n), rim: new Float32Array(n) };
     const ct = Math.cos(tilt), st = Math.sin(tilt);
     const rimW = Math.max(1.2, r * 0.06);
     for (let py = 0; py < size; py++) for (let px = 0; px < size; px++) {
@@ -36,7 +36,7 @@ export class Globe {
         g.mask[i] = 1;
         g.nx[i] = x; g.ny[i] = y; g.nz[i] = z;
         g.lon[i] = Math.atan2(x, z2);
-        g.row[i] = Math.max(0, Math.min(H - 1, Math.floor((0.5 - lat / Math.PI) * H)));
+        g.lat[i] = Math.max(0, Math.min(0.999999, 0.5 - lat / Math.PI)); // 0 at the north pole, 1 at the south
       } else {
         const d = Math.sqrt(d2);
         const over = (d - 1) * r;
@@ -52,12 +52,15 @@ export class Globe {
   texture(layer, structures, era) {
     let t = this.tex.get(layer);
     if (t) return t;
+    // The layer's own size: the home world is 640×360 (#129), other planets 320×180.
+    const W = layer.width, H = layer.height;
     const src = layer.getContext('2d').getImageData(0, 0, W, H).data;
     const data = new Uint8ClampedArray(src);
-    const rng = mulberry32(W * 7 + H);
+    const rng = mulberry32(320 * 7 + 180);
+    const capScale = H / 180;
     for (let x = 0; x < W; x++) {
-      const capN = 7 + Math.floor(rng() * 4 + Math.sin(x / 9) * 2);
-      const capS = 6 + Math.floor(rng() * 4 + Math.cos(x / 11) * 2);
+      const capN = Math.round((7 + Math.floor(rng() * 4 + Math.sin(x / 9) * 2)) * capScale);
+      const capS = Math.round((6 + Math.floor(rng() * 4 + Math.cos(x / 11) * 2)) * capScale);
       for (let y = 0; y < H; y++) {
         const edge = y < capN ? 1 - y / capN : y >= H - capS ? 1 - (H - 1 - y) / capS : 0;
         if (edge <= 0) continue;
@@ -83,7 +86,7 @@ export class Globe {
         if (v > lights[j]) { lights[j] = v; lightCol[j * 3] = col[0]; lightCol[j * 3 + 1] = col[1]; lightCol[j * 3 + 2] = col[2]; }
       }
     }
-    t = { data, lights, lightCol, era };
+    t = { data, lights, lightCol, era, w: W, h: H };
     this.tex.set(layer, t);
     return t;
   }
@@ -107,6 +110,7 @@ export class Globe {
     }
     const out = sc.img.data;
     const { data, lights, lightCol } = tex;
+    const TW = tex.w || W, TH = tex.h || H;
     const n = g.size * g.size;
     for (let i = 0; i < n; i++) {
       const m = g.mask[i], o = i * 4;
@@ -119,8 +123,8 @@ export class Globe {
       }
       let u = (g.lon[i] + rot) / TAU + 0.5;
       u -= Math.floor(u);
-      const tx = Math.min(W - 1, Math.floor(u * W));
-      const j = g.row[i] * W + tx;
+      const tx = Math.min(TW - 1, Math.floor(u * TW));
+      const j = Math.floor(g.lat[i] * TH) * TW + tx;
       const s4 = j * 4;
       const lam = g.nx[i] * L[0] + g.ny[i] * L[1] + g.nz[i] * L[2];
       // Posterised light so the terminator reads as pixel-art bands.

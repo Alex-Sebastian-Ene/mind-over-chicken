@@ -48,8 +48,8 @@ export class Engine {
     /**
      * Generate a home world with moc-terrain (#109) and make it the engine's: heights, tiles,
      * colours, sites and the 3D relief. `width`/`height` 0 (or left out) mean the engine's
-     * 320×180; the engine only draws worlds of its own size, so another size only updates the
-     * 3D mesh (until the game supports bigger maps, #129).
+     * 320×180. Any size drives the 3D mesh, raycast and billboards (#129); the Rust 2D port's
+     * own tiles stay 320×180.
      */
     generate_terrain(seed: number, width: number, height: number): void;
     get_camera_distance(): number;
@@ -117,12 +117,26 @@ export class Engine {
     set_camera_target(tx: number, tz: number): void;
     set_era(era: number): void;
     /**
-     * Use the JS world's heights (row-major W×H, 0..1, sea level 0.33) for the 3D mesh, the
-     * raycast and where billboards stand.
+     * Use the JS world's heights (row-major `width × height`, 0..1, sea level 0.33) for the 3D
+     * mesh, the raycast and where billboards stand. The world may be bigger than the view
+     * (#129: 640×360 under a 320×180 screen); width 0 means the classic 320×180.
      */
-    set_heightmap(heights: Float32Array | number[]): void;
+    set_heightmap(heights: Float32Array | number[], width: number, height: number): void;
     set_terrain_biome(biome_name: string): void;
+    /**
+     * The 2D frame: the low-res view canvas (320×180) the 2D renderer scales up and lights.
+     */
     upload_canvas(canvas: HTMLCanvasElement): void;
+    /**
+     * The 3D terrain's colour map: a canvas the size of the world (#129), not the screen. The
+     * mesh's texture coordinates span the whole world, so this is what drapes over the relief.
+     */
+    upload_terrain_canvas(canvas: HTMLCanvasElement): void;
+    world_h(): number;
+    /**
+     * The world's size in map pixels (= 3D units), as last set by `set_heightmap` (#129).
+     */
+    world_w(): number;
     zoom_camera(factor: number): void;
 }
 
@@ -484,6 +498,10 @@ export class RustWorldGen {
      */
     static planet(seed: number, biome: string): RustWorldGen;
     /**
+     * "learned, N steps" or "procedural".
+     */
+    static relief_status(): string;
+    /**
      * The base colour layer, RGBA.
      */
     rgba(): Uint8Array;
@@ -505,7 +523,86 @@ export class RustWorldGen {
      * Game tiles (the JS `T` codes).
      */
     types(): Uint8Array;
+    /**
+     * Use the learned relief (#110) for the worlds this wasm instance generates: the
+     * worldgen worker calls it, the main thread doesn't, so the model never runs on the main
+     * thread. Returns whether a model is loaded; without one (a build without
+     * `crates/moc-diffusion/weights/relief.mocd`, or weights that fail to load) generation stays
+     * exactly the procedural relief.
+     */
+    static use_learned_relief(on: boolean): boolean;
     width(): number;
+}
+
+/**
+ * The 2D camera over the home world. `pan(dx, dy)` moves the map under the window like a drag
+ * (the content follows the pointer); everything wraps both ways (a torus, #111).
+ */
+export class ViewCamera {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * The rectangles that paint the window from a world-sized canvas, cut at the seams:
+     * `[sx, sy, w, h, dx, dy]` per rectangle (1 to 4 of them, more only if the world is
+     * smaller than the view). Draw each with `drawImage(world, sx, sy, w, h, dx, dy, w, h)`.
+     */
+    blits(): Float32Array;
+    center_x(): number;
+    center_y(): number;
+    /**
+     * Translations `[ox, oy]` (pairs) that take world coordinates to screen coordinates, one per
+     * copy of the world that reaches the window (widened by `margin` pixels on every side).
+     * Overlays drawn in world units repeat at each, so labels and lights wrap with the map.
+     */
+    copies(margin: number): Float32Array;
+    /**
+     * The shorter signed east-west way from b to a.
+     */
+    delta_x(a: number, b: number): number;
+    /**
+     * The shorter signed north-south way from b to a.
+     */
+    delta_y(a: number, b: number): number;
+    /**
+     * World x at the window's left edge, snapped to whole pixels so the 2D map stays crisp.
+     * Every 2D conversion uses the snapped edge, so what is drawn and what is clicked agree.
+     */
+    left(): number;
+    constructor(world_w: number, world_h: number, view_w: number, view_h: number);
+    /**
+     * Drag the map by (dx, dy) world pixels: the content moves with the pointer, so the window
+     * moves the other way.
+     */
+    pan(dx: number, dy: number): void;
+    set_center(x: number, y: number): void;
+    /**
+     * A new world size (another map was loaded). The centre stays put, wrapped into it.
+     */
+    set_world(world_w: number, world_h: number): void;
+    /**
+     * World x → screen x of its copy nearest the window's centre (may fall off screen).
+     */
+    to_screen_x(wx: number): number;
+    /**
+     * World y → screen y of its copy nearest the window's centre.
+     */
+    to_screen_y(wy: number): number;
+    /**
+     * Screen x (view pixels, 0..view_w) → world x.
+     */
+    to_world_x(sx: number): number;
+    /**
+     * Screen y (view pixels, 0..view_h) → world y.
+     */
+    to_world_y(sy: number): number;
+    /**
+     * World y at the window's top edge (snapped, like `left`).
+     */
+    top(): number;
+    view_h(): number;
+    view_w(): number;
+    world_h(): number;
+    world_w(): number;
 }
 
 /**
@@ -542,6 +639,7 @@ export interface InitOutput {
     readonly __wbg_rustimutracker_free: (a: number, b: number) => void;
     readonly __wbg_rustsimsource_free: (a: number, b: number) => void;
     readonly __wbg_rustworldgen_free: (a: number, b: number) => void;
+    readonly __wbg_viewcamera_free: (a: number, b: number) => void;
     readonly engine_add_3d_light: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly engine_add_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly engine_add_billboard_y: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
@@ -637,9 +735,12 @@ export interface InitOutput {
     readonly engine_set_backdrop: (a: number, b: number, c: number, d: number) => void;
     readonly engine_set_camera_target: (a: number, b: number, c: number) => void;
     readonly engine_set_era: (a: number, b: number) => void;
-    readonly engine_set_heightmap: (a: number, b: number, c: number) => [number, number];
+    readonly engine_set_heightmap: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly engine_set_terrain_biome: (a: number, b: number, c: number) => void;
     readonly engine_upload_canvas: (a: number, b: any) => [number, number];
+    readonly engine_upload_terrain_canvas: (a: number, b: any) => [number, number];
+    readonly engine_world_h: (a: number) => number;
+    readonly engine_world_w: (a: number) => number;
     readonly engine_zoom_camera: (a: number, b: number) => void;
     readonly paint_land_use: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number];
     readonly pointergesture_down: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
@@ -796,6 +897,7 @@ export interface InitOutput {
     readonly rustworldgen_new: (a: number) => number;
     readonly rustworldgen_owner: (a: number) => any;
     readonly rustworldgen_planet: (a: number, b: number, c: number) => number;
+    readonly rustworldgen_relief_status: () => [number, number];
     readonly rustworldgen_rgba: (a: number) => any;
     readonly rustworldgen_rivers: (a: number) => any;
     readonly rustworldgen_sites_json: (a: number) => [number, number];
@@ -808,7 +910,28 @@ export interface InitOutput {
     readonly rustworldgen_surface_types: (a: number) => any;
     readonly rustworldgen_surface_width: (a: number) => number;
     readonly rustworldgen_types: (a: number) => any;
+    readonly rustworldgen_use_learned_relief: (a: number) => number;
     readonly rustworldgen_width: (a: number) => number;
+    readonly viewcamera_blits: (a: number) => [number, number];
+    readonly viewcamera_center_x: (a: number) => number;
+    readonly viewcamera_center_y: (a: number) => number;
+    readonly viewcamera_copies: (a: number, b: number) => [number, number];
+    readonly viewcamera_delta_x: (a: number, b: number, c: number) => number;
+    readonly viewcamera_delta_y: (a: number, b: number, c: number) => number;
+    readonly viewcamera_left: (a: number) => number;
+    readonly viewcamera_new: (a: number, b: number, c: number, d: number) => number;
+    readonly viewcamera_pan: (a: number, b: number, c: number) => void;
+    readonly viewcamera_set_center: (a: number, b: number, c: number) => void;
+    readonly viewcamera_set_world: (a: number, b: number, c: number) => void;
+    readonly viewcamera_to_screen_x: (a: number, b: number) => number;
+    readonly viewcamera_to_screen_y: (a: number, b: number) => number;
+    readonly viewcamera_to_world_x: (a: number, b: number) => number;
+    readonly viewcamera_to_world_y: (a: number, b: number) => number;
+    readonly viewcamera_top: (a: number) => number;
+    readonly viewcamera_view_h: (a: number) => number;
+    readonly viewcamera_view_w: (a: number) => number;
+    readonly viewcamera_world_h: (a: number) => number;
+    readonly viewcamera_world_w: (a: number) => number;
     readonly walk_field: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly moc_ai_policy_act: (a: number, b: number, c: number, d: number) => number;
     readonly moc_ai_policy_free: (a: number) => void;
@@ -842,8 +965,8 @@ export interface InitOutput {
     readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
     readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
     readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__270: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__271: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__295: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__296: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

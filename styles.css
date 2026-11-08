@@ -522,6 +522,15 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 .start { display: grid; gap: 12px; }
 .start-main { display: grid; gap: 8px; justify-items: start; }
 .hint { margin: 0; color: var(--muted); font-size: 14px; max-width: 70ch; }
+/* Planet size picker for the civ sandbox */
+.size-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 6px 0; }
+.size-pick-label { font: 600 12px var(--pixel); color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-right: 4px; }
+.size-pick button {
+  font: 600 12px var(--pixel); color: var(--ink-text, #f2e8d5); background: transparent;
+  border: 1px solid var(--line); border-radius: 3px; padding: 4px 8px; cursor: pointer;
+}
+.size-pick button:hover { border-color: var(--ember); }
+.size-pick button[aria-checked="true"] { background: var(--ember); border-color: var(--ember); color: #14101c; }
 .start-real { border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; background: var(--panel); }
 .start-real summary { cursor: pointer; font: 600 14px var(--pixel); }
 .start-real[open] summary { margin-bottom: 8px; }

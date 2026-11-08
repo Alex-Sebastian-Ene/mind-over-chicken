@@ -227,8 +227,13 @@ export class Brain {
         this.aim.x = clamp(0.5 + frame.tilt.x * 0.5);
         this.aim.y = clamp(0.5 + frame.tilt.y * 0.5);
       } else {
-        this.aim.x = smooth(this.aim.x, clamp(0.5 + frame.tilt.x * 0.5), 10, 0.1);
-        this.aim.y = smooth(this.aim.y, clamp(0.5 + frame.tilt.y * 0.5), 10, 0.1);
+        // A headset aims at the screen. On a world bigger than the screen (#129) the game maps
+        // that through its camera (screenToAim); the smoothing stays in screen space.
+        const s = (this.screenAim ||= { x: this.aim.x, y: this.aim.y });
+        s.x = smooth(s.x, clamp(0.5 + frame.tilt.x * 0.5), 10, 0.1);
+        s.y = smooth(s.y, clamp(0.5 + frame.tilt.y * 0.5), 10, 0.1);
+        const a = this.screenToAim ? this.screenToAim(s.x, s.y) : s;
+        this.aim.x = a.x; this.aim.y = a.y;
       }
     }
     this.motion = frame.motion;

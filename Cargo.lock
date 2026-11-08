@@ -204,6 +204,7 @@ dependencies = [
  "moc-ai",
  "moc-brain",
  "moc-cosmos",
+ "moc-diffusion",
  "moc-planet",
  "moc-terrain",
  "wasm-bindgen",
@@ -262,6 +263,13 @@ name = "moc-cosmos"
 version = "0.1.0"
 dependencies = [
  "wasm-bindgen",
+]
+
+[[package]]
+name = "moc-diffusion"
+version = "0.1.0"
+dependencies = [
+ "moc-terrain",
 ]
 
 [[package]]
