@@ -314,14 +314,15 @@ fn finish(coarse: &[f32], resid: &[f32], band: f32) -> Vec<f32> {
         .collect()
 }
 
-/// The hook: procedural shaping on the coarse grid, then the learned detail; procedural all
-/// the way when there is no model or the input is unusable.
-impl ReliefDetail for LearnedDiffusion {
-    fn detail(&self, input: &DetailInput, rng: &mut Rng) -> Vec<f32> {
+impl LearnedDiffusion {
+    /// The hook body with a given procedural stage: procedural shaping on the coarse grid,
+    /// then the learned detail; `procedural.detail` unchanged when there is no model or the
+    /// input is unusable.
+    pub fn detail_with(&self, procedural: &ProceduralDiffusion, input: &DetailInput, rng: &mut Rng) -> Vec<f32> {
         if self.model.is_none() || check(input).is_err() {
-            return self.procedural.detail(input, rng);
+            return procedural.detail(input, rng);
         }
-        let (shaped, _) = self.procedural.shape(input, rng);
+        let (shaped, _) = procedural.shape(input, rng);
         let seed = rng.next_u64();
         let shaped_in = DetailInput {
             coarse: &shaped,
@@ -334,7 +335,35 @@ impl ReliefDetail for LearnedDiffusion {
         };
         match self.try_detail(&shaped_in, seed) {
             Ok(v) => v,
-            Err(_) => self.procedural.upsample(input, &shaped, rng),
+            Err(_) => procedural.upsample(input, &shaped, rng),
         }
+    }
+}
+
+/// The hook with this instance's own `procedural` stage.
+impl ReliefDetail for LearnedDiffusion {
+    fn detail(&self, input: &DetailInput, rng: &mut Rng) -> Vec<f32> {
+        self.detail_with(&self.procedural, input, rng)
+    }
+}
+
+/// The hook for one preset: a shared model with that preset's procedural stage.
+pub struct Relief<'a> {
+    pub learned: &'a LearnedDiffusion,
+    pub procedural: ProceduralDiffusion,
+}
+
+impl ReliefDetail for Relief<'_> {
+    fn detail(&self, input: &DetailInput, rng: &mut Rng) -> Vec<f32> {
+        self.learned.detail_with(&self.procedural, input, rng)
+    }
+}
+
+/// Generate a map with the learned relief when `learned` holds a model, and with plain
+/// `moc_terrain::generate` (exactly today's procedural relief) otherwise.
+pub fn generate(p: &moc_terrain::TerrainParams, learned: Option<&LearnedDiffusion>) -> moc_terrain::TerrainMap {
+    match learned {
+        Some(l) if l.is_learned() => moc_terrain::generate_with(p, &Relief { learned: l, procedural: ProceduralDiffusion::from_params(p) }),
+        _ => moc_terrain::generate(p),
     }
 }

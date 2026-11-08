@@ -1,9 +1,11 @@
 // Generates a World off the main thread so new planets never stall the game. With `vast`, the
 // World is a galaxy planet: its 640×360 surface (#68) and the 320×180 capital cut from it, all
 // generated in Rust (crates/moc-terrain via the engine wasm, #109).
-import { World, initTerrain } from '../world/terrain.js';
+import { World, initTerrain, useLearnedRelief } from '../world/terrain.js';
 
-const ready = initTerrain();
+// Worlds made here get the learned relief when the build ships weights (#110); otherwise the
+// procedural relief, exactly as before.
+const ready = initTerrain().then(() => useLearnedRelief());
 
 self.onmessage = async (e) => {
   const { id, seed, biome, vast, width, height } = e.data;

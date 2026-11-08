@@ -182,3 +182,17 @@ fn loads_exported_weights() {
     eprintln!("{path}: steps {}, home world in {:.0} ms", ld.opts.steps, t.elapsed().as_secs_f64() * 1e3);
     assert!(out.iter().all(|v| v.is_finite()));
 }
+
+#[test]
+fn without_a_model_generation_is_exactly_the_procedural_relief() {
+    // What the engine runs: no weights (or broken weights) must give today's maps, bit for bit.
+    for p in [moc_terrain::TerrainParams::home_world(7), moc_terrain::TerrainParams::galaxy_surface(7, "ice")] {
+        let want = moc_terrain::generate(&p);
+        let broken = LearnedDiffusion::from_bytes(b"not weights");
+        for got in [moc_diffusion::generate(&p, None), moc_diffusion::generate(&p, Some(&broken))] {
+            assert_eq!(got.heights, want.heights);
+            assert_eq!(got.types, want.types);
+            assert_eq!(got.rgba, want.rgba);
+        }
+    }
+}
