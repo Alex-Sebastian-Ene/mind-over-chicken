@@ -194,7 +194,7 @@ export class FarmingToKingdoms {
         const left = clamp(1 - this.pt / 4.4);
         ctx.fillStyle = '#b5543a'; ctx.fillRect(x0 + 16, y0 + 62, (w - 32) * left, 2);
       }
-      if (this.G.source.kind === 'sim' && !this.reveal) label(ctx, W / 2, y0 + h + 14, 'Emulated headset: hold F (or the Inspire tile) to concentrate', '#ffcf4a', 5);
+      if (this.G.source.kind === 'sim' && !this.reveal) label(ctx, W / 2, y0 + h + 14, 'Emulated headset: hold F to concentrate', '#ffcf4a', 5);
     }
     if (this.phase === 'done') {
       label(ctx, W / 2, 70, 'Writing. Law. Taxes.', '#f2e8d5', 12);
