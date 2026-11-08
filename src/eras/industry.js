@@ -54,7 +54,9 @@ export class Industry {
     this.tick = 0;
     this.crashCooldown = 0;
     this.recessions = 0;
-    this.headlines = ['GOAT EXCHANGE OPENS FOR BUSINESS', 'ANALYSTS: "GOATS ARE THE FUTURE"'];
+    // The goat market's headlines go on the game's one news ticker (#220), with the rivals' news.
+    const opening = ['GOAT EXCHANGE OPENS FOR BUSINESS', 'ANALYSTS: "GOATS ARE THE FUTURE"'];
+    this.headlines = G.news ? G.news.channel('market', opening, 'market') : opening;
     this.tickerX = W;
     this.generalStrike = 0;
     this.done = false;
@@ -504,7 +506,8 @@ export class Industry {
       ctx.fillText('fair val', x0 + cw - 3, yOf(this.value) - 1.5);
     }
 
-    // Ticker tape across the screen bottom
+    // Ticker tape across the screen bottom: main.js draws the shared one (src/ui/news.js).
+    if (G.news) return;
     ctx.fillStyle = 'rgba(14, 15, 26, 0.88)';
     ctx.fillRect(0, H - 8, W, 8);
     ctx.font = '5px "Pixelify Sans", monospace';
