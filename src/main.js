@@ -52,6 +52,7 @@ import { SimPlanet } from './ai/planet.js';
 import { AIGod } from './ai/autopilot.js';
 import { observe, decodeAction, scriptedAction, BOLT_COOLDOWN } from './ai/observe.js';
 import { loading } from './ui/loading.js'; // loading screen
+import { engineFailToShow } from './ui/fail.js';
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
 // mind read uses the same window.
@@ -442,6 +443,7 @@ function startScene(i) {
   hud.setScene(scene);
   document.body.dataset.era = scene.era;
   fade = 1;
+  G.failing = false;
   banner = null;
   $('banner').hidden = true;
   if (scene.intro) startIntro(scene, i);
@@ -470,6 +472,10 @@ function restartScene() {
   lookAtStage(scene);
   hud.setScene(scene);
   fade = 1;
+  // A fresh attempt: no fail pending, and no controls card left over from the fail screen (#172).
+  G.failing = false;
+  banner = null;
+  $('banner').hidden = true;
   if (scene.intro) startIntro(scene, i);
 }
 
@@ -590,6 +596,10 @@ function dismissBanner() {
 
 let failTimer = null;
 function showFail(reason) {
+  if (G) {
+    if (G.failing) return;   // one fail per run: the JS scene and the Rust era sim can both report it (#172)
+    G.failing = true;
+  }
   let heading = 'Collapse';
   let cause = 'The era has collapsed.';
   let nextStep = 'Try again with focused calm and steady aim.';
@@ -627,6 +637,8 @@ function showFail(reason) {
   $('failAdvice').textContent = nextStep;
   $('failScreen').hidden = false;
   $('biometricFeedbackAck').hidden = true;
+  const how = $('showHowBtn');
+  if (how) how.hidden = !G?.scene?.intro;   // no controls card to show for a scene without one (#172)
   updateAssistUI();
 
   audio.bad();
@@ -956,12 +968,9 @@ function frame(ts) {
       if (engine.is_game_era_complete?.() && !pendingScene && !G.finished && G.sceneIndex < SCENES.length - 1 && G.scene?.era !== 'space') {
         G.complete(1.5);
       }
-      if (engine.is_game_era_failed?.() && $('failScreen').hidden && !G.finished) {
-        const failReason = engine.is_game_era_failed();
-        if (failReason) {
-          showFail(failReason);
-        }
-      }
+      // Once per failed run, not whenever the fail screen is hidden (Controls hides it, #172).
+      const failReason = engineFailToShow(engine, G);
+      if (failReason) showFail(failReason);
     }
     if (intro.active) {
       intro.update(dt);   // the sim stays paused: the era starts exactly as enter() left it
