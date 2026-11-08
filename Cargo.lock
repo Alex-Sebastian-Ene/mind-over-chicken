@@ -253,6 +253,7 @@ name = "moc-civ"
 version = "0.1.0"
 dependencies = [
  "moc-planet",
+ "serde_json",
 ]
 
 [[package]]
@@ -269,9 +270,6 @@ version = "0.1.0"
 [[package]]
 name = "moc-terrain"
 version = "0.1.0"
-dependencies = [
- "moc-planet",
-]
 
 [[package]]
 name = "pin-project-lite"

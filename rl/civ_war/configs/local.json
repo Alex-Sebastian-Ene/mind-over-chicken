@@ -1,0 +1,15 @@
+{
+  "name": "local",
+  "comment": "~65 min of training on an 8-core desktop: the curriculum to 8 civs on the default 1280x640 planet, then the commander.",
+  "n_procs": 7,
+  "torch_threads": 1,
+  "net": [64, 64],
+  "ppo": {"lr": 0.0003, "batch_size": 512, "n_epochs": 6, "gamma": 0.99, "gae_lambda": 0.95, "ent_coef": 0.01, "clip_range": 0.2, "rollout": 3584},
+  "league": {"every_minutes": 4, "max_size": 8},
+  "stages": [
+    {"name": "c1_duel_small", "mode": "council", "n_civs": 2, "size": [640, 320], "learners": 1, "minutes": 12, "max_seconds": 700, "warmup": [150, 400], "p_rules": 0.4},
+    {"name": "c2_four", "mode": "council", "n_civs": 4, "size": [1280, 640], "learners": 2, "minutes": 20, "max_seconds": 900, "warmup": [200, 450], "p_rules": 0.35},
+    {"name": "c3_eight", "mode": "council", "n_civs": 8, "size": [1280, 640], "learners": 4, "minutes": 12, "max_seconds": 900, "warmup": [200, 450], "p_rules": 0.3},
+    {"name": "k1_commander", "mode": "commander", "n_civs": 4, "size": [1280, 640], "minutes": 16, "max_seconds": 900, "warmup": [250, 450], "p_rules": 0.0}
+  ]
+}

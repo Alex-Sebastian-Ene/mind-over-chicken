@@ -1,0 +1,13 @@
+{
+  "name": "smoke",
+  "comment": "A one-minute check that every stage kind runs end to end.",
+  "n_procs": 2,
+  "torch_threads": 1,
+  "net": [64, 64],
+  "ppo": {"lr": 0.0003, "batch_size": 64, "n_epochs": 2, "gamma": 0.99, "gae_lambda": 0.95, "ent_coef": 0.01, "clip_range": 0.2, "rollout": 128},
+  "league": {"every_minutes": 0.25, "max_size": 4},
+  "stages": [
+    {"name": "c1", "mode": "council", "n_civs": 2, "size": [640, 320], "learners": 1, "minutes": 0.5, "max_seconds": 120, "warmup": [150, 200], "p_rules": 0.4},
+    {"name": "k1", "mode": "commander", "n_civs": 4, "size": [640, 320], "minutes": 0.5, "max_seconds": 300, "warmup": [250, 300], "p_rules": 0.0}
+  ]
+}
