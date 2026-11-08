@@ -194,6 +194,22 @@ impl Engine {
         self.camera_3d.pitch
     }
 
+    pub fn set_camera_distance(&mut self, distance: f32) {
+        self.camera_3d.set_distance(distance);
+    }
+
+    pub fn set_camera_pitch(&mut self, pitch: f32) {
+        self.camera_3d.set_pitch(pitch);
+    }
+
+    pub fn set_camera_yaw(&mut self, yaw: f32) {
+        self.camera_3d.set_yaw(yaw);
+    }
+
+    pub fn set_camera_pose(&mut self, yaw: f32, pitch: f32, distance: f32) {
+        self.camera_3d.set_pose(yaw, pitch, distance);
+    }
+
     // Unproject screen coordinates to 3D terrain surface for click aiming & lightning
     pub fn screen_to_ground(&self, sx: f32, sy: f32, cw: f32, ch: f32) -> js_sys::Float32Array {
         let result = js_sys::Float32Array::new_with_length(2);
@@ -846,6 +862,27 @@ impl Engine {
             canvas_h,
         );
         self.lights.clear();
+    }
+
+    /// Blit an overlay canvas on top of the rendered 3D scene with alpha blending.
+    pub fn render_overlay_canvas(
+        &mut self,
+        canvas: &web_sys::HtmlCanvasElement,
+        alpha: f32,
+        canvas_w: i32,
+        canvas_h: i32,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        if alpha <= 0.001 {
+            return Ok(());
+        }
+        self.renderer.upload_canvas(canvas)?;
+        self.renderer.render_overlay_texture(
+            &self.renderer.texture,
+            alpha,
+            canvas_w,
+            canvas_h,
+        );
+        Ok(())
     }
 
     pub fn is_walkable(&self, x: i32, y: i32) -> bool {

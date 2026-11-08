@@ -25,6 +25,7 @@ pub struct WebGlRenderer {
     pub u_flip_y: WebGlUniformLocation,
     pub u_light_count: WebGlUniformLocation,
     pub u_lights: WebGlUniformLocation,
+    pub u_opacity: Option<WebGlUniformLocation>,
 }
 
 const VERTEX_SHADER_SRC: &str = r#"
@@ -50,6 +51,7 @@ uniform sampler2D u_texture;
 uniform float u_night;
 uniform float u_flash;
 uniform float u_fade;
+uniform float u_opacity;
 uniform int u_light_count;
 uniform vec4 u_lights[16];
 
@@ -90,7 +92,8 @@ void main() {
     litColor += vec3(u_flash * 0.9);
     litColor = mix(litColor, vec3(0.02, 0.02, 0.06), u_fade);
 
-    gl_FragColor = vec4(clamp(litColor, 0.0, 1.0), texColor.a);
+    float op = u_opacity > 0.001 ? u_opacity : 1.0;
+    gl_FragColor = vec4(clamp(litColor, 0.0, 1.0), texColor.a * op);
 }
 "#;
 
@@ -186,6 +189,7 @@ impl WebGlRenderer {
         let u_flip_y = gl.get_uniform_location(&program, "u_flipY").ok_or("u_flipY uniform missing")?;
         let u_light_count = gl.get_uniform_location(&program, "u_light_count").ok_or("u_light_count missing")?;
         let u_lights = gl.get_uniform_location(&program, "u_lights").ok_or("u_lights missing")?;
+        let u_opacity = gl.get_uniform_location(&program, "u_opacity");
 
         Ok(Self {
             gl,
@@ -201,6 +205,7 @@ impl WebGlRenderer {
             u_flip_y,
             u_light_count,
             u_lights,
+            u_opacity,
         })
     }
 
@@ -295,6 +300,9 @@ impl WebGlRenderer {
         self.gl.uniform1f(Some(&self.u_fade), fade);
         self.gl.uniform2f(Some(&self.u_shake), shake_x, shake_y);
         self.gl.uniform1f(Some(&self.u_flip_y), if flip_y { 1.0 } else { 0.0 });
+        if let Some(u_op) = &self.u_opacity {
+            self.gl.uniform1f(Some(u_op), 1.0);
+        }
 
         let count = lights.len().min(16);
         self.gl.uniform1i(Some(&self.u_light_count), count as i32);
@@ -319,6 +327,58 @@ impl WebGlRenderer {
         self.gl.active_texture(WebGlRenderingContext::TEXTURE0);
         self.gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(texture));
         self.gl.draw_arrays(WebGlRenderingContext::TRIANGLES, 0, 6);
+    }
+
+    /// Blit an overlay texture on top of the rendered scene with alpha blending.
+    pub fn render_overlay_texture(
+        &self,
+        texture: &WebGlTexture,
+        alpha: f32,
+        canvas_w: i32,
+        canvas_h: i32,
+    ) {
+        if alpha <= 0.001 {
+            return;
+        }
+
+        let scale_x = canvas_w / 320;
+        let scale_y = canvas_h / 180;
+        let scale = scale_x.min(scale_y).max(1);
+        let vp_w = 320 * scale;
+        let vp_h = 180 * scale;
+        let vp_x = (canvas_w - vp_w) / 2;
+        let vp_y = (canvas_h - vp_h) / 2;
+
+        self.gl.viewport(vp_x, vp_y, vp_w, vp_h);
+
+        self.gl.enable(WebGlRenderingContext::BLEND);
+        self.gl.blend_func(
+            WebGlRenderingContext::SRC_ALPHA,
+            WebGlRenderingContext::ONE_MINUS_SRC_ALPHA,
+        );
+
+        self.gl.use_program(Some(&self.program));
+        self.gl.uniform1f(Some(&self.u_night), 0.0);
+        self.gl.uniform1f(Some(&self.u_flash), 0.0);
+        self.gl.uniform1f(Some(&self.u_fade), 0.0);
+        self.gl.uniform2f(Some(&self.u_shake), 0.0, 0.0);
+        self.gl.uniform1f(Some(&self.u_flip_y), 0.0);
+        if let Some(u_op) = &self.u_opacity {
+            self.gl.uniform1f(Some(u_op), alpha);
+        }
+        self.gl.uniform1i(Some(&self.u_light_count), 0);
+
+        self.gl.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&self._vertex_buffer));
+        self.gl.enable_vertex_attrib_array(self.a_position);
+        self.gl.vertex_attrib_pointer_with_i32(self.a_position, 2, WebGlRenderingContext::FLOAT, false, 4 * 4, 0);
+        self.gl.enable_vertex_attrib_array(self.a_tex_coord);
+        self.gl.vertex_attrib_pointer_with_i32(self.a_tex_coord, 2, WebGlRenderingContext::FLOAT, false, 4 * 4, 2 * 4);
+
+        self.gl.active_texture(WebGlRenderingContext::TEXTURE0);
+        self.gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(texture));
+        self.gl.draw_arrays(WebGlRenderingContext::TRIANGLES, 0, 6);
+
+        self.gl.disable(WebGlRenderingContext::BLEND);
     }
 }
 
