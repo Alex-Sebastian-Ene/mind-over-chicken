@@ -1110,7 +1110,26 @@ impl Engine {
         self.advisor.update(dt);
         self.hud.update_clock(self.game.stats.runtime);
         self.hud.update_meters(calm, None, focus, None, stress, blinks);
-        self.hud.update_objectives(&self.game.era.objectives());
+        self.hud.update_objectives(&self.game.objectives());
+    }
+
+    /// Mirror the JS scene on screen into the HUD (#191): its objectives (`flags` bit 1 done,
+    /// 2 bad, 4 plain) and run time. The Rust era sim then stands still and raises nothing of its
+    /// own; see GameFlow::mirrored. Called by src/main.js every frame, before game_tick.
+    pub fn game_mirror(
+        &mut self,
+        run_time: f32,
+        labels: Vec<String>,
+        values: Vec<String>,
+        flags: Vec<u8>,
+    ) {
+        self.game
+            .mirror(run_time, eras::objectives_from_rows(labels, values, &flags));
+    }
+
+    /// Back to the Rust era sim driving the HUD (the all-Rust app never mirrors).
+    pub fn game_unmirror(&mut self) {
+        self.game.unmirror();
     }
 
     pub fn game_on_blink(&mut self, aim_x: f32, aim_y: f32) {
@@ -1197,7 +1216,7 @@ impl Engine {
     }
 
     pub fn is_game_failed(&self) -> Option<String> {
-        self.game.era.is_failed()
+        self.game.era_failed()
     }
 
     pub fn get_game_runtime(&self) -> f32 {
@@ -1233,11 +1252,11 @@ impl Engine {
     }
 
     pub fn is_game_era_complete(&self) -> bool {
-        self.game.era.is_complete()
+        self.game.era_complete()
     }
 
     pub fn is_game_era_failed(&self) -> Option<String> {
-        self.game.era.is_failed()
+        self.game.era_failed()
     }
 }
 

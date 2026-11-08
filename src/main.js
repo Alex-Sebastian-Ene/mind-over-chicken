@@ -55,6 +55,7 @@ import { loading } from './ui/loading.js'; // loading screen
 import { engineFailToShow } from './ui/fail.js';
 import { frameLoop } from './ui/loop.js';
 import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
+import { mirrorHud } from './ui/hud-mirror.js';
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
 // mind read uses the same window.
@@ -965,10 +966,15 @@ function frame(ts) {
   lastTs = ts;
   if (G) {
     G.brain.update(dt, G.mood);   // the camera's face anger counts toward brain.stress
-    // The scene's Rust era sim ticks only in a playable era, and not during its intro (#194).
-    if (engine && rustEraTicks(G.scene, intro.active)) {
+    // The Rust shell draws the WebGL HUD (objectives, clock, meters, advisor text) in game_tick.
+    // It shows the JS scene on screen (#191): mirrorHud hands over its objectives and clock, and
+    // the Rust era sim stands still, so it runs every frame, time skips and intros included.
+    // Without the mirror (an old pkg/), the Rust era sim ticks only in a playable era (#194).
+    const mirrored = engine && mirrorHud(engine, G.runTime, cosmos.hudScene(G, galaxyHudScene));
+    if (engine && (mirrored || rustEraTicks(G.scene, intro.active))) {
       const b = G.brain;
       engine.game_tick(dt, b.calm || 0, b.focus || 0, b.stress ?? 0, b.stats?.blinks || 0);
+      // Under the mirror these never fire: the JS scene calls G.complete / G.fail itself.
       if (engine.is_game_era_complete?.() && !pendingScene && !G.finished && G.sceneIndex < SCENES.length - 1 && G.scene?.era !== 'space') {
         G.complete(1.5);
       }
