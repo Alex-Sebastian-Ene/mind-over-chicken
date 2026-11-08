@@ -1,4 +1,4 @@
-// camera (#33): loads Google's MediaPipe Tasks (Gesture Recognizer + Face Landmarker) on demand.
+// camera (#33, #327): loads Google's MediaPipe Tasks (Hand Landmarker + Face Landmarker) on demand.
 //
 // Only downloads happen here: the runtime from jsDelivr (pinned version) and two model files
 // from Google's model bucket. Inference runs in this tab (WebGL, or WebAssembly on the CPU);
@@ -13,12 +13,12 @@ const CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VERSION}`;
 export const VISION_URLS = {
   bundle: `${CDN}/vision_bundle.mjs`,
   wasm: `${CDN}/wasm`,
-  gesture: 'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task',
+  gesture: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
   face: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
 };
 
 export const OPTIONS = {
-  gesture: { baseOptions: { modelAssetPath: VISION_URLS.gesture }, runningMode: 'VIDEO', numHands: 2 },
+  gesture: { baseOptions: { modelAssetPath: VISION_URLS.gesture }, runningMode: 'VIDEO', numHands: 2, minHandDetectionConfidence: 0.4, minHandPresenceConfidence: 0.4, minTrackingConfidence: 0.4 },
   face: { baseOptions: { modelAssetPath: VISION_URLS.face }, runningMode: 'VIDEO', numFaces: 1, outputFaceBlendshapes: true },
 };
 
@@ -59,7 +59,7 @@ async function load(onStatus, hands) {
   if (hands) {
     onStatus('Loading the hand model…');
     let t = performance.now();
-    gesture = await create(mp.GestureRecognizer, fileset, OPTIONS.gesture);
+    gesture = await create(mp.HandLandmarker, fileset, OPTIONS.gesture);
     timings.gesture = Math.round(performance.now() - t);
   } else {
     timings.gesture = 0;
@@ -80,7 +80,7 @@ async function load(onStatus, hands) {
     async rebuildOnCpu(name) {
       try { vision[name]?.close?.(); } catch {}
       if (!vision[name]) return null;
-      const Task = name === 'gesture' ? mp.GestureRecognizer : mp.FaceLandmarker;
+      const Task = name === 'gesture' ? mp.HandLandmarker : mp.FaceLandmarker;
       vision[name] = await Task.createFromOptions(fileset, withDelegate(OPTIONS[name], 'CPU'));
       vision.delegates[name] = 'CPU';
       return vision[name];

@@ -12,6 +12,7 @@ import { drawPerson, drawChicken, drawRocket, drawGantry, drawReticle } from '..
 import { FireballFX } from '../render/fireball.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
+import { eraTuning } from '../game/options.js'; // difficulty (#220)
 
 const ENGINEERS = 10;
 const CITIZENS = 28;
@@ -99,7 +100,7 @@ export class SpaceAge {
               floater(this.particles, e.x, e.y - 8, 'dropped it', '#ff8a9c', 5);
               G.advisor.say('drop', pick(['Someone dropped the fuel valve. I will not say who. It was because of your stress.', 'Another wrench in the ocean. The engineers can feel your stress, my lord.']), { mood: 'panic', priority: 2, cooldown: 10 });
             } else if (this.progress < 1) {
-              this.progress = Math.min(1, this.progress + 0.03);
+              this.progress = Math.min(1, this.progress + 0.03 / eraTuning(G).launchNeeds);
               G.audio.tick();
             }
             e.carry = null; e.state = 'load'; e.timer = rand(0.2, 0.8);
