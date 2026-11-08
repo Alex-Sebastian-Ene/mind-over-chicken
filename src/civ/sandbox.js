@@ -366,9 +366,100 @@ export class CivSandbox {
     this.mood = mood;
   }
 
+  onWheel(delta) {
+    this.zoom = clamp((this.zoom || 1.0) * (delta > 0 ? 0.9 : 1.11), 0.6, 2.5);
+  }
+
   // A drag from main.js (world units, both axes): the content follows the pointer, so the camera
   // moves the other way. This planet is far bigger than the view, so north–south matters here.
-  panBy(dx, dy) { this.civ?.pan(-dx, -dy); }
+  panBy(dx, dy) {
+    const z = this.zoom || 1.0;
+    this.civ?.pan(-dx / z, -dy / z);
+  }
+
+  centerColumn() { return W / 2; }
+
+  getVisibleHeightmap() {
+    const civ = this.civ;
+    if (!civ) return null;
+    const view = civ.render();
+    if (!view || !view.data) return null;
+    const data = view.data;
+    if (!this._heightmap || this._heightmap.length !== W * H) {
+      this._heightmap = new Float32Array(W * H);
+      this._smoothHeight = new Float32Array(W * H);
+    }
+    const h = this._heightmap;
+
+    for (let i = 0, p = 0; i < W * H; i++, p += 4) {
+      const r = data[p], g = data[p + 1], b = data[p + 2];
+      // Water
+      if (b > r + 15 && b > 70) {
+        h[i] = b > 140 ? 0.27 : 0.18;
+      } else if (r > 200 && g > 200 && b > 200) {
+        // Snow / ice
+        h[i] = 0.88;
+      } else if (r > 100 && g > 95 && b > 85 && Math.abs(r - g) < 18) {
+        // Mountain
+        h[i] = 0.78;
+      } else if (r > 110 && g > 105 && b < 100) {
+        // Hills
+        h[i] = 0.62;
+      } else if (g > r && g > b) {
+        // Plains / forest
+        h[i] = g > 120 ? 0.42 : 0.48;
+      } else if (r > 170 && g > 150 && b < 160) {
+        // Sand / beach
+        h[i] = 0.35;
+      } else {
+        // Settlement / structure / road
+        h[i] = 0.42;
+      }
+    }
+
+    // 1-pass fast smoothing box blur for rolling terrain
+    const s = this._smoothHeight;
+    for (let y = 0; y < H; y++) {
+      const y0 = Math.max(0, y - 1) * W;
+      const y1 = y * W;
+      const y2 = Math.min(H - 1, y + 1) * W;
+      for (let x = 0; x < W; x++) {
+        const x0 = Math.max(0, x - 1);
+        const x1 = x;
+        const x2 = Math.min(W - 1, x + 1);
+        s[y1 + x1] = (h[y0 + x0] + h[y0 + x1] + h[y0 + x2] +
+                      h[y1 + x0] + h[y1 + x1] + h[y1 + x2] +
+                      h[y2 + x0] + h[y2 + x1] + h[y2 + x2]) * 0.111111;
+      }
+    }
+    return s;
+  }
+
+  lights() {
+    const L = [];
+    for (const bolt of this.bolts) {
+      const s = this.civ?.toScreen(bolt.x, bolt.y);
+      if (s) L.push({ x: s.x, y: s.y, r: 60 * Math.min(1, bolt.life * 4) });
+    }
+    return L;
+  }
+
+  draw3d(engine, _dt) {
+    if (!engine) return;
+    for (const bolt of this.bolts) {
+      const s = this.civ?.toScreen(bolt.x, bolt.y);
+      if (s && s.x >= -20 && s.x <= W + 20 && s.y >= -20 && s.y <= H + 20) {
+        engine.add_3d_light(s.x, 12.0, s.y, 60.0 * Math.min(1, bolt.life * 4), 2.5);
+      }
+    }
+    for (const f of this.factions) {
+      if (!f.alive || !f.capital) continue;
+      const s = this.civ?.toScreen(f.capital.x + 0.5, f.capital.y);
+      if (s && s.x >= 0 && s.x <= W && s.y >= 0 && s.y <= H) {
+        engine.add_3d_light(s.x, 9.0, s.y, 20.0, 1.2);
+      }
+    }
+  }
 
   // ---------- drawing ----------
   draw(ctx) {
@@ -387,7 +478,21 @@ export class CivSandbox {
       return;
     }
     const t0 = performance.now();
-    ctx.putImageData(civ.render(), 0, 0);
+    if (!this.viewCanvas) {
+      this.viewCanvas = Object.assign(document.createElement('canvas'), { width: W, height: H });
+    }
+    this.viewCanvas.getContext('2d').putImageData(civ.render(), 0, 0);
+    const z = this.zoom || 1.0;
+    if (Math.abs(z - 1.0) < 0.01) {
+      ctx.drawImage(this.viewCanvas, 0, 0);
+    } else {
+      ctx.save();
+      ctx.translate(W / 2, H / 2);
+      ctx.scale(z, z);
+      ctx.translate(-W / 2, -H / 2);
+      ctx.drawImage(this.viewCanvas, 0, 0);
+      ctx.restore();
+    }
     const ms = performance.now() - t0;
     this.perf.renderMs = ms;
     this.perf.sumRender += ms;
