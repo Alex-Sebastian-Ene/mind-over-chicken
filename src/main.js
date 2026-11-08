@@ -229,7 +229,8 @@ cosmos.setViewCamera(viewCam);
 // A scene with its own camera (the civ sandbox's planet) takes every pan: drag, keys, wheel.
 cosmos.panSink = (dx, dy) => { if (G?.scene?.panBy) { G.scene.panBy(dx, dy); return true; } return false; };
 // What the HUD shows while you look at the galaxy.
-const galaxyHudScene = { label: 'Galaxy', powers: ['calm', 'focus', 'stress'], objectives: () => cosmos.galaxy?.objectives() || [] };
+// Blinks raise storms on the galaxy's blink world, so Lightning is a power there too (#178).
+const galaxyHudScene = { label: 'Galaxy', powers: ['blink', 'calm', 'focus', 'stress'], objectives: () => cosmos.galaxy?.objectives() || [] };
 let hudScene = null;
 let G = null;
 let previewSource = null;
@@ -1410,6 +1411,7 @@ document.querySelectorAll('[data-power]').forEach((tile) => {
   const map = { calm: 'calm', focus: 'focus', stress: 'panic' };
   tile.addEventListener('pointerdown', (e) => {
     audio.unlock();
+    if (tile.disabled) return;   // not a power in this era (#178)
     const s = sim(); if (!s) return;
     if (power === 'blink') { s.blink(); return; }
     s.input[map[power]] = true;
