@@ -11,6 +11,12 @@ use crate::planet_sim::{
 use crate::war::{BodyFx, Mind, Mission, SpaceWar, WorldStats};
 
 pub const MAX_PLANETS: usize = 7;
+/// Floats per planet in the contiguous metrics buffer (#216):
+/// `[pop, era_index, progress, market, storms, alive, forming, pos_x, pos_y]`.
+pub const PLANET_METRIC_STRIDE: usize = 9;
+/// Floats per ship in the contiguous metrics buffer (#216):
+/// `[from_planet, to_planet, progress (0..1), duration]`.
+pub const SHIP_METRIC_STRIDE: usize = 4;
 pub const STAR_X: f32 = 132.0;
 pub const STAR_Y: f32 = 92.0;
 pub const ORBIT_FIRST: f32 = 34.0;
@@ -407,5 +413,49 @@ impl Galaxy {
             }
         }
         events
+    }
+
+    /// Packed numeric state of one planet, in `PLANET_METRIC_STRIDE` floats (#216).
+    pub fn planet_metrics(&self, idx: usize) -> Option<[f32; PLANET_METRIC_STRIDE]> {
+        let p = self.planets.get(idx)?;
+        let (px, py, _) = p.position(self.time);
+        Some([
+            p.state.pop,
+            p.state.era_index as f32,
+            p.state.progress,
+            p.state.market,
+            p.state.storms as f32,
+            if p.alive { 1.0 } else { 0.0 },
+            if p.forming { 1.0 } else { 0.0 },
+            px,
+            py,
+        ])
+    }
+
+    /// Write every planet's `planet_metrics` into one contiguous buffer (#216). The buffer is
+    /// reused (`clear` + `extend`) so its allocation, and any JS view over it, stays stable.
+    pub fn fill_planet_metrics(&self, out: &mut Vec<f32>) {
+        out.clear();
+        out.reserve(self.planets.len() * PLANET_METRIC_STRIDE);
+        for i in 0..self.planets.len() {
+            if let Some(m) = self.planet_metrics(i) {
+                out.extend_from_slice(&m);
+            }
+        }
+    }
+
+    /// Write every colony ship's `[from, to, progress, duration]` into one contiguous buffer
+    /// (#216). `progress` is normalised 0..1 like the `ship_t` getter.
+    pub fn fill_ship_metrics(&self, out: &mut Vec<f32>) {
+        out.clear();
+        out.reserve(self.ships.len() * SHIP_METRIC_STRIDE);
+        for s in &self.ships {
+            out.extend_from_slice(&[
+                s.from_planet as f32,
+                s.to_planet as f32,
+                s.t / s.duration.max(0.001),
+                s.duration,
+            ]);
+        }
     }
 }

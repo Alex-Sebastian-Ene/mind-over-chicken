@@ -1941,6 +1941,30 @@ export class RustGalaxy {
         return ret;
     }
     /**
+     * Floats per planet in the packed buffer (#216).
+     * @returns {number}
+     */
+    planet_stride() {
+        const ret = wasm.rustgalaxy_planet_stride(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Length in `f32`s of the packed planet buffer (#216).
+     * @returns {number}
+     */
+    planets_len() {
+        const ret = wasm.rustgalaxy_planets_len(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Byte offset (in wasm linear memory) of the packed planet buffer (#216).
+     * @returns {number}
+     */
+    planets_ptr() {
+        const ret = wasm.rustgalaxy_planets_ptr(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * @param {number} planet_idx
      */
     set_attended(planet_idx) {
@@ -1962,6 +1986,14 @@ export class RustGalaxy {
         return ret >>> 0;
     }
     /**
+     * Floats per ship in the packed buffer (#216).
+     * @returns {number}
+     */
+    ship_stride() {
+        const ret = wasm.rustgalaxy_ship_stride(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * @param {number} idx
      * @returns {number}
      */
@@ -1975,6 +2007,22 @@ export class RustGalaxy {
      */
     ship_to(idx) {
         const ret = wasm.rustgalaxy_ship_to(this.__wbg_ptr, idx);
+        return ret >>> 0;
+    }
+    /**
+     * Length in `f32`s of the packed ship buffer (#216).
+     * @returns {number}
+     */
+    ships_len() {
+        const ret = wasm.rustgalaxy_ships_len(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Byte offset (in wasm linear memory) of the packed ship buffer (#216).
+     * @returns {number}
+     */
+    ships_ptr() {
+        const ret = wasm.rustgalaxy_ships_ptr(this.__wbg_ptr);
         return ret >>> 0;
     }
     /**
@@ -3042,6 +3090,16 @@ export class ViewCamera {
 if (Symbol.dispose) ViewCamera.prototype[Symbol.dispose] = ViewCamera.prototype.free;
 
 /**
+ * The engine's WebAssembly memory (#216). JS keeps one `Float32Array` view over it and reads
+ * the galaxy's packed planet/ship buffers without per-entity getter calls.
+ * @returns {WebAssembly.Memory}
+ */
+export function engine_memory() {
+    const ret = wasm.engine_memory();
+    return ret;
+}
+
+/**
  * The era's land use (farms, roads, paving: tiles whose type differs from the base type)
  * painted over the base colour layer, in a planet biome's colours.
  * @param {Uint8Array | number[]} base
@@ -3145,6 +3203,10 @@ function __wbg_get_imports() {
         },
         __wbg___wbindgen_is_undefined_be5b34249ff1fc15: function(arg0) {
             const ret = arg0 === undefined;
+            return ret;
+        },
+        __wbg___wbindgen_memory_17a1178bc3328ea3: function() {
+            const ret = wasm.memory;
             return ret;
         },
         __wbg___wbindgen_string_get_7ce8eee7fd327545: function(arg0, arg1) {
@@ -3676,22 +3738,22 @@ function __wbg_get_imports() {
         },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [F64], shim_idx: 58, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_);
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 54, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_);
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000003: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("PointerEvent")], shim_idx: 54, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__307);
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__314);
             return ret;
         },
         __wbindgen_generic_0000000000000004: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 54, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__308);
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__315);
             return ret;
         },
         __wbindgen_generic_0000000000000005: function(arg0) {
@@ -3730,20 +3792,20 @@ function __wbg_get_imports() {
 }
 
 const lAudioContext = (typeof AudioContext !== 'undefined' ? AudioContext : (typeof webkitAudioContext !== 'undefined' ? webkitAudioContext : undefined));
-function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_(arg0, arg1, arg2);
+function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_(arg0, arg1, arg2);
 }
 
-function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__307(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__307(arg0, arg1, arg2);
+function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__314(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__314(arg0, arg1, arg2);
 }
 
-function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__308(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__308(arg0, arg1, arg2);
+function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__315(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__315(arg0, arg1, arg2);
 }
 
-function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_(arg0, arg1, arg2);
+function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_(arg0, arg1, arg2);
 }
 
 

@@ -55,9 +55,17 @@ export const CHANNELS = {
 };
 
 let RustGalaxyClass = null;
+let wasmMemory = null;
 
-export function setRustGalaxy(cls) {
+// #216: the Rust galaxy packs its planets into one contiguous float buffer. JS reads it through a
+// single cached Float32Array view over wasm memory instead of four boundary calls per planet.
+// Kept in sync with `PLANET_METRIC_STRIDE` in crates/moc-cosmos/src/galaxy.rs.
+const PLANET_STRIDE = 9;   // [pop, era, progress, market, storms, alive, forming, x, y]
+const SHIP_STRIDE = 4;     // [from, to, progress, duration]
+
+export function setRustGalaxy(cls, memory) {
   RustGalaxyClass = cls;
+  wasmMemory = memory || null;
 }
 
 export function fmtPop(n) {
@@ -77,6 +85,8 @@ export class Galaxy {
     }
     this.planets = [];
     this.ships = [];
+    this.planetView = null;   // cached Float32Array over the Rust planet buffer (#216)
+    this.shipView = null;     // cached Float32Array over the Rust ship buffer (#216)
     this.log = [];
     this.time = 0;
     this.usedNames = new Set();
@@ -92,6 +102,39 @@ export class Galaxy {
     this.onEvent = null;   // (planet, text, kind) → main.js forwards to the advisor
     // #166: fleets, raids, bombardments and invasions between space-capable worlds (Rust).
     this.war = this.wasm?.war_sync ? new SpaceWarView(this, this.wasm) : null;
+  }
+
+  // #216: one zero-copy view over the Rust galaxy's packed planet buffer. The view is reused
+  // across frames and only rebuilt when wasm memory grows (which detaches the old ArrayBuffer)
+  // or the planet count changes. Returns null when there is no wasm or no memory handle, and
+  // callers fall back to the per-entity getters.
+  wasmPlanets() {
+    const w = this.wasm;
+    if (!w || !wasmMemory) return null;
+    const len = w.planets_len();
+    const ptr = w.planets_ptr();
+    if (!ptr || !len) return null;
+    const buffer = wasmMemory().buffer;
+    const view = this.planetView;
+    if (!view || view.buffer !== buffer || view.length !== len) {
+      this.planetView = new Float32Array(buffer, ptr, len);
+    }
+    return this.planetView;
+  }
+
+  // #216: the same zero-copy treatment for the Rust colony-ship buffer.
+  wasmShips() {
+    const w = this.wasm;
+    if (!w || !wasmMemory || typeof w.ships_len !== 'function') return null;
+    const len = w.ships_len();
+    const ptr = w.ships_ptr();
+    if (!ptr || !len) return null;
+    const buffer = wasmMemory().buffer;
+    const view = this.shipView;
+    if (!view || view.buffer !== buffer || view.length !== len) {
+      this.shipView = new Float32Array(buffer, ptr, len);
+    }
+    return this.shipView;
   }
 
   addHome(world, { autonomous = false } = {}) {
@@ -351,25 +394,42 @@ export class Galaxy {
       const attIdx = this.attended ? this.planets.indexOf(this.attended) : -1;
       this.wasm.set_attended(attIdx);
       const count = this.wasm.planet_count();
+      const metrics = this.wasmPlanets();
       for (let i = 0; i < count && i < this.planets.length; i++) {
         const p = this.planets[i];
-        if (p.mindSlot && p.forming && !p.formPending && !this.wasm.planet_is_forming(i)) {
-          p.forming = false;
-          p.alive = true;
-          p.name = this.wasm.planet_name(i);
-          p.channel = this.wasm.planet_channel(i);
-          p.biome = this.wasm.planet_biome(i);
-          this.note(p, `A new world emerged from your ${p.channel}: behold ${p.name}!`);
+        const o = i * PLANET_STRIDE;
+        if (p.mindSlot && p.forming && !p.formPending) {
+          const forming = metrics ? metrics[o + 6] !== 0 : this.wasm.planet_is_forming(i);
+          if (!forming) {
+            p.forming = false;
+            p.alive = true;
+            p.name = this.wasm.planet_name(i);
+            p.channel = this.wasm.planet_channel(i);
+            p.biome = this.wasm.planet_biome(i);
+            this.note(p, `A new world emerged from your ${p.channel}: behold ${p.name}!`);
+          }
         }
-        if (!p.home) {
-          // A colony ship from the Rust sim settled an empty world: wake it here too (#196).
-          if (!p.alive && !p.forming && typeof this.wasm.planet_is_alive === 'function' && this.wasm.planet_is_alive(i)) {
+        if (p.home) continue;
+        // A colony ship from the Rust sim settled an empty world: wake it here too (#196).
+        if (!p.alive && !p.forming) {
+          const alive = metrics
+            ? metrics[o + 5] !== 0
+            : (typeof this.wasm.planet_is_alive === 'function' && this.wasm.planet_is_alive(i));
+          if (alive) {
             p.alive = true;
             p.surface?.ensureTribe();
             p.labels.push({ text: 'settled!', t: 3.5, color: '#9be38a' });
             this.note(p, `Settlers landed on ${p.name}.`);
             this.onEvent?.(p, 'settled', 'settled');
           }
+        }
+        if (metrics) {
+          // #216: contiguous read, no wasm calls per field.
+          p.pop = metrics[o];
+          p.eraIndex = metrics[o + 1];
+          p.progress = metrics[o + 2];
+          p.market = metrics[o + 3];
+        } else {
           p.pop = this.wasm.planet_pop(i);
           p.eraIndex = this.wasm.planet_era(i);
           p.progress = this.wasm.planet_progress(i);
@@ -377,22 +437,27 @@ export class Galaxy {
         }
       }
 
-      // Synchronize colony ships from Rust simulation
-      if (typeof this.wasm.ship_count === 'function') {
-        const sc = this.wasm.ship_count();
+      // Synchronize colony ships from the Rust simulation (#196) through its packed buffer (#216).
+      const shipData = this.wasmShips();
+      if (shipData || typeof this.wasm.ship_count === 'function') {
         this.ships = [];
-        for (let i = 0; i < sc; i++) {
-          const fromIdx = this.wasm.ship_from(i);
-          const toIdx = this.wasm.ship_to(i);
-          const t = this.wasm.ship_t(i);
-          if (fromIdx < this.planets.length && toIdx < this.planets.length) {
-            this.ships.push({
-              from: this.planets[fromIdx],
-              to: this.planets[toIdx],
-              t,
-              dur: 1,
-              bend: 0.1,
-            });
+        if (shipData) {
+          for (let i = 0; i + SHIP_STRIDE <= shipData.length; i += SHIP_STRIDE) {
+            const fromIdx = shipData[i] | 0;
+            const toIdx = shipData[i + 1] | 0;
+            if (fromIdx < this.planets.length && toIdx < this.planets.length) {
+              this.ships.push({ from: this.planets[fromIdx], to: this.planets[toIdx], t: shipData[i + 2], dur: 1, bend: 0.1 });
+            }
+          }
+        } else {
+          const sc = this.wasm.ship_count();
+          for (let i = 0; i < sc; i++) {
+            const fromIdx = this.wasm.ship_from(i);
+            const toIdx = this.wasm.ship_to(i);
+            const t = this.wasm.ship_t(i);
+            if (fromIdx < this.planets.length && toIdx < this.planets.length) {
+              this.ships.push({ from: this.planets[fromIdx], to: this.planets[toIdx], t, dur: 1, bend: 0.1 });
+            }
           }
         }
       }

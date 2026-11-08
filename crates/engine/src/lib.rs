@@ -1767,10 +1767,22 @@ impl RustEmotionTracker {
     }
 }
 
+/// The engine's WebAssembly memory (#216). JS keeps one `Float32Array` view over it and reads
+/// the galaxy's packed planet/ship buffers without per-entity getter calls.
+#[wasm_bindgen]
+pub fn engine_memory() -> js_sys::WebAssembly::Memory {
+    wasm_bindgen::memory().unchecked_into()
+}
+
 /// Standalone WebAssembly Galaxy & Multi-World Simulator (#24, #108)
 #[wasm_bindgen]
 pub struct RustGalaxy {
     inner: moc_cosmos::galaxy::Galaxy,
+    /// Packed planet state (#216), rewritten in place after every mutation so JS can read it
+    /// through one contiguous view instead of four getter calls per planet per frame.
+    planet_buf: Vec<f32>,
+    /// Packed colony-ship state (#216): `[from, to, t, duration]` per ship.
+    ship_buf: Vec<f32>,
 }
 
 #[wasm_bindgen]
@@ -1781,7 +1793,20 @@ impl RustGalaxy {
         // The browser's galaxy (src/cosmos/galaxy.js) has more planets than this one and syncs
         // every one of them into the war itself (#166).
         inner.war_auto = false;
-        Self { inner }
+        let mut galaxy = Self {
+            inner,
+            planet_buf: Vec::new(),
+            ship_buf: Vec::new(),
+        };
+        galaxy.refresh_buffers();
+        galaxy
+    }
+
+    /// Rebuild the contiguous buffers. `Vec::clear` + `extend` keeps the allocation (and any
+    /// JS view over it) stable once the first frame has sized it.
+    fn refresh_buffers(&mut self) {
+        self.inner.fill_planet_metrics(&mut self.planet_buf);
+        self.inner.fill_ship_metrics(&mut self.ship_buf);
     }
 
     pub fn step(
@@ -1795,10 +1820,42 @@ impl RustGalaxy {
     ) {
         let fx = moc_cosmos::planet_sim::BrainEffects::from_signals(calm, focus, stress, blinks_last_10s);
         self.inner.step(dt, &fx, blinks_total);
+        self.refresh_buffers();
     }
 
     pub fn on_blink(&mut self) {
         self.inner.on_blink();
+        self.refresh_buffers();
+    }
+
+    /// Byte offset (in wasm linear memory) of the packed planet buffer (#216).
+    pub fn planets_ptr(&self) -> usize {
+        self.planet_buf.as_ptr() as usize
+    }
+
+    /// Length in `f32`s of the packed planet buffer (#216).
+    pub fn planets_len(&self) -> usize {
+        self.planet_buf.len()
+    }
+
+    /// Byte offset (in wasm linear memory) of the packed ship buffer (#216).
+    pub fn ships_ptr(&self) -> usize {
+        self.ship_buf.as_ptr() as usize
+    }
+
+    /// Length in `f32`s of the packed ship buffer (#216).
+    pub fn ships_len(&self) -> usize {
+        self.ship_buf.len()
+    }
+
+    /// Floats per planet in the packed buffer (#216).
+    pub fn planet_stride(&self) -> usize {
+        moc_cosmos::galaxy::PLANET_METRIC_STRIDE
+    }
+
+    /// Floats per ship in the packed buffer (#216).
+    pub fn ship_stride(&self) -> usize {
+        moc_cosmos::galaxy::SHIP_METRIC_STRIDE
     }
 
     pub fn set_attended(&mut self, planet_idx: i32) {
