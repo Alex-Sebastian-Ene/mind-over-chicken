@@ -863,9 +863,9 @@ export class StoneAge {
 
   impactFireball({ x, y, color = '#ff9a2e', charge = 1 }) {
     const G = this.G;
-    const n = 22 + Math.round(charge * 28);
-    this.flash = Math.max(this.flash, 0.42);
-    G.shake = Math.max(G.shake || 0, 1.3 + charge * 0.6);
+    const n = 55 + Math.round(charge * 60);
+    this.flash = Math.max(this.flash, 1);
+    G.shake = Math.max(G.shake || 0, 4.5 + charge * 3);
     G.audio?.thunder?.();
     this.particles.burst(n, () => ({
       x, y, vx: rand(-46, 46), vy: rand(-62, 4), g: 75,
@@ -878,22 +878,29 @@ export class StoneAge {
     for (const p of this.living()) if (dist(x, y, p.x, p.y) < 22 + charge * 14) p.fear = clamp(p.fear + 0.2 + charge * 0.2);
     // A massive explosion (Alex): everything in the blast takes it. Giant chickens are roasted,
     // trees catch, people near the centre die, everyone further out panics.
-    const R = 18 + charge * 26;
-    this.flash = Math.max(this.flash, 0.6);
-    G.shake = Math.max(G.shake || 0, 2.2 + charge * 1.4);
+    const R = 70 + charge * 90;
+    this.flash = Math.max(this.flash, 1);
+    G.shake = Math.max(G.shake || 0, 5 + charge * 3);
     for (const m of this.mammoths) {
       if (m.alive && dist(x, y, m.x, m.y) < R) { m.alive = false; m.dead = true; this.meat.push({ x: m.x, y: m.y, amount: 5, cooked: true, claimed: 0 }); }
     }
     let burning = 0;
     for (const t of [...(G.world.trees || [])]) {
-      if (burning >= 4 + Math.round(charge * 6)) break;
+      if (burning >= 10 + Math.round(charge * 20)) break;
       if (dist(x, y, t.x, t.y) < R && this.igniteForestFire(t)) burning++;
     }
     for (const p of this.living()) {
       if (p.colony || p.state === 'aboard') continue;
       const d = dist(x, y, p.x, p.y);
-      if (d < R * 0.45) this.kill(p);
-      else if (d < R * 1.4) { p.fear = clamp(p.fear + 0.5); if (['idle', 'warm', 'dance', 'huddle', 'hunt'].includes(p.state)) { p.state = 'flee'; p.target = null; } }
+      if (d < R * 0.35) this.kill(p);
+      else if (d < R * 1.5) { p.fear = clamp(p.fear + 0.7); if (['idle', 'warm', 'dance', 'huddle', 'hunt'].includes(p.state)) { p.state = 'flee'; p.target = null; } }
+    }
+    // Every rival people in the blast dies too (#fireball).
+    const rivals = G.rivals?.smite?.(x, y, R) || 0;
+    if (rivals) {
+      floater(this.particles, x, y - 26, `${rivals} rival${rivals === 1 ? '' : 's'} incinerated`, '#ff5a72', 8);
+      G.advisor?.say('fireball-rivals', `${rivals} of the rival peoples were inside the blast. They are no longer a problem.`, { mood: 'panic', priority: 3, cooldown: 5 });
+      G.hud?.showCause?.(`🔥 ${rivals} rival ${rivals === 1 ? 'person' : 'people'} killed in the blast`);
     }
     // And it strikes like lightning at the centre: it lights the pit.
     this.lastBolt = -Infinity;
