@@ -416,12 +416,14 @@ impl World {
                             // Field plots of 4×3 tiles (lush, young and ripening crops) with
                             // furrows, and a grid of canals where it is irrigated.
                             let h = hash2(gx / 4, gy / 3);
-                            let c = [[92, 182, 58], [140, 204, 74], [190, 190, 80]][(h % 3) as usize];
+                            // (Greens with little red, so the 3D view's height-from-colour reads them
+                            // as plains, not hills.)
+                            let c = [[80, 172, 52], [104, 200, 66], [118, 186, 58]][(h % 3) as usize];
                             blend(p, c, 110 + t / 2);
                             if gy % 3 == 2 {
                                 blend(p, [52, 118, 40], 60);
                             }
-                            if fe >= 190 && (gx % 8 == 0 || gy % 6 == 0) {
+                            if fe >= 190 && gx % 6 == 0 {
                                 blend(p, [74, 136, 204], 190);
                             }
                         }
@@ -444,7 +446,7 @@ impl World {
                     match k {
                         FOREST => blend(p, [120, 98, 62], t * 160 / 90),
                         SAND => blend(p, [196, 168, 116], t * 120 / 90),
-                        _ => blend(p, if speck { [140, 112, 74] } else { [184, 156, 104] }, t * 190 / 90),
+                        _ => blend(p, if speck { [150, 122, 100] } else { [184, 156, 104] }, t * 190 / 90),
                     }
                 }
             }
