@@ -144,6 +144,15 @@ export class Cosmos extends ZoomState {
     const r = this.view.blits();
     for (let i = 0; i < r.length; i += 6) lctx.drawImage(worldCanvas, r[i], r[i + 1], r[i + 2], r[i + 3], r[i + 4], r[i + 5], r[i + 2], r[i + 3]);
   }
+  // The same, for a window `scale` times the view's size shrunk onto the view (a zoomed-out frame:
+  // the era intro eases in from one).
+  blitViewScaled(worldCanvas, low, scale) {
+    if (!this.view?.blits_scaled) { this.blitView(worldCanvas, low); return; }
+    const lctx = low.getContext('2d');
+    lctx.imageSmoothingEnabled = false;
+    const r = this.view.blits_scaled(scale);
+    for (let i = 0; i < r.length; i += 8) lctx.drawImage(worldCanvas, r[i], r[i + 1], r[i + 2], r[i + 3], r[i + 4], r[i + 5], r[i + 6], r[i + 7]);
+  }
   // [ox, oy] translations (world px → view px) at which to repeat world-space overlays and lights
   // so they wrap with the map: one per copy of the world reaching the screen (+margin).
   overlayOffsets(margin = 24) {

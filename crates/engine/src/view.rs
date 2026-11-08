@@ -178,6 +178,25 @@ impl ViewCamera {
         out
     }
 
+    /// Like `blits`, for a window `scale` times the view's size around the same centre, with the
+    /// destination rectangles shrunk back onto the view: `[sx, sy, w, h, dx, dy, dw, dh]` per
+    /// rectangle. A zoomed-out frame, e.g. an era's intro easing in onto its stage.
+    pub fn blits_scaled(&self, scale: f32) -> Vec<f32> {
+        let s = scale.max(0.05);
+        let (vw, vh) = (self.view_w * s, self.view_h * s);
+        let left = wrap((self.cx - vw * 0.5).round(), self.world_w);
+        let top = wrap((self.cy - vh * 0.5).round(), self.world_h);
+        let xs = segments(left, vw, self.world_w);
+        let ys = segments(top, vh, self.world_h);
+        let mut out = Vec::with_capacity(xs.len() * ys.len() * 8);
+        for y in &ys {
+            for x in &xs {
+                out.extend_from_slice(&[x[0], y[0], x[1], y[1], x[2] / s, y[2] / s, x[1] / s, y[1] / s]);
+            }
+        }
+        out
+    }
+
     /// Translations `[ox, oy]` (pairs) that take world coordinates to screen coordinates, one per
     /// copy of the world that reaches the window (widened by `margin` pixels on every side).
     /// Overlays drawn in world units repeat at each, so labels and lights wrap with the map.
@@ -316,6 +335,21 @@ mod tests {
         // Inside the world, one copy suffices without margin.
         c.set_center(320.0, 180.0);
         assert_eq!(c.copies(0.0), vec![-160.0, -90.0]);
+    }
+
+    #[test]
+    fn a_scaled_window_covers_the_view_from_a_wider_patch_of_world() {
+        let mut c = cam();
+        c.set_center(320.0, 180.0);
+        // Scale 1 is the ordinary window.
+        assert_eq!(c.blits_scaled(1.0), vec![160.0, 90.0, 320.0, 180.0, 0.0, 0.0, 320.0, 180.0]);
+        // Twice as wide and tall, drawn back into 320×180: the whole 640×360 world, once.
+        assert_eq!(c.blits_scaled(2.0), vec![0.0, 0.0, 640.0, 360.0, 0.0, 0.0, 320.0, 180.0]);
+        // Across the seams the pieces still tile the screen exactly.
+        c.set_center(10.0, 10.0);
+        let b = c.blits_scaled(1.5);
+        let area: f32 = b.chunks(8).map(|r| r[6] * r[7]).sum();
+        assert!((area - 320.0 * 180.0).abs() < 1e-2, "area {}", area);
     }
 
     #[test]

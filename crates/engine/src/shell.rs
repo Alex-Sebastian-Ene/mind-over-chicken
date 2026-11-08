@@ -140,8 +140,13 @@ impl AdvisorDriver {
             let total_len = c.text.len() as f32;
             if c.shown < total_len {
                 c.shown = (c.shown + dt * 48.0).min(total_len);
-                let char_idx = c.shown.floor() as usize;
-                update_dom_text = Some(c.text[..char_idx].to_string());
+                // `shown` counts bytes: cut on a char boundary, or a line with '×', '·' or '—'
+                // panics here and leaves the whole Engine borrowed (every later call throws).
+                let mut cut = (c.shown.floor() as usize).min(c.text.len());
+                while cut > 0 && !c.text.is_char_boundary(cut) {
+                    cut -= 1;
+                }
+                update_dom_text = Some(c.text[..cut].to_string());
             } else {
                 c.hold -= dt;
                 if c.hold <= 0.0 {
@@ -404,5 +409,15 @@ mod advisor_era_tests {
         assert!(a.say("intro", "industry", "happy", 2, 999.0));
         a.set_era("space");
         assert!(a.say("intro", "space", "happy", 2, 999.0));
+    }
+
+    #[test]
+    fn typing_out_a_line_with_wide_characters_never_cuts_inside_one() {
+        // '×', '·' and '—' are 2-3 bytes: typing the line out byte by byte used to panic on them.
+        let mut a = AdvisorDriver::new();
+        assert!(a.say("howto", "Blink · Calm: a 640×360 world — or bigger", "happy", 3, 999.0));
+        for _ in 0..200 {
+            a.update(1.0 / 60.0);
+        }
     }
 }

@@ -7,6 +7,7 @@ import { World, setRustWorldGen } from './world/terrain.js';
 import { SimSource, BridgeSource, setRustSimSource } from './brain/sources.js';
 import { Brain, setRustBrain } from './brain/brain.js';
 import { Advisor, setRustAdvisorEngine } from './ui/advisor.js';
+import { EraIntro } from './ui/intro.js'; // era intro transition (no click-to-dismiss card)
 import { Hud, setRustHudEngine } from './ui/hud.js';
 import { EegPanel } from './ui/eeg-panel.js';
 import { Audio } from './audio.js';
@@ -266,7 +267,11 @@ try {
 let fade = 0;           // 0..1 black overlay for transitions
 let pendingScene = null;
 let pendingTimer = 0;
-let banner = null;      // {t}
+let banner = null;      // {t}: the controls card, now only reopened from the fail screen
+// Each era opens with a short camera move onto its stage, its title and goal fading over it,
+// inputs held until it ends (Space, Enter or a click skip it). The sim is paused meanwhile.
+const intro = new EraIntro();
+let introCam = null;    // 3D: { from: {dist, pitch}, to: {dist, pitch} } for the ease-in
 let lastTs = 0;
 
 // ---------- AI god (PPO / Autopilot) ----------
@@ -356,6 +361,7 @@ function newGame(source, startIndex = 0) {
   resetAIGod();
   const brain = new Brain(source);
   cosmos.reset();
+  intro.cancel(); introCam = null; delete document.body.dataset.intro;
   G = {
     world: new World(undefined, { width: HOME_W, height: HOME_H }), // the bigger home world (#129)
     brain, source, advisor, hud, audio, engine,
@@ -370,6 +376,8 @@ function newGame(source, startIndex = 0) {
     },
     fail(reason) { showFail(reason); },
     finish(extra) { G.finished = true; G.extra = extra; setTimeout(showEnd, 2200); },
+    // The intro transition for the scene in play (#137), e.g. a new stage inside one scene.
+    startTransition(caption) { startTransition(G.scene, caption); },
   };
   // Headset aims are screen positions: map them through the home camera (#129), raycasting in 3D.
   brain.screenToAim = (x, y) => {
@@ -388,7 +396,7 @@ function newGame(source, startIndex = 0) {
     cosmos.galaxy?.onBlink();   // storms on the blink world; a strike on the world you're zoomed into
     if (cosmos.galaxy?.attended) audio.thunder();
     const view = cosmos.viewScene(G); // planets (#68): another world's surface when you're on it
-    if (!banner && view?.onBlink) view.onBlink(aim);
+    if (!banner && !intro.active && view?.onBlink) view.onBlink(aim);
   });
   // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
   G.camera = cosmos;          // the eras ask it where the screen is (#129)
@@ -434,8 +442,10 @@ function startScene(i) {
   hud.setScene(scene);
   document.body.dataset.era = scene.era;
   fade = 1;
-  if (scene.intro) showBanner(scene, i);
-  else banner = null;
+  banner = null;
+  $('banner').hidden = true;
+  if (scene.intro) startIntro(scene, i);
+  else intro.cancel();
 }
 
 // Each era opens with the camera on its stage: the village, the exchange, the launch crowd (#129).
@@ -460,7 +470,81 @@ function restartScene() {
   lookAtStage(scene);
   hud.setScene(scene);
   fade = 1;
-  if (scene.intro) showBanner(scene, i);
+  if (scene.intro) startIntro(scene, i);
+}
+
+// ---------- era intro transition ----------
+// A short move onto the era's stage instead of a card: 3D eases from high and tilted down to the
+// play pose, 2D zooms in from a wider frame (ViewCamera.blits_scaled). The caption is the era
+// title and its one-line goal; the how-to lines move to the advisor once the stage is reached.
+const INTRO_FROM = { dist: 560, pitch: 1.42, zoom2d: 2.2 };
+function startIntro(scene, i) {
+  const n = ['I', 'II', 'III'][[0, 2, 4].indexOf(i)] || '';
+  startTransition(scene, { eyebrow: n ? `Era ${n}` : (scene.label || ''), title: scene.intro.title, goal: scene.intro.goal, how: scene.intro.how });
+}
+// The transition API (#137): any scene (an era, a progression stage, the civ sandbox) opens with
+// it. caption: { eyebrow, title, goal, how: [[key, text], ...] }; the how-to lines go to the
+// advisor when it ends. Also on G.startTransition(caption) for the scene in play (a new stage
+// inside one scene) and __moc.startTransition.
+function startTransition(scene, caption = {}) {
+  if (!G || !scene) return;
+  intro.start({ eyebrow: caption.eyebrow || '', title: caption.title || scene.label || '', goal: caption.goal || '', how: caption.how || [] }, () => endIntro(scene));
+  document.body.dataset.intro = 'on';
+  G.brain.setCue(null);
+  introCam = null;
+  if (engine && engine.is_3d_mode()) {
+    // Land on the player's own angle, or the default diorama pose if they were looking straight down.
+    const d = engine.get_camera_distance(), pitch = engine.get_camera_pitch();
+    const to = d >= CAM3D.blendFrom ? { dist: 300, pitch: 1.05 } : { dist: d, pitch };
+    introCam = { from: { dist: Math.max(to.dist, INTRO_FROM.dist), pitch: Math.max(to.pitch, INTRO_FROM.pitch) }, to };
+    cam3dBase = null; cam3dTween = null;
+    applyIntroCamera();
+  }
+}
+function applyIntroCamera() {
+  if (!introCam || !engine) return;
+  const a = intro.away();
+  const { from, to } = introCam;
+  const dist = to.dist + (from.dist - to.dist) * a;
+  const pitch = to.pitch + (from.pitch - to.pitch) * a;
+  engine.zoom_camera(dist / engine.get_camera_distance());
+  engine.orbit_camera(0, pitch - engine.get_camera_pitch());
+}
+function endIntro(scene) {
+  applyIntroCamera();
+  const caption = intro.caption;
+  introCam = null;
+  delete document.body.dataset.intro;
+  if (!G || G.scene !== scene) return;
+  // Re-arm the scene's calibration cue, as the card's Begin did.
+  if (scene.id === 'stone' || scene.id === 'industry') G.brain.setCue(scene.hold?.active || scene.ipo?.state === 'active' ? 'calm' : 'rest');
+  // The how-to lines, now the advisor's first words on the stage.
+  const how = (caption?.how || []).map(([k, v]) => `${k}: ${v}`).join(' ');
+  if (how) advisor.say(`howto-${scene.era || scene.id}`, how, { mood: 'happy', priority: 3, cooldown: 999 });
+}
+// The caption over the move: eyebrow, title and goal, fading in and out (view units).
+function drawIntroCaption(ctx) {
+  const a = intro.captionAlpha();
+  const c = intro.caption;
+  if (a <= 0 || !c) return;
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.textAlign = 'center';
+  const line = (text, y, size, color) => {
+    if (!text) return;
+    ctx.font = `${size}px "Pixelify Sans", monospace`;
+    ctx.fillStyle = 'rgba(8,10,24,0.85)';
+    ctx.fillText(text, W / 2 + 0.7, y + 0.7);
+    ctx.fillStyle = color;
+    ctx.fillText(text, W / 2, y);
+  };
+  line(c.eyebrow, 46, 6, '#ff9a2e');
+  line(c.title, 66, 18, '#f2e8d5');
+  line(c.goal, 80, 6.5, '#ffd166');
+  ctx.font = '5px "Pixelify Sans", monospace';
+  ctx.fillStyle = 'rgba(242,232,213,0.55)';
+  ctx.fillText('Space · Enter · click to skip', W / 2, H - 14);
+  ctx.restore();
 }
 
 // ---------- overlays ----------
@@ -572,6 +656,7 @@ function quitToTitle() {
   $('banner').hidden = true;
   $('endScreen').hidden = true;
   banner = null;
+  intro.cancel(); introCam = null; delete document.body.dataset.intro;
   pendingScene = null;
   resetAIGod();
   const keep = G?.source?.kind === 'bridge' && G.source.connected ? G.source : null;
@@ -729,7 +814,11 @@ function render() {
   }
   scene.draw(ctx);
   scene.drawAfterLight?.(ctx);
-  if (windowed && !G.render3d) cosmos.blitView(worldCanvas, low);
+  if (windowed && !G.render3d) {
+    const zoom = intro.active ? 1 + (INTRO_FROM.zoom2d - 1) * intro.away() : 1;
+    if (zoom > 1.001) cosmos.blitViewScaled(worldCanvas, low, zoom);   // the intro's wider frame
+    else cosmos.blitView(worldCanvas, low);
+  }
   if (!G.render3d) scene.drawScreen?.(lowCtx);
   if (!windowed && !G.render3d && scene?.phase !== 'voyage') cosmos.applyPan(low);
 
@@ -822,15 +911,16 @@ function render() {
     } else {
       textCtx.__project3d = null;
     }
-    for (const [ox, oy] of offsets) {
+    for (const [ox, oy] of intro.active ? [] : offsets) {   // map labels wait for the stage
       textCtx.setTransform(K, 0, 0, K, ox * K, oy * K);
       scene.drawOverlay?.(textCtx);
     }
     textCtx.__project3d = null;
     textCtx.setTransform(K, 0, 0, K, 0, 0);
     if (G.render3d) scene.drawScreen?.(textCtx);   // 3D has no low-res frame to paint into
-    scene.drawScreenOverlay?.(textCtx);
-    if (windowed && !cosmic && scene.phase !== 'voyage') drawMinimap(textCtx, scene);   // not over the voyage's starfield
+    if (!intro.active) scene.drawScreenOverlay?.(textCtx);   // the stage's own HUD waits for the intro
+    if (windowed && !cosmic && scene.phase !== 'voyage' && !intro.active) drawMinimap(textCtx, scene);   // not over the voyage's starfield
+    if (intro.active) drawIntroCaption(textCtx);
   }
   textCtx.setTransform(K, 0, 0, K, 0, 0);
   textCtx.globalAlpha = visible;
@@ -873,7 +963,10 @@ function frame(ts) {
         }
       }
     }
-    if (banner) {
+    if (intro.active) {
+      intro.update(dt);   // the sim stays paused: the era starts exactly as enter() left it
+      applyIntroCamera();
+    } else if (banner) {
       banner.t += dt;
       if (!banner.manual && banner.t > 8) dismissBanner();
     } else if (G.sandbox) {
@@ -1096,6 +1189,7 @@ function stepCam3dTween() {
 }
 
 screen.addEventListener('pointermove', (e) => {
+  if (intro.gate('pointer') !== 'pass') return;   // inputs are held during the era intro
   followCursorAim(e);
   if (G && cosmos.active) { const p = worldFromEvent(e); cosmos.pointerMove(e.pointerId, p.x, p.y, G); return; }
   if (orbitDrag && orbitDrag.id === e.pointerId) {
@@ -1145,6 +1239,7 @@ function triggerAimClick(e) {
 
 screen.addEventListener('pointerdown', (e) => {
   audio.unlock();
+  if (intro.gate('pointer') === 'skip') { intro.skip(); return; }   // a click skips the era intro
   if (banner) { dismissBanner(); return; }
   if (G && cosmos.active) {
     const p = worldFromEvent(e);
@@ -1207,6 +1302,7 @@ screen.addEventListener('pointercancel', endPointer);
 screen.addEventListener('wheel', (e) => {
   if (!G) return;
   e.preventDefault();
+  if (intro.gate('wheel') !== 'pass') return;
   // Horizontal scroll (or Shift+scroll) pans the surface; in 3D the camera follows the pan.
   const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey;
   if (horizontal && !cosmos.active) { cosmos.pan(-(e.shiftKey ? e.deltaY : e.deltaX) * 0.15); return; }
@@ -1256,6 +1352,10 @@ window.addEventListener('keydown', (e) => {
   }
   const overlay = !G || !$('titleScreen').hidden || !$('failScreen').hidden || !$('endScreen').hidden;
   if (overlay) return;
+  // The era intro: Space or Enter skip it, every other game key waits for the stage.
+  const gate = intro.gate('key', e.code);
+  if (gate === 'skip') { e.preventDefault(); intro.skip(); return; }
+  if (gate === 'hold') return;
   if (banner && e.code !== 'Enter') return;
   if (e.code === 'KeyM') { toggleModel(); return; }
   if (e.code === 'KeyE') { eegPanel?.toggle(); return; }
@@ -1482,7 +1582,7 @@ $('playCiv').addEventListener('click', () => {
   scene.enter(G);
   hud.setScene(scene);
   document.body.dataset.era = scene.era;
-  showBanner(scene, -1);
+  startIntro(scene, -1);
 });
 $('playBridge').addEventListener('click', async () => {
   const url = $('bridgeUrl').value.trim() || 'ws://localhost:8765';
@@ -1500,7 +1600,7 @@ $('playBridge').addEventListener('click', async () => {
 
 // Debug handle for the console (and for automated playtests).
 window.__moc = {
-  get G() { return G; }, startScene: (i) => startScene(i), cosmos, get engine() { return engine; },
+  get G() { return G; }, startScene: (i) => startScene(i), cosmos, get engine() { return engine; }, intro, startTransition: (caption) => startTransition(G?.scene, caption),
   // Average render and frame cost since the last call (ms), then reset.
   perf() {
     const p = perfSample;
@@ -1520,7 +1620,7 @@ window.__moc = {
 // with coach visual demonstration. Face sets mood.
 window.__moc.camera = initCamera({
   getG: () => cosmos.castG(G), // planets (#68): casts and mood reach the world you're on
-  canCast: () => !!G?.scene && !banner && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,
+  canCast: () => !!G?.scene && !banner && !intro.active && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,
   // camera debug (#67): the fingertip aims on the panned surface like the mouse does.
   // Aims are 0..1 of the world; the camera's overlay draws in 0..1 of the screen (#129).
   mapX: (x) => cosmos.mapX(x * W) / cosmos.worldW,
