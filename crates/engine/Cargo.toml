@@ -52,4 +52,13 @@ features = [
     "BiquadFilterType",
     "AudioBuffer",
     "AudioBufferSourceNode",
+    "MouseEvent",
+    "PointerEvent",
+    "WheelEvent",
+    "KeyboardEvent",
+    "EventTarget",
+    "Event",
+    "WebSocket",
+    "MessageEvent",
+    "BinaryType",
 ]

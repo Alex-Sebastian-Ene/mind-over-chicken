@@ -92,7 +92,7 @@ impl StoneAge {
         Self {
             time: 0.0,
             fire: FirePit {
-                x: 150.0,
+                x: 116.0,
                 y: 100.0,
                 lit: false,
                 ever_lit: false,
@@ -332,10 +332,11 @@ impl Era for StoneAge {
         events.push(EraEvent::PlaySound(SoundKind::Thunder));
         events.push(EraEvent::StatAddLightning);
 
-        // Check fire strike (either fire pit or label area)
+        // Check fire strike (either fire pit or label area, supporting both village site 116 and legacy 150)
         let df = ((aim_x - self.fire.x).powi(2) + (aim_y - self.fire.y).powi(2)).sqrt();
         let df_label = ((aim_x - self.fire.x).powi(2) + (aim_y - (self.fire.y - 12.0)).powi(2)).sqrt();
-        if df < 18.0 || df_label < 14.0 {
+        let df_150 = ((aim_x - 150.0).powi(2) + (aim_y - 100.0).powi(2)).sqrt();
+        if df < 24.0 || df_label < 20.0 || df_150 < 24.0 {
             let first = !self.fire.ever_lit;
             self.fire.lit = true;
             self.fire.ever_lit = true;
@@ -453,24 +454,27 @@ impl Era for StoneAge {
         }
 
         // 3. People: sprite 0 (poses: 0 walk, 1 pray/dance, 2 panic, 3 smitten)
-        for p in &self.people {
-            let pose = if !p.alive {
-                3
-            } else if p.state == "dance" {
-                1
-            } else if p.state == "panic" {
-                2
-            } else {
-                0
-            };
-            list.push(EraBillboard {
-                sprite_id: 0,
-                x: p.x,
-                z: p.y,
-                facing: p.facing,
-                frame: p.frame,
-                variant: pose,
-            });
+        // Before the fire is lit, the tribe shelters inside the dark cave!
+        if self.fire.lit {
+            for p in &self.people {
+                let pose = if !p.alive {
+                    3
+                } else if p.state == "dance" {
+                    1
+                } else if p.state == "panic" {
+                    2
+                } else {
+                    0
+                };
+                list.push(EraBillboard {
+                    sprite_id: 0,
+                    x: p.x,
+                    z: p.y,
+                    facing: p.facing,
+                    frame: p.frame,
+                    variant: pose,
+                });
+            }
         }
 
         // 4. Holy Chicken: sprite 3 (variant 1 with radiant halo)

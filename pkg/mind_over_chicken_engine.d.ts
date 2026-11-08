@@ -6,6 +6,7 @@ export class Engine {
     [Symbol.dispose](): void;
     add_3d_light(x: number, y: number, z: number, radius: number, intensity: number): void;
     add_billboard(sprite_id: number, x: number, z: number, facing: number, frame: number, variant: number): void;
+    add_billboard_y(sprite_id: number, x: number, y: number, z: number, facing: number, frame: number, variant: number): void;
     add_custom_billboard(x: number, y: number, z: number, w: number, h: number, u0: number, v0: number, u1: number, v1: number): void;
     add_light(x: number, y: number, radius: number, intensity: number): void;
     advisor_say(key: string, text: string, mood: string, priority: number, cooldown: number): boolean;
@@ -58,6 +59,7 @@ export class Engine {
     get_camera_yaw(): number;
     get_continent_count(): number;
     get_game_births_stat(): number;
+    get_game_darkness(): number;
     get_game_deaths_stat(): number;
     get_game_era_id(): string;
     get_game_era_index(): number;
@@ -164,6 +166,20 @@ export class RustAiPolicy {
     constructor();
     probs(obs: Float32Array | number[]): Float32Array;
     self_check(): number;
+}
+
+/**
+ * WebAssembly entry point wrapping `App` for browser usage (#108).
+ */
+export class RustApp {
+    free(): void;
+    [Symbol.dispose](): void;
+    constructor(canvas_id: string);
+    on_face_blendshapes(has_face: boolean, smile_l: number, smile_r: number, brow_down_l: number, brow_down_r: number, brow_inner_up: number, eye_wide_l: number, eye_wide_r: number, jaw_open: number, mouth_frown_l: number, mouth_frown_r: number, dt: number): void;
+    on_hand_landmarks(coords: Float64Array | number[] | null | undefined, aspect: number, now: number): void;
+    start(): void;
+    step_frame(ts: number): void;
+    stop(): void;
 }
 
 export class RustBlinkClassifier {
@@ -446,6 +462,7 @@ export interface InitOutput {
     readonly __wbg_engine_free: (a: number, b: number) => void;
     readonly __wbg_pointergesture_free: (a: number, b: number) => void;
     readonly __wbg_rustaipolicy_free: (a: number, b: number) => void;
+    readonly __wbg_rustapp_free: (a: number, b: number) => void;
     readonly __wbg_rustblinkclassifier_free: (a: number, b: number) => void;
     readonly __wbg_rustbrain_free: (a: number, b: number) => void;
     readonly __wbg_rustcalibration_free: (a: number, b: number) => void;
@@ -458,6 +475,7 @@ export interface InitOutput {
     readonly __wbg_rustworldgen_free: (a: number, b: number) => void;
     readonly engine_add_3d_light: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly engine_add_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly engine_add_billboard_y: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly engine_add_custom_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
     readonly engine_add_light: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly engine_advisor_say: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
@@ -497,6 +515,7 @@ export interface InitOutput {
     readonly engine_get_camera_yaw: (a: number) => number;
     readonly engine_get_continent_count: (a: number) => number;
     readonly engine_get_game_births_stat: (a: number) => number;
+    readonly engine_get_game_darkness: (a: number) => number;
     readonly engine_get_game_deaths_stat: (a: number) => number;
     readonly engine_get_game_era_id: (a: number) => [number, number];
     readonly engine_get_game_era_index: (a: number) => number;
@@ -568,6 +587,12 @@ export interface InitOutput {
     readonly rustaipolicy_new: () => number;
     readonly rustaipolicy_probs: (a: number, b: number, c: number) => any;
     readonly rustaipolicy_self_check: (a: number) => number;
+    readonly rustapp_new: (a: number, b: number) => [number, number, number];
+    readonly rustapp_on_face_blendshapes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => void;
+    readonly rustapp_on_hand_landmarks: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly rustapp_start: (a: number) => [number, number];
+    readonly rustapp_step_frame: (a: number, b: number) => void;
+    readonly rustapp_stop: (a: number) => void;
     readonly rustblinkclassifier_accuracy: (a: number) => number;
     readonly rustblinkclassifier_arm_flash_window: (a: number, b: number) => void;
     readonly rustblinkclassifier_baseline_samples: (a: number) => number;
@@ -692,6 +717,18 @@ export interface InitOutput {
     readonly rustworldgen_types: (a: number) => any;
     readonly rustworldgen_width: (a: number) => number;
     readonly walk_field: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+    readonly moc_ai_policy_act: (a: number, b: number, c: number, d: number) => number;
+    readonly moc_ai_policy_free: (a: number) => void;
+    readonly moc_ai_policy_new: () => number;
+    readonly moc_ai_policy_probs: (a: number, b: number, c: number) => void;
+    readonly moc_ai_policy_self_check: (a: number) => number;
+    readonly moc_galaxy_blink: (a: number) => void;
+    readonly moc_galaxy_free: (a: number) => void;
+    readonly moc_galaxy_new: (a: number) => number;
+    readonly moc_galaxy_planet_count: (a: number) => number;
+    readonly moc_galaxy_planet_metrics: (a: number, b: number, c: number) => number;
+    readonly moc_galaxy_set_attended: (a: number, b: number) => void;
+    readonly moc_galaxy_step: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly moc_brain_free: (a: number) => void;
     readonly moc_brain_get_agitation: (a: number) => number;
     readonly moc_brain_get_calm: (a: number) => number;
@@ -710,24 +747,17 @@ export interface InitOutput {
     readonly moc_sim_free: (a: number) => void;
     readonly moc_sim_new: (a: number) => number;
     readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
-    readonly moc_ai_policy_act: (a: number, b: number, c: number, d: number) => number;
-    readonly moc_ai_policy_free: (a: number) => void;
-    readonly moc_ai_policy_new: () => number;
-    readonly moc_ai_policy_probs: (a: number, b: number, c: number) => void;
-    readonly moc_ai_policy_self_check: (a: number) => number;
-    readonly moc_galaxy_blink: (a: number) => void;
-    readonly moc_galaxy_free: (a: number) => void;
-    readonly moc_galaxy_new: (a: number) => number;
-    readonly moc_galaxy_planet_count: (a: number) => number;
-    readonly moc_galaxy_planet_metrics: (a: number, b: number, c: number) => number;
-    readonly moc_galaxy_set_attended: (a: number, b: number) => void;
-    readonly moc_galaxy_step: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__246: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__247: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly __wbindgen_destroy_closure: (a: number, b: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_start: () => void;
 }
