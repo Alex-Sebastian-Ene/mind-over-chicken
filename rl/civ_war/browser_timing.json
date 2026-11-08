@@ -280,5 +280,58 @@
     "council_decisions": 0
    }
   ]
+ },
+ "final_weights": {
+  "what": "The cluster run's council and commander (this build), 12 staged rivals on main's 1920x960 sandbox planet, 240 frames per block. The world was still growing fast during the x16 blocks (3,057 -> 4,036 agents), so the x16 councils block sits between its two rules blocks; at x1 the agent count is steady. No NaN fallbacks.",
+  "rows": [
+   {
+    "brain": "rules",
+    "speed": 16,
+    "agents": 3057,
+    "mean_ms": 4.356,
+    "p95_ms": 7.6,
+    "max_ms": 9.7
+   },
+   {
+    "brain": "ppo",
+    "speed": 16,
+    "agents": 3455,
+    "mean_ms": 7.7,
+    "p95_ms": 14.1,
+    "max_ms": 32.8
+   },
+   {
+    "brain": "rules again",
+    "speed": 16,
+    "agents": 4036,
+    "mean_ms": 11.179,
+    "p95_ms": 18.8,
+    "max_ms": 27.4
+   },
+   {
+    "brain": "rules",
+    "speed": 1,
+    "agents": 4021,
+    "mean_ms": 2.41,
+    "p95_ms": 4.8,
+    "max_ms": 38.1
+   },
+   {
+    "brain": "ppo",
+    "speed": 1,
+    "agents": 3997,
+    "mean_ms": 2.158,
+    "p95_ms": 3.9,
+    "max_ms": 26.1
+   },
+   {
+    "brain": "rules again",
+    "speed": 1,
+    "agents": 3976,
+    "mean_ms": 2.457,
+    "p95_ms": 4.8,
+    "max_ms": 13.7
+   }
+  ]
  }
 }

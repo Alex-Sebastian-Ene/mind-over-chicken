@@ -341,3 +341,14 @@ fn a_network_that_returns_nan_falls_back_to_the_rules() {
     assert!(rc.borrow().fallbacks > 0, "the bad network's decisions went to the rules");
     assert!(w.alive_factions().count() > 0);
 }
+
+#[test]
+fn nearest_village_pairs_are_symmetric() {
+    // politics::scan_borders used to wipe the (higher, lower) entry right after writing it, so
+    // a higher-numbered civilisation could never march on (or find a battlefield with) a
+    // lower-numbered one.
+    let (w, _) = duel();
+    let (ab, ba) = (w.near_pairs[1], w.near_pairs[MAX_FACTIONS]);
+    assert!(ab.1 != NO_V && ab.2 != NO_V, "0 -> 1 has a nearest pair");
+    assert_eq!(ba, (ab.0, ab.2, ab.1), "1 -> 0 is the same pair, the other way round");
+}
