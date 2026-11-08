@@ -11,9 +11,9 @@ export function panelHotkey(e) {
   return null;
 }
 
-// Overlays that hold every game hotkey (#171-#173): title, fail, end, the controls banner and the
-// calibration wizard.
-export const HOTKEY_OVERLAYS = ['titleScreen', 'failScreen', 'endScreen', 'banner'];
+// Overlays that hold every game hotkey (#171-#173): title, planet setup, fail, end, the controls
+// banner and the calibration wizard.
+export const HOTKEY_OVERLAYS = ['titleScreen', 'planetSetup', 'failScreen', 'endScreen', 'banner'];
 
 export function overlayBlocksHotkeys(doc = globalThis.document) {
   if (!doc) return false;

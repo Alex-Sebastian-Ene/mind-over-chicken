@@ -525,6 +525,67 @@ body[data-reticle="1"] #screen { cursor: none; }   /* one cursor: the in-game re
 }
 .size-pick button:hover { border-color: var(--ember); }
 .size-pick button[aria-checked="true"] { background: var(--ember); border-color: var(--ember); color: #102423; }
+/* Planet setup: your mind makes four worlds, one card at a time like a pack opening (Alex). The
+   centre card reads your mind, flips to show its world, then moves left into the row. */
+.setup-inner { width: 100%; max-width: 1100px; display: grid; gap: 18px; justify-items: center; text-align: center; }
+.setup-head { display: grid; gap: 6px; justify-items: center; }
+.setup-head .eyebrow { margin: 0; font: 600 13px var(--pixel); color: var(--ember); letter-spacing: 0.08em; text-transform: uppercase; }
+.setup-head h1 { margin: 0; font: 700 clamp(30px, 5.4vw, 56px)/1 var(--pixel); letter-spacing: -0.01em; }
+.setup-hint { margin: 0; color: var(--muted); font-size: 15px; min-height: 1.4em; }
+.pack-row { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; min-height: 330px; width: 100%; }
+.pack-card { --w: 216px; --planet: var(--calm); width: var(--w); aspect-ratio: 5 / 7; flex: none; perspective: 1000px; font-size: calc(var(--w) / 14); }
+.pack-card.is-done { --w: 132px; }
+.pack-flip { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform 560ms cubic-bezier(.2, .8, .2, 1); }
+.pack-card.is-revealed .pack-flip { transform: rotateY(180deg); }
+.pack-face {
+  position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  border-radius: 0.8em; border: 2px solid var(--line); background: var(--panel);
+  display: grid; align-content: center; justify-items: center; gap: 0.5em; padding: 0.9em 0.8em; overflow: hidden;
+}
+.pack-back {
+  background:
+    repeating-linear-gradient(45deg, transparent 0 10px, rgba(255, 255, 255, 0.03) 10px 20px),
+    linear-gradient(160deg, var(--panel-2), var(--panel));
+}
+.pack-q { font: 700 4em/1 var(--pixel); color: var(--ember); animation: pack-pulse 1.1s ease-in-out infinite; }
+.pack-reading { margin: 0; font: 600 0.85em var(--pixel); color: var(--bone); }
+.pack-meter { width: 80%; height: 0.45em; border: 1px solid var(--line); border-radius: 0.3em; overflow: hidden; background: var(--ink); }
+.pack-meter i { display: block; width: var(--p, 0%); height: 100%; background: var(--ember); }
+.pack-live { list-style: none; margin: 0.2em 0 0; padding: 0; width: 80%; display: grid; gap: 0.2em; font-size: 0.8em; }
+.pack-live li { display: flex; justify-content: space-between; color: var(--muted); }
+.pack-live b { font: 600 1em var(--pixel); color: var(--bone); font-variant-numeric: tabular-nums; }
+.pack-front {
+  transform: rotateY(180deg); border-color: var(--planet);
+  background: linear-gradient(165deg, color-mix(in srgb, var(--planet) 30%, var(--panel)) 0%, var(--panel) 72%);
+  align-content: start; gap: 0.35em;
+}
+.pack-card.is-revealed:not(.is-done) .pack-front { box-shadow: 0 0 0 2px var(--planet), 0 0 2.2em color-mix(in srgb, var(--planet) 55%, transparent); }
+.pack-top { justify-self: stretch; display: flex; align-items: baseline; justify-content: space-between; }
+.pack-rating { font: 700 2.3em/1 var(--pixel); color: var(--bone); }
+.pack-ch { font: 600 0.75em var(--pixel); color: var(--planet); text-transform: uppercase; letter-spacing: 0.08em; }
+.pack-orb {
+  width: 4.2em; height: 4.2em; border-radius: 50%; margin: 0.2em 0;
+  background: radial-gradient(circle at 34% 30%, rgba(255, 255, 255, 0.65), var(--planet) 34%, rgba(0, 0, 0, 0.45) 100%);
+  box-shadow: 0 0 1.4em color-mix(in srgb, var(--planet) 50%, transparent);
+}
+.pack-front h2 { margin: 0; font: 700 1.25em/1.1 var(--pixel); }
+.pack-sub { margin: 0; font-size: 0.78em; color: var(--muted); }
+.pack-stats { margin: 0.3em 0 0; justify-self: stretch; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.3em; border-top: 1px solid var(--line); padding-top: 0.45em; }
+.pack-stats div { display: grid; gap: 0.1em; }
+.pack-stats dt { font: 600 0.62em var(--pixel); color: var(--muted); letter-spacing: 0.08em; }
+.pack-stats dd { margin: 0; font: 700 1.15em var(--pixel); color: var(--bone); font-variant-numeric: tabular-nums; }
+.setup-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+@keyframes pack-pulse { 50% { opacity: 0.55; transform: scale(0.94); } }
+@media (prefers-reduced-motion: reduce) {
+  .pack-flip { transition: none; }
+  .pack-q { animation: none; }
+}
+@media (max-width: 640px) {
+  .pack-row { gap: 8px; min-height: 0; }
+  .pack-card { --w: 168px; }
+  .pack-card.is-done { --w: 74px; }
+  .pack-card.is-done .pack-sub, .pack-card.is-done .pack-stats { display: none; }
+}
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .row label { font: 600 13px var(--pixel); color: var(--muted); }
 .row input {
