@@ -1797,6 +1797,17 @@ impl RustGalaxy {
         self.inner.war.set_shared(idx, shared);
     }
 
+    /// Difficulty seam: how hard the AI powers press the player, ×how often they launch at the
+    /// player's world and ×how hard those fleets hit (1 default; Easy about 0.5, Hard about 1.6;
+    /// clamped to 0.1..=3).
+    pub fn war_set_player_pressure(&mut self, x: f32) {
+        self.inner.war.set_player_pressure(x);
+    }
+
+    pub fn war_player_pressure(&self) -> f32 {
+        self.inner.war.player_pressure
+    }
+
     pub fn war_step(&mut self, dt: f32, calm: f32, focus: f32, stress: f32) {
         self.inner.war.step(dt, moc_cosmos::war::Mind { calm, focus, stress });
     }

@@ -1973,6 +1973,13 @@ export class RustGalaxy {
         return ret;
     }
     /**
+     * @returns {number}
+     */
+    war_player_pressure() {
+        const ret = wasm.rustgalaxy_war_player_pressure(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * @param {number} p
      * @returns {string}
      */
@@ -2003,6 +2010,15 @@ export class RustGalaxy {
      */
     war_set_player_home(idx) {
         wasm.rustgalaxy_war_set_player_home(this.__wbg_ptr, idx);
+    }
+    /**
+     * Difficulty seam: how hard the AI powers press the player, ×how often they launch at the
+     * player's world and ×how hard those fleets hit (1 default; Easy about 0.5, Hard about 1.6;
+     * clamped to 0.1..=3).
+     * @param {number} x
+     */
+    war_set_player_pressure(x) {
+        wasm.rustgalaxy_war_set_player_pressure(this.__wbg_ptr, x);
     }
     /**
      * A planet several civilisations share (the civ sandbox's).
@@ -3272,12 +3288,12 @@ function __wbg_get_imports() {
         },
         __wbindgen_generic_0000000000000003: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("PointerEvent")], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__268);
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__270);
             return ret;
         },
         __wbindgen_generic_0000000000000004: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__269);
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__271);
             return ret;
         },
         __wbindgen_generic_0000000000000005: function(arg0) {
@@ -3320,12 +3336,12 @@ function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_
     wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_(arg0, arg1, arg2);
 }
 
-function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__268(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__268(arg0, arg1, arg2);
+function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__270(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__270(arg0, arg1, arg2);
 }
 
-function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__269(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__269(arg0, arg1, arg2);
+function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__271(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__271(arg0, arg1, arg2);
 }
 
 function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_(arg0, arg1, arg2) {

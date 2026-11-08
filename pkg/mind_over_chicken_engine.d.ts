@@ -340,12 +340,19 @@ export class RustGalaxy {
      * The player's power (−1 none).
      */
     war_player(): number;
+    war_player_pressure(): number;
     war_power_name(p: number): string;
     war_powers(): Float32Array;
     /**
      * The campaign's home (−1: none, as in the sandboxes).
      */
     war_set_player_home(idx: number): void;
+    /**
+     * Difficulty seam: how hard the AI powers press the player, ×how often they launch at the
+     * player's world and ×how hard those fleets hit (1 default; Easy about 0.5, Hard about 1.6;
+     * clamped to 0.1..=3).
+     */
+    war_set_player_pressure(x: number): void;
     /**
      * A planet several civilisations share (the civ sandbox's).
      */
@@ -733,9 +740,11 @@ export interface InitOutput {
     readonly rustgalaxy_war_order: (a: number, b: number, c: number) => [number, number];
     readonly rustgalaxy_war_planet_meta: (a: number, b: number) => [number, number];
     readonly rustgalaxy_war_player: (a: number) => number;
+    readonly rustgalaxy_war_player_pressure: (a: number) => number;
     readonly rustgalaxy_war_power_name: (a: number, b: number) => [number, number];
     readonly rustgalaxy_war_powers: (a: number) => [number, number];
     readonly rustgalaxy_war_set_player_home: (a: number, b: number) => void;
+    readonly rustgalaxy_war_set_player_pressure: (a: number, b: number) => void;
     readonly rustgalaxy_war_set_shared: (a: number, b: number, c: number) => void;
     readonly rustgalaxy_war_step: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly rustgalaxy_war_sync: (a: number, b: number, c: number) => void;
@@ -833,8 +842,8 @@ export interface InitOutput {
     readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
     readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
     readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__268: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__269: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__270: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__271: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

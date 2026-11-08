@@ -46,6 +46,10 @@ export class SpaceWarView {
     this.civNews = [];     // war news about civ sandbox civilisations, for the sandbox's ticker
   }
 
+  // Difficulty seam: how hard the AI powers press the player's world (×how often they launch at
+  // it, ×how hard those fleets hit). 1 is Normal; Easy about 0.5, Hard about 1.6. Rust clamps it.
+  setPlayerPressure(x) { this.w.war_set_player_pressure?.(Number(x) || 1); }
+
   // The civ sandbox's planet: its civilisations, not the player, live there (#166 stage 4).
   setShared(i) {
     if (this.shared === i) return;

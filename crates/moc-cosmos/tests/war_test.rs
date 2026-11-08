@@ -355,3 +355,77 @@ fn civilisations_on_a_shared_planet_fight_in_space() {
     w.step(1.0, NEUTRAL);
     assert_ne!(w.owner_of(2), Some(a));
 }
+
+/// Fleets AI councils sent at the player's world over `minutes` at a given difficulty pressure,
+/// summed over a few galaxies.
+fn launches_at_player(pressure: f32, minutes: usize) -> u32 {
+    let mut total = 0;
+    for seed in [11u32, 12, 13, 14] {
+        let mut home = world(40.0, 3, 0.5);
+        home.hand_played = true;
+        let mut w = SpaceWar::new(seed);
+        w.set_player_home(Some(0));
+        w.set_player_pressure(pressure);
+        let worlds = [("Home", home), ("Thrum", world(12000.0, 3, 0.8)), ("Lumen", world(10000.0, 3, 0.45)), ("Flicker", world(8000.0, 3, 0.55)), ("Stillwater", world(11000.0, 3, 0.3))];
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..(240 * minutes) {
+            for (i, (n, s)) in worlds.iter().enumerate() {
+                w.sync_body(i, n, *s);
+            }
+            w.step(0.25, NEUTRAL);
+            for f in w.fleets.iter().filter(|f| f.to_planet == 0) {
+                seen.insert(f.mission.unwrap().id);
+            }
+            for i in 0..worlds.len() {
+                w.take_fx(i);
+            }
+        }
+        total += seen.len() as u32;
+    }
+    total
+}
+
+#[test]
+fn difficulty_pressure_scales_how_often_the_ai_comes_for_the_player() {
+    let mut w = SpaceWar::new(1);
+    assert_eq!(w.player_pressure, 1.0, "Normal by default");
+    w.set_player_pressure(f32::NAN);
+    assert_eq!(w.player_pressure, 1.0);
+    w.set_player_pressure(99.0);
+    assert_eq!(w.player_pressure, 3.0, "clamped");
+    let (easy, normal, hard) = (launches_at_player(0.5, 6), launches_at_player(1.0, 6), launches_at_player(1.6, 6));
+    assert!(easy < normal && normal < hard, "launches at the player: easy {easy}, normal {normal}, hard {hard}");
+    // About ×0.5 and ×1.6 (measured 11 / 23 / 38).
+    assert!((easy as f32) < 0.75 * normal as f32 && (hard as f32) > 1.25 * normal as f32, "easy {easy}, normal {normal}, hard {hard}");
+}
+
+#[test]
+fn difficulty_pressure_scales_how_hard_ai_fleets_hit_the_player() {
+    // The same bombardment of the player's (not hand-played) world, at Easy and at Hard.
+    let hit = |pressure: f32| {
+        let mut w = SpaceWar::new(21);
+        w.set_player_home(Some(0));
+        let worlds = [("Home", world(9000.0, 3, 0.5)), ("Thrum", world(12000.0, 3, 0.8))];
+        for _ in 0..60 {
+            for (i, (n, s)) in worlds.iter().enumerate() {
+                w.sync_body(i, n, *s);
+            }
+            w.step(0.5, NEUTRAL);
+            for p in w.powers.iter_mut() {
+                p.fleet = 0.0;
+                p.cooldown = 99.0;
+                p.tier_xp = -1e6;
+            }
+        }
+        w.fleets.clear();
+        w.take_fx(0);
+        assert!(w.is_player(w.owner_of(0).unwrap()));
+        w.set_player_pressure(pressure);
+        w.launch_external(1, 0, Order::Bombard, 120.0, Motive::Revenge).expect("launched");
+        settle(&mut w);
+        let fx = w.take_fx(0);
+        fx.pop_mul
+    };
+    let (easy, normal, hard) = (hit(0.5), hit(1.0), hit(1.6));
+    assert!(hard < normal && normal < easy, "Hard kills more of the player's people: people left ×{hard} hard, ×{normal} normal, ×{easy} easy");
+}

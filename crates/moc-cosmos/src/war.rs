@@ -27,6 +27,8 @@
 //! [`Rules`], by default; a trained policy can replace them without touching anything else).
 //! **The player's mind tilts every council:** stress makes leaders reckless (more launches,
 //! invasions, longer grudges); calm makes them defensive and diplomatic (shields, truces).
+//! **Difficulty seam:** [`SpaceWar::set_player_pressure`] scales how often AI councils launch at
+//! the player's world and how hard those fleets hit it (1 Normal; Easy about 0.5, Hard about 1.6).
 //!
 //! **News.** Every launch at the player and every battle writes a line saying who attacked whom
 //! and why ([`Motive`], plus the mind's part), for the galaxy log.
@@ -528,6 +530,10 @@ pub struct SpaceWar {
     pub dominant: Option<u16>,
     pub dominance_t: f32,
     pub councils: u32,
+    /// How hard the AI powers press the player (difficulty seam): ×how often they launch at the
+    /// player's world and ×how hard those fleets hit it. 1 is the default; Easy about 0.5, Hard
+    /// about 1.6 ([`SpaceWar::set_player_pressure`]).
+    pub player_pressure: f32,
     council_acc: f32,
     next_fleet: u32,
     next_battle: u32,
@@ -557,6 +563,7 @@ impl Clone for SpaceWar {
             dominant: self.dominant,
             dominance_t: self.dominance_t,
             councils: self.councils,
+            player_pressure: self.player_pressure,
             council_acc: self.council_acc,
             next_fleet: self.next_fleet,
             next_battle: self.next_battle,
@@ -599,6 +606,7 @@ impl SpaceWar {
             dominant: None,
             dominance_t: 0.0,
             councils: 0,
+            player_pressure: 1.0,
             council_acc: 0.0,
             next_fleet: 1,
             next_battle: 0,
@@ -611,6 +619,24 @@ impl SpaceWar {
     /// Replace the rules with a trained policy (None: the rules again).
     pub fn set_policy(&mut self, p: Option<Box<dyn SpacePolicy>>) {
         self.policy = p;
+    }
+
+    /// The difficulty seam: how hard the AI powers press the player, 1 by default (Easy about
+    /// 0.5, Hard about 1.6), clamped to 0.1..=3. It scales how often councils launch at the
+    /// player's world (any [`SpacePolicy`]) and the strength those fleets hit it with; the ships
+    /// themselves, and every other war, are untouched.
+    pub fn set_player_pressure(&mut self, x: f32) {
+        self.player_pressure = if x.is_finite() { clamp(x, 0.1, 3.0) } else { 1.0 };
+    }
+
+    /// The pressure multiplier for `attacker` striking `defender` (1 unless an AI power strikes
+    /// the player).
+    pub fn pressure_on(&self, attacker: u16, defender: u16) -> f32 {
+        if self.is_player(defender) && !self.is_player(attacker) {
+            self.player_pressure
+        } else {
+            1.0
+        }
     }
 
     // ------------------------------------------------------------------ host input
@@ -788,10 +814,12 @@ impl SpaceWar {
     }
 
     fn launch(&mut self, p: u16, l: Launch) -> u32 {
+        // Pressing the player harder (difficulty): back at it sooner after a strike on it.
+        let at_player = l.target_power.or(self.bodies[l.target].owner).map_or(1.0, |d| self.pressure_on(p, d));
         let pw = &mut self.powers[p as usize];
         let strength = (pw.fleet * clamp(l.commit, 0.0, 1.0)).max(MIN_LAUNCH.min(pw.fleet));
         pw.fleet -= strength;
-        pw.cooldown = 10.0 + 8.0 * (1.0 - pw.stance);
+        pw.cooldown = (10.0 + 8.0 * (1.0 - pw.stance)) / at_player.max(1.0);
         self.dispatch(p, l.target, l.target_power, l.order, strength, l.motive)
     }
 
@@ -1043,7 +1071,16 @@ impl SpaceWar {
                 None => Rules.decide(self, p, &mut out),
             }
             for &l in out.iter() {
-                if self.powers[p as usize].fleet >= MIN_LAUNCH && self.can_target(p, l.target, l.target_power.or(self.bodies[l.target].owner)) {
+                let tp = l.target_power.or(self.bodies[l.target].owner);
+                if self.powers[p as usize].fleet >= MIN_LAUNCH && self.can_target(p, l.target, tp) {
+                    // Pressing the player more softly (difficulty): a council often stands its
+                    // fleet down instead (for longer the softer it is).
+                    let k = tp.map_or(1.0, |d| self.pressure_on(p, d));
+                    if k < 1.0 && self.roll(p, tp.unwrap_or(p), 7) >= k {
+                        let pw = &mut self.powers[p as usize];
+                        pw.cooldown = (10.0 + 8.0 * (1.0 - pw.stance)) / k;
+                        break;
+                    }
                     self.launch(p, l);
                     if l.motive == Motive::Coalition {
                         self.joint_strike(p, l);
@@ -1133,7 +1170,8 @@ impl SpaceWar {
         let mut def = self.defence(to, Some(d_id));
         let before = def;
         let luck = self.rng.range_f32(0.85, 1.15);
-        let a = m.strength * luck;
+        // Difficulty: an AI fleet hits the player's world ×player_pressure (its ships don't change).
+        let a = m.strength * luck * self.pressure_on(a_id, d_id);
         let mut fx = BodyFx::default();
         let won;
         let mut survivors;
