@@ -578,8 +578,7 @@ export class CivSandbox {
       drawBolt(ctx, bolt.pts, Math.min(1, bolt.life * 4));
       ctx.restore();
     }
-    const a = this.G.brain.aim;
-    drawReticle(ctx, a.x * (W - 1), a.y * (H - 1), this.t, '#ffe066');
+    // The aim reticle is drawn once, on top, by main.js (#301).
     if (this.flash > 0) { ctx.fillStyle = `rgba(220,230,255,${this.flash * 0.8})`; ctx.fillRect(0, 0, W, H); }
   }
 

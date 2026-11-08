@@ -6,7 +6,8 @@ pub const DEFAULT_PITCH: f32 = 1.05;
 pub const DEFAULT_DISTANCE: f32 = 300.0;
 /// Close enough to pick out single villagers (Alex: "zoom in further like I was before").
 pub const MIN_DISTANCE: f32 = 12.0;
-pub const MAX_DISTANCE: f32 = 600.0;
+// 900: room for the wide top-down view of a Huge home world (688, src/render/surface-zoom.js).
+pub const MAX_DISTANCE: f32 = 900.0;
 
 #[derive(Clone, Debug)]
 pub struct OrbitCamera {

@@ -130,6 +130,7 @@ export class PlanetSurface {
     for (const hit of this.fireballs.update(dt)) this.impactFireball(hit);
     this.particles.update(dt);
     const sp = this.sim;
+    if (sp?.G) sp.G.handInput = this.handInput;   // Rain spell: the capital tribe needs the palm state
     if (sp) {
       if (sp.outcome) {
         sp.advance(dt);   // the tribe keeps living (dancing, or not) for a moment
@@ -484,8 +485,7 @@ export class PlanetSurface {
       for (const b of this.bolts) drawBolt(ctx, b.pts, Math.min(1, b.life * 4));
       ctx.restore();
     }
-    const a = this.human?.aim;
-    if (a) drawReticle(ctx, a.x * (W - 1), a.y * (H - 1), this.t, '#ffe066');
+    // The aim reticle is drawn once, on top, by main.js (#301).
     const f = this.flash;
     if (f > 0) { ctx.fillStyle = `rgba(220,230,255,${f * 0.9})`; ctx.fillRect(0, 0, W, H); }
   }

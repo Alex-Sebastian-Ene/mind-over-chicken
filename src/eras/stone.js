@@ -1,6 +1,6 @@
 // ERA I · STONE AGE
 // Blink to throw lightning (light the fire, cook a mammoth, convert Grug).
-// Hold calm for 5 s when the flame fades. Keep the tribe fed until it grows.
+// Hold Insight/Focus for 5 s when the flame fades. Keep the tribe fed until it grows.
 // Calibration: calm cues are labelled `calm`, the rest of play is labelled `rest`.
 
 import { Particles, clamp, dist, rand, chance, floater, pick } from '../sim/util.js';
@@ -10,9 +10,15 @@ import { eraTuning } from '../game/options.js'; // difficulty (#220)
 import { drawPerson, drawMammoth, drawFire, makeBolt, drawBolt, drawReticle, drawChicken, drawBoat } from '../render/sprites.js';
 import { FireballFX } from '../render/fireball.js';
 
+// Rain is a camera spell: an open palm held to the camera plus Insight/Focus. There is no
+// keyboard fallback. `hand.at` is a performance.now() timestamp.
+export function rainHandReady(hand, now = performance.now()) {
+  return !!hand?.active && !!hand.palm && now - (Number(hand.at) || 0) <= 350;
+}
+
 const POP_START = 10;
 const POP_TARGET = 15;
-const CALM_TARGET = 2;
+const FOCUS_TARGET = 2;
 // 3D firelight strength at the pit (was 1.8, which read as a white glare around the fire).
 const FIRE_GLOW = 0.9;
 const HOLD_SECONDS = 5;
@@ -26,8 +32,8 @@ export class StoneAge {
     this.label = 'Era I · Stone Age';
     this.intro = {
       title: 'Stone Age',
-      goal: `Grow the tribe to ${POP_TARGET} and keep the fire alive with ${CALM_TARGET} calm holds.`,
-      how: [['Blink', 'Throw lightning where you look. Strike the fire pit to light it, strike a giant chicken for dinner, or strike a tree to start a forest fire.'], ['Calm', 'When the flame fades, stay calm for 5 seconds.'], ['Rain', 'A forest fire needs rain: hold F / Insight for two seconds to summon it.']],
+      goal: `Grow the tribe to ${POP_TARGET} and keep the fire alive with ${FOCUS_TARGET} focus holds.`,
+      how: [['Blink', 'Throw lightning where you look. Strike the fire pit to light it, strike a giant chicken for dinner, or strike a tree to start a forest fire.'], ['Focus', 'When the flame fades, hold Insight for 5 seconds.'], ['Rain', 'A forest fire needs rain: hold an open palm to the camera and hold Insight for two seconds.']],
     };
     this.powers = ['blink', 'focus'];
     this.darkness = 0.6;
@@ -42,7 +48,7 @@ export class StoneAge {
     this.t = 0;
     this.fire = { x: w.sites.fire.x, y: w.sites.fire.y, heat: 0, lit: false, everLit: false };
     this.forest = { fires: [], burned: 0, warned: false };
-    this.rainHold = { progress: 0, active: 0, cooldown: 0 };
+    this.rainHold = { progress: 0, active: 0, cooldown: 0, hintAt: -99 };
     this.food = 0;
     this.hold = { active: false, progress: 0, successes: 0, broke: 0 };
     this.bolts = [];
@@ -201,7 +207,7 @@ export class StoneAge {
     this.G.audio?.thunder?.();
     if (!this.forest.warned) {
       this.forest.warned = true;
-      this.G.advisor.say('forest-fire', 'The forest is on fire! Hold F / Insight for two seconds to summon rain and put it out!', { mood: 'panic', priority: 3, cooldown: 999 });
+      this.G.advisor.say('forest-fire', 'The forest is on fire! Hold an open palm to the camera and Insight for two seconds to summon rain and put it out!', { mood: 'panic', priority: 3, cooldown: 999 });
     }
     return true;
   }
@@ -250,10 +256,10 @@ export class StoneAge {
     const G = this.G;
     this.castRain(this.fire.x, this.fire.y - 40);
     for (const p of this.people) if (p.alive) p.fear = clamp(p.fear - 0.15);
-    floater(this.particles, this.fire.x, this.fire.y - 30, hadForest ? 'rain puts the forest fire out' : 'rain', '#9ec9ff', 8);
+    floater(this.particles, this.fire.x, this.fire.y - 30, hadForest ? 'rain puts the forest fire out' : 'rain spell', '#9ec9ff', 8);
     G.audio?.good?.();
     G.advisor.say('rain-summoned', hadForest
-      ? 'Rain! The forest fire is out. The tribe is damp, alive and quietly impressed.'
+      ? 'Rain spell! The forest fire is out. The tribe is damp, alive and quietly impressed.'
       : 'Rain falls over the tribe. No fire to put out, but the goats seem pleased.', { mood: 'happy', priority: 3, cooldown: 10 });
   }
 
@@ -275,6 +281,15 @@ export class StoneAge {
     const held = this.G.source?.input?.focus ? 1 : 0;
     const level = Math.max(brain.focus ?? 0, held);
     const thr = brain.threshold ? brain.threshold('focus', 0.5) : 0.5;
+    // Rain is a camera spell: a held open palm is required every frame, plus Insight.
+    if (!rainHandReady(this.G.handInput, performance.now())) {
+      if (level >= thr && this.t - r.hintAt > 8) {
+        r.hintAt = this.t;
+        this.G.advisor?.say('rain-palm', 'Rain is a camera spell, my lord: hold an open palm to the camera with Insight.', { priority: 2, cooldown: 8 });
+      }
+      r.progress = Math.max(0, r.progress - dt * 2);
+      return;
+    }
     r.progress = level >= thr ? r.progress + dt : Math.max(0, r.progress - dt * 1.5);
     if (r.progress >= 2) this.startRain();
   }
@@ -287,7 +302,7 @@ export class StoneAge {
     this.bolts = this.bolts.filter((b) => (b.life -= dt) > 0);
     this.flash = Math.max(0, this.flash - dt);
 
-    // ---- Fire and the calm challenge ----
+    // ---- Fire and the focus/insight challenge ----
     const f = this.fire;
     if (f.lit) {
       const decayMult = (this.G.assistMode ? 0.5 : 1.0) * eraTuning(this.G).fireDecay;
@@ -303,16 +318,22 @@ export class StoneAge {
     }
     if (f.lit && !this.hold.active && f.heat < 0.5 && !this.done) {
       this.hold.active = true; this.hold.progress = 0;
-      brain.setCue('calm');
-      G.advisor.say('calm', 'The flame is fading. Be still, my lord. Breathe like a sleepy boulder.', { priority: 3, cooldown: 0 });
+      brain.setCue('focus');
+      G.advisor.say('focus', 'The flame is fading. Hold your focus, my lord. Keep your palm closed unless you mean rain.', { priority: 3, cooldown: 0 });
       G.audio.blip();
     }
     if (this.hold.active) {
-      const thr = brain.threshold('calm', eraTuning(G).calmThreshold);
+      const tuning = eraTuning(G);
+      const thr = brain.threshold('focus', tuning.calmThreshold);
+      // The AI god was trained on calm; its calm action still rekindles, but the player's
+      // challenge is Insight/Focus.
+      const focusLevel = Math.max(brain.focus ?? 0, this.G.source?.input?.focus ? 1 : 0);
+      const calmFallback = (this.simulated || this.G.aiGodActive) ? (brain.calm ?? 0) : 0;
+      const calmThr = brain.threshold ? brain.threshold('calm', tuning.calmThreshold) : tuning.calmThreshold;
       this.hold.thr = thr;
-      if (brain.calm >= thr) this.hold.progress += dt;
+      if (focusLevel >= thr || calmFallback >= calmThr) this.hold.progress += dt;
       else {
-        if (this.hold.progress > 1.5) G.advisor.say('broke', 'You flinched. The fire flinched. We all flinched.', { priority: 2, cooldown: 10 });
+        if (this.hold.progress > 1.5) G.advisor.say('broke', 'Your focus slipped. The fire slipped with it.', { priority: 2, cooldown: 10 });
         this.hold.progress = Math.max(0, this.hold.progress - dt * 1.5);
       }
       if (this.hold.progress >= this.holdSeconds()) this.endHold(true);
@@ -479,12 +500,12 @@ export class StoneAge {
         : this.food === 0 && !this.meat.length
         ? 'The tribe starved: blink to strike giant chickens and feed your people.'
         : !f.lit
-        ? 'The fire went out: stay calm when the flame fades to kindle it.'
+        ? 'The fire went out: hold Insight when the flame fades to kindle it.'
         : 'The tribe has perished: keep the fire lit and hunt giant chickens for dinner.';
       G.fail(reason);
     }
-    const calmTarget = this.G.assistMode ? 1 : CALM_TARGET;
-    if (!this.done && alive >= POP_TARGET && this.hold.successes >= calmTarget && f.lit) {
+    const focusTarget = this.G.assistMode ? 1 : FOCUS_TARGET;
+    if (!this.done && alive >= POP_TARGET && this.hold.successes >= focusTarget && f.lit) {
       this.done = true;
       brain.setCue(null);
       G.audio.fanfare();
@@ -504,7 +525,7 @@ export class StoneAge {
       G.audio.good();
       this.particles.burst(30, () => ({ x: this.fire.x, y: this.fire.y - 3, vx: rand(-25, 25), vy: rand(-45, -10), g: 30, life: 1, maxLife: 1, size: 1, color: pick(['#ffe066', '#ff9a2e', '#fff4c2']) }));
       floater(this.particles, this.fire.x, this.fire.y - 14, 'The flame roars', '#ffd166', 7);
-      G.advisor.say('calmok', 'Your serenity has fed the flame. The tribe weeps with gratitude. Also smoke.', { mood: 'happy', priority: 3, cooldown: 0 });
+      G.advisor.say('focusok', 'Your focus has fed the flame. The tribe weeps with gratitude. Also smoke.', { mood: 'happy', priority: 3, cooldown: 0 });
       for (const p of this.living()) p.faith = clamp(p.faith + 0.3);
     }
   }
@@ -619,7 +640,7 @@ export class StoneAge {
 
   objectives() {
     const alive = this.living().length;
-    const calmTarget = this.G.assistMode ? 1 : CALM_TARGET;
+    const focusTarget = this.G.assistMode ? 1 : FOCUS_TARGET;
     const foodHint = !this.fire.lit
       ? 'light fire'
       : this.food < 1 && !this.meat.length
@@ -630,7 +651,7 @@ export class StoneAge {
     return [
       { label: 'Fire', value: this.fire.lit ? 'lit' : 'out', done: this.fire.lit },
       { label: 'Tribe', value: `${alive}/${POP_TARGET}`, done: alive >= POP_TARGET, bad: alive <= 5 },
-      { label: 'Calm holds', value: `${this.hold.successes}/${calmTarget}`, done: this.hold.successes >= calmTarget },
+      { label: 'Focus holds', value: `${this.hold.successes}/${focusTarget}`, done: this.hold.successes >= focusTarget },
       { label: 'Food', value: foodHint, done: this.food >= 3, plain: this.food >= 1 },
       { label: 'Continents', value: `${1 + Object.keys(this.colonies).length}/${this.G.world.continents.length}`, plain: true },
     ];
@@ -729,11 +750,8 @@ export class StoneAge {
 
   drawAfterLight(ctx) {
     for (const b of this.bolts) drawBolt(ctx, b.pts, Math.min(1, b.life * 4));
-    const a = this.G.brain.aim;
-    // Painted into the map in 3D too: the map drapes over the terrain, so it lands exactly on the
-    // ground point under the cursor (the standing sprite version sat above it, or didn't show).
-    const w = this.G.world, p = w.aimPoint(a);
-    drawReticle(ctx, p.x, p.y, this.t, '#ffe066');
+    // The aim reticle is drawn once, on top of the lighting, by main.js (#301).
+    const w = this.G.world;
     if (this.flash > 0) { ctx.fillStyle = `rgba(220,230,255,${this.flash * 0.9})`; ctx.fillRect(0, 0, w.width, w.height); }
   }
 
@@ -756,9 +774,9 @@ export class StoneAge {
         ctx.lineWidth = 1.4;
         ctx.strokeStyle = 'rgba(10,12,30,0.7)';
         ctx.beginPath(); ctx.arc(f.x, f.y - 3, 13, 0, Math.PI * 2); ctx.stroke();
-        ctx.strokeStyle = '#59d8c8';
+        ctx.strokeStyle = '#9ec9ff';
         ctx.beginPath(); ctx.arc(f.x, f.y - 3, 13, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2); ctx.stroke();
-        label(ctx, f.x, f.y - 20, `HOLD CALM  ${(this.holdSeconds() - this.hold.progress).toFixed(1)}s`, '#59d8c8', 7);
+        label(ctx, f.x, f.y - 20, `HOLD INSIGHT  ${(this.holdSeconds() - this.hold.progress).toFixed(1)}s`, '#9ec9ff', 7);
       }
     }
     this.fireballs.draw(ctx);
