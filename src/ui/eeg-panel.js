@@ -24,6 +24,10 @@ const IMU_AXES = [
   { idx: 2, label: 'Z', color: '#89b4fa' },
 ];
 
+// Brain.aim is world-space on the bigger home world (#129); every calibration preview, the aim
+// pad and the sandbox test are screen-space, so read the screen aim that Brain maps from.
+const screenAimOf = (brain) => brain?.screenAim || brain?.aim || null;
+
 const TEMPLATE = `
   <header class="eeg-head">
     <h2 id="eegHeading">EEG &amp; Biosensing</h2>
@@ -547,6 +551,7 @@ export class EegPanel {
     if (!this.wiz || !this.wiz.active) return;
     const src = this.getSource();
     const b = this.getBrain();
+    const aim = screenAimOf(b);
     const now = performance.now();
     const frameDt = Math.max(0.008, Math.min(0.25, (now - (this.wiz.lastFrameNow || now)) / 1000));
     this.wiz.lastFrameNow = now;
@@ -709,9 +714,9 @@ export class EegPanel {
       ctx.fill();
 
       // Draw live head cursor preview
-      if (b?.aim) {
-        const ux = b.aim.x * w;
-        const uy = b.aim.y * h;
+      if (aim) {
+        const ux = aim.x * w;
+        const uy = aim.y * h;
         ctx.strokeStyle = '#59d8c8';
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -875,8 +880,8 @@ export class EegPanel {
       if (curBlinks > this.wiz.lastBlinkCount) {
         this.wiz.lastBlinkCount = curBlinks;
         this.wiz.sandboxBolts.push({
-          x: (b?.aim?.x ?? 0.5) * w,
-          y: (b?.aim?.y ?? 0.5) * h,
+          x: (aim?.x ?? 0.5) * w,
+          y: (aim?.y ?? 0.5) * h,
           born: now,
         });
       }
@@ -894,7 +899,7 @@ export class EegPanel {
       ];
       for (const t of targets) {
         const tx = t.x * w, ty = t.y * h;
-        const dist = Math.hypot((b?.aim?.x ?? 0.5) - t.x, (b?.aim?.y ?? 0.5) - t.y);
+        const dist = Math.hypot((aim?.x ?? 0.5) - t.x, (aim?.y ?? 0.5) - t.y);
         ctx.strokeStyle = dist < 0.09 ? '#7ee08a' : 'rgba(163, 166, 196, 0.45)';
         ctx.lineWidth = dist < 0.09 ? 3 : 1.5;
         ctx.beginPath();
@@ -916,9 +921,9 @@ export class EegPanel {
         ctx.stroke();
       }
 
-      if (b?.aim) {
-        const ux = b.aim.x * w;
-        const uy = b.aim.y * h;
+      if (aim) {
+        const ux = aim.x * w;
+        const uy = aim.y * h;
         ctx.strokeStyle = '#7ee08a';
         ctx.fillStyle = '#7ee08a';
         ctx.lineWidth = 2.5;
@@ -930,7 +935,7 @@ export class EegPanel {
         ctx.fill();
       }
 
-      this.wiz.statsEl.textContent = `Head Aim: (${(b?.aim?.x ?? 0.5).toFixed(2)}, ${(b?.aim?.y ?? 0.5).toFixed(2)}) · Motion R²: ${Math.round((mm?.r2 ?? 0) * 100)}% (PitchEdge: ${(mm?.pitchEdgeDeg ?? 8).toFixed(1)}°) · Blink Acc: ${Math.round((bm?.accuracy ?? 0) * 100)}% (Thr ${Math.round(bm?.thresholdUv ?? 175)}µV)`;
+      this.wiz.statsEl.textContent = `Head Aim (screen): (${(aim?.x ?? 0.5).toFixed(2)}, ${(aim?.y ?? 0.5).toFixed(2)}) · Motion R²: ${Math.round((mm?.r2 ?? 0) * 100)}% (PitchEdge: ${(mm?.pitchEdgeDeg ?? 8).toFixed(1)}°) · Blink Acc: ${Math.round((bm?.accuracy ?? 0) * 100)}% (Thr ${Math.round(bm?.thresholdUv ?? 175)}µV)`;
     }
   }
 
@@ -972,7 +977,11 @@ export class EegPanel {
     if (src?.recenter) {
       const o = b?.orientation;
       src.recenter(true);
-      if (b) { b.aim.x = 0.5; b.aim.y = 0.5; }
+      if (b) {
+        b.screenAim = { ...(b.screenAim || {}), x: 0.5, y: 0.5 };
+        const a = b.screenToAim ? b.screenToAim(0.5, 0.5) : { x: 0.5, y: 0.5 };
+        b.aim.x = a.x; b.aim.y = a.y;
+      }
       this.ui.msg.textContent = '3D Head pose tared to screen center (0.50, 0.50) in Rust!';
       this.addLog(`Head cursor tared at raw=(P:${o ? o.pitch.toFixed(1) : '?'}° R:${o ? o.roll.toFixed(1) : '?'}° Y:${o ? o.yaw.toFixed(1) : '?'}°) -> center (0.5, 0.5)`);
     }
@@ -1250,7 +1259,7 @@ export class EegPanel {
       this.ui.roll.textContent = '--°';
       this.ui.yaw.textContent = '--°';
     }
-    this.drawPad(b.aim, totalCalib >= 1);
+    this.drawPad(screenAimOf(b), totalCalib >= 1);
   }
 
   drawPad(aim, calibrated) {
