@@ -12,7 +12,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 - [ ] **Headset**:
   - **Option A (Muse 2 hardware)**: Bluetooth paired. `python bridge/muse_bridge.py --board muse2` running in terminal, showing green stream. On the title screen, **Connect a real headset → Connect**. The run starts on the first EEG frame: the status reads *"Waiting for the first EEG from the headset…"* and gives up after 10 s with Retry or the emulated headset.
   - **Option B (Emulated Headset fallback)**: Title screen button **"Play with the emulated headset"**.
-- [ ] **Settings**: **⚙ Settings** (top bar or title screen) holds reduce motion, head-aim sensitivity and inversion, the calibration window and "camera on at start". Esc closes it. Everything is saved in the browser.
+- [ ] **Settings**: **⚙ Settings** (top bar or title screen) holds reduce motion (no shake, softer lightning flashes, no camera sweeps), head-aim sensitivity and inversion, the calibration window, the keyboard controls and "camera on at start". Esc closes it. Everything is saved in the browser. Turn on reduce motion if anyone watching is sensitive to flashes.
 - [ ] **Webcam**: Camera positioned at eye level with even lighting. Press `C` (or **⚙ Settings → Advanced → Camera**) to open the sidebar, then **"Start Camera"** and allow the permission prompt. A **● Camera on** chip shows in the top bar while it runs.
 - [ ] **Mood without a webcam** (optional): in the Camera sidebar, clear **No emotion** and use the **Happy ↔ Mix ↔ Surprised** slider. Joy lifts morale; moving into Surprised sets off a sky flash and lightning once.
 - [ ] **Pinch calibration** (optional): Camera sidebar → **🎯 Pinch Movement Calibration** opens a pop-up. Follow the live camera + wireframe to the LEFT, RIGHT, UP and DOWN targets with each hand. It auto-advances, saves per-axis gains and closes when complete. Gains persist in the browser. Esc closes it. Head tilt is not calibrated.
@@ -53,7 +53,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 
 #### Operator Actions
 - **0:00**: Title screen visible. Click **"Play with the emulated headset"** (or **Connect a real headset → Connect** if the Muse is streaming).
-- **0:05**: The camera sweeps down onto the 640×360 home world in **3D WebGL mode** (3.2 s; pixel-art heightmap terrain, the sun crossing a 150-second day). There is no card to dismiss.
+- **0:05**: The camera sweeps down onto the 640×360 home world in **3D WebGL mode** (3.2 s; pixel-art heightmap terrain, the sun crossing a 150-second day). There is no card to dismiss. Under reduced motion the sweep is dropped.
 - **0:12**: Show the power tiles (`Lightning`, `Rain or Calm`, `Markets`). Point out that the 10-second calibration window is active, recording baseline alpha/beta rhythms.
 
 ---

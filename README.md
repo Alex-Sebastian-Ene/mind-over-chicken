@@ -109,9 +109,9 @@ The Rust/Wasm simulation loop and world rules.
 * **Day and night:** in 3D the sun crosses the sky over a 150-second day; nights are moonlit and stay readable. An era's own darkness (the Stone Age before its fire) always wins (#242).
 * **Zoom:** one continuous zoom from the surface to the globe and the galaxy, by scroll wheel, trackpad pinch, two-hand pinch, **Z**/**X** or the on-screen buttons. In 3D it zooms toward the cursor (#142, #207, #228, #248).
 * **Galaxy picker:** **Left/Right** (or **A**/**D**, or a sideways scroll) choose a world; **Enter** or any zoom-in lands on it. Clicking a planet works too (#259).
-* **Era intro:** each era opens with a 3.2-second camera move onto its stage instead of a card to dismiss. **Space**, **Enter** or a click skips it (#224).
+* **Era intro:** each era opens with a 3.2-second camera move onto its stage instead of a card to dismiss. **Space**, **Enter** or a click skips it (#224). Under reduced motion the caption stays and the sweep is dropped (#90).
 * **Top bar:** EEG, 3D, AI God, Sound and **⚙ Settings**, plus a **● Camera on** chip while the webcam runs (#275).
-* **Settings:** one panel, also on the title screen and closed with **Esc**: reduce motion, head aim (sensitivity and inversion), the calibration window, camera on at start, and Advanced: the Camera (**C**), Model (**M**) and Debug (**`**) panels. Everything is saved in the browser (#275). **Shift+C** re-centres the headset's head pose (#239).
+* **Settings:** one panel, also on the title screen and closed with **Esc**: reduce motion (no screen shake, softer flashes, no camera sweeps; it starts from the system setting, #90), head aim (sensitivity and inversion), the calibration window, the keyboard-and-mouse controls for playing with no headset or camera, camera on at start, and Advanced: the Camera (**C**), Model (**M**) and Debug (**`**) panels. Everything is saved in the browser (#275). **Shift+C** re-centres the headset's head pose (#239).
 * **UI layer:** the target is a hands-free interface controlled through gestures, head movement, and concentration.
 * **Current milestone:** the HUD and existing fallback controls remain; gesture navigation is deferred.
 
