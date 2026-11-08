@@ -67,3 +67,21 @@ test('the Stone Age takes its calm hold from the difficulty (5 s on Normal)', as
   s.G = {};
   assert.equal(s.holdSeconds(), 5);
 });
+
+test('a save keeps the New Game options, so Continue plays the same size and difficulty', async () => {
+  const { buildCheckpoint } = await import('../src/game/checkpoint.js');
+  const cp = buildCheckpoint({ options: { worldSize: 'random', difficulty: 'hard', size: 'large' }, world: { seed: 9, width: 960, height: 540 } }, { id: 'r', runNumber: 1, mode: 'story' });
+  assert.deepEqual(cp.options, { worldSize: 'random', difficulty: 'hard', size: 'large' });
+  assert.deepEqual(cp.worldSize, { width: 960, height: 540 });
+  assert.equal(buildCheckpoint({}, { id: 'r', runNumber: 1 }).options, null);
+});
+
+test('the New Game step offers every size and difficulty in the table', async () => {
+  const { readFileSync } = await import('node:fs');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const view = html.slice(html.indexOf('data-title-view="new"'), html.indexOf('data-title-view="load"'));
+  const values = (opt) => [...view.matchAll(new RegExp(`data-option="${opt}" data-value="([a-z]+)"`, 'g'))].map((m) => m[1]);
+  assert.deepEqual(values('worldSize'), [...WORLD_SIZES.map((s) => s.id), 'random']);
+  assert.deepEqual(values('difficulty'), DIFFICULTIES);
+  assert.match(view, /id="newGameStart"/);
+});
