@@ -3,7 +3,7 @@
 // Hold calm for 5 s when the flame fades. Keep the tribe fed until it grows.
 // Calibration: calm cues are labelled `calm`, the rest of play is labelled `rest`.
 
-import { W, H, Particles, clamp, dist, rand, chance, floater, pick } from '../sim/util.js';
+import { Particles, clamp, dist, rand, chance, floater, pick } from '../sim/util.js';
 import { walk, animate, villagerLook, sail } from '../sim/agents.js';
 import { drawPerson, drawMammoth, drawFire, makeBolt, drawBolt, drawReticle, drawChicken, drawBoat } from '../render/sprites.js';
 
@@ -83,7 +83,7 @@ export class StoneAge {
     const G = this.G;
     if (this.t - this.lastBolt < 0.5 || this.done) return;
     this.lastBolt = this.t;
-    const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
+    const { x, y } = G.world.aimPoint(aim);   // aims are 0..1 of the world (640×360 at home, #129)
     this.bolts.push({ pts: makeBolt(x, y), life: 0.35 });
     this.flash = 0.35;
     this.strikes++;
@@ -587,8 +587,9 @@ export class StoneAge {
     const a = this.G.brain.aim;
     // Painted into the map in 3D too: the map drapes over the terrain, so it lands exactly on the
     // ground point under the cursor (the standing sprite version sat above it, or didn't show).
-    drawReticle(ctx, a.x * (W - 1), a.y * (H - 1), this.t, '#ffe066');
-    if (this.flash > 0) { ctx.fillStyle = `rgba(220,230,255,${this.flash * 0.9})`; ctx.fillRect(0, 0, W, H); }
+    const w = this.G.world, p = w.aimPoint(a);
+    drawReticle(ctx, p.x, p.y, this.t, '#ffe066');
+    if (this.flash > 0) { ctx.fillStyle = `rgba(220,230,255,${this.flash * 0.9})`; ctx.fillRect(0, 0, w.width, w.height); }
   }
 
   drawOverlay(ctx) {
@@ -621,7 +622,7 @@ export class StoneAge {
   // Living-entity pinch-grab support (#120)
   onGrabStart(aim) {
     if (this.done) return null;
-    const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
+    const { x, y } = this.G.world.aimPoint(aim);
     // Reject non-living targets: fire pit, rocks, water
     if (dist(x, y, this.fire.x, this.fire.y) < 14) {
       return { ok: false, reason: 'Fire pit cannot be picked up' };
@@ -655,7 +656,7 @@ export class StoneAge {
 
   onGrabMove(aim) {
     if (!this.grabbedEntity) return;
-    const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
+    const { x, y } = this.G.world.aimPoint(aim);
     const e = this.grabbedEntity.entity;
     e.x = x;
     e.y = y;
@@ -668,7 +669,7 @@ export class StoneAge {
     this.grabbedEntity = null;
     if (cancelled) return;
     const w = this.G.world;
-    const targetX = Math.round(aimX * (W - 1)), targetY = Math.round(aimY * (H - 1));
+    const { x: targetX, y: targetY } = w.aimPoint({ x: aimX, y: aimY });
     const safeLand = w.walkable(targetX, targetY) && w.reachable(targetX, targetY)
       ? { x: targetX, y: targetY }
       : w.randomLand(targetX, targetY, 1, 8);
@@ -685,7 +686,7 @@ export class StoneAge {
     const G = this.G;
     if (!G || this.done) return;
     const w = G.world, f = this.fire;
-    const x = Math.round(aim.x * (W - 1)), y = Math.round(aim.y * (H - 1));
+    const { x, y } = w.aimPoint(aim);
     switch (spell) {
       case 'palm': {
         // Core move Palm (#122): calm fear, soothe people, feed fire a bit
@@ -719,8 +720,8 @@ export class StoneAge {
         // Victory: a soft rain. Fear eases and the berry bushes swell.
         for (const p of this.living()) p.fear = clamp(p.fear - 0.35);
         this.food += 1;
-        this.castRain(x);
-        floater(this.particles, x, 24, 'gentle rain', '#9ec9ff', 7);
+        this.castRain(x, y);
+        floater(this.particles, x, y - 66, 'gentle rain', '#9ec9ff', 7);
         G.advisor.say('cast-rain', 'A gentle rain. The tribe relaxes, the berries swell. The fire is fine, I checked.', { mood: 'happy', priority: 1, cooldown: 25 });
         break;
       }
@@ -737,8 +738,8 @@ export class StoneAge {
         this.flash = 0.5;
         G.shake = Math.max(G.shake || 0, 1.2);
         G.audio.thunder();
-        for (let i = 0; i < 3; i++) this.bolts.push({ pts: makeBolt(clamp(x + rand(-16, 16), 2, W - 3), clamp(y + rand(-8, 8), 4, H - 3)), life: 0.35 + i * 0.12 });
-        this.castRain(x);
+        for (let i = 0; i < 3; i++) this.bolts.push({ pts: makeBolt(x + rand(-16, 16), y + rand(-8, 8)), life: 0.35 + i * 0.12 });
+        this.castRain(x, y);
         for (const p of this.living()) {
           const d = dist(x, y, p.x, p.y);
           if (d > 45) continue;
@@ -762,8 +763,9 @@ export class StoneAge {
     }
   }
 
-  castRain(cx) {
-    this.particles.burst(60, () => ({ x: cx + rand(-60, 60), y: rand(-10, H * 0.7), vx: -4, vy: rand(70, 100), life: rand(0.5, 1), maxLife: 1, size: 1, color: 'rgba(158,201,255,0.75)' }));
+  // Rain over a screen-sized patch of sky around (cx, cy) (the world is bigger than the view, #129).
+  castRain(cx, cy = this.G?.camera?.viewCenter?.().y ?? this.fire.y) {
+    this.particles.burst(60, () => ({ x: cx + rand(-60, 60), y: cy + rand(-100, 26), vx: -4, vy: rand(70, 100), life: rand(0.5, 1), maxLife: 1, size: 1, color: 'rgba(158,201,255,0.75)' }));
   }
 
   // Face mood. Joy: the tribe dances and believes. Anger: it gets restless. Surprise: the sky
@@ -788,7 +790,8 @@ export class StoneAge {
       if (mood.reason === 'change') floater(this.particles, this.fire.x, this.fire.y - 16, 'grumbling', '#ff8a9c', 6);
     } else if (mood.dominant === 'surprise') {
       this.flash = Math.max(this.flash, 0.3);
-      this.bolts.push({ pts: makeBolt(rand(20, W - 20), rand(30, H - 20)), life: 0.3 });
+      const c = G.camera?.viewCenter?.() || this.fire;   // somewhere on screen
+      this.bolts.push({ pts: makeBolt(c.x + rand(-140, 140), c.y + rand(-60, 70)), life: 0.3 });
       G.audio.thunder();
       for (const p of home) p.fear = clamp(p.fear + 0.05);
     }

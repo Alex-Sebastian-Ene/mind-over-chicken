@@ -1,6 +1,6 @@
 // Mind over Chicken: boot, scene flow, render pipeline and input.
 
-import { W, H, clamp, lerp } from './sim/util.js';
+import { W, H, HOME_W, HOME_H, clamp, lerp, wrapDelta } from './sim/util.js';
 
 const smoothstep = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
 import { World, setRustWorldGen } from './world/terrain.js';
@@ -20,6 +20,7 @@ import initEngine, {
   RustImuTracker,
   RustBlinkClassifier,
   PointerGesture,
+  ViewCamera, // the 320×180 window onto the bigger home world (#129)
   RustWorldGen,
   RustCastController,
   RustFingerController,
@@ -44,7 +45,7 @@ import { setRustAgentHelpers } from './sim/agents.js';
 import { initDebug } from './camera/debug.js'; // camera debug (#67)
 import { Calibration, readCalibrationConfig, setRustCalibration } from './brain/calibration.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
-import { CivSandbox } from './civ/sandbox.js'; // civ (#50)
+import { CivSandbox, initPlanetSizePicker } from './civ/sandbox.js'; // civ (#50)
 import { worldMeta, renderWorldDetail } from './cosmos/panel.js'; // planets (#68)
 import { SimPlanet } from './ai/planet.js';
 import { AIGod } from './ai/autopilot.js';
@@ -69,6 +70,7 @@ const cosmosCanvas = Object.assign(document.createElement('canvas'), { width: W,
 const cosmosCtx = cosmosCanvas.getContext('2d');
 let K = 3;
 let engine = null;
+let viewCam = null;
 let gesture = null; // Rust (input.rs): with the main button or a finger, a tap blinks and a drag pans
 // Pan the map by a drag (world units), both axes, wherever you are: a scene with its own camera
 // (the civ sandbox's big planet) takes it directly; otherwise the planet pans east–west (and
@@ -89,20 +91,33 @@ function grabPan3d(e) {
   for (let pass = 0; pass < 3; pass++) {
     const g = groundAt(e);
     if (!g) break;
+    if (worldScene(cosmos.viewScene(G)) && cosmos.view) {
+      // The home world (#129): a wrap-aware difference on both axes (a torus, #111), then move
+      // the one camera (2D window and 3D target) by it.
+      const dx = wrapDelta(grab3d.x, g.x, cosmos.worldW), dz = wrapDelta(grab3d.z, g.z, cosmos.worldH);
+      if (Math.abs(dx) < 0.05 && Math.abs(dz) < 0.05) break;
+      cosmos.pan(-dx, -dz);
+      // Apply now, not at the next frame: a fast mouse sends several moves per frame, and each
+      // one must raycast against the camera it already moved.
+      engine.set_camera_target(cosmos.view.center_x(), cosmos.view.center_y());
+      continue;
+    }
+    // Other worlds' 320×180 relief (#192): pan east–west, move the target north–south.
     let dx = grab3d.x - g.x; dx = ((dx + W * 1.5) % W) - W / 2;
     const dz = grab3d.z - g.z;
     if (Math.abs(dx) < 0.05 && Math.abs(dz) < 0.05) break;
     if (dx) cosmos.pan(-dx);
-    engine.set_camera_target(cosmos.mapX(W / 2), clamp(engine.get_camera_target_z() + dz, 0, H - 1));
+    engine.set_camera_target(engine.get_camera_target_x(), clamp(engine.get_camera_target_z() + dz, 0, H - 1));
   }
   cam3dBase = null;
   return true;
 }
 function panMap(dx, dy) {
-  if (G?.scene?.panBy) { G.scene.panBy(dx, dy); return; }
+  // Both axes. The home world's 3D target follows the 2D camera (#129); a scene with its own
+  // camera (the civ sandbox) takes the pan through cosmos.panSink.
   const scene = cosmos?.viewScene?.(G) || G?.scene;
   cosmos.pan(dx, dy);
-  if (dy && in3dSurface() && (!scene || typeof scene.centerColumn !== 'function')) {
+  if (dy && in3dSurface() && !worldScene(scene) && !G?.scene?.panBy && (!scene || typeof scene.centerColumn !== 'function')) {
     engine.set_camera_target(engine.get_camera_target_x(), clamp(engine.get_camera_target_z() - dy, 0, H - 1));
   }
   cam3dBase = null;
@@ -122,6 +137,7 @@ try {
   setRustCalibration(RustCalibration);
   setRustAgentHelpers(rust_villager_look, rust_animate_agent);
   gesture = new PointerGesture(6);
+  viewCam = new ViewCamera(HOME_W, HOME_H, W, H); // the 320×180 window onto the home world (#129)
   BridgeSource.setWasmClasses(RustImuTracker, RustBlinkClassifier);
   engine = new Engine('screen');
   try {
@@ -205,6 +221,9 @@ const audio = {
 const advisor = new Advisor($('advisor'));
 const hud = new Hud(document);
 const cosmos = new Cosmos();
+cosmos.setViewCamera(viewCam);
+// A scene with its own camera (the civ sandbox's planet) takes every pan: drag, keys, wheel.
+cosmos.panSink = (dx, dy) => { if (G?.scene?.panBy) { G.scene.panBy(dx, dy); return true; } return false; };
 // What the HUD shows while you look at the galaxy.
 const galaxyHudScene = { label: 'Galaxy', powers: ['calm', 'focus', 'stress'], objectives: () => cosmos.galaxy?.objectives() || [] };
 let hudScene = null;
@@ -338,7 +357,7 @@ function newGame(source, startIndex = 0) {
   const brain = new Brain(source);
   cosmos.reset();
   G = {
-    world: new World(),
+    world: new World(undefined, { width: HOME_W, height: HOME_H }), // the bigger home world (#129)
     brain, source, advisor, hud, audio, engine,
     calibration: new Calibration(calibConfig), // calibration (#54)
     scene: null, sceneIndex: startIndex, runTime: 0, shake: 0,
@@ -352,15 +371,28 @@ function newGame(source, startIndex = 0) {
     fail(reason) { showFail(reason); },
     finish(extra) { G.finished = true; G.extra = extra; setTimeout(showEnd, 2200); },
   };
+  // Headset aims are screen positions: map them through the home camera (#129), raycasting in 3D.
+  brain.screenToAim = (x, y) => {
+    if (cosmos.surfaceInView || !cosmos.view || cosmos.active) return { x, y };
+    if (in3dSurface()) {
+      const r = screen.getBoundingClientRect();
+      const hit = engine.screen_to_ground(x * r.width, y * r.height, r.width, r.height);
+      if (hit && hit[0] >= 0) return { x: hit[0] / cosmos.worldW, y: hit[1] / cosmos.worldH };
+    }
+    const p = cosmos.toWorld(x * W, y * H);
+    return { x: p.x / cosmos.worldW, y: p.y / cosmos.worldH };
+  };
   brain.onBlink((aim) => {
     hud.flashBlink();
-    if (engine) engine.game_on_blink(aim.x * W, aim.y * H);
+    if (engine) engine.game_on_blink(aim.x * cosmos.worldW, aim.y * cosmos.worldH);
     cosmos.galaxy?.onBlink();   // storms on the blink world; a strike on the world you're zoomed into
     if (cosmos.galaxy?.attended) audio.thunder();
     const view = cosmos.viewScene(G); // planets (#68): another world's surface when you're on it
     if (!banner && view?.onBlink) view.onBlink(aim);
   });
   // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
+  G.camera = cosmos;          // the eras ask it where the screen is (#129)
+  cosmos.attachWorld(G.world); // the camera looks at the village
   cosmos.ensureGalaxy(G);
   brain.onTrained = () => {};
   $('endScreen').hidden = true;
@@ -369,7 +401,7 @@ function newGame(source, startIndex = 0) {
     engine.init_world(G.world.seed);
     // The 3D relief must be the world the simulation runs on (#71). Older pkg builds lack this.
     if (engine.set_heightmap) {
-      try { engine.set_heightmap(G.world.h); } catch (err) { console.warn('set_heightmap failed:', err); }
+      try { engine.set_heightmap(G.world.h, G.world.width || 0, G.world.height || 0); } catch (err) { console.warn('set_heightmap failed:', err); }
     }
     // Around the 3D map: this world's deep sea, so the edges read as open ocean.
     const deep = G.world.palette?.[0]?.[0];
@@ -398,11 +430,20 @@ function startScene(i) {
   }
   advisor.setEra(scene.era);
   scene.enter(G);
+  lookAtStage(scene);
   hud.setScene(scene);
   document.body.dataset.era = scene.era;
   fade = 1;
   if (scene.intro) showBanner(scene, i);
   else banner = null;
+}
+
+// Each era opens with the camera on its stage: the village, the exchange, the launch crowd (#129).
+function lookAtStage(scene) {
+  const s = G?.world?.sites;
+  if (!s || !WORLD_SCENES.some((c) => scene instanceof c)) return;
+  const f = scene.era === 'industry' ? s.exchange : scene.era === 'space' ? s.crowd : s.village;
+  if (f) cosmos.lookAt(f.x, f.y);
 }
 
 function restartScene() {
@@ -416,6 +457,7 @@ function restartScene() {
   }
   advisor.setEra(scene.era);
   scene.enter(G);
+  lookAtStage(scene);
   hud.setScene(scene);
   fade = 1;
   if (scene.intro) showBanner(scene, i);
@@ -577,7 +619,62 @@ function showEnd() {
 }
 
 // ---------- render ----------
+// The home world is bigger than the screen (#129). Its scenes (the eras, and the AI god's Stone
+// Age) paint the whole map into `worldCanvas` in world pixels; the camera's 320×180 window is
+// then cut out of it into `low` (2D), or the whole canvas drapes over the 3D relief. Anything
+// fixed to the screen (charts, tickers, captions) goes through drawScreen / drawScreenOverlay.
+const WORLD_SCENES = [StoneAge, FarmingToKingdoms, Industry, InfoAge, SpaceAge];
+const worldCanvas = document.createElement('canvas');
+const worldCtx = worldCanvas.getContext('2d');
+function worldScene(scene) { return !!scene && scene !== cosmos.surfaceInView && WORLD_SCENES.some((c) => scene instanceof c) && !!scene.G?.world; }
+function sizeWorldCanvas(world) {
+  const w = world.width || W, h = world.height || H;
+  if (worldCanvas.width !== w || worldCanvas.height !== h) { worldCanvas.width = w; worldCanvas.height = h; }
+}
+// Lights for the 2D shader are in screen pixels: repeat each at every wrap copy that reaches the view.
+function addLights2d(scene, offsets) {
+  for (const l of scene.lights()) {
+    for (const [ox, oy] of offsets) {
+      const x = l.x + ox, y = l.y + oy;
+      if (x > -l.r && y > -l.r && x < W + l.r && y < H + l.r) engine.add_light(x, y, l.r, 1.0);
+    }
+  }
+}
+// Small map of the whole world with the camera's window on it (#129), in the screen's corner.
+const MINI = { w: 64, h: 36, pad: 4 };
+const miniCache = { layer: null, canvas: null };
+function drawMinimap(ctx, scene) {
+  const world = scene.G.world, layer = scene.layer || world.layers?.stone;
+  if (!layer || !cosmos.view) return;
+  if (miniCache.layer !== layer) {
+    const c = miniCache.canvas || document.createElement('canvas');
+    c.width = MINI.w; c.height = MINI.h;
+    const cx = c.getContext('2d');
+    cx.imageSmoothingEnabled = true;
+    cx.drawImage(layer, 0, 0, MINI.w, MINI.h);
+    miniCache.layer = layer; miniCache.canvas = c;
+  }
+  const x0 = MINI.pad, y0 = MINI.pad;   // top-left: the goat chart is top-right, the coach and HUD at the bottom
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = 'rgba(8,10,24,0.85)';
+  ctx.fillRect(x0 - 1, y0 - 1, MINI.w + 2, MINI.h + 2);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(miniCache.canvas, x0, y0);
+  // The camera's window, cut at the seams like the view itself.
+  const sx = MINI.w / (world.width || W), sy = MINI.h / (world.height || H);
+  const r = cosmos.view.blits();
+  ctx.strokeStyle = '#ffe066';
+  ctx.lineWidth = 0.6;
+  for (let i = 0; i < r.length; i += 6) ctx.strokeRect(x0 + r[i] * sx, y0 + r[i + 1] * sy, r[i + 2] * sx, r[i + 3] * sy);
+  const v = world.sites?.village;
+  if (v) { ctx.fillStyle = '#ff9a2e'; ctx.fillRect(x0 + v.x * sx - 0.75, y0 + v.y * sy - 0.75, 1.5, 1.5); }
+  ctx.globalAlpha = 1;
+}
+
+// Frame cost for playtests (#129): render ms and whole-frame ms, read and reset via __moc.perf().
+let perfSample = { n: 0, ms: 0, frames: 0, frameMs: 0, maxFrameMs: 0 };
 function render() {
+  const t0 = performance.now();
   const scene = G ? cosmos.viewScene(G) : null;
   textCtx.setTransform(1, 0, 0, 1, 0, 0);
   textCtx.clearRect(0, 0, textLayer.width, textLayer.height);
@@ -591,19 +688,21 @@ function render() {
   lowCtx.imageSmoothingEnabled = false;
   lowCtx.setTransform(1, 0, 0, 1, 0, 0);
   lowCtx.clearRect(0, 0, W, H);
+  const windowed = worldScene(scene);
   // In 3D mode, the 3D map is kept active continuously between orbit and surface (continuous zoom down from globe).
   G.render3d = in3dSurface();
   globalThis.__moc_render3d = G.render3d;
   const z = cosmos?.z || 0;
   if (G.render3d) {
-    // The 3D camera follows the same east–west pan as the 2D map (A/D, Shift+scroll, drag).
-    if (scene && typeof scene.centerColumn === 'function') {
+    if (windowed && cosmos.view) {
+      // One camera for both views: the 3D target is the centre of the 2D window (#129).
+      engine.set_camera_target(cosmos.view.center_x(), cosmos.view.center_y());
+    } else if (scene && typeof scene.centerColumn === 'function') {
+      // Other worlds and the civ sandbox (#192): their own camera over a 320×180 relief.
       const cx = scene.centerColumn();
       const vh = scene.v?.h ?? (scene.civ ? H : 360);
       const cz = scene.civ ? (H / 2) : clamp(((scene.camY ?? 0) + H / 2) / vh * H, 10, H - 10);
       engine.set_camera_target(cx, cz);
-    } else {
-      engine.set_camera_target(cosmos.mapX(W / 2), engine.get_camera_target_z());
     }
     if (z > 0.001 && z < 1.0) {
       // Continuous camera zoom between orbit and ground
@@ -620,9 +719,19 @@ function render() {
     }
   }
   // In 3D, scenes with draw3d stand their actors up as sprites, so they skip painting them flat.
-  scene.draw(lowCtx);
-  scene.drawAfterLight?.(lowCtx);
-  if (!G.render3d && scene?.phase !== 'voyage') cosmos.applyPan(low);   // the surface is a planet: it wraps east–west (3D pans the camera instead)
+  let ctx = lowCtx;
+  if (windowed) {
+    sizeWorldCanvas(scene.G.world);
+    worldCtx.imageSmoothingEnabled = false;
+    worldCtx.setTransform(1, 0, 0, 1, 0, 0);
+    worldCtx.clearRect(0, 0, worldCanvas.width, worldCanvas.height);
+    ctx = worldCtx;
+  }
+  scene.draw(ctx);
+  scene.drawAfterLight?.(ctx);
+  if (windowed && !G.render3d) cosmos.blitView(worldCanvas, low);
+  if (!G.render3d) scene.drawScreen?.(lowCtx);
+  if (!windowed && !G.render3d && scene?.phase !== 'voyage') cosmos.applyPan(low);
 
   let cosmic = false;
   if (!G.render3d || z >= 1.0) {
@@ -642,18 +751,20 @@ function render() {
   const shakeAmount = G.shake ? (G.shake * 0.008) : 0;
   const sx = shakeAmount ? (Math.random() - 0.5) * shakeAmount : 0;
   const sy = shakeAmount ? (Math.random() - 0.5) * shakeAmount : 0;
-  // The surface is panned east–west after it is drawn, so lights (and labels) follow the
-  // pan, with a second copy across the date line.
-  const offsets = cosmos.overlayOffsets();
+  // World-space lights and labels repeat at every copy of the world that reaches the screen, so
+  // they follow the camera and wrap with the map. In 3D, labels are projected instead.
+  const offsets = windowed && !G.render3d ? cosmos.overlayOffsets() : [[0, 0]];
 
   if (engine) {
     try {
       if (G.render3d && z < 1.0) {
         sync3dWorldMesh(scene);
         engine.begin_frame();
-        engine.upload_canvas(low);
+        // The 3D terrain texture: the home world's world-sized canvas (#129), or the view canvas
+        // for other worlds' 320×180 relief (#192).
+        engine.upload_terrain_canvas(windowed ? worldCanvas : low);
         if (scene === G.scene && !G.sandbox && !(scene instanceof CivSandbox) && !scene?.civ && scene?.era) {
-          G.world?.draw3d?.(engine);
+          G.world?.draw3d?.(engine, windowed ? near3d(scene.G.world) : null);
           if (scene.draw3d) {
             scene.draw3d(engine, 0.016);
           } else if (typeof engine.draw_era_3d === 'function') {
@@ -684,11 +795,7 @@ function render() {
         // begin_frame clears last frame's lights; without it they pile up every frame (#38).
         engine.begin_frame();
         engine.upload_canvas(low);
-        if (surface && scene.lights) {
-          for (const l of scene.lights()) {
-            for (const off of offsets) engine.add_light(l.x + off, l.y, l.r, 1.0);
-          }
-        }
+        if (surface && scene.lights) addLights2d(scene, offsets);
         engine.render_uploaded_canvas(dark, flash, fade, sx, sy, screen.width, screen.height);
       }
     } catch (e) {
@@ -715,17 +822,31 @@ function render() {
     } else {
       textCtx.__project3d = null;
     }
-    for (const off of offsets) {
-      textCtx.setTransform(K, 0, 0, K, off * K, 0);
+    for (const [ox, oy] of offsets) {
+      textCtx.setTransform(K, 0, 0, K, ox * K, oy * K);
       scene.drawOverlay?.(textCtx);
     }
     textCtx.__project3d = null;
+    textCtx.setTransform(K, 0, 0, K, 0, 0);
+    if (G.render3d) scene.drawScreen?.(textCtx);   // 3D has no low-res frame to paint into
+    scene.drawScreenOverlay?.(textCtx);
+    if (windowed && !cosmic && scene.phase !== 'voyage') drawMinimap(textCtx, scene);   // not over the voyage's starfield
   }
   textCtx.setTransform(K, 0, 0, K, 0, 0);
   textCtx.globalAlpha = visible;
   if (cosmic) cosmos.overlay(textCtx, G);
-  scene.drawScreenUI?.(textCtx);
   textCtx.globalAlpha = 1;
+  perfSample.n++; perfSample.ms += performance.now() - t0;
+}
+
+// 3D: only the trees and buildings near the camera target are sent as billboards (the world is
+// four screens big, #129). Radius from the camera distance, generous for the tilted far edge.
+function near3d(world) {
+  const tx = engine.get_camera_target_x(), tz = engine.get_camera_target_z();
+  const d = engine.get_camera_distance();
+  const rx = d * 0.62 + 40, rz = d * 0.5 + 40;
+  const ww = world.width, wh = world.height;
+  return (x, y) => Math.abs(wrapDelta(x, tx, ww)) < rx && Math.abs(wrapDelta(y, tz, wh)) < rz;
 }
 
 // ---------- loop ----------
@@ -792,6 +913,8 @@ function frame(ts) {
   }
   eegPanel?.update();
   render();
+  const fms = performance.now() - ts;
+  perfSample.frames++; perfSample.frameMs += fms; perfSample.maxFrameMs = Math.max(perfSample.maxFrameMs, fms);
 }
 function rafLoop() {
   if (!jsLoopRunning) return;
@@ -823,11 +946,14 @@ function surfaceAim(e) {
     const sy = e.clientY - r.top;
     const hit = engine.screen_to_ground(sx, sy, r.width, r.height);
     if (hit && hit[0] >= 0 && hit[1] >= 0) {
-      return { x: clamp(hit[0] / W), y: clamp(hit[1] / H) };
+      return { x: hit[0] / cosmos.worldW, y: hit[1] / cosmos.worldH };
     }
   }
+  // 2D: screen → world through the camera (#129). Aims are 0..1 of the world, like the brain's.
   const a = aimFromEvent(e);
-  return { x: cosmos.mapX(a.x * W) / W, y: a.y };
+  if (cosmos.surfaceInView || !cosmos.view) return a;
+  const p = cosmos.toWorld(a.x * W, a.y * H);
+  return { x: p.x / cosmos.worldW, y: p.y / cosmos.worldH };
 }
 
 function followCursorAim(e) {
@@ -846,8 +972,9 @@ let orbitDrag = null;
 // The globe zoom (cosmos) starts from the flat 2D map. So zooming the 3D camera out past its
 // default distance tips it, smoothly, to look straight down, north-up, at the whole map: exactly
 // the 2D frame. Only then does the globe take over. Zooming back in reverses it.
-// topDown is where the 30 degree lens frames the 180-tile-high map at sea level (y = 7.92):
-// 90 / tan(15 deg) + 7.92 = 344.
+// topDown is where the 30 degree lens frames the 180-tile-high view at sea level (y = 7.92):
+// 90 / tan(15 deg) + 7.92 = 344. The world is bigger (#129), but the camera target is the centre of
+// the 2D window, so the top-down 3D frame is exactly the 2D view at hand-over.
 const CAM3D = { blendFrom: 300, topDown: 344, topPitch: 1.55 };
 let cam3dBase = null;   // the player's own angle when the tip-over began
 let cam3dTween = null;  // a keyboard/button zoom-out animates the tip-over, then hands over
@@ -892,7 +1019,7 @@ function sync3dWorldMesh(scene) {
   current3dWorldKey = key;
 
   if (world.h && engine.set_heightmap) {
-    try { engine.set_heightmap(world.h); } catch (e) { console.warn('set_heightmap failed:', e); }
+    try { engine.set_heightmap(world.h, world.width || 0, world.height || 0); } catch (e) { console.warn('set_heightmap failed:', e); }
   }
   const deep = world.palette?.[0]?.[0];
   if (deep && engine.set_backdrop) {
@@ -916,18 +1043,16 @@ function applyCam3dBlend() {
   if (t <= 0) {
     if (cam3dBase) {
       engine.orbit_camera(cam3dBase.yaw - engine.get_camera_yaw(), cam3dBase.pitch - engine.get_camera_pitch());
-      engine.set_camera_target(engine.get_camera_target_x(), cam3dBase.z);
       cam3dBase = null;
     }
     return;
   }
-  if (!cam3dBase) cam3dBase = { pitch: engine.get_camera_pitch(), yaw: engine.get_camera_yaw(), z: engine.get_camera_target_z() };
+  if (!cam3dBase) cam3dBase = { pitch: engine.get_camera_pitch(), yaw: engine.get_camera_yaw() };
   const e = t * t * (3 - 2 * t);
   const northUp = Math.round(cam3dBase.yaw / (2 * Math.PI)) * 2 * Math.PI;
   const yaw = cam3dBase.yaw + (northUp - cam3dBase.yaw) * e;
   const pitch = cam3dBase.pitch + (CAM3D.topPitch - cam3dBase.pitch) * e;
   engine.orbit_camera(yaw - engine.get_camera_yaw(), pitch - engine.get_camera_pitch());
-  engine.set_camera_target(engine.get_camera_target_x(), cam3dBase.z + (H / 2 - cam3dBase.z) * e);
 }
 function zoom3dBy(f) {
   const d = engine.get_camera_distance();
@@ -1140,7 +1265,7 @@ window.addEventListener('keydown', (e) => {
   if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { zoomOutFromSurface(); return; }
   if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { zoomInOnSurface(); return; }
   if (G && !cosmos.active && (e.code === 'KeyA' || e.code === 'KeyD')) { cosmos.panVel = e.code === 'KeyA' ? 140 : -140; return; }
-  if (G && !cosmos.active && cosmos.surfaceInView && (e.code === 'KeyW' || e.code === 'KeyS')) { cosmos.panVelY = e.code === 'KeyW' ? 110 : -110; return; } // planets (#68)
+  if (G && !cosmos.active && (e.code === 'KeyW' || e.code === 'KeyS')) { cosmos.panVelY = e.code === 'KeyW' ? 110 : -110; return; } // planets (#68); home pans north–south too (#129)
   if (G && e.code === 'KeyN' && !e.repeat) { cam3dBase = null; cam3dTween = null; if (cosmos.visitNextWorld(G)) audio.blip(); return; } // planets (#68, #43): visit the next AI world (G is the AI God toggle)
   if (e.code === 'Enter') {
     if (banner) dismissBanner();
@@ -1347,7 +1472,8 @@ $('playSandbox').addEventListener('click', () => {
   advisor.setEra('space');
   advisor.say('sandbox', 'Galaxy sandbox, my lord. Three worlds are forming from your thoughts. Make more planets and let them run.', { mood: 'happy', priority: 3, cooldown: 999 });
 });
-// civ (#50): "Sandbox: four civilisations" runs its own scene (Rust sim in src/civ/) on the emulated headset.
+// civ (#50): "Sandbox: a crowded planet" runs its own scene (Rust sim in src/civ/) on the emulated headset.
+initPlanetSizePicker($('planetSizePick'));   // Small/Medium/Large/Huge or Random (Alex)
 $('playCiv').addEventListener('click', () => {
   begin(new SimSource());
   const scene = new CivSandbox({ cosmos });
@@ -1373,7 +1499,22 @@ $('playBridge').addEventListener('click', async () => {
 });
 
 // Debug handle for the console (and for automated playtests).
-window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos, get engine() { return engine; } };
+window.__moc = {
+  get G() { return G; }, startScene: (i) => startScene(i), cosmos, get engine() { return engine; },
+  // Average render and frame cost since the last call (ms), then reset.
+  perf() {
+    const p = perfSample;
+    perfSample = { n: 0, ms: 0, frames: 0, frameMs: 0, maxFrameMs: 0 };
+    return { renderMs: p.n ? p.ms / p.n : 0, frameMs: p.frames ? p.frameMs / p.frames : 0, maxFrameMs: p.maxFrameMs, frames: p.frames };
+  },
+  // CPU cost of n back-to-back frames (sim step + render), ms per frame: a playtest benchmark
+  // that doesn't depend on how often the browser schedules frames.
+  bench(n = 120) {
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) { lastFrameAt = 0; lastTs = performance.now() - 16.7; frame(); }
+    return (performance.now() - t0) / n;
+  },
+};
 
 // camera (#33, #116–#123): opt-in webcam. Hands perform actions (pinch-grab, 2-hand zoom, palm, fist)
 // with coach visual demonstration. Face sets mood.
@@ -1381,8 +1522,10 @@ window.__moc.camera = initCamera({
   getG: () => cosmos.castG(G), // planets (#68): casts and mood reach the world you're on
   canCast: () => !!G?.scene && !banner && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,
   // camera debug (#67): the fingertip aims on the panned surface like the mouse does.
-  mapX: (x) => cosmos.mapX(x * W) / W,
-  screenX: (x) => ((((x * W + cosmos.panX) % W) + W) % W) / W,
+  // Aims are 0..1 of the world; the camera's overlay draws in 0..1 of the screen (#129).
+  mapX: (x) => cosmos.mapX(x * W) / cosmos.worldW,
+  screenX: (x) => (cosmos.surfaceInView ? x : cosmos.toScreen(x * cosmos.worldW, 0).x / W),
+  screenY: (y) => (cosmos.surfaceInView ? y : cosmos.toScreen(0, y * cosmos.worldH).y / H),
   onZoomDelta: (delta, factor) => {
     // Two-hand continuous pinch zoom: delta > 0 is zoom in (hands spread), delta < 0 is zoom out (hands together)
     if (!G) return;

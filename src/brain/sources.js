@@ -81,7 +81,10 @@ export class SimSource {
             bands: { delta: out[0], theta: out[1], alpha: out[2], beta: out[3], gamma: out[4] },
             blink: out[5] > 0.5,
             hr: out[6] > 0 ? out[6] : null,
-            tilt: [out[7], out[8]],
+            // The emulated head points where the mouse aims (setAim), like makeFrame: the Rust
+            // sim's own tilt array left brain.aim NaN, so clicks missed (#129).
+            tilt: { x: this.aim.x * 2 - 1, y: this.aim.y * 2 - 1 },
+            isSim: true,
             motion: out[9],
             quality: out[10],
           });

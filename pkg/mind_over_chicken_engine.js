@@ -370,8 +370,8 @@ export class Engine {
     /**
      * Generate a home world with moc-terrain (#109) and make it the engine's: heights, tiles,
      * colours, sites and the 3D relief. `width`/`height` 0 (or left out) mean the engine's
-     * 320×180; the engine only draws worlds of its own size, so another size only updates the
-     * 3D mesh (until the game supports bigger maps, #129).
+     * 320×180. Any size drives the 3D mesh, raycast and billboards (#129); the Rust 2D port's
+     * own tiles stay 320×180.
      * @param {number} seed
      * @param {number} width
      * @param {number} height
@@ -913,14 +913,19 @@ export class Engine {
         wasm.engine_set_era(this.__wbg_ptr, era);
     }
     /**
-     * Use the JS world's heights (row-major W×H, 0..1, sea level 0.33) for the 3D mesh, the
-     * raycast and where billboards stand.
+     * Use the JS world's heights (row-major `width × height`, 0..1, sea level 0.33) for the 3D
+     * mesh, the raycast and where billboards stand. The world may be bigger than the view
+     * (#129: 640×360 under a 320×180 screen); width 0 means the classic 320×180.
      * @param {Float32Array | number[]} heights
+     * @param {number} width
+     * @param {number} height
      */
-    set_heightmap(heights) {
+    set_heightmap(heights, width, height) {
+        const val2 = +width;
+        const val3 = +height;
         const ptr0 = passArrayF32ToWasm0(heights, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.engine_set_heightmap(this.__wbg_ptr, ptr0, len0);
+        const ret = wasm.engine_set_heightmap(this.__wbg_ptr, ptr0, len0, val2, val3);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -934,6 +939,7 @@ export class Engine {
         wasm.engine_set_terrain_biome(this.__wbg_ptr, ptr0, len0);
     }
     /**
+     * The 2D frame: the low-res view canvas (320×180) the 2D renderer scales up and lights.
      * @param {HTMLCanvasElement} canvas
      */
     upload_canvas(canvas) {
@@ -941,6 +947,32 @@ export class Engine {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
+    }
+    /**
+     * The 3D terrain's colour map: a canvas the size of the world (#129), not the screen. The
+     * mesh's texture coordinates span the whole world, so this is what drapes over the relief.
+     * @param {HTMLCanvasElement} canvas
+     */
+    upload_terrain_canvas(canvas) {
+        const ret = wasm.engine_upload_terrain_canvas(this.__wbg_ptr, canvas);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @returns {number}
+     */
+    world_h() {
+        const ret = wasm.engine_world_h(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * The world's size in map pixels (= 3D units), as last set by `set_heightmap` (#129).
+     * @returns {number}
+     */
+    world_w() {
+        const ret = wasm.engine_world_w(this.__wbg_ptr);
+        return ret >>> 0;
     }
     /**
      * @param {number} factor
@@ -2409,6 +2441,200 @@ export class RustWorldGen {
 if (Symbol.dispose) RustWorldGen.prototype[Symbol.dispose] = RustWorldGen.prototype.free;
 
 /**
+ * The 2D camera over the home world. `pan(dx, dy)` moves the map under the window like a drag
+ * (the content follows the pointer); everything wraps both ways (a torus, #111).
+ */
+export class ViewCamera {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        ViewCameraFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_viewcamera_free(ptr, 0);
+    }
+    /**
+     * The rectangles that paint the window from a world-sized canvas, cut at the seams:
+     * `[sx, sy, w, h, dx, dy]` per rectangle (1 to 4 of them, more only if the world is
+     * smaller than the view). Draw each with `drawImage(world, sx, sy, w, h, dx, dy, w, h)`.
+     * @returns {Float32Array}
+     */
+    blits() {
+        const ret = wasm.viewcamera_blits(this.__wbg_ptr);
+        var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * @returns {number}
+     */
+    center_x() {
+        const ret = wasm.viewcamera_center_x(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    center_y() {
+        const ret = wasm.viewcamera_center_y(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Translations `[ox, oy]` (pairs) that take world coordinates to screen coordinates, one per
+     * copy of the world that reaches the window (widened by `margin` pixels on every side).
+     * Overlays drawn in world units repeat at each, so labels and lights wrap with the map.
+     * @param {number} margin
+     * @returns {Float32Array}
+     */
+    copies(margin) {
+        const ret = wasm.viewcamera_copies(this.__wbg_ptr, margin);
+        var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * The shorter signed east-west way from b to a.
+     * @param {number} a
+     * @param {number} b
+     * @returns {number}
+     */
+    delta_x(a, b) {
+        const ret = wasm.viewcamera_delta_x(this.__wbg_ptr, a, b);
+        return ret;
+    }
+    /**
+     * The shorter signed north-south way from b to a.
+     * @param {number} a
+     * @param {number} b
+     * @returns {number}
+     */
+    delta_y(a, b) {
+        const ret = wasm.viewcamera_delta_y(this.__wbg_ptr, a, b);
+        return ret;
+    }
+    /**
+     * World x at the window's left edge, snapped to whole pixels so the 2D map stays crisp.
+     * Every 2D conversion uses the snapped edge, so what is drawn and what is clicked agree.
+     * @returns {number}
+     */
+    left() {
+        const ret = wasm.viewcamera_left(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {number} world_w
+     * @param {number} world_h
+     * @param {number} view_w
+     * @param {number} view_h
+     */
+    constructor(world_w, world_h, view_w, view_h) {
+        const ret = wasm.viewcamera_new(world_w, world_h, view_w, view_h);
+        this.__wbg_ptr = ret;
+        ViewCameraFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * Drag the map by (dx, dy) world pixels: the content moves with the pointer, so the window
+     * moves the other way.
+     * @param {number} dx
+     * @param {number} dy
+     */
+    pan(dx, dy) {
+        wasm.viewcamera_pan(this.__wbg_ptr, dx, dy);
+    }
+    /**
+     * @param {number} x
+     * @param {number} y
+     */
+    set_center(x, y) {
+        wasm.viewcamera_set_center(this.__wbg_ptr, x, y);
+    }
+    /**
+     * A new world size (another map was loaded). The centre stays put, wrapped into it.
+     * @param {number} world_w
+     * @param {number} world_h
+     */
+    set_world(world_w, world_h) {
+        wasm.viewcamera_set_world(this.__wbg_ptr, world_w, world_h);
+    }
+    /**
+     * World x → screen x of its copy nearest the window's centre (may fall off screen).
+     * @param {number} wx
+     * @returns {number}
+     */
+    to_screen_x(wx) {
+        const ret = wasm.viewcamera_to_screen_x(this.__wbg_ptr, wx);
+        return ret;
+    }
+    /**
+     * World y → screen y of its copy nearest the window's centre.
+     * @param {number} wy
+     * @returns {number}
+     */
+    to_screen_y(wy) {
+        const ret = wasm.viewcamera_to_screen_y(this.__wbg_ptr, wy);
+        return ret;
+    }
+    /**
+     * Screen x (view pixels, 0..view_w) → world x.
+     * @param {number} sx
+     * @returns {number}
+     */
+    to_world_x(sx) {
+        const ret = wasm.viewcamera_to_world_x(this.__wbg_ptr, sx);
+        return ret;
+    }
+    /**
+     * Screen y (view pixels, 0..view_h) → world y.
+     * @param {number} sy
+     * @returns {number}
+     */
+    to_world_y(sy) {
+        const ret = wasm.viewcamera_to_world_y(this.__wbg_ptr, sy);
+        return ret;
+    }
+    /**
+     * World y at the window's top edge (snapped, like `left`).
+     * @returns {number}
+     */
+    top() {
+        const ret = wasm.viewcamera_top(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    view_h() {
+        const ret = wasm.viewcamera_view_h(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    view_w() {
+        const ret = wasm.viewcamera_view_w(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    world_h() {
+        const ret = wasm.viewcamera_world_h(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    world_w() {
+        const ret = wasm.viewcamera_world_w(this.__wbg_ptr);
+        return ret;
+    }
+}
+if (Symbol.dispose) ViewCamera.prototype[Symbol.dispose] = ViewCamera.prototype.free;
+
+/**
  * The era's land use (farms, roads, paving: tiles whose type differs from the base type)
  * painted over the base colour layer, in a planet biome's colours.
  * @param {Uint8Array | number[]} base
@@ -2987,6 +3213,9 @@ function __wbg_get_imports() {
         __wbg_texParameteri_0afc5d515132fed2: function(arg0, arg1, arg2, arg3) {
             arg0.texParameteri(arg1 >>> 0, arg2 >>> 0, arg3);
         },
+        __wbg_texSubImage2D_fed0a884356d02d6: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+            arg0.texSubImage2D(arg1 >>> 0, arg2, arg3, arg4, arg5 >>> 0, arg6 >>> 0, arg7);
+        }, arguments); },
         __wbg_uniform1f_0b36dc15cb2b4991: function(arg0, arg1, arg2) {
             arg0.uniform1f(arg1, arg2);
         },
@@ -3025,23 +3254,23 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [F64], shim_idx: 77, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [F64], shim_idx: 74, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 73, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 70, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("PointerEvent")], shim_idx: 73, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__251);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("PointerEvent")], shim_idx: 70, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__274);
             return ret;
         },
         __wbindgen_generic_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 73, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__252);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 70, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__275);
             return ret;
         },
         __wbindgen_generic_0000000000000005: function(arg0) {
@@ -3084,12 +3313,12 @@ function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_
     wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_(arg0, arg1, arg2);
 }
 
-function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__251(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__251(arg0, arg1, arg2);
+function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__274(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__274(arg0, arg1, arg2);
 }
 
-function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__252(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__252(arg0, arg1, arg2);
+function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__275(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__275(arg0, arg1, arg2);
 }
 
 function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_(arg0, arg1, arg2) {
@@ -3143,6 +3372,9 @@ const RustSimSourceFinalization = (typeof FinalizationRegistry === 'undefined')
 const RustWorldGenFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_rustworldgen_free(ptr, 1));
+const ViewCameraFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_viewcamera_free(ptr, 1));
 
 function addToExternrefTable0(obj) {
     const idx = wasm.__externref_table_alloc();

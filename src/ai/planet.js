@@ -24,9 +24,11 @@ export class SimPlanet {
   // brain: 'sim' = the real Brain fed by an emulated headset that belongs to the AI (what the
   // policy was trained against, default); 'proxy' = a cheaper stand-in for many background planets.
   // world: an already generated World for this seed (e.g. built off-thread by the galaxy, #68).
-  constructor({ seed, biome, brain = 'sim', advisor = silentAdvisor, audio = silentAudio, world = null } = {}) {
+  // width/height: the World's size (the home world's 640×360 when the AI god takes over the
+  // campaign map, #129; the default 320×180 for the trainer and galaxy planets).
+  constructor({ seed, biome, brain = 'sim', advisor = silentAdvisor, audio = silentAudio, world = null, width, height } = {}) {
     this.seed = Number.isFinite(seed) ? seed >>> 0 : (Math.random() * 1e9) >>> 0;
-    this.world = world || new World(this.seed, { biome });
+    this.world = world || new World(this.seed, { biome, width, height });
     if (brain === 'sim') {
       this.aiBrain = new Brain(new SimSource());
       this.aiInput = this.aiBrain.source.input;
