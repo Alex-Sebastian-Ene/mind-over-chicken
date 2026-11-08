@@ -63,7 +63,9 @@ export class Hud {
         this.blinkFlash -= dt;
         if (this.blinkFlash <= 0) this.powers.blink.classList.remove('is-firing');
       }
-      if (this.modelPanel && !this.modelPanel.hidden) this.updateModel(G.brain?.model);
+      // The Rust shell draws the meters, not the model panel (#173: this called a missing
+      // updateModel(), which threw every frame the panel was open and froze the render).
+      if (this.modelPanel && !this.modelPanel.hidden && G.brain) this.renderModel(G.brain, G);
       return;
     }
     const b = G.brain;

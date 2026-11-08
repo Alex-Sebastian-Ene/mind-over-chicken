@@ -556,6 +556,8 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
   padding: 12px 14px;
   box-shadow: 0 20px 60px -10px rgba(0, 0, 0, 0.9);
 }
+/* "See the model of you" on the end screen (z 50) opens it above that overlay, not behind it (#173). */
+body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
 .model-panel header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
 .model-panel h2 { margin: 0; font: 700 20px var(--pixel); }
 .model-lede { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
