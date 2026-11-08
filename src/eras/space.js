@@ -261,11 +261,12 @@ export class SpaceAge {
   draw(ctx) {
     if (this.phase === 'voyage') return this.drawVoyage(ctx);
     const G = this.G;
-    const base = G.render3d ? (G.world?.layers3d?.space || this.layer) : this.layer;
+    const is3d = Boolean(G?.render3d || globalThis.__moc_render3d);
+    const base = is3d ? (G?.world?.layers3d?.space || this.layer) : this.layer;
     ctx.drawImage(base, 0, 0);
-    if (!G.render3d) G.world.drawWater(ctx, this.t);
+    if (!is3d) G?.world?.drawWater?.(ctx, this.t);
     // In 3D, draw3d stands rocket, pad, engineers, citizens and chicken up as billboards
-    if (G.render3d) {
+    if (is3d) {
       this.particles.draw(ctx);
       return;
     }

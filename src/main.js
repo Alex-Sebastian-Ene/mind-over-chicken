@@ -46,6 +46,7 @@ import { CivSandbox } from './civ/sandbox.js'; // civ (#50)
 import { worldMeta, renderWorldDetail } from './cosmos/panel.js'; // planets (#68)
 import { SimPlanet } from './ai/planet.js';
 import { AIGod } from './ai/autopilot.js';
+import { observe, decodeAction, scriptedAction, BOLT_COOLDOWN } from './ai/observe.js';
 import { loading } from './ui/loading.js'; // loading screen
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
@@ -78,7 +79,7 @@ function groundAt(e) {
 function grabPan3d(e) {
   if (!grab3d) return false;
   const scene = cosmos?.viewScene?.(G) || G?.scene;
-  if (scene && scene !== G?.scene && typeof scene.centerColumn === 'function') {
+  if (scene instanceof CivSandbox || scene?.civ || (scene && typeof scene.centerColumn === 'function')) {
     return false;
   }
   for (let pass = 0; pass < 3; pass++) {
@@ -245,12 +246,14 @@ let pendingTimer = 0;
 let banner = null;      // {t}
 let lastTs = 0;
 
-// ---------- AI god (PPO) ----------
-let aiPlanet = null;
+// ---------- AI god (PPO / Autopilot) ----------
+let aiGod = null;
+let aiGodTimer = 0;
 function resetAIGod() {
-  if (!aiPlanet) return;
-  aiPlanet.attachHuman(null);
-  aiPlanet = null;
+  if (!aiGod) return;
+  aiGod = null;
+  const s = sim();
+  if (s) { s.input.calm = false; s.input.focus = false; s.input.panic = false; }
   const btn = $('aiGodBtn');
   if (btn) {
     btn.textContent = 'AI God: OFF';
@@ -259,24 +262,66 @@ function resetAIGod() {
 }
 function toggleAIGod() {
   if (!G || !$('titleScreen').hidden) return;
-  if (aiPlanet) {
-    aiPlanet.attachHuman(null);
-    aiPlanet = null;
-    const btn = $('aiGodBtn');
-    if (btn) {
-      btn.textContent = 'AI God: OFF';
-      btn.setAttribute('aria-pressed', 'false');
-    }
+  if (aiGod) {
+    resetAIGod();
     advisor.say('ai-off', 'AI god disengaged. You have full command.', { mood: 'happy', priority: 2, cooldown: 1 });
   } else {
-    aiPlanet = new SimPlanet({ seed: G?.world?.seed || 42, brain: 'proxy' }).setGod(new AIGod());
-    if (G?.brain) aiPlanet.attachHuman(G.brain);
+    aiGod = new AIGod();
+    aiGodTimer = 0;
     const btn = $('aiGodBtn');
     if (btn) {
       btn.textContent = 'AI God: ON';
       btn.setAttribute('aria-pressed', 'true');
     }
     advisor.say('ai-on', 'AI god engaged! The PPO autopilot is steering this world. Stay calm to help it.', { mood: 'nervous', priority: 2, cooldown: 1 });
+  }
+}
+
+function updateAIGodAutopilot(dt) {
+  if (!aiGod || !G || !$('failScreen').hidden || !$('endScreen').hidden) return;
+  const scene = cosmos?.viewScene?.(G) || G?.scene;
+  if (!scene) return;
+  const s = sim();
+
+  if (scene.id === 'stone') {
+    aiGodTimer -= dt;
+    if (aiGodTimer <= 0) {
+      aiGodTimer = 0.25;
+      const obs = observe(scene, G, { lastBolt: G.aiLastBolt ?? -Infinity });
+      const action = aiGod.policy ? aiGod.policy.act(obs, { greedy: true }) : scriptedAction(obs);
+      const { aim, calm } = decodeAction(scene, action);
+      if (s) s.input.calm = calm;
+      if (aim && scene.t - (G.aiLastBolt || -Infinity) >= BOLT_COOLDOWN) {
+        G.aiLastBolt = scene.t;
+        if (s) s.setAim(aim.x, aim.y);
+        scene.onBlink(aim);
+      }
+    }
+  } else if (scene.id === 'industry') {
+    if (s) {
+      const needCalm = scene.ipo?.state === 'active' || (scene.arousal && scene.arousal() > 0.4) || scene.strike;
+      s.input.calm = !!needCalm;
+      s.input.focus = !needCalm;
+    }
+  } else if (scene.era === 'space') {
+    if (s) {
+      if (scene.phase === 'build') {
+        s.input.focus = true;
+        s.input.calm = false;
+      } else if (scene.phase === 'board') {
+        s.input.focus = false;
+        s.input.calm = true;
+      } else if (scene.phase === 'countdown') {
+        s.input.focus = true;
+        s.input.calm = true;
+        s.input.panic = false;
+      }
+    }
+  } else if (scene instanceof CivSandbox || scene?.civ) {
+    if (s) {
+      s.input.calm = true;
+      s.input.focus = false;
+    }
   }
 }
 
@@ -287,7 +332,6 @@ function newGame(source, startIndex = 0) {
   if (G?.source && G.source !== source) G.source.disconnect();
   resetAIGod();
   const brain = new Brain(source);
-  if (aiPlanet) aiPlanet.attachHuman(brain);
   cosmos.reset();
   G = {
     world: new World(),
@@ -309,7 +353,6 @@ function newGame(source, startIndex = 0) {
     if (engine) engine.game_on_blink(aim.x * W, aim.y * H);
     cosmos.galaxy?.onBlink();   // storms on the blink world; a strike on the world you're zoomed into
     if (cosmos.galaxy?.attended) audio.thunder();
-    if (aiPlanet) aiPlanet.humanBlink(aim);
     const view = cosmos.viewScene(G); // planets (#68): another world's surface when you're on it
     if (!banner && view?.onBlink) view.onBlink(aim);
   });
@@ -531,7 +574,7 @@ function showEnd() {
 
 // ---------- render ----------
 function render() {
-  const scene = aiPlanet ? aiPlanet.scene : (G ? cosmos.viewScene(G) : null); // AI god autopilot, else the world in view (planets #68)
+  const scene = G ? cosmos.viewScene(G) : null;
   textCtx.setTransform(1, 0, 0, 1, 0, 0);
   textCtx.clearRect(0, 0, textLayer.width, textLayer.height);
   if (!scene) {
@@ -687,10 +730,9 @@ function frame(ts) {
     } else if ($('failScreen').hidden && $('endScreen').hidden) {
       G.runTime += dt;
       G.calibration?.update(dt, G.brain, G.mood);
-      if (aiPlanet) aiPlanet.update(dt);
+      if (aiGod) updateAIGodAutopilot(dt);
       G.scene?.update(dt);
     } else if (!$('endScreen').hidden) {
-      if (aiPlanet) aiPlanet.update(dt);
       G.scene?.update(dt);
     }
     if (G.scene?.phase === 'launch' || G.scene?.phase === 'voyage') {
@@ -863,10 +905,20 @@ function zoom3dBy(f) {
   applyCam3dBlend();
 }
 function zoomOutFromSurface() {
+  const scene = cosmos?.viewScene?.(G) || G?.scene;
+  if (scene instanceof CivSandbox || scene?.civ) {
+    scene.onWheel?.(100);
+    return;
+  }
   if (!in3dSurface()) { cosmos.zoomOut(G); return; }
   cam3dTween = { from: engine.get_camera_distance(), t0: performance.now(), dur: 350 };
 }
 function zoomInOnSurface() {
+  const scene = cosmos?.viewScene?.(G) || G?.scene;
+  if (scene instanceof CivSandbox || scene?.civ) {
+    scene.onWheel?.(-100);
+    return;
+  }
   if (in3dSurface()) { cam3dTween = null; zoom3dBy(0.8); return; }
   cosmos.zoomIn(G);
 }
