@@ -437,6 +437,10 @@ export class RustWorldGen {
      */
     static planet(seed: number, biome: string): RustWorldGen;
     /**
+     * "learned, N steps" or "procedural".
+     */
+    static relief_status(): string;
+    /**
      * The base colour layer, RGBA.
      */
     rgba(): Uint8Array;
@@ -458,6 +462,14 @@ export class RustWorldGen {
      * Game tiles (the JS `T` codes).
      */
     types(): Uint8Array;
+    /**
+     * Use the learned relief (#110) for the worlds this wasm instance generates: the
+     * worldgen worker calls it, the main thread doesn't, so the model never runs on the main
+     * thread. Returns whether a model is loaded; without one (a build without
+     * `crates/moc-diffusion/weights/relief.mocd`, or weights that fail to load) generation stays
+     * exactly the procedural relief.
+     */
+    static use_learned_relief(on: boolean): boolean;
     width(): number;
 }
 
@@ -805,6 +817,7 @@ export interface InitOutput {
     readonly rustworldgen_new: (a: number) => number;
     readonly rustworldgen_owner: (a: number) => any;
     readonly rustworldgen_planet: (a: number, b: number, c: number) => number;
+    readonly rustworldgen_relief_status: () => [number, number];
     readonly rustworldgen_rgba: (a: number) => any;
     readonly rustworldgen_rivers: (a: number) => any;
     readonly rustworldgen_sites_json: (a: number) => [number, number];
@@ -817,6 +830,7 @@ export interface InitOutput {
     readonly rustworldgen_surface_types: (a: number) => any;
     readonly rustworldgen_surface_width: (a: number) => number;
     readonly rustworldgen_types: (a: number) => any;
+    readonly rustworldgen_use_learned_relief: (a: number) => number;
     readonly rustworldgen_width: (a: number) => number;
     readonly viewcamera_blits: (a: number) => [number, number];
     readonly viewcamera_center_x: (a: number) => number;
@@ -871,8 +885,8 @@ export interface InitOutput {
     readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
     readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
     readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__274: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__275: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__276: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__277: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
