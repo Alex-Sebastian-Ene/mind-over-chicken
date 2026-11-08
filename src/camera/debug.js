@@ -11,6 +11,7 @@ import { SPELL_BY_ID, GESTURE_LABEL } from './spells.js';
 import { EMOTIONS } from './emotion.js';
 import { drawHand } from './draw.js';
 import { FrameMeter } from './meter.js';
+import { aimSource } from './aim-source.js';
 
 export const DEBUG_KEY = 'Backquote';
 const TEXT_MS = 120;   // text refresh; the thumbnail redraws every frame while open
@@ -209,7 +210,7 @@ export function initDebug({ getG, camera }) {
             : `open ${f.ratio.toFixed(2)} (< ${s.pinch.enter})`;
     set(el.pinch, pinchTxt);
     const rg = s?.range;
-    set(el.range, !rg ? '–' : `head cursor sole aim · ${rg.calibrated ? 'learned' : `learning ${pct(rg.progress)}`}`);
+    set(el.range, !rg ? '–' : `cursor: ${aimSource(getG()).label} · hand range ${rg.calibrated ? 'learned' : `learning ${pct(rg.progress)}`}`);
 
     // Cooldowns: rebuild the chips only when the set of cooling spells changes; update widths always.
     const cds = s?.cooldowns || [];

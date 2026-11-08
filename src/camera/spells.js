@@ -1,5 +1,5 @@
 // camera (#33, #116, #122): the three core hand moves replace the old seven-cast bar.
-//   1. Pinch       — grab / pick up a living entity under the head cursor (or confirm selection)
+//   1. Pinch       — grab / pick up a living entity under the cursor (or confirm selection)
 //   2. Open Palm   — calm / peace / bless / bounty
 //   3. Closed Fist — strike / lightning / fireball at the head reticle
 //
@@ -9,11 +9,11 @@ export const CAMERA_CASTS_ENABLED = true;
 
 export const SPELLS = [
   { id: 'pinch', key: 1, gesture: 'Pinch', glyph: '🤏', name: 'Grab', cooldown: 400,
-    hint: 'Pinch thumb and index: pick up a living creature under your head cursor, move your head, release to drop.' },
+    hint: 'Pinch thumb and index: pick up a living creature under the cursor, move the cursor, release to drop.' },
   { id: 'palm', aimed: true, key: 2, gesture: 'Open_Palm', glyph: '🖐️', name: 'Calm', cooldown: 5000,
     hint: 'Open palm: calm fear, broker peace and bless the land.' },
   { id: 'fist', aimed: true, key: 3, gesture: 'Closed_Fist', glyph: '✊', name: 'Strike', cooldown: 1500,
-    hint: 'Closed fist: strike lightning or a fireball at your head cursor.' },
+    hint: 'Closed fist: strike lightning or a fireball at the cursor.' },
 ];
 
 export const ADVANCED_SPELLS = [

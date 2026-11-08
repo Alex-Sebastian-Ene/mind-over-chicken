@@ -60,7 +60,7 @@ export const COACH_MOVES = [
     title: 'Pinch Grab',
     key: '1',
     glyph: '🤏',
-    instruction: 'Pinch to pick up a living creature under your head cursor, move head, release to drop.',
+    instruction: 'Pinch to pick up a living creature under the cursor, move the cursor (headset or mouse), release to drop.',
     contexts: ['surface', 'civ'],
     sample(phase) {
       // 0..0.25 close into pinch, 0.25..0.75 hold pinch & glide horizontally, 0.75..1.0 open to drop
@@ -115,7 +115,7 @@ export const COACH_MOVES = [
     title: 'Closed Fist · Strike',
     key: '3',
     glyph: '✊',
-    instruction: 'Hold a closed fist (or press 3) to strike lightning at your head cursor.',
+    instruction: 'Hold a closed fist (or press 3) to strike lightning at the cursor.',
     contexts: ['surface', 'civ'],
     sample(phase) {
       const k = phase < 0.3 ? phase / 0.3 : phase > 0.8 ? 1 - (phase - 0.8) / 0.2 : 1;
@@ -132,7 +132,7 @@ const TEMPLATE = `
     <button type="button" class="tool coach-toggle" data-coach-toggle aria-expanded="true" title="Toggle Hand Coach panel (H)">
       <span class="coach-dot" data-coach-dot data-ok="0"></span>
       <span>Hand Coach <kbd>H</kbd></span>
-      <span class="coach-live-tag" data-coach-live>Head cursor · ${COACH_CARDS.length} moves</span>
+      <span class="coach-live-tag" data-coach-live>${COACH_CARDS.length} moves</span>
     </button>
     <div class="coach-meter" title="Gesture hold / pinch strength"><span data-coach-meter></span></div>
     <span class="coach-feedback" data-coach-feedback aria-live="polite">Ready</span>
@@ -235,7 +235,7 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
     if (move.id === 'two_hand_zoom') {
       ctx.fillText('←  PINCH & SPREAD  →', w / 2, 16);
     } else if (move.id === 'pinch_grab') {
-      ctx.fillText('PINCH · MOVE HEAD · DROP', w / 2, 16);
+      ctx.fillText('PINCH · MOVE CURSOR · DROP', w / 2, 16);
     }
   }
 
