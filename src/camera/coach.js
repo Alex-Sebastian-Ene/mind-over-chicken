@@ -171,10 +171,27 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
   }));
 
   // Collapsed by default: open on the first run it covered the playfield and the era card's
-  // Begin button (#182). The bar stays visible (H or its toggle opens it); the player's last
-  // choice is remembered.
+  // Begin button (#182). Once moves have been demonstrated (#204), stays minimal by default.
+  // The bar stays visible (H or its toggle opens it); the player's last choice is remembered.
+  const demonstratedMoves = new Set();
+  try {
+    const saved = JSON.parse(localStorage.getItem('moc.coachDemonstrated') || '[]');
+    if (Array.isArray(saved)) for (const id of saved) demonstratedMoves.add(id);
+  } catch {}
+
+  function markDemonstrated(id) {
+    if (!id || !COACH_MOVE_BY_ID[id]) return;
+    demonstratedMoves.add(id);
+    try { localStorage.setItem('moc.coachDemonstrated', JSON.stringify([...demonstratedMoves])); } catch {}
+  }
+
   let open = false;
-  try { open = localStorage.getItem('moc.coachOpen') === '1'; } catch {}
+  try {
+    const stored = localStorage.getItem('moc.coachOpen');
+    // If moves have already been demonstrated, prefer collapsed/minimal state by default (#204)
+    if (stored !== null) open = stored === '1';
+    else open = demonstratedMoves.size === 0;
+  } catch {}
 
   let activeMoveId = COACH_CARDS[0].id;
   let flashState = null; // { text, kind: 'ok' | 'bad', until }
@@ -209,6 +226,9 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
     flashState = { text, kind, until: performance.now() + durationMs };
     feedbackEl.textContent = text;
     feedbackEl.dataset.tone = kind;
+    if (kind === 'ok' && activeMoveId) {
+      markDemonstrated(activeMoveId);
+    }
   }
 
   function isReducedMotion() {
@@ -279,6 +299,8 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
   return {
     get open() { return open; },
     get activeMoveId() { return activeMoveId; },
+    get demonstrated() { return new Set(demonstratedMoves); },
+    markDemonstrated,
     setOpen,
     selectMove,
     flash,
