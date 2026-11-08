@@ -20,78 +20,142 @@ mod tests {
     // Spells and Casts tests
     // -----------------------------------------------------------------------
 
+    /// Feed one gesture at 30 fps over [t0, t1]; return the casts that fired.
+    fn feed(c: &mut CastController, gesture: &str, t0: f64, t1: f64) -> Vec<(SpellId, f64)> {
+        let mut out = Vec::new();
+        let mut t = t0;
+        while t <= t1 {
+            if let Some(id) = c.update(gesture, 0.9, t).cast {
+                out.push((id, t));
+            }
+            t += 1000.0 / 30.0;
+        }
+        out
+    }
+
     #[test]
-    fn test_seven_spells_and_keys() {
-        assert_eq!(SPELLS.len(), 7);
+    fn test_three_core_moves_and_keys() {
+        assert_eq!(SPELLS.len(), 3);
         let keys: Vec<u8> = SPELLS.iter().map(|s| s.key).collect();
-        assert_eq!(keys, vec![1, 2, 3, 4, 5, 6, 7]);
-        assert_eq!(spell_for_key_code("Digit2").unwrap().id, SpellId::Fireball);
-        assert_eq!(spell_for_key_code("Numpad7").unwrap().id, SpellId::Peace);
-        assert!(spell_for_key_code("Digit8").is_none());
+        assert_eq!(keys, vec![1, 2, 3]);
+        assert_eq!(spell_for_key_code("Digit1").unwrap().id, SpellId::Pinch);
+        assert_eq!(spell_for_key_code("Digit2").unwrap().id, SpellId::Palm);
+        assert_eq!(spell_for_key_code("Numpad3").unwrap().id, SpellId::Fireball);
+        assert!(spell_for_key_code("Digit4").is_none());
         assert!(spell_for_key_code("KeyF").is_none());
+        for s in SPELLS.iter() {
+            assert_eq!(SpellId::from_str(s.id.as_str()), Some(s.id));
+        }
+        // No Strike move (#159), and the legacy ids are gone.
+        for legacy in ["fist", "point", "spawn", "rain", "bless", "disaster", "peace"] {
+            assert!(SpellId::from_str(legacy).is_none(), "{legacy}");
+        }
     }
 
     #[test]
     fn test_gesture_to_cast_mapping() {
         let c = CastController::default();
-        assert_eq!(c.spell_for("Pointing_Up"), Some(SpellId::Point));
+        assert_eq!(c.spell_for("Open_Palm"), Some(SpellId::Palm));
         assert_eq!(c.spell_for("Closed_Fist"), Some(SpellId::Fireball));
-        assert_eq!(c.spell_for("Open_Palm"), Some(SpellId::Spawn));
-        assert_eq!(c.spell_for("Victory"), Some(SpellId::Rain));
-        assert_eq!(c.spell_for("Thumb_Up"), Some(SpellId::Bless));
-        assert_eq!(c.spell_for("Thumb_Down"), Some(SpellId::Disaster));
-        assert_eq!(c.spell_for("ILoveYou"), Some(SpellId::Peace));
-        assert_eq!(c.spell_for("None"), None);
+        for g in ["Pointing_Up", "Victory", "Thumb_Up", "Thumb_Down", "ILoveYou", "None"] {
+            assert_eq!(c.spell_for(g), None, "{g} casts nothing");
+        }
+        assert_eq!(spell_for_id(SpellId::Fireball).unwrap().release, Some("Open_Palm"));
+        assert_eq!(spell_for_id(SpellId::Palm).unwrap().release, None);
     }
 
     #[test]
-    fn test_hold_debounce_and_cast_once() {
+    fn test_held_fist_charges_but_never_casts() {
         let mut c = CastController::default();
-        // 250 ms: not enough
-        for t in (0..=250).step_by(33) {
-            let u = c.update("Closed_Fist", 0.9, t as f64);
-            assert!(u.cast.is_none());
-            if t == 250 {
-                assert!(u.progress > 0.7 && u.progress < 1.0);
-            }
-        }
+        assert!(feed(&mut c, "Closed_Fist", 0.0, 20_000.0).is_empty());
+        let u = c.update("Closed_Fist", 0.9, 20_010.0);
+        assert_eq!(u.held, Some(SpellId::Fireball));
+        assert_eq!(u.progress, 1.0);
+        assert_eq!(u.armed, Some(SpellId::Fireball));
+    }
 
-        // At 300 ms: fires fireball!
-        let r = c.update("Closed_Fist", 0.9, 300.0);
-        assert_eq!(r.cast, Some(SpellId::Fireball));
+    #[test]
+    fn test_fist_then_open_releases_exactly_one_fireball() {
+        let mut c = CastController::default();
+        assert!(feed(&mut c, "Closed_Fist", 0.0, 500.0).is_empty());
+        // Two transition frames the recognizer often reports between the poses.
+        c.update("None", 0.0, 533.0);
+        c.update("None", 0.0, 566.0);
+        let casts = feed(&mut c, "Open_Palm", 600.0, 3_000.0);
+        assert_eq!(casts, vec![(SpellId::Fireball, 600.0)], "one fireball, and the opening hand does not also calm");
+        // Leave the palm, then a fresh palm hold calms as usual.
+        feed(&mut c, "None", 3_033.0, 3_400.0);
+        let calm = feed(&mut c, "Open_Palm", 3_433.0, 4_000.0);
+        assert_eq!(calm.len(), 1);
+        assert_eq!(calm[0].0, SpellId::Palm);
+    }
 
-        // Long hold (up to 20 seconds): casts once per hold
-        for t in (330..=20000).step_by(33) {
-            let u = c.update("Closed_Fist", 0.9, t as f64);
-            assert!(u.cast.is_none());
-        }
+    #[test]
+    fn test_palm_alone_calms_once_and_never_fires() {
+        let mut c = CastController::default();
+        let casts = feed(&mut c, "Open_Palm", 0.0, 20_000.0);
+        assert_eq!(casts.len(), 1);
+        assert_eq!(casts[0].0, SpellId::Palm);
+        assert!(casts[0].1 >= 300.0);
+    }
+
+    #[test]
+    fn test_short_fist_or_late_open_does_not_fire() {
+        // A fist shorter than the hold time never charges.
+        let mut c = CastController::default();
+        feed(&mut c, "Closed_Fist", 0.0, 200.0);
+        let casts = feed(&mut c, "Open_Palm", 233.0, 2_000.0);
+        assert!(casts.iter().all(|(id, _)| *id == SpellId::Palm), "{casts:?}");
+
+        // Opening the hand long after the charge was lost does nothing either.
+        let mut d = CastController::default();
+        feed(&mut d, "Closed_Fist", 0.0, 500.0);
+        feed(&mut d, "None", 533.0, 1_400.0);
+        let late = d.update("Open_Palm", 0.9, 1_433.0);
+        assert_eq!(late.cast, None);
+        assert_eq!(late.armed, None);
+    }
+
+    #[test]
+    fn test_fireball_cooldown_eats_the_release() {
+        let mut c = CastController::default();
+        feed(&mut c, "Closed_Fist", 0.0, 400.0);
+        assert_eq!(c.update("Open_Palm", 0.9, 433.0).cast, Some(SpellId::Fireball));
+        feed(&mut c, "None", 466.0, 700.0);
+        feed(&mut c, "Closed_Fist", 733.0, 1_200.0);
+        // Still cooling (1.5 s): the release is consumed, nothing fires, no Calm either.
+        assert!(feed(&mut c, "Open_Palm", 1_233.0, 2_000.0).is_empty());
+        assert!(c.cooldown_left(SpellId::Fireball, 1_233.0) > 0.0);
     }
 
     #[test]
     fn test_tracking_dropouts_and_grace() {
         let mut c = CastController::new(300.0, 0.55, 0.45, 150.0);
-        c.update("Victory", 0.9, 0.0);
-        c.update("Victory", 0.9, 150.0);
+        c.update("Open_Palm", 0.9, 0.0);
+        c.update("Open_Palm", 0.9, 150.0);
         c.update("None", 0.0, 200.0); // 50 ms dropout
-        assert_eq!(c.update("Victory", 0.9, 310.0).cast, Some(SpellId::Rain));
+        assert_eq!(c.update("Open_Palm", 0.9, 310.0).cast, Some(SpellId::Palm));
 
         let mut d = CastController::new(300.0, 0.55, 0.45, 150.0);
-        d.update("Victory", 0.9, 0.0);
-        d.update("Victory", 0.9, 150.0);
+        d.update("Open_Palm", 0.9, 0.0);
+        d.update("Open_Palm", 0.9, 150.0);
         d.update("None", 0.0, 200.0);
         d.update("None", 0.0, 400.0); // 250 ms dropout > grace: hold dropped
-        assert_eq!(d.update("Victory", 0.9, 420.0).cast, None);
-        assert_eq!(d.update("Victory", 0.9, 720.0).cast, Some(SpellId::Rain));
+        assert_eq!(d.update("Open_Palm", 0.9, 420.0).cast, None);
+        assert_eq!(d.update("Open_Palm", 0.9, 720.0).cast, Some(SpellId::Palm));
     }
 
     #[test]
     fn test_keyboard_trigger_and_cooldowns() {
         let mut c = CastController::default();
-        assert!(c.trigger(SpellId::Peace, 0.0));
-        assert!(!c.trigger(SpellId::Peace, 1000.0));
-        assert!((c.cooldown_frac(SpellId::Peace, 0.0) - 1.0).abs() < 1e-9);
-        assert_eq!(c.cooldown_left(SpellId::Peace, 15000.0), 0.0);
-        assert!(c.trigger(SpellId::Peace, 15000.0));
+        assert!(c.trigger(SpellId::Palm, 0.0));
+        assert!(!c.trigger(SpellId::Palm, 1000.0));
+        assert!((c.cooldown_frac(SpellId::Palm, 0.0) - 1.0).abs() < 1e-9);
+        assert_eq!(c.cooldown_left(SpellId::Palm, 5000.0), 0.0);
+        assert!(c.trigger(SpellId::Palm, 5000.0));
+        assert!(c.trigger(SpellId::Fireball, 0.0));
+        assert!(!c.trigger(SpellId::Fireball, 1000.0));
+        assert!(c.trigger(SpellId::Fireball, 1500.0));
     }
 
     // -----------------------------------------------------------------------

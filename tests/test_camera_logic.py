@@ -1,5 +1,6 @@
-"""Camera input (#33): runs the Node unit tests for the gesture->cast debounce and cooldowns
-and the blendshape->emotion mapping. Skipped when Node isn't installed."""
+"""Camera input (#33, #150, #159): runs the Node unit tests for the spell table, the
+gesture->cast debounce, cooldowns and fist-to-open fireball (JS and wasm controllers) and the
+blendshape->emotion mapping. Skipped when Node isn't installed."""
 
 import shutil
 import subprocess
@@ -15,7 +16,7 @@ class CameraLogicTest(unittest.TestCase):
         if not node:
             self.skipTest("node is not installed")
         proc = subprocess.run(
-            [node, "--test", str(ROOT / "tests" / "camera_logic.test.mjs")],
+            [node, "--test", str(ROOT / "tests" / "camera_logic.test.mjs"), str(ROOT / "tests" / "camera_casts.test.mjs")],
             cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120,
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
