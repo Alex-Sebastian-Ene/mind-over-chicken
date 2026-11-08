@@ -10,6 +10,8 @@
 //
 // This file is pure: no DOM, no wasm, so the setup screen and the Node tests share it.
 
+import { CHANNEL_SCORE } from '../cosmos/planet-sim.js';
+
 export const TRAITS = [
   {
     key: 'friendliness',
@@ -140,12 +142,16 @@ export function moodTraits({ calm = 0, focus = 0, stress = 0, blinks = 0 } = {})
   });
 }
 
-// The feeling that led the reading, and how strongly.
+// The feeling that led the reading, and how strongly. Scored like the galaxy's own mind reading
+// (CHANNEL_SCORE in cosmos/planet-sim.js), so both read the same player the same way.
 export function moodChannel({ calm = 0, focus = 0, stress = 0, blinks = 0 } = {}) {
-  const scores = { calm: clamp01(calm), focus: clamp01(focus), stress: clamp01(stress), blink: blinkLevel(blinks) };
-  let channel = 'calm';
-  for (const k of MOOD_CHANNELS) if (scores[k] > scores[channel]) channel = k;
-  return { channel, strength: scores[channel] };
+  const m = { calm: clamp01(calm), focus: clamp01(focus), stress: clamp01(stress), blinks: Math.max(0, Number(blinks) || 0) };
+  let channel = 'calm', best = CHANNEL_SCORE.calm(m);
+  for (const k of MOOD_CHANNELS) {
+    const sc = CHANNEL_SCORE[k](m);
+    if (sc > best) { best = sc; channel = k; }
+  }
+  return { channel, strength: clamp01(best / 3) };
 }
 
 // One world from one reading. `rating` is the card's big number: how strongly the feeling held.

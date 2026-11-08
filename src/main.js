@@ -2098,7 +2098,13 @@ let setupSource = null;
 let setupBrain = null;     // reads the player's mind for the four worlds
 function setupSim() { return planetSetup?.isOpen && setupSource?.kind === 'sim' ? setupSource : null; }
 const planetSetup = new PlanetSetup($('planetSetup'), {
-  getBrain: () => setupBrain,
+  getBrain: () => {
+    // Shift is the emulated headset's Stress key: full agitation (as in ai/proxyBrain.js). A fresh
+    // brain has no resting baseline yet to read agitation against, so the setup reads the key.
+    const s = setupSim();
+    if (!setupBrain || !s?.input?.panic) return setupBrain;
+    return { calm: setupBrain.calm, focus: setupBrain.focus * 0.4, stress: 1, stats: setupBrain.stats };
+  },
   isEmulated: () => setupSource?.kind === 'sim',
   onBegin: (planets) => {
     const src = setupSource || playSource();
