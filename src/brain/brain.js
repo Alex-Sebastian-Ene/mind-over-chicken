@@ -53,6 +53,12 @@ export function faceAnger(mood) {
 const finite2 = (p) => !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
 
 const WINDOW = 6;            // frames averaged per feature window (~0.6 s)
+// Signal quality (#175): below UNUSABLE the headset's contact is too poor to read calm and focus
+// from, and the game pauses the era until it is back above USABLE (hysteresis, smoothed over
+// about a second of frames). Head tracking counts as lost when no tilt arrived for HEAD_LOST_S.
+export const QUALITY_UNUSABLE = 0.25;
+export const QUALITY_USABLE = 0.4;
+const HEAD_LOST_S = 2;
 const TRAIN_EVERY = 2.5;     // seconds between retrains
 
 let RustBrainClass = null;
@@ -112,6 +118,9 @@ export class Brain {
     this.trainTimer = 0;
     this.restRef = { ab: [], bat: [] };
     this.stats = { blinks: 0, calmSeconds: 0, focusSeconds: 0, framesSeen: 0 };
+    this.signalQuality = 1;       // smoothed headset quality, 0..1 (#175)
+    this.signalUnusable = false;  // contact too poor to play on: the era pauses
+    this.lastTiltAt = -Infinity;  // brain time of the last usable head tilt
     this.onTrained = null;
   }
 
@@ -137,6 +146,9 @@ export class Brain {
     this.stress = REST_STRESS;
     this.motion = 0;
     this.quality = 0;
+    this.signalQuality = 1;
+    this.signalUnusable = false;
+    this.lastTiltAt = -Infinity;
     this.bands = { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 };
     this.contact = null;
     this.orientation = null;
@@ -197,7 +209,7 @@ export class Brain {
           b.delta || 0, b.theta || 0, b.alpha || 0, b.beta || 0, b.gamma || 0,
           !!frame.blink, frame.hr || 0,
           Number.isFinite(frame.tilt?.x) ? frame.tilt.x : 0, Number.isFinite(frame.tilt?.y) ? frame.tilt.y : 0,
-          frame.motion || 0, frame.quality || 1
+          frame.motion || 0, frame.quality ?? 1   // quality 0 is poor contact, not "unknown" (#175)
         );
       } catch (err) {
         console.warn('RustBrain ingest failed, disabling wasm brain:', err);
@@ -205,6 +217,12 @@ export class Brain {
       }
     }
     this.quality = frame.quality;
+    if (!frame.isSim) {
+      const q = Number.isFinite(frame.quality) ? clamp(frame.quality) : 1;
+      this.signalQuality += (q - this.signalQuality) * 0.2;   // ~1 s at the bridge's 10 frames/s
+      if (this.signalUnusable) this.signalUnusable = this.signalQuality < QUALITY_USABLE;
+      else this.signalUnusable = this.signalQuality < QUALITY_UNUSABLE;
+    }
     if (frame.bands) this.bands = { ...frame.bands };
     if (frame.contact) this.contact = frame.contact;
     if (frame.orientation !== undefined) this.orientation = frame.orientation;
@@ -275,6 +293,10 @@ export class Brain {
     this.focusRaw = p && p.focus != null ? this.genericFocus * (1 - tf) + p.focus * tf : this.genericFocus;
   }
 
+  // Whether the headset is aiming: a tilt arrived lately (#175). Without one (no orientation and
+  // no accelerometer from the bridge) the mouse and arrow keys aim instead.
+  get headTracking() { return this.time - this.lastTiltAt < HEAD_LOST_S; }
+
   // Head tilt (-1..1 each axis) → aim (#221). Non-finite input never reaches the smoothing.
   ingestTilt(tilt, isSim) {
     if (!finite2(tilt)) {
@@ -282,6 +304,7 @@ export class Brain {
       return;
     }
     const tx = clamp(0.5 + tilt.x * 0.5), ty = clamp(0.5 + tilt.y * 0.5);
+    this.lastTiltAt = this.time;
     if (isSim) {
       this.aim.x = tx;
       this.aim.y = ty;
