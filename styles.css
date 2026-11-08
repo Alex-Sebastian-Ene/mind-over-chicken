@@ -117,6 +117,11 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 .source::before { content: ""; width: 7px; height: 7px; background: var(--alarm); }
 .source[data-ok="1"]::before { background: var(--good); }
 .clock { font: 600 14px var(--pixel); font-variant-numeric: tabular-nums; color: var(--muted); }
+/* #85: signal truth next to the source chip */
+.signal { font: 12px var(--pixel); white-space: nowrap; padding: 1px 6px; border: 1px solid var(--line); border-radius: 3px; }
+.signal[data-level="good"] { color: var(--good); }
+.signal[data-level="fair"] { color: var(--focus); }
+.signal[data-level="poor"] { color: var(--alarm); border-color: color-mix(in srgb, var(--alarm) 55%, var(--line)); }
 .tool {
   font: 600 12px var(--pixel);
   background: var(--panel);
