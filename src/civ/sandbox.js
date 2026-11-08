@@ -15,8 +15,9 @@
 // random (reproducible from ?seed=) in the default dummy run. The run seed also picks the
 // planet and the other three civilisations.
 
-import { W, H, clamp } from '../sim/util.js';
+import { W, H, clamp, Particles, rand, pick } from '../sim/util.js';
 import { makeBolt, drawBolt, drawReticle } from '../render/sprites.js';
+import { FireballFX } from '../render/fireball.js';
 import { createCiv, EVENT, CAST, TONE, SETUP } from './civ.js';
 import { seamSpans, fadeReliefRim } from './seams.js';
 import { calibrationTraits, calibrationLine } from './calibration-traits.js';
@@ -126,6 +127,8 @@ export class CivSandbox {
     this.error = null;
     this.t = 0;
     this.bolts = [];
+    this.particles = new Particles();
+    this.fireballs = new FireballFX();
     this.news = [];          // {text, t, kind}
     this.shown = null;       // {text, until}
     this.factions = [];
@@ -220,6 +223,8 @@ export class CivSandbox {
     if (!civ) return;
     const G = this.G, b = G.brain;
     this.t += dt;
+    for (const hit of this.fireballs.update(dt)) this.impactFireball(hit);
+    this.particles.update(dt);
     // Calibration → your civilisation (#190), once founding is over so it never fights the
     // 5 s seeding windows; the log says what was applied.
     if (!this.calibApplied && civ.setupPhase === SETUP.done && G.calibration?.done) {
@@ -380,16 +385,28 @@ export class CivSandbox {
     if (cancelled && this.civ) this.civ.moveAgent(g.agent, g.p0.x, g.p0.y);
   }
 
-  // Charged fireball (#291): a bright hit at the cursor.
+  // Charged fireball (#291): launch a visible slam, then impact at the aimed planet tile (#315).
   onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
     const G = this.G;
     if (!G) return;
     const p = this.aimPlanet(aim);
+    this.fireballs.launch(
+      { x: aim.x * (W - 1), y: aim.y * (H - 1) },
+      { color, charge, meta: { planet: p } },
+    );
+    G.audio?.blip?.();
+  }
+
+  impactFireball({ planet, color = '#ff9a2e', charge = 1 }) {
+    const G = this.G;
+    const p = planet || { x: W / 2, y: H / 2 };
+    const s = this.civ?.toScreen ? this.civ.toScreen(p.x, p.y) : p;
     this.flash = 0.4;
     G.audio?.thunder?.();
-    G.shake = Math.max(G.shake || 0, 1.2);
-    if (this.particles) this.particles.burst(16 + Math.round(charge * 16), () => ({ x: p.x, y: p.y, vx: rand(-30, 30), vy: rand(-40, 5), g: 50, life: rand(0.4, 0.7), maxLife: 0.7, size: 1, color }));
-    this.G.advisor?.say('civ-fireball', `A fireball! ${Math.round(charge * 100)}% charged and very visible.`, { mood: 'panic', priority: 2, cooldown: 8 });
+    G.shake = Math.max(G.shake || 0, 1.3 + charge * 0.6);
+    this.particles.burst(24 + Math.round(charge * 24), () => ({ x: s.x, y: s.y, vx: rand(-42, 42), vy: rand(-52, 4), g: 64, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color }));
+    this.particles.burst(8 + Math.round(charge * 8), () => ({ x: s.x + rand(-5, 5), y: s.y + rand(-1, 2), vx: rand(-16, 16), vy: rand(-14, -2), g: 22, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color: pick(['#c9c2b0', '#8a7a5a', '#5f5545']) }));
+    G.advisor?.say('civ-fireball', `A fireball! ${Math.round(charge * 100)}% charged and very visible.`, { mood: 'panic', priority: 2, cooldown: 8 });
   }
 
   // camera (#49): hand casts. aim is 0..1 like the brain's.
@@ -570,6 +587,8 @@ export class CivSandbox {
       label(ctx, W / 2, H / 2, this.error ? 'The planet failed to form.' : 'Forming a planet…', this.error ? '#ff5a72' : '#ffe066', 8);
       return;
     }
+    this.fireballs.draw(ctx, { project: (x, y) => [x, y] });
+    this.particles.draw(ctx);
     // Names (and ages) at capitals.
     for (const f of this.factions) {
       if (!f.alive || !f.capital) continue;

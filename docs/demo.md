@@ -23,6 +23,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
   - `B`: Deliberate Blink. On a surface it throws lightning (a tree strike starts a forest fire); in the galaxy/globe it selects/lands like a left click
   - `Space` / `Enter` / click during an era's opening camera move: skip it
   - `3`: Hold to charge the charged fireball, release to throw (or fist → pull back → thrust + open palm with the camera). Its colour follows joy (red) / surprise (blue)
+  - `I`: Toggle people invincibility in Stone Age (no hunger, starvation, lightning or trample deaths)
   - `T`: Toggle 3D Heightmap Terrain vs 2D Classic
   - `Z` / `X` (or scroll, or a trackpad pinch): one continuous zoom out to the globe and galaxy / back in to the surface. In 3D the zoom goes toward the cursor
   - `Left` / `Right` (or `A` / `D`) in the galaxy: choose a world; `Enter` or zoom in to land on it. `N`: visit the next world

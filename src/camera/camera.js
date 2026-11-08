@@ -571,7 +571,6 @@ export function initCamera({
     try { scene.onFireball(aim, { color: fb.color, charge: fb.charge }); }
     catch (err) { console.error('[camera] onFireball failed:', err); return false; }
     G.stats.casts = (G.stats.casts || 0) + 1;
-    G.audio?.thunder?.();
     coach?.flash(`🔥 Fireball ${Math.round(fb.charge * 100)}%`, 'ok', 1400);
     G.hud?.showCause?.(`🔥 Charged fireball ${Math.round(fb.charge * 100)}% · ${fb.color}`, { tone: 'ok' });
     return true;

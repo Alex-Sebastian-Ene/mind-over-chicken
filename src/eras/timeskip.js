@@ -10,6 +10,7 @@
 import { W, H, Particles, rand, pick, floater, clamp } from '../sim/util.js';
 import { walk, animate, villagerLook } from '../sim/agents.js';
 import { drawPerson, drawGoat, drawChicken } from '../render/sprites.js';
+import { FireballFX } from '../render/fireball.js';
 import { label } from './stone.js';
 
 // What the scholars write down, one focus window each.
@@ -40,6 +41,7 @@ export class FarmingToKingdoms {
     const w = G.world;
     this.layer = w.paint('farming');
     this.particles = new Particles();
+    this.fireballs = new FireballFX();
     this.t = 0;
     this.phase = 'farming';
     this.problems = INVENTIONS;
@@ -81,6 +83,7 @@ export class FarmingToKingdoms {
   update(dt) {
     const G = this.G, w = G.world;
     this.t += dt;
+    for (const hit of this.fireballs.update(dt)) this.impactFireball(hit);
     this.particles.update(dt);
     const v = w.sites.village;
 
@@ -165,6 +168,7 @@ export class FarmingToKingdoms {
 
   // On the map, in world units (repeated at the map's wrap copies).
   drawOverlay(ctx) {
+    this.fireballs.draw(ctx);
     this.particles.drawText(ctx);
   }
 
@@ -206,7 +210,13 @@ export class FarmingToKingdoms {
   onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
     if (!this.G) return;
     const p = this.G.world.aimPoint(aim);
-    floater(this.particles, p.x, p.y - 6, `fireball ${Math.round(charge * 100)}%`, color, 6);
+    this.fireballs.launch({ x: p.x, y: p.y }, { color, charge });
+    this.G.audio?.blip?.();
+  }
+
+  impactFireball({ x, y, color = '#ff9a2e', charge = 1 }) {
+    this.particles.burst(18 + Math.round(charge * 20), () => ({ x, y, vx: rand(-38, 38), vy: rand(-46, 4), g: 60, life: rand(0.45, 0.85), maxLife: 0.85, size: 1, color }));
+    floater(this.particles, x, y - 6, `SLAM! ${Math.round(charge * 100)}%`, color, 6);
   }
 
   onCast(spell, aim) {
@@ -239,6 +249,7 @@ export class InfoAge {
     this.layer = G.world.paint('space');
     this.t = 0;
     this.particles = new Particles();
+    this.fireballs = new FireballFX();
     G.brain.setCue('rest');
     G.advisor.setEra('space');
     G.advisor.say('info', 'Three hundred years later. The goats went digital. Then everyone looked up.', { mood: 'nervous', priority: 3, cooldown: 999 });
@@ -248,6 +259,8 @@ export class InfoAge {
 
   update(dt) {
     this.t += dt;
+    for (const hit of this.fireballs.update(dt)) this.impactFireball(hit);
+    this.particles.update(dt);
     if (this.t > 6 && !this.left) { this.left = true; this.G.brain.setCue(null); this.G.complete(0.1); }
   }
 
@@ -260,7 +273,7 @@ export class InfoAge {
     return L;
   }
 
-  draw(ctx) { ctx.drawImage(this.layer, 0, 0); this.G.world.drawWater(ctx, this.t); }
+  draw(ctx) { ctx.drawImage(this.layer, 0, 0); this.G.world.drawWater(ctx, this.t); this.particles.draw(ctx); }
 
   // Captions fixed to the screen (#129).
   drawScreenOverlay(ctx) {
@@ -268,11 +281,22 @@ export class InfoAge {
     label(ctx, W / 2, 38, this.t < 3 ? 'The goats went digital.' : 'Everyone looks up.', '#9ec9ff', 7);
   }
 
-  // ---- camera (#33): this short bridge draws no particles, so the advisor reads the label out. ----
+  drawOverlay(ctx) {
+    this.fireballs.draw(ctx);
+    this.particles.drawText(ctx);
+  }
+
+  // ---- camera (#33): this short bridge draws no gameplay, so the fireball just slams into the map. ----
   onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
     if (!this.G) return;
     const p = this.G.world.aimPoint(aim);
-    floater(this.particles, p.x, p.y - 6, `fireball ${Math.round(charge * 100)}%`, color, 6);
+    this.fireballs.launch({ x: p.x, y: p.y }, { color, charge });
+    this.G.audio?.blip?.();
+  }
+
+  impactFireball({ x, y, color = '#ff9a2e', charge = 1 }) {
+    this.particles.burst(18 + Math.round(charge * 20), () => ({ x, y, vx: rand(-38, 38), vy: rand(-46, 4), g: 60, life: rand(0.45, 0.85), maxLife: 0.85, size: 1, color }));
+    floater(this.particles, x, y - 6, `SLAM! ${Math.round(charge * 100)}%`, color, 6);
   }
 
   onCast(spell) {
