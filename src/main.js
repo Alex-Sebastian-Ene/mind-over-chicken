@@ -57,6 +57,7 @@ import { engineFailToShow } from './ui/fail.js';
 import { frameLoop } from './ui/loop.js';
 import { dayNight } from './render/daynight.js';
 import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
+import { mirrorHud } from './ui/hud-mirror.js';
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
 // mind read uses the same window.
@@ -90,6 +91,11 @@ function groundAt(e) {
 }
 function grabPan3d(e) {
   if (!grab3d) return false;
+  return keepGroundUnder(e, grab3d);
+}
+// Move the camera so the ground point `anchor` sits under the pointer again: a drag (grab-pan)
+// and a zoom toward the cursor both use it. Returns false where the scene has its own camera.
+function keepGroundUnder(e, anchor) {
   const scene = cosmos?.viewScene?.(G) || G?.scene;
   if (scene instanceof CivSandbox || scene?.civ || (scene && typeof scene.centerColumn === 'function')) {
     return false;
@@ -100,7 +106,7 @@ function grabPan3d(e) {
     if (worldScene(cosmos.viewScene(G)) && cosmos.view) {
       // The home world (#129): a wrap-aware difference on both axes (a torus, #111), then move
       // the one camera (2D window and 3D target) by it.
-      const dx = wrapDelta(grab3d.x, g.x, cosmos.worldW), dz = wrapDelta(grab3d.z, g.z, cosmos.worldH);
+      const dx = wrapDelta(anchor.x, g.x, cosmos.worldW), dz = wrapDelta(anchor.z, g.z, cosmos.worldH);
       if (Math.abs(dx) < 0.05 && Math.abs(dz) < 0.05) break;
       cosmos.pan(-dx, -dz);
       // Apply now, not at the next frame: a fast mouse sends several moves per frame, and each
@@ -109,8 +115,8 @@ function grabPan3d(e) {
       continue;
     }
     // Other worlds' 320×180 relief (#192): pan east–west, move the target north–south.
-    let dx = grab3d.x - g.x; dx = ((dx + W * 1.5) % W) - W / 2;
-    const dz = grab3d.z - g.z;
+    let dx = anchor.x - g.x; dx = ((dx + W * 1.5) % W) - W / 2;
+    const dz = anchor.z - g.z;
     if (Math.abs(dx) < 0.05 && Math.abs(dz) < 0.05) break;
     if (dx) cosmos.pan(-dx);
     engine.set_camera_target(engine.get_camera_target_x(), clamp(engine.get_camera_target_z() + dz, 0, H - 1));
@@ -967,10 +973,15 @@ function frame(ts) {
   lastTs = ts;
   if (G) {
     G.brain.update(dt, G.mood);   // the camera's face anger counts toward brain.stress
-    // The scene's Rust era sim ticks only in a playable era, and not during its intro (#194).
-    if (engine && rustEraTicks(G.scene, intro.active)) {
+    // The Rust shell draws the WebGL HUD (objectives, clock, meters, advisor text) in game_tick.
+    // It shows the JS scene on screen (#191): mirrorHud hands over its objectives and clock, and
+    // the Rust era sim stands still, so it runs every frame, time skips and intros included.
+    // Without the mirror (an old pkg/), the Rust era sim ticks only in a playable era (#194).
+    const mirrored = engine && mirrorHud(engine, G.runTime, cosmos.hudScene(G, galaxyHudScene));
+    if (engine && (mirrored || rustEraTicks(G.scene, intro.active))) {
       const b = G.brain;
       engine.game_tick(dt, b.calm || 0, b.focus || 0, b.stress ?? 0, b.stats?.blinks || 0);
+      // Under the mirror these never fire: the JS scene calls G.complete / G.fail itself.
       if (engine.is_game_era_complete?.() && !pendingScene && !G.finished && G.sceneIndex < SCENES.length - 1 && G.scene?.era !== 'space') {
         G.complete(1.5);
       }
@@ -1323,20 +1334,30 @@ screen.addEventListener('wheel', (e) => {
     // Already looking straight down at the whole map: scrolling on carries on into the globe,
     // continuously (#143).
     if (e.deltaY > 0 && engine.get_camera_distance() >= CAM3D.topDown - 0.5 && !(scene instanceof CivSandbox) && !scene?.civ) {
-      cosmos.wheel(e.deltaY, G);
+      cosmos.wheel(wheelAmount(e), G);
       return;
     }
-    // In proportion to the scroll (#143): a mouse notch (100) is about ×1.1, a trackpad glides.
-    zoom3dBy(Math.exp(clamp(e.deltaY, -240, 240) * 0.00095));
+    // In proportion to the scroll (#143), and easy to do (Alex: "the zoom is too difficult"):
+    // a mouse notch is about ×1.27, a trackpad pinch counts triple. The ground under the cursor
+    // stays under it, like a map app.
+    const anchor = groundAt(e);
+    zoom3dBy(Math.exp(wheelAmount(e) * 0.0024));
+    if (anchor) keepGroundUnder(e, anchor);
     return;
   }
   const scene = cosmos?.viewScene?.(G) || G?.scene;
   if (scene instanceof CivSandbox || scene?.civ) {
-    scene.onWheel?.(e.deltaY);
+    scene.onWheel?.(wheelAmount(e));
     return;
   }
-  cosmos.wheel(e.deltaY, G);
+  cosmos.wheel(wheelAmount(e), G);
 }, { passive: false });
+// How far one wheel event zooms, in pixel-like units: a mouse notch is about 100, a trackpad
+// pinch (sent as Ctrl+wheel with small deltas) counts triple, line-mode wheels are scaled up.
+function wheelAmount(e) {
+  const lines = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 400 : 1;
+  return clamp(e.deltaY * lines * (e.ctrlKey ? 3 : 1), -300, 300);
+}
 screen.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // Shift is the Stress demo key: full agitation on the emulated headset (input.panic).

@@ -364,7 +364,6 @@ export class SpaceAge {
     const { x, y } = G.world.aimPoint(aim);   // aims are 0..1 of the world (#129)
     const watching = this.citizens.filter((c) => c.state !== 'aboard');
     switch (spell) {
-      case 'fist':
       case 'fireball': {
         G.stats.lightning++;
         G.audio.thunder();

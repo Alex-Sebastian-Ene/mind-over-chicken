@@ -1,10 +1,10 @@
-// camera (#33, #116, #122): the three core hand moves replace the old seven-cast bar.
-//   1. Pinch       — grab / pick up a living entity under the cursor (or confirm selection)
-//   2. Open Palm   — calm / peace / bless / bounty
-//   3. Closed Fist — strike / lightning / fireball at the head reticle
-//
-// Legacy spell IDs remain in SPELL_BY_ID and ADVANCED_SPELLS so scenes and ?advanced_casts=1
-// continue to resolve without breaking.
+// camera (#33, #116, #122, #150, #159): the three core hand moves, keys 1–3. Mirrors
+// crates/engine/src/camera/spells.rs, which is what the browser runs (RustCastController):
+//   1. Pinch     — grab / pick up a living entity under the cursor
+//   2. Open Palm — Calm: held, once per hold
+//   3. Fireball  — a closed fist CHARGES it, opening the hand RELEASES it (#150); a held fist alone
+//                  never casts. The separate "Closed Fist · Strike" is gone (#159), and so is the
+//                  legacy seven-cast table: those gestures cast nothing.
 export const CAMERA_CASTS_ENABLED = true;
 
 export const SPELLS = [
@@ -12,31 +12,11 @@ export const SPELLS = [
     hint: 'Pinch thumb and index: pick up a living creature under the cursor, move the cursor, release to drop.' },
   { id: 'palm', aimed: true, key: 2, gesture: 'Open_Palm', glyph: '🖐️', name: 'Calm', cooldown: 5000,
     hint: 'Open palm: calm fear, broker peace and bless the land.' },
-  { id: 'fist', aimed: true, key: 3, gesture: 'Closed_Fist', glyph: '✊', name: 'Strike', cooldown: 1500,
-    hint: 'Closed fist: strike lightning or a fireball at the cursor.' },
+  { id: 'fireball', aimed: true, key: 3, gesture: 'Closed_Fist', release: 'Open_Palm', glyph: '🔥', name: 'Fireball', cooldown: 1500,
+    hint: 'Close your fist to charge, open your hand to throw a fireball at the cursor (or hold 3 and release).' },
 ];
 
-export const ADVANCED_SPELLS = [
-  { id: 'point', key: 1, gesture: 'Pointing_Up', glyph: '☝️', name: 'Aim', cooldown: 0,
-    hint: 'Legacy aim: jump to the next landmark.' },
-  { id: 'fireball', aimed: true, key: 2, gesture: 'Closed_Fist', glyph: '✊', name: 'Fireball', cooldown: 1500,
-    hint: 'Closed fist: lightning strikes the reticle.' },
-  { id: 'spawn', aimed: true, key: 3, gesture: 'Open_Palm', glyph: '🖐️', name: 'Bounty', cooldown: 6000,
-    hint: 'Open palm: food, goats or rocket parts, by era.' },
-  { id: 'rain', aimed: true, key: 4, gesture: 'Victory', glyph: '✌️', name: 'Rain', cooldown: 10000,
-    hint: 'Victory: rain calms fear and boosts the harvest.' },
-  { id: 'bless', key: 5, gesture: 'Thumb_Up', glyph: '👍', name: 'Bless', cooldown: 9000,
-    hint: 'Thumb up: faith, morale and courage rise.' },
-  { id: 'disaster', aimed: true, key: 6, gesture: 'Thumb_Down', glyph: '👎', name: 'Disaster', cooldown: 14000,
-    hint: 'Thumb down: a storm hits the reticle.' },
-  { id: 'peace', key: 7, gesture: 'ILoveYou', glyph: '🤟', name: 'Peace', cooldown: 15000,
-    hint: 'I-love-you: ends strikes, riots and panics.' },
-];
-
-export const SPELL_BY_ID = Object.fromEntries([
-  ...ADVANCED_SPELLS.map((s) => [s.id, s]),
-  ...SPELLS.map((s) => [s.id, s]),
-]);
+export const SPELL_BY_ID = Object.fromEntries(SPELLS.map((s) => [s.id, s]));
 
 // Short readable names for the gesture readout.
 export const GESTURE_LABEL = {

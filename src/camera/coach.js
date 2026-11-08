@@ -111,15 +111,21 @@ export const COACH_MOVES = [
     },
   },
   {
-    id: 'fist_strike',
-    title: 'Closed Fist · Strike',
+    // Fireball (#150): a fist charges it and opening the hand throws it. The old stationary
+    // "Closed Fist · Strike" is gone (#159).
+    id: 'fireball_release',
+    title: 'Fist → Open · Fireball',
     key: '3',
-    glyph: '✊',
-    instruction: 'Hold a closed fist (or press 3) to strike lightning at the cursor.',
+    glyph: '🔥',
+    instruction: 'Close your fist to charge, then open your hand to throw a fireball at the cursor (or hold 3 and release).',
     contexts: ['surface', 'civ'],
     sample(phase) {
-      const k = phase < 0.3 ? phase / 0.3 : phase > 0.8 ? 1 - (phase - 0.8) / 0.2 : 1;
-      return [{ hand: buildGhostHand('open', 'fist', k, { cx: 0.5, cy: 0.76, size: 0.27 }), state: { held: k > 0.75 } }];
+      // 0..0.25 close into a fist, 0.25..0.7 hold it (charging), 0.7..0.8 snap open, 0.8..1 open (thrown)
+      const at = { cx: 0.5, cy: 0.76, size: 0.27 };
+      if (phase < 0.25) return [{ hand: buildGhostHand('open', 'fist', phase / 0.25, at), state: {} }];
+      if (phase < 0.7) return [{ hand: buildGhostHand('fist', 'fist', 1, at), state: { held: true } }];
+      if (phase < 0.8) return [{ hand: buildGhostHand('fist', 'open', (phase - 0.7) / 0.1, at), state: { held: phase < 0.75 } }];
+      return [{ hand: buildGhostHand('open', 'open', 1, at), state: {} }];
     },
   },
 ];
@@ -252,7 +258,17 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
     ctx.fillStyle = 'rgba(255, 207, 74, 0.85)';
     ctx.font = '11px "Pixelify Sans", monospace';
     ctx.textAlign = 'center';
-    if (move.id === 'two_hand_zoom') {
+    if (move.id === 'fireball_release') {
+      ctx.fillText(phase < 0.7 ? 'CLOSE FIST · CHARGE' : 'OPEN HAND · THROW', w / 2, 16);
+      if (phase >= 0.7 && phase < 0.95) {
+        // The release flash: an orange burst where the fireball leaves the hand.
+        const k = (phase - 0.7) / 0.25;
+        ctx.globalAlpha = 1 - k;
+        ctx.fillStyle = '#ff9a2e';
+        ctx.beginPath(); ctx.arc(w / 2, h * 0.3, 6 + 26 * k, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    } else if (move.id === 'two_hand_zoom') {
       ctx.fillText('←  PINCH & SPREAD  →', w / 2, 16);
     } else if (move.id === 'pinch_grab') {
       ctx.fillText('PINCH · MOVE CURSOR · DROP', w / 2, 16);
@@ -264,7 +280,7 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
 
     if (state.bothPinched) selectMove('two_hand_zoom');
     else if (state.grabActive) selectMove('pinch_grab');
-    else if (state.heldMove === 'fist') selectMove('fist_strike');
+    else if (state.heldMove === 'fireball' || state.armedMove === 'fireball') selectMove('fireball_release');
 
     const handCount = (state.leftVisible ? 1 : 0) + (state.rightVisible ? 1 : 0);
     dotEl.dataset.ok = state.live ? (handCount > 0 ? '1' : 'wait') : '0';
