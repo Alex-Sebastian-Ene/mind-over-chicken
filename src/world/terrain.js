@@ -164,6 +164,13 @@ export class World {
     return near;
   }
 
+  // A building's sprite is drawn above and around its anchor tile (render/sprites.js): keep the
+  // walls (x-2..x+2, y-3..y-1) off the water so no hut or house hangs over the sea.
+  spriteOverWater(x, y) {
+    for (let dy = -3; dy <= -1; dy++) for (let dx = -2; dx <= 2; dx++) if (this.isWater(x + dx, y + dy)) return true;
+    return false;
+  }
+
   // A walkable point in a loose cluster around (x, y): a free angle, a radius biased towards
   // the centre, and a little space from the structures already placed. Co-ordinates wrap.
   clusterSpot(x, y, spreadX, spreadY, pred, placed, rng = Math.random, innerX = 5, innerY = 3) {
@@ -171,7 +178,7 @@ export class World {
       const a = rng() * Math.PI * 2, r = Math.pow(rng(), 1.35);
       const px = this.wrapX(Math.round(x + Math.cos(a) * (innerX + r * (spreadX - innerX))));
       const py = this.wrapY(Math.round(y + Math.sin(a) * (innerY + r * (spreadY - innerY))));
-      if (!this.walkable(px, py) || (pred && !pred(px, py))) continue;
+      if (!this.walkable(px, py) || (pred && !pred(px, py)) || this.spriteOverWater(px, py)) continue;
       if (placed && placed.some((o) => Math.abs(this.dx(px, o.x)) < 3 && Math.abs(this.dy(py, o.y)) < 3)) continue;
       return { x: px, y: py };
     }

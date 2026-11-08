@@ -56,6 +56,13 @@ let blank = null;
 const blankLayer = () => (blank ||= makeCanvas(1, 1));
 export const fmtNum = (n) => (n < 1000 ? `${Math.round(n)}` : `${(n / 1000).toFixed(n < 10000 ? 1 : 0)}k`);
 
+// A building's sprite covers x-2..x+2, y-3..y-1 above its anchor (render/sprites.js): none of it
+// may hang over the sea.
+function spriteOverWater(v, x, y) {
+  for (let dy = -3; dy <= -1; dy++) for (let dx = -2; dx <= 2; dx++) if (typeAt(v, x + dx, y + dy) <= T.SHALLOW) return true;
+  return false;
+}
+
 export class PlanetSurface {
   constructor(p, world) {
     this.p = p;
@@ -221,7 +228,7 @@ export class PlanetSurface {
         const innerX = s.capital ? 6 : 4, innerY = innerX * (spreadY / spreadX);
         x = wrapX(Math.round(s.x + Math.cos(a) * (innerX + r * (spreadX - innerX))));
         y = Math.round(s.y + Math.sin(a) * (innerY + r * (spreadY - innerY)));
-        clear = walkableAt(v, x, y)
+        clear = walkableAt(v, x, y) && !spriteOverWater(v, x, y)
           && !placed.some((b) => Math.abs(wrapDx(x - b.x)) < 4 && Math.abs(y - b.y) < 3);
       }
       if (!clear) continue;
