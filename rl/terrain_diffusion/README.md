@@ -6,13 +6,19 @@ relief. Nothing here ships: the game runs the exported weights in Rust
 
 ## How it fits
 
-`moc-terrain` builds a coarse map (plates, continents, ranges) and calls the relief hook
-with coarse heights, uplift and land weight. `moc-diffusion` resamples those onto the model
-grid (2 model pixels per coarse cell), adds a random **roughness** field so regions get
-different landforms, and runs a few DDIM steps of a conditional UNet over the whole torus
-(wrap-around padding, so no patches and no seams). The generated residual is added to the
-coarse heights, and the coarse land/sea layout is kept. A fresh seed every run makes every
-map different. No weights, or weights that fail to load, means procedural detail instead.
+`moc-terrain` builds a coarse map (plates, continents) and calls its `ReliefDetail` hook
+with coarse heights, uplift and land weight. `moc-diffusion`'s `LearnedDiffusion` implements
+the hook: the procedural stage first shapes the coarse grid (DLA ranges along the uplift,
+erosion), then the model resamples it onto the model grid (2 model pixels per coarse cell),
+adds a random **roughness** field so regions get different landforms, and runs a few DDIM
+steps of a conditional UNet over the whole torus (wrap-around padding, so no patches and no
+seams). The generated residual is added to the coarse heights, and the coarse land/sea
+layout is kept. Every run is random.
+
+In the game, the engine's `RustWorldGen.use_learned_relief(true)` turns it on for one wasm
+instance; only the worldgen worker calls it, so the model never runs on the main thread.
+No weights (`crates/moc-diffusion/weights/relief.mocd` absent, as now), or weights that fail
+to load, means exactly today's procedural relief.
 
 | File | What |
 |---|---|
