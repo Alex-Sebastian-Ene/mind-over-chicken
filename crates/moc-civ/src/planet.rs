@@ -11,6 +11,8 @@
 //! BFS distance field limited to a window round its target, so building one stays cheap on a
 //! big planet). The 320×180 view itself is `moc_planet::fb::Framebuffer`.
 
+use std::collections::VecDeque;
+
 use moc_planet::fb::Framebuffer;
 use moc_planet::{VH, VW};
 
@@ -226,11 +228,33 @@ const UNREACHED: u16 = u16::MAX;
 impl LocalField {
     /// The target itself is always the source, even if impassable (a village on a coast).
     pub fn build(d: Dims, tx: i32, ty: i32, r: i32, passable: impl Fn(i32, i32) -> bool) -> LocalField {
+        let mut dist = Vec::new();
+        let mut queue = VecDeque::new();
+        Self::build_with(d, tx, ty, r, passable, &mut dist, &mut queue)
+    }
+
+    /// As [`LocalField::build`], filling caller-owned scratch buffers (#217). `dist` is moved
+    /// into the field, so the owner gets its allocation back by recycling an evicted field;
+    /// `queue` stays with the caller and is reused for every build. Both are cleared first,
+    /// so an interrupted or repeated build can never inherit stale work.
+    fn build_with(
+        d: Dims,
+        tx: i32,
+        ty: i32,
+        r: i32,
+        passable: impl Fn(i32, i32) -> bool,
+        dist: &mut Vec<u16>,
+        queue: &mut VecDeque<usize>,
+    ) -> LocalField {
         let tx = d.wrap_x(tx);
         let ty = d.wrap_y(ty);
         let side = (2 * r + 1) as usize;
-        let mut dist = vec![UNREACHED; side * side];
-        let mut queue = std::collections::VecDeque::with_capacity(side * 4);
+        let len = side * side;
+        dist.clear();
+        dist.resize(len, UNREACHED);
+        queue.clear();
+        // `reserve` measures from `len` (now 0), so this only allocates while warming up.
+        queue.reserve(side * 4);
         let s = r as usize * side + r as usize;
         dist[s] = 0;
         queue.push_back(s);
@@ -257,6 +281,7 @@ impl LocalField {
                 }
             }
         }
+        let dist = std::mem::take(dist);
         LocalField { tx, ty, r, side, d, dist }
     }
 
@@ -302,22 +327,49 @@ impl LocalField {
 }
 
 /// Recently used fields toward villages, built on a per-step budget.
+///
+/// #217: fields are cached at a capacity proportional to the number of active settlements
+/// (`FIELD_CACHE_BASE + FIELD_CACHE_PER_SETTLEMENT * settlements`, capped at
+/// `FIELD_CACHE_MAX`) instead of a fixed 48. One field is ~26k `u16` (52 KB), so 128 fields
+/// is ~6.6 MB and the 256-field ceiling ~13 MB: bounded, and far below the old thrash of
+/// evicting and immediately rebuilding the same handful of village fields on a crowded planet.
+///
+/// BFS scratch buffers live here too. `dist` is moved into each built field and comes back
+/// on eviction, so after the cache warms up no build allocates a distance vector; `queue`
+/// is reused for every build. Requests over the step budget are queued (deduped, first-come)
+/// and retried next step instead of making agents stuck or giving up on routing.
 pub struct Paths {
     fields: Vec<(LocalField, u64)>,
     tick: u64,
     budget: u32,
     pub builds: u32,
+    /// Requests deferred because this step's budget (or the cache's cold capacity) ran out.
+    pub deferred: u32,
+    /// First-come, deduped requests waiting for a later step: `(x, y, queued tick)`.
+    pending: VecDeque<(i32, i32, u64)>,
+    /// Recycled distance buffer; moved into the next field (see [`LocalField::build_with`]).
+    scratch_dist: Vec<u16>,
+    /// Reused BFS queue.
+    scratch_queue: VecDeque<usize>,
     /// Window half-size (tiles) of every field this cache builds.
     pub radius: i32,
+    cap_base: usize,
+    cap_per_settlement: usize,
+    cap_max: usize,
     cap: usize,
 }
 
 pub const FIELD_RADIUS: i32 = 80;
-const FIELD_CAP: usize = 48;
+/// Land fields: enough for several villages per civilisation plus their marches and colonies.
+pub const FIELD_CACHE_BASE: usize = 128;
+pub const FIELD_CACHE_PER_SETTLEMENT: usize = 8;
+pub const FIELD_CACHE_MAX: usize = 256;
 /// Sea routes (#197): voyages run up to ~110 tiles, so their fields reach further, and fewer
-/// are kept (each is bigger).
+/// are kept (each is bigger: ~116 KB at `SEA_RADIUS`).
 pub const SEA_RADIUS: i32 = 120;
-const SEA_CAP: usize = 24;
+pub const SEA_CACHE_BASE: usize = 24;
+pub const SEA_CACHE_PER_SETTLEMENT: usize = 1;
+pub const SEA_CACHE_MAX: usize = 48;
 
 impl Default for Paths {
     fn default() -> Self {
@@ -327,22 +379,101 @@ impl Default for Paths {
 
 impl Paths {
     pub fn new() -> Paths {
-        Paths::with(FIELD_RADIUS, FIELD_CAP)
+        Paths::with(FIELD_RADIUS, FIELD_CACHE_BASE, FIELD_CACHE_PER_SETTLEMENT, FIELD_CACHE_MAX)
     }
 
     /// The sea-route cache (#197): water-only fields toward ports and landing sites.
     pub fn sea() -> Paths {
-        Paths::with(SEA_RADIUS, SEA_CAP)
+        Paths::with(SEA_RADIUS, SEA_CACHE_BASE, SEA_CACHE_PER_SETTLEMENT, SEA_CACHE_MAX)
     }
 
-    fn with(radius: i32, cap: usize) -> Paths {
-        Paths { fields: Vec::new(), tick: 0, budget: 0, builds: 0, radius, cap }
+    fn with(radius: i32, cap_base: usize, cap_per_settlement: usize, cap_max: usize) -> Paths {
+        Paths {
+            fields: Vec::new(),
+            tick: 0,
+            budget: 0,
+            builds: 0,
+            deferred: 0,
+            pending: VecDeque::new(),
+            scratch_dist: Vec::new(),
+            scratch_queue: VecDeque::new(),
+            radius,
+            cap_base,
+            cap_per_settlement,
+            cap_max,
+            cap: cap_base,
+        }
     }
 
-    /// Allow `n` new fields this step.
+    /// Size the cache to the world's active settlements (#217). Called each step; the
+    /// capacity never exceeds the constructor's ceiling, so memory stays bounded.
+    pub fn set_settlements(&mut self, settlements: usize) {
+        self.cap = (self.cap_base + self.cap_per_settlement * settlements).min(self.cap_max);
+    }
+
+    /// The current field-cache capacity (for tests and telemetry).
+    pub fn capacity(&self) -> usize {
+        self.cap
+    }
+
+    /// Field distance bytes currently allocated by the cache (fields plus recycled scratch).
+    /// Steady state after warm-up is constant: eviction hands a buffer straight to the next
+    /// build instead of allocating (#217).
+    pub fn dist_capacity(&self) -> usize {
+        self.fields.iter().map(|(f, _)| f.dist.capacity()).sum::<usize>() + self.scratch_dist.capacity()
+    }
+
+    /// Requests waiting for a later step in the current step's queue.
+    pub fn pending_len(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Allow `n` new fields this step (no proactive rebuild: callers that want queued
+    /// requests served first use [`Paths::refill_with`]).
     pub fn refill(&mut self, n: u32) {
         self.budget = n;
         self.tick += 1;
+        // Without a passability rule requests cannot be rebuilt ahead of the agents; the
+        // agents re-ask this step and queue afresh.
+        self.pending.clear();
+    }
+
+    /// Start a step and first serve the requests deferred last step, oldest first. This is the
+    /// prioritized retry the world uses (#217): an agent that waited keeps its place instead of
+    /// losing every step to agents earlier in the loop. `passable(target_x, target_y, x, y)`
+    /// supplies the field's walkability rule for a queued target.
+    pub fn refill_with(&mut self, n: u32, d: Dims, passable: impl Fn(i32, i32, i32, i32) -> bool) {
+        self.budget = n;
+        self.tick += 1;
+        let tick = self.tick;
+        while self.budget > 0 {
+            let Some(&(x, y, _)) = self.pending.front() else {
+                break;
+            };
+            if self.fields.iter().any(|(f, _)| f.tx == x && f.ty == y) {
+                self.pending.pop_front();
+                continue;
+            }
+            if !self.make_room() {
+                break;
+            }
+            self.budget -= 1;
+            self.builds += 1;
+            self.pending.pop_front();
+            let f = LocalField::build_with(
+                d,
+                x,
+                y,
+                self.radius,
+                |px, py| passable(x, y, px, py),
+                &mut self.scratch_dist,
+                &mut self.scratch_queue,
+            );
+            self.fields.push((f, tick));
+        }
+        // A request is retried for one step. If it still cannot be served (budget or a cache
+        // full of fields in use), it expires; the agent asks again with its current goal.
+        self.pending.retain(|&(_, _, t)| tick.saturating_sub(t) <= 1);
     }
 
     /// The field toward (x, y): cached, or built now if this step's budget allows.
@@ -352,6 +483,9 @@ impl Paths {
 
     /// As [`Paths::get`], over the tiles `passable` allows (the same cache must always be
     /// given the same rule: fields are keyed by their target alone).
+    ///
+    /// A miss that cannot be built this step is queued (deduped) and returns `None`; the
+    /// caller can tell that case from "no field will ever exist" with [`Paths::is_pending`].
     pub fn get_by(&mut self, d: Dims, x: i32, y: i32, passable: impl Fn(i32, i32) -> bool) -> Option<&LocalField> {
         let (x, y) = (d.wrap_x(x), d.wrap_y(y));
         let tick = self.tick;
@@ -360,17 +494,74 @@ impl Paths {
             return Some(&self.fields[i].0);
         }
         if self.budget == 0 {
+            self.defer(x, y);
+            return None;
+        }
+        if !self.make_room() {
+            self.defer(x, y);
             return None;
         }
         self.budget -= 1;
         self.builds += 1;
-        let f = LocalField::build(d, x, y, self.radius, passable);
-        if self.fields.len() >= self.cap {
-            let oldest = self.fields.iter().enumerate().min_by_key(|(_, (_, t))| *t).map(|(i, _)| i).unwrap_or(0);
-            self.fields.swap_remove(oldest);
-        }
+        self.unpend(x, y);
+        let f = LocalField::build_with(
+            d,
+            x,
+            y,
+            self.radius,
+            passable,
+            &mut self.scratch_dist,
+            &mut self.scratch_queue,
+        );
         self.fields.push((f, tick));
         self.fields.last().map(|(f, _)| f)
+    }
+
+    /// Evict the coldest field if the cache is full, never one already used this step: agents
+    /// that have a field keep it, and a cache full of fields in use makes the new request wait.
+    fn make_room(&mut self) -> bool {
+        if self.fields.len() < self.cap {
+            return true;
+        }
+        let tick = self.tick;
+        let oldest = self
+            .fields
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, t))| *t < tick)
+            .min_by_key(|(_, (_, t))| *t)
+            .map(|(i, _)| i);
+        match oldest {
+            Some(i) => {
+                let (old, _) = self.fields.swap_remove(i);
+                self.scratch_dist = old.dist;
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn defer(&mut self, x: i32, y: i32) {
+        let tick = self.tick;
+        if let Some(e) = self.pending.iter_mut().find(|(px, py, _)| *px == x && *py == y) {
+            e.2 = tick;
+        } else {
+            self.pending.push_back((x, y, tick));
+        }
+        self.deferred = self.deferred.saturating_add(1);
+    }
+
+    fn unpend(&mut self, x: i32, y: i32) {
+        if let Some(i) = self.pending.iter().position(|&(px, py, _)| px == x && py == y) {
+            self.pending.remove(i);
+        }
+    }
+
+    /// Was this target deferred for a later step? Agents wait rather than steering greedily
+    /// (and counting `stuck`) while its field is queued.
+    pub fn is_pending(&self, d: Dims, x: i32, y: i32) -> bool {
+        let (x, y) = (d.wrap_x(x), d.wrap_y(y));
+        self.pending.iter().any(|&(px, py, _)| px == x && py == y)
     }
 
     pub fn has(&self, d: Dims, x: i32, y: i32) -> bool {
