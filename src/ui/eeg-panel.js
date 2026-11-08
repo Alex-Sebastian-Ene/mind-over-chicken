@@ -349,6 +349,21 @@ export class EegPanel {
     });
   }
 
+  // Set, save and apply the head-aim settings from elsewhere (the Settings panel, #186), keeping
+  // this panel's controls in step.
+  setAimPrefs(p) {
+    this.prefs = { sensitivity: Number(p.sensitivity) || 1, invertYaw: !!p.invertYaw, invertPitch: !!p.invertPitch };
+    if (this.ui) {
+      this.ui.sensInput.value = String(this.prefs.sensitivity);
+      this.ui.sensVal.textContent = `${this.prefs.sensitivity.toFixed(1)}×`;
+      this.ui.invYaw.checked = this.prefs.invertYaw;
+      this.ui.invPitch.checked = this.prefs.invertPitch;
+    }
+    saveAimPrefs(this.prefs);
+    const src = this.getSource?.();
+    if (src?.kind === 'bridge') this.applyPrefsToSource(src);
+  }
+
   applyPrefsToSource(src) {
     if (!src) return;
     src.sensitivity = this.prefs.sensitivity;
@@ -1114,6 +1129,11 @@ export class EegPanel {
       if (modP && !modP.hidden) {
         modP.hidden = true;
         modB?.setAttribute('aria-pressed', 'false');
+      }
+      const setP = this.doc.getElementById('settingsPanel');   // one side panel at a time (#186)
+      if (setP && !setP.hidden) {
+        setP.hidden = true;
+        this.doc.getElementById('settingsBtn')?.setAttribute('aria-pressed', 'false');
       }
     }
   }
