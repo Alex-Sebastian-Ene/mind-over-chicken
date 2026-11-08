@@ -1,0 +1,24 @@
+[package]
+name = "moc-diffusion"
+description = "Learned terrain relief for Mind over Chicken: a small conditional diffusion UNet (trained offline on real elevation data) run in pure Rust/wasm on the whole torus"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Alex-Sebastian-Ene/mind-over-chicken"
+build = "build.rs"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+# Only moc-terrain (the hook it plugs into): the weights parser, JSON reader, f16 widening and
+# conv kernels are all in this crate, so it adds little to the wasm bundle beyond its own code.
+[dependencies]
+moc-terrain = { path = "../moc-terrain" }
+
+[features]
+default = []
+# Plain extern "C" exports used only by the wasm timing harness (tools/bench_wasm.mjs).
+wasm-bench = []
+
+[[example]]
+name = "bench"

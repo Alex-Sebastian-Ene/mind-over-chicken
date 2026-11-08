@@ -64,6 +64,11 @@ export function initTerrainSync(bytes) {
 }
 export const initTerrain = () => wasm.default();
 const Gen = () => RustWorldGenClass || wasm.RustWorldGen;
+// The learned relief (#110) for worlds made by this wasm instance: the worldgen worker turns it
+// on, the main thread never does. False (procedural relief, unchanged) without trained weights.
+export function useLearnedRelief() {
+  try { return Gen().use_learned_relief?.(true) ?? false; } catch { return false; }
+}
 
 export class World {
   // opts: { biome, width, height } (the game's W × H by default).

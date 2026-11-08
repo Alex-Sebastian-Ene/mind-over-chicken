@@ -1238,6 +1238,17 @@ pub struct RustWorldGen {
     ms: f64,
 }
 
+thread_local! {
+    /// The learned relief model (#110), in instances that asked for it (the worldgen worker).
+    static LEARNED_RELIEF: std::cell::RefCell<Option<moc_diffusion::LearnedDiffusion>> = const { std::cell::RefCell::new(None) };
+}
+
+/// A moc-terrain map with the learned relief when this instance enabled it, and plain
+/// `moc_terrain::generate` (today's procedural relief, unchanged) otherwise.
+fn generate_relief(p: &moc_terrain::TerrainParams) -> moc_terrain::TerrainMap {
+    LEARNED_RELIEF.with(|c| moc_diffusion::generate(p, c.borrow().as_ref()))
+}
+
 fn now_ms() -> f64 {
     js_sys::Date::now()
 }
@@ -1284,16 +1295,37 @@ impl RustWorldGen {
         let (w, h) = if width == 0 || height == 0 { (W, H) } else { (width as usize, height as usize) };
         let mut p = moc_terrain::TerrainParams::home_world_sized(seed, w, h);
         p.set_biome(biome);
-        let map = moc_terrain::generate(&p);
+        let map = generate_relief(&p);
         RustWorldGen { map, surface: None, ms: now_ms() - t0 }
     }
 
     /// A galaxy planet: its 640×360 surface, and the 320×180 capital at (0, 90) as the world.
     pub fn planet(seed: u32, biome: &str) -> RustWorldGen {
         let t0 = now_ms();
-        let surface = moc_terrain::TerrainMap::generate_planet_surface(seed, biome);
+        let surface = generate_relief(&moc_terrain::TerrainParams::galaxy_surface(seed, biome));
         let map = surface.crop(0, 90, W, H, true);
         RustWorldGen { map, surface: Some(surface), ms: now_ms() - t0 }
+    }
+
+    /// Use the learned relief (#110) for the worlds this wasm instance generates: the
+    /// worldgen worker calls it, the main thread doesn't, so the model never runs on the main
+    /// thread. Returns whether a model is loaded; without one (a build without
+    /// `crates/moc-diffusion/weights/relief.mocd`, or weights that fail to load) generation stays
+    /// exactly the procedural relief.
+    pub fn use_learned_relief(on: bool) -> bool {
+        LEARNED_RELIEF.with(|c| {
+            let mut slot = c.borrow_mut();
+            *slot = if on { Some(moc_diffusion::LearnedDiffusion::embedded()).filter(|l| l.is_learned()) } else { None };
+            slot.is_some()
+        })
+    }
+
+    /// "learned, N steps" or "procedural".
+    pub fn relief_status() -> String {
+        LEARNED_RELIEF.with(|c| match c.borrow().as_ref() {
+            Some(l) => format!("learned, {} steps", l.opts.steps),
+            None => "procedural".to_string(),
+        })
     }
 
     /// Generation time, ms.
