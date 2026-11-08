@@ -83,7 +83,7 @@ export async function loadPolicy(url = new URL('./stone_policy.json', import.met
     try {
       const wasm = new RustAiPolicyClass();
       return {
-        obsSize: 20, // moc_ai::policy::NUM_INPUTS: the Stone Age observation (observe.js OBS_SIZE)
+        obsSize: 20, // moc_ai::policy::NUM_INPUTS, the same 20 inputs as observe.js (was 18: the god never loaded)
         act: (obs, { greedy = true } = {}) => wasm.act(new Float32Array(obs), greedy, Math.random()),
         probs: (obs) => Array.from(wasm.probs(new Float32Array(obs))),
         selfCheck: () => wasm.self_check(),

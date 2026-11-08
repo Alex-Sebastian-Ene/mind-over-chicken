@@ -68,16 +68,39 @@ function label(ctx, x, y, text, color, size = 6, align = 'center') {
   ctx.fillText(text, x, y);
 }
 
+// The planet sizes a sandbox run can roll (Alex: different size planets).
+export const PLANET_SIZES = [
+  { name: 'small', w: 1280, h: 640, civs: 8 },
+  { name: 'medium', w: 1920, h: 960, civs: 12 },
+  { name: 'large', w: 2560, h: 1280, civs: 16 },
+  { name: 'huge', w: 3072, h: 1536, civs: 20 },
+];
+// The size for a run: a named size or WxH from the URL, else rolled from the seed.
+export function planetSize(seed, arg = null) {
+  const named = PLANET_SIZES.find((p) => p.name === arg);
+  if (named) return { ...named };
+  const m = /^(\d+)x(\d+)$/.exec(arg || '');
+  if (m) {
+    const [w, h] = [m[1], m[2]].map((v) => Math.max(320, Math.min(4096, Number(v))));
+    // Peoples in proportion to the area, as the named sizes have them.
+    return { name: `${w}x${h}`, w, h, civs: Math.max(4, Math.min(20, Math.round(8 * Math.sqrt((w * h) / (1280 * 640))))) };
+  }
+  let x = (seed ^ 0x9e3779b9) >>> 0;
+  x = Math.imul(x ^ (x >>> 16), 0x45d9f3b) >>> 0;
+  x = (x ^ (x >>> 16)) >>> 0;
+  return { ...PLANET_SIZES[x % PLANET_SIZES.length] };
+}
+
 const smoothstep = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
 
 export class CivSandbox {
   constructor({ cosmos = null, seed = null } = {}) {
     this.id = 'civ';
     this.era = 'kingdoms';
-    this.label = 'Sandbox · Four civilisations';
+    this.label = 'Sandbox · A crowded planet';
     this.intro = {
-      title: 'Four civilisations',
-      goal: 'Found four peoples on one big planet, one at a time: choose one, place it, and seed its temper from your mind for 5 seconds. Then watch them climb twenty ages, fight and split. Your mind tilts war and peace.',
+      title: 'A crowded planet',
+      goal: 'Found your four peoples on a planet of random size, one at a time: choose one, place it, and seed its temper from your mind for 5 seconds. Rival peoples rise on their own: 4 on a small planet, up to 16 on a huge one. Watch them all climb twenty ages, trade, ally, fight and split. Your mind tilts war and peace.',
       how: [
         ['Calm', 'Hold Space: friendlier chiefs, trade, peace treaties, fewer rebels.'],
         ['Stress', 'Hold Shift (or frown at the camera): stress and anger bring raids, wars and rebellions.'],
@@ -146,12 +169,17 @@ export class CivSandbox {
     active = this;
     held.clear();
     G.brain.setCue(null);
-    G.advisor.say('civ-intro', 'Four peoples, one planet, my lord. They will grow, squabble and split. Your moods are now everyone\'s problem.', { priority: 3, cooldown: 999 });
     // calibration (#54): one run seed for the planet, the civilisations and the dummy seed.
     this.seed = (this.seedArg ?? G.calibration?.config?.seed ?? Math.random() * 2 ** 32) >>> 0;
-    // ?civs=8..12 (#101): the player's four and rivals that arrive on their own (default 10 in all).
-    const civs = Math.max(4, Math.min(16, Number(new URLSearchParams(location.search).get('civs')) || 10));
-    createCiv(this.seed, { staged: true, rivals: civs - 4 })
+    // Planets come in sizes (Alex), rolled from the run seed: the bigger the planet, the more
+    // peoples on it (the player's four plus rivals that arrive on their own). Overrides:
+    // ?planet=small|medium|large|huge or WxH, and ?civs=4..20.
+    const q = new URLSearchParams(location.search);
+    const size = planetSize(this.seed, q.get('planet'));
+    const civs = Math.max(4, Math.min(20, Number(q.get('civs')) || size.civs));
+    this.planetSize = { ...size, civs };
+    G.advisor.say('civ-intro', `A ${size.name} planet, my lord, and ${civs} peoples on it: your four and ${civs - 4} rivals. They will grow, squabble and split. Your moods are now everyone's problem.`, { priority: 3, cooldown: 999 });
+    createCiv(this.seed, { staged: true, rivals: civs - 4, width: size.w, height: size.h })
       .then((civ) => {
         if (G.scene !== this) { civ.free(); return; }
         this.civ = civ;
@@ -366,9 +394,100 @@ export class CivSandbox {
     this.mood = mood;
   }
 
+  onWheel(delta) {
+    this.zoom = clamp((this.zoom || 1.0) * (delta > 0 ? 0.9 : 1.11), 0.6, 2.5);
+  }
+
   // A drag from main.js (world units, both axes): the content follows the pointer, so the camera
   // moves the other way. This planet is far bigger than the view, so north–south matters here.
-  panBy(dx, dy) { this.civ?.pan(-dx, -dy); }
+  panBy(dx, dy) {
+    const z = this.zoom || 1.0;
+    this.civ?.pan(-dx / z, -dy / z);
+  }
+
+  centerColumn() { return W / 2; }
+
+  getVisibleHeightmap() {
+    const civ = this.civ;
+    if (!civ) return null;
+    const view = civ.render();
+    if (!view || !view.data) return null;
+    const data = view.data;
+    if (!this._heightmap || this._heightmap.length !== W * H) {
+      this._heightmap = new Float32Array(W * H);
+      this._smoothHeight = new Float32Array(W * H);
+    }
+    const h = this._heightmap;
+
+    for (let i = 0, p = 0; i < W * H; i++, p += 4) {
+      const r = data[p], g = data[p + 1], b = data[p + 2];
+      // Water
+      if (b > r + 15 && b > 70) {
+        h[i] = b > 140 ? 0.27 : 0.18;
+      } else if (r > 200 && g > 200 && b > 200) {
+        // Snow / ice
+        h[i] = 0.88;
+      } else if (r > 100 && g > 95 && b > 85 && Math.abs(r - g) < 18) {
+        // Mountain
+        h[i] = 0.78;
+      } else if (r > 110 && g > 105 && b < 100) {
+        // Hills
+        h[i] = 0.62;
+      } else if (g > r && g > b) {
+        // Plains / forest
+        h[i] = g > 120 ? 0.42 : 0.48;
+      } else if (r > 170 && g > 150 && b < 160) {
+        // Sand / beach
+        h[i] = 0.35;
+      } else {
+        // Settlement / structure / road
+        h[i] = 0.42;
+      }
+    }
+
+    // 1-pass fast smoothing box blur for rolling terrain
+    const s = this._smoothHeight;
+    for (let y = 0; y < H; y++) {
+      const y0 = Math.max(0, y - 1) * W;
+      const y1 = y * W;
+      const y2 = Math.min(H - 1, y + 1) * W;
+      for (let x = 0; x < W; x++) {
+        const x0 = Math.max(0, x - 1);
+        const x1 = x;
+        const x2 = Math.min(W - 1, x + 1);
+        s[y1 + x1] = (h[y0 + x0] + h[y0 + x1] + h[y0 + x2] +
+                      h[y1 + x0] + h[y1 + x1] + h[y1 + x2] +
+                      h[y2 + x0] + h[y2 + x1] + h[y2 + x2]) * 0.111111;
+      }
+    }
+    return s;
+  }
+
+  lights() {
+    const L = [];
+    for (const bolt of this.bolts) {
+      const s = this.civ?.toScreen(bolt.x, bolt.y);
+      if (s) L.push({ x: s.x, y: s.y, r: 60 * Math.min(1, bolt.life * 4) });
+    }
+    return L;
+  }
+
+  draw3d(engine, _dt) {
+    if (!engine) return;
+    for (const bolt of this.bolts) {
+      const s = this.civ?.toScreen(bolt.x, bolt.y);
+      if (s && s.x >= -20 && s.x <= W + 20 && s.y >= -20 && s.y <= H + 20) {
+        engine.add_3d_light(s.x, 12.0, s.y, 60.0 * Math.min(1, bolt.life * 4), 2.5);
+      }
+    }
+    for (const f of this.factions) {
+      if (!f.alive || !f.capital) continue;
+      const s = this.civ?.toScreen(f.capital.x + 0.5, f.capital.y);
+      if (s && s.x >= 0 && s.x <= W && s.y >= 0 && s.y <= H) {
+        engine.add_3d_light(s.x, 9.0, s.y, 20.0, 1.2);
+      }
+    }
+  }
 
   // ---------- drawing ----------
   draw(ctx) {
@@ -387,7 +506,21 @@ export class CivSandbox {
       return;
     }
     const t0 = performance.now();
-    ctx.putImageData(civ.render(), 0, 0);
+    if (!this.viewCanvas) {
+      this.viewCanvas = Object.assign(document.createElement('canvas'), { width: W, height: H });
+    }
+    this.viewCanvas.getContext('2d').putImageData(civ.render(), 0, 0);
+    const z = this.zoom || 1.0;
+    if (Math.abs(z - 1.0) < 0.01) {
+      ctx.drawImage(this.viewCanvas, 0, 0);
+    } else {
+      ctx.save();
+      ctx.translate(W / 2, H / 2);
+      ctx.scale(z, z);
+      ctx.translate(-W / 2, -H / 2);
+      ctx.drawImage(this.viewCanvas, 0, 0);
+      ctx.restore();
+    }
     const ms = performance.now() - t0;
     this.perf.renderMs = ms;
     this.perf.sumRender += ms;

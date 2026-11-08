@@ -16,7 +16,7 @@ function buildHere(seed, biome, vast) {
   const w = new World(seed, { biome });
   if (vast) {
     const v = buildVast(w, seed);
-    w.vast = { w: v.w, h: v.h, tile: v.tile, type: v.type, continents: v.continents, spots: v.spots, rgba: paintVast(v, w.biome, seed) };
+    w.vast = { w: v.w, h: v.h, tile: v.tile, type: v.type, height: v.height, continents: v.continents, spots: v.spots, rgba: paintVast(v, w.biome, seed) };
   }
   return w;
 }
