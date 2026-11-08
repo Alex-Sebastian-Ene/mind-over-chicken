@@ -23,7 +23,6 @@ import initEngine, {
   PointerGesture,
   ViewCamera, // the 320×180 window onto the bigger home world (#129)
   RustWorldGen,
-  RustCastController,
   RustFingerController,
   RustEmotionTracker,
   RustGalaxy,
@@ -37,8 +36,8 @@ import initEngine, {
 import { Cosmos } from './cosmos/cosmos.js';
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel, setRustGalaxy } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
+import { pinchMove } from './camera/pinch-move.js'; // one-hand pinch movement (#270)
 import { initCameraAdapter } from './camera/adapter.js';
-import { setRustCastController } from './camera/casts.js';
 import { setRustFingerController } from './camera/fingers.js';
 import { setRustEmotionTracker } from './camera/emotion.js';
 import { setRustAiPolicy } from './ai/policy.js';
@@ -140,7 +139,6 @@ try {
   loading.start('engine', 'Starting the game engine', { blocking: true }); // loading screen
   await initEngine();
   setRustWorldGen(RustWorldGen);
-  setRustCastController(RustCastController);
   setRustFingerController(RustFingerController);
   setRustEmotionTracker(RustEmotionTracker);
   setRustGalaxy(RustGalaxy);
@@ -424,12 +422,23 @@ function newGame(source, startIndex = 0) {
     return { x: p.x / cosmos.worldW, y: p.y / cosmos.worldH };
   };
   brain.onBlink((aim) => {
+    // Blink is a left click for game mechanics only (#284). Never touch DOM/UI, and do nothing
+    // while an overlay or calibration is open.
+    const gameVisible = !!G && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden
+      && !banner && !intro.active && !eegPanel?.wiz?.active
+      && document.getElementById('moveCalibModal')?.hidden !== false;
+    if (!gameVisible) return;
     hud.flashBlink();
+    if (cosmos.z > 0.5) {
+      // Galaxy/globe: the reticle IS the pointer here. Select/land exactly like a left click.
+      if (cosmos.clickAt?.(aim.x * W, aim.y * H, G)) audio.blip();
+      return;
+    }
     if (engine) engine.game_on_blink(aim.x * cosmos.worldW, aim.y * cosmos.worldH);
     cosmos.galaxy?.onBlink();   // storms on the blink world; a strike on the world you're zoomed into
     if (cosmos.galaxy?.attended) audio.thunder();
     const view = cosmos.viewScene(G); // planets (#68): another world's surface when you're on it
-    if (!banner && !intro.active && !eegPanel?.wiz?.active && view?.onBlink) view.onBlink(aim);   // not while calibrating (#176)
+    if (view?.onBlink) view.onBlink(aim);
   });
   // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
   G.camera = cosmos;          // the eras ask it where the screen is (#129)
@@ -1422,7 +1431,8 @@ screen.addEventListener('contextmenu', (e) => e.preventDefault());
 // Shift is the Stress demo key: full agitation on the emulated headset (input.panic).
 const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'panic' };
 window.addEventListener('keydown', (e) => {
-  if (e.target.closest?.('input, select, textarea')) return;
+  if (e.target?.closest?.('input, select, textarea')) return;
+  if (document.getElementById('moveCalibModal')?.hidden === false) return;
   if (e.code === 'Escape' && settingsUi?.isOpen()) { e.preventDefault(); settingsUi.close(); return; }
   if (!$('failScreen').hidden) {
     if (e.code === 'Enter') { e.preventDefault(); retryEra(); return; }
@@ -1798,23 +1808,41 @@ window.__moc.camera = initCamera({
     // Cosmos zoom (surface <-> globe <-> galaxy): wheel negative zooms in, positive zooms out
     cosmos.wheel(-delta * 750, G);
   },
-  onGrabMove: ({ dx, dy, active, started, released, aim }) => {
-    // One-hand pinch grab & move the globe or world view
+  onGrabMove: ({ dx, dy, headDx = 0, headDy = 0, active, started, released, aim }) => {
+    // One-hand pinch (#270): hand translation pans the map in cardinal directions in 2D and 3D;
+    // aim movement orbits the 3D camera like Alt+drag. Two-hand zoom and entity grab stay separate.
     if (!G) return;
+    const move = pinchMove({ handDx: dx, handDy: dy, headDx, headDy });
     if (cosmos.active || (cosmos?.z || 0) > 0.05) {
-      if (active) {
-        // In normalized hand space (-1..1). Moving hand right rotates globe right.
-        const spin = -dx * 3.5;
-        cosmos.rot += spin;
-        cosmos.spinVel = spin / 0.033;
+      if (active && move.panX) {
+        // Same formula as a pointer drag, so a rotated globe follows the hand (#284).
+        cosmos.dragRotate?.(move.panX * W);
       }
       return;
     }
-    // On the surface, 2D or 3D, a one-hand pinch drags the map (#156): it used to orbit the 3D
-    // camera, which felt like the world tilting away. Orbiting stays on right-drag.
-    if (active && (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001)) {
-      if (in3dSurface()) cam3dBase = null;
-      panMap(-dx * W * 1.5, -dy * H * 1.5);
+    // On the surface, 2D or 3D, a one-hand pinch drags the map (#156). The sign matches a
+    // pointer drag: hand left moves the world left. In 3D the ground under the centre is
+    // raycast so a rotated/tilted camera pans in screen space (#284).
+    if (active && (move.panX || move.panY)) {
+      if (in3dSurface() && cosmos.view && !cosmos.surfaceInView) {
+        const r = screen.getBoundingClientRect();
+        const w = r.width || screen.clientWidth || W;
+        const h = r.height || screen.clientHeight || H;
+        const a = engine?.screen_to_ground(w / 2, h / 2, w, h);
+        const b = engine?.screen_to_ground(w / 2 + move.panX * w, h / 2 + move.panY * h, w, h);
+        if (a && b && a[0] >= 0 && b[0] >= 0) {
+          cosmos.pan(b[0] - a[0], b[1] - a[1]);
+          cam3dBase = null;
+        } else {
+          panMap(move.panX * W * 1.5, move.panY * H * 1.5);
+        }
+      } else {
+        panMap(move.panX * W * 1.5, move.panY * H * 1.5);
+      }
+    }
+    if (active && in3dSurface() && (move.tiltX || move.tiltY)) {
+      engine.orbit_camera(move.tiltX * W * 0.008, move.tiltY * H * 0.008);
+      cam3dBase = null;
     }
   },
 });

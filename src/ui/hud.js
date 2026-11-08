@@ -7,8 +7,8 @@ import { STRESSED } from '../brain/brain.js';
 // 8×8 pixel icons for the power tiles.
 const ICONS = {
   blink: { c: '#ffcf4a', p: ['....##..', '...##...', '..##....', '.######.', '....##..', '...##...', '..##....', '.#......'] },
-  calm: { c: '#59d8c8', p: ['...#....', '...##...', '..###...', '..####..', '.##.###.', '.#...##.', '.##.###.', '..####..'] },
-  focus: { c: '#ffcf4a', p: ['........', '..####..', '.#....#.', '#..##..#', '#..##..#', '.#....#.', '..####..', '........'] },
+  // Rain or Calm (#276): a rain cloud.
+  focus: { c: '#9ec9ff', p: ['..####..', '.######.', '########', '..#..#..', '.#..#...', '..#..#..', '.#..#...', '........'] },
   // Stress: the cartoon "cross vein" of an agitated god.
   stress: { c: '#ff5a72', p: ['..#..#..', '.##..##.', '##....##', '........', '........', '##....##', '.##..##.', '..#..#..'] },
 };
@@ -21,7 +21,7 @@ function paintIcon(canvas, icon) {
   icon.p.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === '#') ctx.fillRect(x, y, 1, 1); }));
 }
 
-const POWER_UNLOCK = { blink: 'stone', calm: 'stone', focus: 'kingdoms', stress: 'industry' };
+const POWER_UNLOCK = { blink: 'stone', focus: 'stone', stress: 'industry' };
 const ERA_ORDER = ['stone', 'farming', 'kingdoms', 'industry', 'space'];
 
 // What each power tile is in a scene (#178): 'on' (in scene.powers: it changes this scene),
@@ -53,7 +53,6 @@ export class Hud {
     this.clock = doc.getElementById('clock');
     this.powers = {
       blink: doc.querySelector('[data-power="blink"]'),
-      calm: doc.querySelector('[data-power="calm"]'),
       focus: doc.querySelector('[data-power="focus"]'),
       stress: doc.querySelector('[data-power="stress"]'),
     };
@@ -158,8 +157,8 @@ export class Hud {
       if (thr != null) el.style.setProperty('--thr', `${Math.round(thr * 100)}%`);
       el.querySelector('.power-value').textContent = text;
     };
-    set(this.powers.calm, b.calm, scene?.powers.includes('calm') ? b.threshold('calm', 0.55) : null, `${Math.round(b.calm * 100)}%`);
-    set(this.powers.focus, b.focus, scene?.powers.includes('focus') ? b.threshold('focus', 0.5) : null, `${Math.round(b.focus * 100)}%`);
+    const focus = b.source?.input?.focus ? 1 : b.focus;
+    set(this.powers.focus, focus, scene?.powers.includes('focus') ? b.threshold('focus', 0.5) : null, `${Math.round(focus * 100)}%`);
     // Stress: about 0.15 at rest, up with EEG agitation or an angry face (brain.js).
     const stress = b.stress ?? 0;
     set(this.powers.stress, stress, null, `${Math.round(stress * 100)}%`);
