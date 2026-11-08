@@ -9,7 +9,7 @@
 
 import { W, H, Particles, clamp, dist, rand, chance, gauss, floater, pick } from '../sim/util.js';
 import { walk, animate, villagerLook, sail } from '../sim/agents.js';
-import { drawPerson, drawGoat, drawChicken, drawBoat, drawReticle } from '../render/sprites.js';
+import { drawPerson, drawGoat, drawChicken, drawBoat, drawReticle, makeBolt, drawBolt } from '../render/sprites.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
 import { eraTuning } from '../game/options.js'; // difficulty (#220)
@@ -57,6 +57,10 @@ export class Industry {
     this.generalStrike = 0;
     this.done = false;
     this.gini = 0;
+    this.bolts = [];
+    this.flash = 0;
+    this.lastBolt = -5;
+    this.strikes = 0;
     const houses = w.structures.filter((s) => s.kind === 'house');
     this.agents = [];
     for (let i = 0; i < N; i++) {
@@ -150,6 +154,8 @@ export class Industry {
     const G = this.G, w = G.world, brain = G.brain;
     this.t += dt;
     this.particles.update(dt);
+    this.bolts = this.bolts.filter((b) => (b.life -= dt) > 0);
+    this.flash = Math.max(0, this.flash - dt);
     this.tick += dt;
     while (this.tick >= TICK) { this.tick -= TICK; this.marketTick(); }
     const ar = this.arousal();
@@ -329,6 +335,7 @@ export class Industry {
       if (fx) L.push({ x: fx.x, y: fx.y, r: 24 + Math.sin(this.t * 5) * 2.0 });
       if (ex) L.push({ x: ex.x, y: ex.y, r: 20 });
     }
+    for (const b of this.bolts) { const e = b.pts[b.pts.length - 1]; L.push({ x: e.x, y: e.y, r: 45 }); }
     return L;
   }
 
@@ -343,6 +350,10 @@ export class Industry {
     }
     if (ex) {
       engine.add_3d_light(ex.x, 8.0, ex.y, 22.0, 1.2);
+    }
+    for (const b of this.bolts) {
+      const e = b.pts[b.pts.length - 1];
+      engine.add_3d_light(e.x, 12.0, e.y, 55.0, 2.5);
     }
 
     // Billboards
@@ -397,6 +408,20 @@ export class Industry {
     ctx.fillRect(0, 0, G.world.width, G.world.height);
   }
 
+  drawAfterLight(ctx) {
+    for (const b of this.bolts) drawBolt(ctx, b.pts, Math.min(1, b.life * 4));
+    const a = this.G.brain?.aim;
+    const w = this.G.world;
+    if (a && w && !ctx.__project3d) {
+      const p = w.aimPoint(a);
+      drawReticle(ctx, p.x, p.y, this.t, '#ffe066');
+    }
+    if (this.flash > 0 && w) {
+      ctx.fillStyle = `rgba(220,230,255,${this.flash * 0.9})`;
+      ctx.fillRect(0, 0, w.width, w.height);
+    }
+  }
+
   // On the map, in world units (repeated at the map's wrap copies, #129).
   drawOverlay(ctx) {
     const G = this.G;
@@ -411,9 +436,6 @@ export class Industry {
       label(ctx, ex.x, ex.y - 21, `IPO · keep stress under ${Math.round((this.ipo.limit ?? STRESSED) * 100)}%`, '#ff8a9c', 6);
     }
     if (this.agents.some((a) => a.state === 'strike' || a.state === 'riot')) label(ctx, G.world.sites.picket.x, G.world.sites.picket.y + 12, 'picket line', '#f2e8d5', 5);
-    // The aim reticle, on the map at the world point aimed at (3D stands it up as a sprite).
-    const aim = G.brain?.aim;
-    if (aim && !ctx.__project3d) { const p = G.world.aimPoint(aim); drawReticle(ctx, p.x, p.y, this.t, '#ffe066'); }
   }
 
   // Fixed to the screen, not the map (#129): the floating goat index window (goatWindowX/Y move
@@ -492,6 +514,80 @@ export class Industry {
 
   // ---- camera (#33): hand casts and face mood. Extra inputs on top of the brain, never instead of it. ----
 
+  onBlink(aim) {
+    const G = this.G;
+    if (this.t - this.lastBolt < 0.5 || this.done) return;
+    this.lastBolt = this.t;
+    const { x, y } = G.world.aimPoint(aim);
+    this.bolts.push({ pts: makeBolt(x, y), life: 0.35 });
+    this.flash = 0.35;
+    this.strikes = (this.strikes || 0) + 1;
+    G.stats.lightning = (G.stats.lightning || 0) + 1;
+    G.audio.thunder();
+    G.shake = Math.max(G.shake || 0, 1.2);
+    this.particles.burst(18, () => ({
+      x,
+      y,
+      vx: rand(-30, 30),
+      vy: rand(-40, 5),
+      g: 60,
+      life: 0.6,
+      maxLife: 0.6,
+      size: 1,
+      color: pick(['#fff4c2', '#ffd166', '#ffffff']),
+    }));
+
+    // Factory dynamo & smokestacks
+    const fx = G.world.sites.factory;
+    if (fx && dist(x, y, fx.x, fx.y) < 28) {
+      this.gdp += 15;
+      floater(this.particles, fx.x, fx.y - 12, 'SUPERCHARGED! +15 GDP', '#ffcf5c', 8);
+      G.audio.ignite?.() || G.audio.coin?.();
+      this.headlines.push('FACTORY STRUCK BY LIGHTNING; MACHINES RUN TWICE AS FAST');
+      G.advisor.say('factory-hit', 'Direct strike on the smokestacks! The dynamos are supercharged!', { mood: 'happy', priority: 2, cooldown: 15 });
+    }
+
+    // Picket line / strikers
+    const picket = G.world.sites.picket;
+    let brokeStrike = false;
+    for (const a of this.agents) {
+      const d = dist(x, y, a.x, a.y);
+      if (d < 24) {
+        if (a.state === 'strike' || a.state === 'riot') {
+          a.state = 'commute';
+          a.spot = null;
+          a.unrest = Math.max(0, a.unrest - 0.4);
+          brokeStrike = true;
+        }
+        a.fear = clamp(a.fear + 0.4);
+      }
+    }
+    if (brokeStrike) {
+      this.generalStrike = Math.max(0, this.generalStrike - 4.0);
+      floater(this.particles, picket.x, picket.y - 10, 'PICKET SCATTERED!', '#9be38a', 7);
+      this.headlines.push('DIVINE LIGHTNING DISPERSES STRIKE; WORKERS RETURN TO LINES');
+      G.advisor.say('picket-struck', 'The picket line scattered before the divine thunderbolt! Back to work!', { mood: 'shocked', priority: 2, cooldown: 20 });
+    }
+
+    // Goat exchange
+    const ex = G.world.sites.exchange;
+    if (ex && dist(x, y, ex.x, ex.y) < 22) {
+      this.price = clamp(this.price * 1.08, 10, 500);
+      this.momentum += 0.02;
+      floater(this.particles, ex.x, ex.y - 12, 'EXCHANGE ELECTRIFIED! ▲', '#ffe066', 7);
+      this.headlines.push('EXCHANGE ELECTRIFIED BY DIVINE WRATH; BULL RUN ENSUES');
+      G.advisor.say('exchange-hit', 'Lightning struck the exchange bell! Bulls are running wild on the trading floor!', { mood: 'happy', priority: 2, cooldown: 15 });
+    }
+
+    // Goats
+    for (const g of this.goats) {
+      if (dist(x, y, g.x, g.y) < 18) {
+        g.facing = -g.facing;
+        floater(this.particles, g.x, g.y - 8, 'BAAA!', '#ffffff', 5);
+      }
+    }
+  }
+
   // aim is 0..1 like the brain's.
   onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
     const G = this.G;
@@ -510,15 +606,10 @@ export class Industry {
     const w = G.world, ex = w.sites.exchange, picket = w.sites.picket;
     const { x, y } = w.aimPoint(aim);   // aims are 0..1 of the world (#129)
     switch (spell) {
-      case 'fireball': {
-        // No lightning power in this era, so the fist throws a fireball. It frightens whoever it lands near.
-        G.stats.lightning++;
-        G.audio.thunder();
-        G.shake = Math.max(G.shake || 0, 0.8);
-        this.particles.burst(22, () => ({ x, y, vx: rand(-30, 30), vy: rand(-40, 5), g: 50, life: 0.7, maxLife: 0.7, size: 1, color: pick(['#fff4c2', '#ffd166', '#ff9a2e', '#e8452c']) }));
-        for (const a of this.agents) if (dist(x, y, a.x, a.y) < 16) a.fear = clamp(a.fear + 0.35);
-        if (dist(x, y, ex.x, ex.y) < 12) { this.price *= 0.95; this.headlines.push('FIREBALL HITS THE GOAT EXCHANGE; TRADERS "FINE"'); }
-        floater(this.particles, x, y - 8, 'fireball', '#ff9a2e', 7);
+      case 'fist':
+      case 'fireball':
+      case 'lightning': {
+        this.onBlink(aim);
         break;
       }
       case 'palm':

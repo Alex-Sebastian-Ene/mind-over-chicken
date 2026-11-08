@@ -5,12 +5,15 @@
 
 import { Particles, clamp, dist, rand, chance, floater, pick } from '../sim/util.js';
 import { walk, animate, villagerLook, sail } from '../sim/agents.js';
+import { forestFire, forestFireStep } from './forest-fire.js';
 import { eraTuning } from '../game/options.js'; // difficulty (#220)
 import { drawPerson, drawMammoth, drawFire, makeBolt, drawBolt, drawReticle, drawChicken, drawBoat } from '../render/sprites.js';
 
 const POP_START = 10;
 const POP_TARGET = 15;
 const CALM_TARGET = 2;
+// 3D firelight strength at the pit (was 1.8, which read as a white glare around the fire).
+const FIRE_GLOW = 0.9;
 const HOLD_SECONDS = 5;
 const NAMES = ['Grug', 'Ugg-a', 'Thak', 'Mo', 'Brakka', 'Nub', 'Ila', 'Krog', 'Zuz', 'Hap', 'Wenna', 'Dorf', 'Yip', 'Ooma'];
 
@@ -98,7 +101,8 @@ export class StoneAge {
     this.particles.burst(14, () => ({ x, y, vx: rand(-30, 30), vy: rand(-40, 5), g: 60, life: 0.6, maxLife: 0.6, size: 1, color: pick(['#fff4c2', '#ffd166', '#ffffff']) }));
 
     // Fire pit & tutorial label (generous target area so clicking label or pit lights fire)
-    if (dist(x, y, this.fire.x, this.fire.y) < 24 || dist(x, y, this.fire.x, this.fire.y - 12) < 20) {
+    const atPit = dist(x, y, this.fire.x, this.fire.y) < 24 || dist(x, y, this.fire.x, this.fire.y - 12) < 20;
+    if (atPit) {
       const first = !this.fire.everLit;
       this.fire.lit = true; this.fire.everLit = true;
       this.fire.heat = Math.max(this.fire.heat, 0.7);
@@ -111,8 +115,9 @@ export class StoneAge {
         G.advisor.say('relit', 'The flame lives again. The tribe pretends it was never worried.', { mood: 'happy', priority: 2 });
       }
     }
-    // Lightning on a tree starts a forest fire (#276).
-    const tree = this.nearestTree(x, y, 9);
+    // Lightning on a tree starts a forest fire (#276), but not a strike that lit the campfire:
+    // the trees beside the pit used to catch, and the forest fire then never stopped.
+    const tree = atPit ? null : this.nearestTree(x, y, 9);
     if (tree) this.igniteForestFire(tree);
 
     // Mammoths (generous hit radius for lightning strike)
@@ -177,13 +182,13 @@ export class StoneAge {
     return best;
   }
 
-  igniteForestFire(tree) {
+  igniteForestFire(tree, gen = 0) {
     const w = this.G.world;
     if (!tree || !w.trees || this.forest.fires.length >= 40) return false;
     const i = w.trees.indexOf(tree);
     if (i < 0) return false;
     w.trees.splice(i, 1);
-    this.forest.fires.push({ x: tree.x, y: tree.y, heat: 0.9, t: 0, spread: 0.9 + rand(0, 0.7) });
+    this.forest.fires.push(forestFire(tree.x, tree.y, gen));
     this.forest.burned++;
     floater(this.particles, tree.x, tree.y - 8, 'FOREST FIRE!', '#ff9a2e', 8);
     this.G.audio?.thunder?.();
@@ -197,13 +202,10 @@ export class StoneAge {
   updateForest(dt) {
     const fires = [...this.forest.fires];
     for (const f of fires) {
-      f.t += dt;
-      f.heat = Math.max(0, 0.9 - f.t * 0.075);
-      f.spread -= dt;
-      if (f.heat > 0 && f.spread <= 0) {
-        f.spread = 1.4 + rand(0, 0.8);
+      // Each burning tree spreads a little, less each generation, then burns out (forest-fire.js).
+      if (forestFireStep(f, dt)) {
         const tree = this.nearestTree(f.x, f.y, 16);
-        if (tree) this.igniteForestFire(tree);
+        if (tree) this.igniteForestFire(tree, f.gen + 1);
       }
       if (f.heat > 0) {
         if (Math.random() < dt * 18 * f.heat) this.particles.add({ x: f.x + rand(-2, 2), y: f.y - 4, vx: rand(-4, 4), vy: rand(-16, -6), life: rand(0.4, 0.9), maxLife: 1, size: 1, color: pick(['#ffd166', '#ff9a2e', '#e8452c']) });
@@ -631,19 +633,20 @@ export class StoneAge {
     const f = this.fire;
     // 3D Point Lights
     if (f.lit) {
-      engine.add_3d_light(f.x, 10.0, f.y, 25.0 + f.heat * 30.0 + Math.sin(this.t * 13) * 1.5, 1.8);
+      engine.add_3d_light(f.x, 10.0, f.y, 20.0 + f.heat * 22.0 + Math.sin(this.t * 13) * 1.2, FIRE_GLOW);
     }
     for (const b of this.bolts) {
       const e = b.pts[b.pts.length - 1];
       engine.add_3d_light(e.x, 12.0, e.y, 55.0, 2.5);
     }
     for (const c of Object.values(this.colonies)) {
-      engine.add_3d_light(c.x, 10.0, c.y, 22.0 + Math.sin(this.t * 11) * 1.5, 1.4);
+      engine.add_3d_light(c.x, 10.0, c.y, 20.0 + Math.sin(this.t * 11) * 1.2, FIRE_GLOW * 0.8);
     }
-    for (const f of this.forest.fires) {
-      engine.add_3d_light(f.x, 11.0, f.y, 20.0 + f.heat * 30.0, 1.7);
-      engine.add_billboard(4, f.x, f.y, 1, Math.floor(this.t * 6 + f.x) % 3, 0);
-    }
+    // Only the hottest few burning trees cast light, so a spreading fire does not pile up into
+    // a white-out (the shader adds every light that reaches a pixel).
+    const lit = [...this.forest.fires].sort((a, b) => b.heat - a.heat).slice(0, 6);
+    for (const f of lit) engine.add_3d_light(f.x, 11.0, f.y, 14.0 + f.heat * 18.0, FIRE_GLOW * 0.7);
+    for (const f of this.forest.fires) engine.add_billboard(4, f.x, f.y, 1, Math.floor(this.t * 6 + f.x) % 3, 0);
 
     // Billboards
     // Fire pit (variant 1 is unlit firewood logs; variant 0 is roaring flame)

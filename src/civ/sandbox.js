@@ -18,6 +18,7 @@
 import { W, H, clamp } from '../sim/util.js';
 import { makeBolt, drawBolt, drawReticle } from '../render/sprites.js';
 import { createCiv, EVENT, CAST, TONE, SETUP } from './civ.js';
+import { calibrationTraits, calibrationLine } from './calibration-traits.js';
 
 const DAY = 80;            // seconds per day–night cycle (DAY_SECONDS in the Rust sim)
 const PAN_SPEED = 140;     // planet pixels per second
@@ -217,6 +218,16 @@ export class CivSandbox {
     if (!civ) return;
     const G = this.G, b = G.brain;
     this.t += dt;
+    // Calibration → your civilisation (#190), once founding is over so it never fights the
+    // 5 s seeding windows; the log says what was applied.
+    if (!this.calibApplied && civ.setupPhase === SETUP.done && G.calibration?.done) {
+      this.calibApplied = true;
+      const t = calibrationTraits(G.calibration.result);
+      if (t && civ.setPlayerTraits(t.friendliness, t.aggressiveness, t.violence)) {
+        this.log.unshift({ text: calibrationLine(t), t: this.t, tone: TONE.info });
+        if (this.log.length > 4) this.log.length = 4;
+      }
+    }
 
     // Camera: keys.
     let px = 0, py = 0;
