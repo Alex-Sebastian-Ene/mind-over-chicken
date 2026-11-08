@@ -68,6 +68,11 @@ import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
 import { mirrorHud } from './ui/hud-mirror.js';
 import { createRivals, playerState, applyRivalLine } from './civ/rivals.js'; // rivals on the home world (#212)
 import { readOptions, worldSizeOf, difficultyOf, bootModeOf } from './game/options.js'; // world size and difficulty (#220)
+import {
+  applyRunToUnlocks, buildChronicle, cameraEnabled, chronicleFacts, combatEnabled, readUnlocks,
+  resolveRunConfig, scoreRun, summarizeRun, twoHandZoomEnabled,
+} from './game/replay.js'; // replayability (#91)
+import { initReplayUi } from './ui/replay.js'; // replayability UI (#91)
 import { News } from './ui/news.js'; // the one news ticker (#220)
 import { initNewGameOptions } from './ui/new-game.js';
 import { minimapWindow3d, viewWindow } from './ui/minimap.js';   // the minimap's 3D window (release QA)
@@ -256,6 +261,12 @@ cosmos.panSink = (dx, dy) => { if (G?.scene?.panBy) { G.scene.panBy(dx, dy); ret
 const galaxyHudScene = { label: 'Galaxy', powers: ['blink', 'calm', 'focus', 'stress'], objectives: () => cosmos.galaxy?.objectives() || [] };
 let hudScene = null;
 let G = null;
+let replayUi = null;   // replay (#91): seed/share controls, HUD chip and end screen
+// replay (#91): the chronicle hears only the advisor lines this run actually said.
+advisor.setRecorder((line) => {
+  if (!G || !line?.text) return;
+  (G.chronicle ||= []).push({ kind: 'advisor', key: line.key, text: line.text, t: G.runTime });
+});
 let lastScreenAim = null;   // last pointer/head point in screen 0..1, for 3D re-projection (#294)
 let previewSource = null;
 let previewBrain = null;
@@ -406,7 +417,8 @@ function updateAIGodAutopilot(dt) {
 // mode: 'story' (the eras), 'galaxy' or 'crowded' (the sandboxes). resume: a save to continue
 // (src/game/saves.js): its world seed and size, stats, run time, calibration seed and brain model.
 // setupPlanets: the four worlds shaped before a new story run (their PPO temperaments).
-function newGame(source, startIndex = 0, { mode = 'story', resume = null, setupPlanets = null } = {}) {
+// replay (#91): the seed/challenge/modifier choices, or null for the stored/query defaults.
+function newGame(source, startIndex = 0, { mode = 'story', resume = null, replay = null, setupPlanets = null } = {}) {
   if (!setupPlanets && Array.isArray(resume?.setupPlanets) && resume.setupPlanets.length) setupPlanets = resume.setupPlanets;
   if (previewSource && previewSource !== source) previewSource.disconnect();
   previewSource = null;
@@ -420,20 +432,29 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null, setupP
   // The one game's options (#220): the home world's size and the difficulty every system reads.
   // A continued save keeps its own world (seed and size) and its difficulty.
   const options = { ...readOptions(), ...(resume?.options || {}) };
-  const seed = Number.isFinite(resume?.seed) ? resume.seed >>> 0 : (Math.random() * 1e9) >>> 0;
+  // replay (#91): a pasted ?seed=/?code= wins; otherwise the New Game seed/challenge/modifiers.
+  // A continued save keeps its own run, including its modifiers and New Mind+ flag.
+  const runReplay = resolveRunConfig({
+    options, resume, requested: replay, search: location.search, now: Date.now(), progress: readUnlocks(),
+  });
+  options.worldSize = runReplay.worldSize;
+  options.difficulty = runReplay.difficulty;
+  const seed = Number.isFinite(resume?.seed) ? resume.seed >>> 0 : runReplay.seed;
   const picked = worldSizeOf(options.worldSize, seed);
   const size = resume?.worldSize?.width ? { w: resume.worldSize.width, h: resume.worldSize.height, id: options.size || picked.id } : picked;
   const calibSeed = resume?.calibration?.config?.seed;
   G = {
     world: new World(seed, { width: size.w || HOME_W, height: size.h || HOME_H }), // the home world, sized by the New Game choice (#129, #220)
     options: { worldSize: options.worldSize, difficulty: options.difficulty, size: size.id },
+    replay: runReplay,   // replay (#91): seed, challenge, modifiers and share code
+    chronicle: [],       // replay (#91): real advisor/news/milestone lines for the end screen
     news: new News(),   // the one news ticker (#220): the goat market and the rivals
     difficulty: difficultyOf(options.difficulty),
     brain, source, advisor, hud, audio, engine,
     calibration: new Calibration(Number.isFinite(calibSeed) ? { ...calibConfig, seed: calibSeed >>> 0 } : calibConfig), // calibration (#54)
     scene: null, sceneIndex: startIndex, runTime: 0, shake: 0, invincible: false,
     stats: { lightning: 0, smitten: 0, births: 0, deaths: 0, recessions: 0, restarts: 0 },
-    eraTimes: [], eraStart: 0, finished: false,
+    eraTimes: [], eraStart: 0, finished: false, endShown: false,
     setupPlanets: setupPlanets ? setupPlanets.map((p) => ({ ...p, traits: { ...p.traits } })) : null,
     complete(delay = 2) {
       if (G.sceneIndex >= SCENES.length - 1) return;
@@ -446,9 +467,11 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null, setupP
     // The intro transition for the scene in play (#137), e.g. a new stage inside one scene.
     startTransition(caption) { startTransition(G.scene, caption); },
   };
+  // replay (#91): every real news line on the ticker is a candidate chronicle line.
+  G.news.onLine = (item) => { (G.chronicle ||= []).push({ kind: 'news', text: item.text, t: G.runTime }); };
   // Local saves: every run has an id and a number ("Run 3 · Stone Age"); continuing a save keeps
   // its id, so the save moves on with the run.
-  G.run = { id: resume?.id || newRunId(), runNumber: resume?.runNumber || nextRunNumber(), mode: resume?.mode || mode, calibration: resume?.calibration || null };
+  G.run = { id: resume?.id || newRunId(), runNumber: resume?.runNumber || nextRunNumber(), mode: resume?.mode || mode, calibration: resume?.calibration || null, mindPlus: !!runReplay.mindPlus };
   if (resume) {
     Object.assign(G.stats, resume.stats || {});
     G.runTime = Number(resume.runTime) || 0;
@@ -479,6 +502,10 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null, setupP
       && !banner && !intro.active && !eegPanel?.wiz?.active
       && document.getElementById('moveCalibModal')?.hidden !== false;
     if (!gameVisible) return;
+    if (!combatEnabled(G) && !G.scene?.setupActive?.()) {   // Pacifist modifier (#91): lightning and fireballs are off.
+      hud.showCause?.('Pacifist run: lightning and fireballs are off', { ms: 2200, tone: 'bad' });
+      return;
+    }
     hud.flashBlink();
     const target = resolveBlinkAim(aim);
     if (!target) return;
@@ -521,6 +548,8 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null, setupP
   }
   startScene(startIndex);
   startRivals(G);
+  replayUi?.onRunStart(G);   // replay (#91): visible seed chip and controls match this run
+  if (!cameraEnabled(G)) window.__moc?.camera?.stop?.();   // No camera modifier (#91)
   try { window.claude?.hot?.snapshot?.(() => ({ sceneIndex: G?.sceneIndex ?? 0, kind: G?.source?.kind })); } catch {}
 }
 
@@ -570,6 +599,11 @@ function startScene(i) {
   }
   advisor.setEra(scene.era);
   scene.enter(G);
+  // replay (#91): a real milestone on the chronicle, no invented detail.
+  if (G.chronicle) {
+    const label = String(scene.label || '').replace(/^.* · /, '') || scene.label || 'The age';
+    G.chronicle.push({ kind: 'era', text: `${label} began.`, t: G.runTime });
+  }
   lookAtStage(scene);
   hud.setScene(scene);
   syncInvincibleButton();
@@ -820,6 +854,7 @@ function showFail(reason) {
   $('failHeading').textContent = heading;
   $('failCause').textContent = cause;
   $('failAdvice').textContent = nextStep;
+  if (G?.chronicle) G.chronicle.push({ kind: 'fail', text: `${heading}: ${cause}`, t: G.runTime });   // replay (#91)
   $('failScreen').hidden = false;
   $('biometricFeedbackAck').hidden = true;
   const how = $('showHowBtn');
@@ -889,6 +924,7 @@ function quitToTitle() {
   if (G?.source && G.source !== keep) G.source.disconnect();
   G = null;
   hudScene = null;
+  replayUi?.hideHud();   // replay (#91)
   syncInvincibleButton();
   fade = 0;
   setGameSource(keep);
@@ -905,6 +941,8 @@ function retryEra() {
 }
 
 function showEnd() {
+  if (!G || G.endShown) return;
+  G.endShown = true;
   const b = G.brain, s = G.stats, m = b.model, x = G.extra || {};
   G.eraTimes.push({ label: G.scene.label, seconds: G.runTime - G.eraStart });
   const t = Math.floor(G.runTime);
@@ -929,6 +967,19 @@ function showEnd() {
     d.append(dt, dd);
     return d;
   }));
+  // replay (#91): scores, chronicle, unlocks and the New Mind+ gate, all from the real run.
+  const summary = summarizeRun(G);
+  const result = scoreRun(summary);
+  const chronicle = buildChronicle({
+    events: G.chronicle || [],
+    facts: chronicleFacts(summary, result),
+    max: 8,
+  });
+  const unlockResult = applyRunToUnlocks(
+    { ...summary, scores: result.categoryMap, score: result.total, rank: result.rank },
+    { runId: G.run?.id },
+  );
+  replayUi?.showEnd({ G, result, chronicle, progress: unlockResult.progress, newUnlocks: unlockResult.newUnlocks });
   $('endScreen').hidden = false;
 }
 
@@ -1661,6 +1712,10 @@ screen.addEventListener('pointermove', (e) => {
 });
 function triggerAimClick(e) {
   if (!G) return;
+  if (!combatEnabled(G) && !G.scene?.setupActive?.()) {   // Pacifist modifier (#91)
+    G.hud?.showCause?.('Pacifist run: lightning and fireballs are off', { ms: 2200, tone: 'bad' });
+    return;
+  }
   const a = surfaceAim(e);
   const target = resolveBlinkAim(a) || a;
   G.brain.aim.x = target.x;
@@ -1963,7 +2018,11 @@ $('biometricFeedbackBtn')?.addEventListener('click', () => {
     advisor?.say('assist', 'Tolerance widened. Take a deep breath; the gods are forgiving today.', { mood: 'happy', priority: 4, cooldown: 0 });
   }
 });
-$('againBtn').addEventListener('click', () => { $('endScreen').hidden = true; newGame(playSource(), 0, { setupPlanets: G?.setupPlanets || null }); });
+$('againBtn').addEventListener('click', () => {
+  $('endScreen').hidden = true;
+  // replay (#91): New Mind+ can be chosen here; the shaped worlds are kept (planet setup).
+  newGame(playSource(), 0, { setupPlanets: G?.setupPlanets || null, replay: replayUi?.againSettings() });
+});
 $('endModelBtn').addEventListener('click', toggleModel);
 
 // ---------- zoom + galaxy UI ----------
@@ -2094,20 +2153,21 @@ function playSource() { return liveBridge(G?.source, previewSource) || new SimSo
 let settingsUi = null;   // the Settings panel (#186), wired after the camera and debug panels
 let titleUi = null;      // the title menu, so Back from planet setup returns to New Game
 // startIndex: Sections start a fresh run at any era. setupPlanets: the four worlds shaped on
-// the planet setup screen, with their PPO temperaments.
-function begin(source, { startIndex = 0, mode = 'story', resume = null, setupPlanets = null } = {}) {
+// the planet setup screen, with their PPO temperaments. replay: seed/challenge/modifiers (#91).
+function begin(source, { startIndex = 0, mode = 'story', resume = null, replay = null, setupPlanets = null } = {}) {
   audio.unlock();
   $('titleScreen').hidden = true;
   $('planetSetup').hidden = true;
   settingsUi?.close();
-  newGame(source, startIndex, { mode, resume, setupPlanets });
+  newGame(source, startIndex, { mode, resume, setupPlanets, replay: replay ?? replayUi?.settings?.() ?? null });
   // Settings › Camera: the player asked for the webcam with every game (#186).
-  if (settingsUi?.settings.cameraOnStart) window.__moc?.camera?.start?.();
+  if (settingsUi?.settings.cameraOnStart && cameraEnabled(G)) window.__moc?.camera?.start?.();
 }
 // New Game opens its step (world size, difficulty, #220); Start then shapes the four worlds
-// before the run begins.
+// before the run begins. The replay choices (#91) ride along with the run.
 $('newGameStart').addEventListener('click', () => openPlanetSetup(playSource()));
 initNewGameOptions($('titleScreen').querySelector('[data-title-view="new"]'));
+replayUi = initReplayUi(document);   // replay (#91): seed box, challenge buttons, modifiers, unlocks
 
 // The planet setup sits between Start and the home planet. The four worlds are shaped there;
 // Begin then drops the player onto the home planet with the normal campaign untouched.
@@ -2129,7 +2189,7 @@ const planetSetup = new PlanetSetup($('planetSetup'), {
   onBegin: (planets) => {
     const src = setupSource || playSource();
     setupSource = null;
-    begin(src, { setupPlanets: planets });
+    begin(src, { setupPlanets: planets, replay: replayUi?.settings() });
   },
   onCancel: () => {
     setupSource = null;
@@ -2267,8 +2327,12 @@ window.__moc.camera = initCamera({
   screenX: (x) => (cosmos.surfaceInView ? x : cosmos.toScreen(x * cosmos.worldW, 0).x / W),
   screenY: (y) => (cosmos.surfaceInView ? y : cosmos.toScreen(0, y * cosmos.worldH).y / H),
   onZoomDelta: (delta, factor) => {
+    // replay (#91): One hand turns two-hand pinch zoom off; one-hand pan still works.
+    if (!G || !twoHandZoomEnabled(G)) {
+      if (G && !twoHandZoomEnabled(G)) G.hud?.showCause?.('One hand: two-hand zoom is off this run', { ms: 1800 });
+      return;
+    }
     // Two-hand continuous pinch zoom: delta > 0 is zoom in (hands spread), delta < 0 is zoom out (hands together)
-    if (!G) return;
     if (in3dSurface() && (cosmos?.z || 0) <= 0.01) {
       cam3dTween = null;
       if (delta < 0 && engine.get_camera_distance() >= camMax() - 0.5) {
@@ -2368,6 +2432,11 @@ function start(data = {}) {
   if (mode === 'crowded') startCivSandbox(playSource());
   else if (mode === 'galaxy') startGalaxySandbox(playSource());
   else if (mode === 'story') begin(playSource());
+  else {
+    // replay (#91): a shared seed / daily link starts that run straight away.
+    const q = new URLSearchParams(location.search);
+    if (q.has('seed') || q.has('code') || q.has('share') || q.get('daily') === '1' || q.get('weekly') === '1') begin(playSource());
+  }
 }
 document.fonts?.load('16px "Pixelify Sans"').finally?.(() => {});
 if (typeof window !== 'undefined' && window.location?.search?.includes('rust=1')) {

@@ -29,7 +29,11 @@ export class Advisor {
     this.queue = [];
     this.cooldowns = new Map();
     this.time = 0;
+    this.recorder = null;   // replay (#91): the run's chronicle hears every accepted line
   }
+
+  // replay (#91): main.js records the run's real advisor lines for the end-of-run chronicle.
+  setRecorder(fn) { this.recorder = typeof fn === 'function' ? fn : null; }
 
   setEra(era) {
     this.era = era;
@@ -45,15 +49,21 @@ export class Advisor {
 
   // key: dedupe/cooldown id. priority: higher interrupts lower.
   say(key, text, { mood = 'nervous', priority = 1, cooldown = 8 } = {}) {
+    const record = () => {
+      try { this.recorder?.({ key, text, mood, t: this.time }); } catch {}
+    };
     if (rustEngine && typeof rustEngine.advisor_say === 'function') {
       try {
-        return rustEngine.advisor_say(key, text, mood, priority, cooldown);
+        const said = rustEngine.advisor_say(key, text, mood, priority, cooldown);
+        if (said) record();
+        return said;
       } catch {}
     }
     const last = this.cooldowns.get(key);
     if (last != null && this.time - last < cooldown) return false;
     this.cooldowns.set(key, this.time);
-    const line = { text, mood, priority, shown: 0, hold: Math.max(3.2, text.length / 16) };
+    const line = { key, text, mood, priority, shown: 0, hold: Math.max(3.2, text.length / 16) };
+    record();
     if (!this.current || priority > this.current.priority) {
       if (this.current && this.current.shown < this.current.text.length) this.queue.unshift(this.current);
       this.start(line);

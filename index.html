@@ -23,6 +23,8 @@
       <span class="signal" id="signalChip" data-level="good" role="status" hidden></span>
       <!-- #152: joy buff and surprise while a mood is live (src/camera/mood-actions.js moodChip) -->
       <span class="mood-chip" id="moodChip" data-tone="idle" hidden></span>
+      <!-- replay (#91): the visible run seed; click it to copy the share code -->
+      <button type="button" class="tool run-seed" id="runSeedChip" hidden title="Copy this run's share code">Seed</button>
       <span class="clock" id="clock" aria-label="Run time">0:00</span>
       <button type="button" class="tool eeg-btn" id="eegBtn" aria-pressed="false" aria-controls="eegPanel" title="Connect or disconnect EEG headset and view live signals (E)">EEG <kbd>E</kbd></button>
       <!-- #89: Camera, Model and Debug live in Settings › Advanced; this shows while the webcam runs -->
@@ -150,6 +152,7 @@
   <div class="title-inner title-menu">
     <h1 id="titleHeading">Mind <span>over</span> Chicken</h1>
     <p class="tagline">A god game you play with your brain</p>
+    <p class="unlock-line" data-unlocks aria-live="polite"></p>
 
     <nav class="title-view" data-title-view="main" aria-label="Main menu">
       <button type="button" class="btn btn-primary title-item" data-title-menu="continue" hidden>Continue<span class="title-sub" data-title-continue-sub></span></button>
@@ -177,6 +180,25 @@
         <button type="button" role="radio" data-option="difficulty" data-value="normal" title="The game as designed">Normal</button>
         <button type="button" role="radio" data-option="difficulty" data-value="hard" title="Hungrier tribe, fiercer rivals, two more peoples">Hard</button>
       </div>
+      <!-- replay (#91): visible seed, share code, daily/weekly challenge and modifiers -->
+      <div class="replay-seed-row">
+        <label for="runSeedInput">Seed</label>
+        <input id="runSeedInput" type="text" inputmode="text" spellcheck="false" autocomplete="off" aria-label="Run seed or share code">
+        <button type="button" class="btn btn-small" id="runSeedRandom" title="New random seed">New</button>
+        <button type="button" class="btn btn-small" id="runSeedDaily" data-challenge="daily" aria-pressed="false" title="Today's UTC seed, the same for everyone">Daily</button>
+        <button type="button" class="btn btn-small" id="runSeedWeekly" data-challenge="weekly" aria-pressed="false" title="This UTC week's seed, the same for everyone">Weekly</button>
+      </div>
+      <p class="replay-meta"><span id="challengeLabel" aria-live="polite"></span></p>
+      <p class="replay-code-row"><code id="runShareCode"></code><button type="button" class="btn btn-small" id="copyRunCode" title="Copy the share code">Copy code</button></p>
+      <div class="modifier-grid" id="runModifiers" role="group" aria-label="Challenge modifiers">
+        <label><input type="checkbox" data-modifier="fragile-fire"> Fragile fire</label>
+        <label><input type="checkbox" data-modifier="volatile-market"> Volatile market</label>
+        <label><input type="checkbox" data-modifier="blink-storm"> Blink storm</label>
+        <label><input type="checkbox" data-modifier="no-camera"> No camera</label>
+        <label><input type="checkbox" data-modifier="one-hand"> One hand</label>
+        <label><input type="checkbox" data-modifier="pacifist"> Pacifist</label>
+      </div>
+      <label class="mind-plus"><input type="checkbox" id="mindPlusToggle" aria-checked="false" disabled> <span>New Mind+ <small id="mindPlusHint">finish a run to unlock</small></span></label>
       <button type="button" class="btn btn-primary title-item" id="newGameStart">Start</button>
       <button type="button" class="btn title-back" data-title-back>Back <kbd>Esc</kbd></button>
     </div>
@@ -257,6 +279,22 @@
     <h1 id="endHeading">A new world</h1>
     <p class="lede">From a fire pit to the stars. The sacred chicken stepped out first.</p>
     <dl class="end-stats" id="endStats"></dl>
+    <!-- replay (#91): rank, scores, chronicle, modifiers, share code, New Mind+ and unlocks -->
+    <section class="end-replay" id="endReplay" hidden aria-labelledby="endRank">
+      <h2 class="end-rank" id="endRank">Rank</h2>
+      <p class="end-seed" id="endSeedLine"></p>
+      <ul class="end-scores" id="endScores" aria-label="Run scores"></ul>
+      <h3 class="end-subhead">Chronicle</h3>
+      <ol class="end-chronicle" id="endChronicle"></ol>
+      <p class="end-modifiers" id="endModifiers"></p>
+      <p class="end-new-unlocks" id="endNewUnlocks" aria-live="polite"></p>
+      <div class="row end-share-row">
+        <code id="endShareCode"></code>
+        <button type="button" class="btn btn-small" id="endCopyCode">Copy code</button>
+        <label class="mind-plus"><input type="checkbox" id="endMindPlus" disabled> New Mind+</label>
+      </div>
+      <p class="unlock-line" data-unlocks aria-live="polite"></p>
+    </section>
     <div class="row">
       <button type="button" class="btn btn-primary" id="galaxyBtn">Open the galaxy</button>
       <button type="button" class="btn" id="againBtn">Play again</button>

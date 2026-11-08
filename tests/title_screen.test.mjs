@@ -32,7 +32,7 @@ test('no long prose: no era list, no hints, a short tagline', () => {
   assert.ok(tagline, 'tagline');
   assert.ok(tagline[1].split(/\s+/).length <= 8, 'tagline is at most 8 words');
   for (const [, p] of title.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/g)) assert.ok(text(p).split(' ').length <= 8, `short line: ${text(p)}`);
-  assert.ok(text(title).split(' ').length <= 70, `the whole title screen is short (${text(title).split(' ').length} words)`);
+  assert.ok(text(title).split(' ').length <= 110, `the whole title screen is short (${text(title).split(' ').length} words)`);
 });
 
 test('Sections jumps to every era, the galaxy and the crowded planet with its size picker', () => {

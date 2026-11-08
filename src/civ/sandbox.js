@@ -20,6 +20,7 @@ import { makeBolt, drawBolt, drawReticle } from '../render/sprites.js';
 import { FireballFX } from '../render/fireball.js';
 import { joyBuff, surpriseFires, surpriseEffect, sparkleCount, JOY_COLORS } from '../camera/mood-actions.js'; // #152
 import { reducedMotion } from '../ui/motion.js';
+import { combatEnabled } from '../game/replay.js'; // challenge modifiers (#91)
 import { createCiv, EVENT, CAST, TONE, SETUP } from './civ.js';
 import { CivSpaceLink } from './space-link.js'; // space age (#166): fleets in the galaxy
 import { seamSpans, fadeReliefRim } from './seams.js';
@@ -364,6 +365,7 @@ export class CivSandbox {
     const p = this.aimPlanet(aim);
     // While founding, a click or blink chooses, places, or (seeding) makes the people wilder.
     if (this.setupActive()) { civ.setupClick(p.x, p.y); this.refresh(); return; }
+    if (!combatEnabled(G)) return;   // Pacifist (#91): no lightning on the crowded planet either.
     const killed = civ.lightning(p.x, p.y);
     const s = this.toScreen(p.x, p.y);
     this.bolts.push({ x: p.x, y: p.y, pts: makeBolt(s.x, s.y), sx: s.x, sy: s.y, life: 0.35 });

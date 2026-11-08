@@ -29,6 +29,7 @@ import { EMOTIONS, EmotionTracker, neutralMood, blendshapeMap } from './emotion.
 import { manualMood, surpriseRisingEdge } from './manual-mood.js';
 import { surpriseReady, sceneKind, joyCause, surpriseCause } from './mood-actions.js';   // #152
 import { loadVision } from './vision.js';
+import { cameraEnabled, combatEnabled } from '../game/replay.js'; // challenge modifiers (#91)
 import { loadEngine, workerPreference } from './engine.js';
 import { handsEnabled, setHandsEnabled } from './hands-pref.js';
 import { FingerController, MultiHandTracker, pinchMetrics } from './fingers.js';
@@ -362,6 +363,11 @@ export function initCamera({
   // ---------- start / stop ----------
   async function start() {
     if (status === 'starting' || status === 'on') return;
+    const G0 = getG();
+    if (G0 && !cameraEnabled(G0)) {
+      setStatus('off', 'Camera disabled by the No camera modifier this run.');
+      return;
+    }
     const id = ++run;
     fpsBefore = frames.fps(performance.now());
     togglePanel(true);
@@ -592,6 +598,10 @@ export function initCamera({
     const scene = G?.scene;
     const aim = G?.brain?.aim;
     if (!scene || !aim) return false;
+    if (!combatEnabled(G)) {
+      G.hud?.showCause?.('Pacifist run: fireballs are off', { tone: 'bad' });
+      return false;
+    }
     if (typeof scene.onFireball !== 'function') return false;
     try { scene.onFireball(aim, { color: fb.color, charge: fb.charge }); }
     catch (err) { console.error('[camera] onFireball failed:', err); return false; }

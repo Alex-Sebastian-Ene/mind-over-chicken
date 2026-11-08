@@ -80,6 +80,7 @@ export function buildCheckpoint(G, run, extra = {}) {
     worldSize: world ? { width: world.width, height: world.height } : null,
     // The New Game choices (#220): continuing keeps the difficulty and the size it was started with.
     options: G?.options ? { worldSize: G.options.worldSize ?? null, difficulty: G.options.difficulty ?? null, size: G.options.size ?? null } : null,
+    replay: G?.replay ? { ...G.replay, modifiers: [...(G.replay.modifiers || [])] } : null,   // replay (#91)
     stats: statsSummary(G?.stats),
     runTime: finite(G?.runTime) ? Math.round(G.runTime * 10) / 10 : 0,
     eraTimes: Array.isArray(G?.eraTimes) ? G.eraTimes.map((e) => ({ label: e.label, seconds: Math.round((e.seconds || 0) * 10) / 10 })) : [],

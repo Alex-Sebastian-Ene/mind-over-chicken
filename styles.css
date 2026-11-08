@@ -631,6 +631,38 @@ body[data-reticle="1"] #screen { cursor: none; }   /* one cursor: the in-game re
 .end-stats dt { font-size: 12px; color: var(--muted); }
 .end-stats dd { margin: 2px 0 0; font: 600 18px var(--pixel); font-variant-numeric: tabular-nums; }
 
+/* replay (#91): visible seed, share code, daily/weekly and modifiers */
+.run-seed { font-family: var(--pixel); font-variant-numeric: tabular-nums; }
+.replay-seed-row { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.replay-seed-row label { font: 600 12px var(--pixel); color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.replay-seed-row input {
+  flex: 1 1 120px; min-width: 0; background: var(--ink); border: 1px solid var(--line);
+  border-radius: 3px; padding: 5px 7px; font: 13px ui-monospace, Consolas, monospace;
+}
+.replay-meta { margin: 0; min-height: 1.1em; font: 600 11px var(--pixel); color: var(--focus); }
+.replay-meta [data-error="1"] { color: var(--alarm); }
+.replay-code-row { display: flex; align-items: center; gap: 6px; margin: 0; min-width: 0; }
+.replay-code-row code { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modifier-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 8px; }
+.modifier-grid label, .mind-plus { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; cursor: pointer; }
+.modifier-grid input, .mind-plus input { margin-top: 2px; }
+.mind-plus small { display: block; color: var(--muted); font-size: 10px; }
+.unlock-line { margin: 0; min-height: 1.1em; font-size: 11px; color: var(--muted); text-align: center; }
+.end-replay { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+.end-rank { margin: 0; font: 700 22px var(--pixel); color: var(--focus); }
+.end-seed { margin: 0; font: 12px ui-monospace, Consolas, monospace; color: var(--muted); }
+.end-scores { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 5px; }
+.end-scores li { display: grid; grid-template-columns: 1fr auto; gap: 0 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 5px 8px; }
+.end-scores li span { font: 600 12px var(--pixel); }
+.end-scores li b { font: 700 16px var(--pixel); color: var(--focus); font-variant-numeric: tabular-nums; }
+.end-scores li small { grid-column: 1 / -1; color: var(--muted); font-size: 10px; }
+.end-subhead { margin: 2px 0 0; font: 600 13px var(--pixel); color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.end-chronicle { margin: 0; padding-left: 18px; display: grid; gap: 2px; font-size: 13px; }
+.end-modifiers, .end-new-unlocks { margin: 0; font-size: 12px; color: var(--muted); }
+.end-new-unlocks { color: var(--focus); }
+.end-share-row { align-items: center; }
+.end-share-row code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---------- model panel (judge overlay) ---------- */
 .model-panel {
   position: fixed; z-index: 30;
