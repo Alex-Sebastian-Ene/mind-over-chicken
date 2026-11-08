@@ -130,6 +130,7 @@ export class PlanetSurface {
     for (const hit of this.fireballs.update(dt)) this.impactFireball(hit);
     this.particles.update(dt);
     const sp = this.sim;
+    if (sp?.G) sp.G.handInput = this.handInput;   // Rain spell: the capital tribe needs the palm state
     if (sp) {
       if (sp.outcome) {
         sp.advance(dt);   // the tribe keeps living (dancing, or not) for a moment
