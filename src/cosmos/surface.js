@@ -16,6 +16,8 @@ import { SimPlanet } from '../ai/planet.js';
 import { AIGod } from '../ai/autopilot.js';
 import { drawHut, drawHouse, drawTower, drawFactory, drawPad, drawPerson, drawBolt, makeBolt, drawReticle } from '../render/sprites.js';
 import { FireballFX } from '../render/fireball.js';
+import { surpriseFires, surpriseEffect } from '../camera/mood-actions.js'; // #152
+import { reducedMotion } from '../ui/motion.js';
 import { villagerLook, animate } from '../sim/agents.js';
 import { VW, VH, wrapX, wrapDx, wrapY, wrapDy, typeAt, walkableAt, settlementPlan } from './vast.js';
 import { TIERS, CONFLICT, castPlanet, tribeOutcome, easeSplit, tierName } from './planet-sim.js';
@@ -689,7 +691,22 @@ export class PlanetSurface {
     }
   }
 
-  onMood(mood) { this.sim?.scene?.onMood?.(mood); }
+  // #152: the capital's tribe gets the mood (its joy buff reads G.mood every frame, so the
+  // tribe dances while you smile); a surprise is this surface's own one-shot: bolts on screen, a
+  // capped flash and a caption (the tribe's copy skips it, so it doesn't strike twice).
+  onMood(mood) {
+    const sc = this.sim?.scene;
+    if (sc?.G) sc.G.mood = { ...mood, surpriseTriggered: false };
+    sc?.onMood?.({ ...mood, surpriseTriggered: false });
+    if (!surpriseFires(mood)) return;
+    const fx = surpriseEffect(reducedMotion());
+    this.ownFlash = Math.max(this.ownFlash, fx.flash);
+    for (let i = 0; i < fx.bolts; i++) {
+      const pts = makeBolt(clamp(W / 2 + rand(-W * 0.3, W * 0.3), 2, W - 3), clamp(H / 2 + rand(-H * 0.2, H * 0.2), 4, H - 3)).map((q) => ({ x: q.x + this.camX, y: q.y + this.camY }));
+      this.bolts.push({ pts, life: 0.3 + i * 0.12 });
+    }
+    floater(this.particles, this.camX + W / 2, this.camY + H / 2 - 30, 'SURPRISE!', '#ffe066', 10);
+  }
 }
 
 // Crisp text in low-res units.
