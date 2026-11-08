@@ -3,8 +3,6 @@
 // 5-band frequency spectrum, mental state (calm, focus, stress: EEG agitation or face anger),
 // and 3-axis Accelerometer & Gyroscope waveforms + head pose calibration & cursor pad.
 
-import { headScreenAim } from '../brain/brain.js';
-
 const BANDS = [
   { key: 'delta', label: 'Delta (1–4Hz)', color: '#f38ba8' },
   { key: 'theta', label: 'Theta (4–8Hz)', color: '#fab387' },
@@ -25,6 +23,10 @@ const IMU_AXES = [
   { idx: 1, label: 'Y', color: '#7ee08a' },
   { idx: 2, label: 'Z', color: '#89b4fa' },
 ];
+
+// Brain.aim is world-space on the bigger home world (#129); every calibration preview, the aim
+// pad and the sandbox test are screen-space, so read the screen aim that Brain maps from.
+const screenAimOf = (brain) => brain?.screenAim || brain?.aim || null;
 
 const TEMPLATE = `
   <header class="eeg-head">
@@ -549,6 +551,7 @@ export class EegPanel {
     if (!this.wiz || !this.wiz.active) return;
     const src = this.getSource();
     const b = this.getBrain();
+    const aim = screenAimOf(b);
     const now = performance.now();
     const frameDt = Math.max(0.008, Math.min(0.25, (now - (this.wiz.lastFrameNow || now)) / 1000));
     this.wiz.lastFrameNow = now;
@@ -569,11 +572,6 @@ export class EegPanel {
     ctx.strokeRect(w * 0.04, h * 0.04, w * 0.92, h * 0.92);
 
     const rel = b?.relOrientation || { yaw: 0, pitch: 0, roll: 0 };
-    // The wizard is a full-screen canvas: it draws where the head points on the SCREEN. brain.aim
-    // is a map point once a game runs on the bigger home world (#129), which squeezed the cursor
-    // into the middle half and kept every edge target out of reach (#221).
-    const head = headScreenAim(b);
-    const aimX = head ? head.x : 0.5, aimY = head ? head.y : 0.5;
     const bm = b?.blinkModel;
     const mm = b?.motionModel;
     const motionVal = b?.motion ?? 0;
@@ -715,12 +713,14 @@ export class EegPanel {
       ctx.arc(dx, dy, 12, 0, Math.PI * 2);
       ctx.fill();
 
-      // Draw live head cursor preview (the head's screen point, #221)
-      if (head) {
+      // Draw live head cursor preview
+      if (aim) {
+        const ux = aim.x * w;
+        const uy = aim.y * h;
         ctx.strokeStyle = '#59d8c8';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(head.x * w, head.y * h, 11, 0, Math.PI * 2);
+        ctx.arc(ux, uy, 11, 0, Math.PI * 2);
         ctx.stroke();
       }
 
@@ -880,8 +880,8 @@ export class EegPanel {
       if (curBlinks > this.wiz.lastBlinkCount) {
         this.wiz.lastBlinkCount = curBlinks;
         this.wiz.sandboxBolts.push({
-          x: aimX * w,
-          y: aimY * h,
+          x: (aim?.x ?? 0.5) * w,
+          y: (aim?.y ?? 0.5) * h,
           born: now,
         });
       }
@@ -899,9 +899,9 @@ export class EegPanel {
       ];
       for (const t of targets) {
         const tx = t.x * w, ty = t.y * h;
-        const hit = !!head && Math.hypot(aimX - t.x, aimY - t.y) < 0.09;
-        ctx.strokeStyle = hit ? '#7ee08a' : 'rgba(163, 166, 196, 0.45)';
-        ctx.lineWidth = hit ? 3 : 1.5;
+        const dist = Math.hypot((aim?.x ?? 0.5) - t.x, (aim?.y ?? 0.5) - t.y);
+        ctx.strokeStyle = dist < 0.09 ? '#7ee08a' : 'rgba(163, 166, 196, 0.45)';
+        ctx.lineWidth = dist < 0.09 ? 3 : 1.5;
         ctx.beginPath();
         ctx.arc(tx, ty, 28, 0, Math.PI * 2);
         ctx.stroke();
@@ -921,33 +921,29 @@ export class EegPanel {
         ctx.stroke();
       }
 
-      // The cursor goes on top of every target ring (CENTER included), with a dark outline so it
-      // reads on any background. No finite aim: a grey cursor at the centre and the reason (#221).
-      const ux = aimX * w, uy = aimY * h;
-      const col = head ? '#7ee08a' : '#a3a6c4';
-      ctx.lineWidth = 5;
-      ctx.strokeStyle = 'rgba(9, 10, 18, 0.9)';
-      ctx.beginPath();
-      ctx.arc(ux, uy, 14, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.strokeStyle = col;
-      ctx.fillStyle = col;
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.arc(ux, uy, 14, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(ux, uy, 4, 0, Math.PI * 2);
-      ctx.fill();
-      const fault = !head ? 'no head aim yet' : b?.aimFault;
-      if (fault) {
+      if (aim) {
+        const ux = aim.x * w;
+        const uy = aim.y * h;
+        ctx.strokeStyle = '#7ee08a';
+        ctx.fillStyle = '#7ee08a';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(ux, uy, 14, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(ux, uy, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Brain drops non-finite head tilts (#221) and says why: show it instead of a silent canvas.
+      if (b?.aimFault) {
         ctx.fillStyle = '#ffcf4a';
         ctx.font = '13px "Atkinson Hyperlegible", sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(`Head aim: ${fault}`, w / 2, h - 18);
+        ctx.fillText(`Head aim: ${b.aimFault}`, w / 2, h - 18);
       }
 
-      this.wiz.statsEl.textContent = `Head Aim: ${head ? `(${aimX.toFixed(2)}, ${aimY.toFixed(2)})` : 'none'} · Motion R²: ${Math.round((mm?.r2 ?? 0) * 100)}% (PitchEdge: ${(mm?.pitchEdgeDeg ?? 8).toFixed(1)}°) · Blink Acc: ${Math.round((bm?.accuracy ?? 0) * 100)}% (Thr ${Math.round(bm?.thresholdUv ?? 175)}µV)`;
+      this.wiz.statsEl.textContent = `Head Aim (screen): (${(aim?.x ?? 0.5).toFixed(2)}, ${(aim?.y ?? 0.5).toFixed(2)})${b?.aimFault ? ` [${b.aimFault}]` : ''} · Motion R²: ${Math.round((mm?.r2 ?? 0) * 100)}% (PitchEdge: ${(mm?.pitchEdgeDeg ?? 8).toFixed(1)}°) · Blink Acc: ${Math.round((bm?.accuracy ?? 0) * 100)}% (Thr ${Math.round(bm?.thresholdUv ?? 175)}µV)`;
     }
   }
 
@@ -990,8 +986,9 @@ export class EegPanel {
       const o = b?.orientation;
       src.recenter(true);
       if (b) {
-        b.aim.x = 0.5; b.aim.y = 0.5;
-        b.screenAim = { x: 0.5, y: 0.5 };   // the head's screen point re-centres with the pose (#221)
+        b.screenAim = { ...(b.screenAim || {}), x: 0.5, y: 0.5 };
+        const a = b.screenToAim ? b.screenToAim(0.5, 0.5) : { x: 0.5, y: 0.5 };
+        b.aim.x = a.x; b.aim.y = a.y;
       }
       this.ui.msg.textContent = '3D Head pose tared to screen center (0.50, 0.50) in Rust!';
       this.addLog(`Head cursor tared at raw=(P:${o ? o.pitch.toFixed(1) : '?'}° R:${o ? o.roll.toFixed(1) : '?'}° Y:${o ? o.yaw.toFixed(1) : '?'}°) -> center (0.5, 0.5)`);
@@ -1270,7 +1267,7 @@ export class EegPanel {
       this.ui.roll.textContent = '--°';
       this.ui.yaw.textContent = '--°';
     }
-    this.drawPad(headScreenAim(b), totalCalib >= 1);
+    this.drawPad(screenAimOf(b), totalCalib >= 1);
   }
 
   drawPad(aim, calibrated) {

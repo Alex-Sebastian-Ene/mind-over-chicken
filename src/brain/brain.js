@@ -45,19 +45,12 @@ export function faceAnger(mood) {
 
 // Head aim (#221). `aim` is where the god points on the map (world 0..1, mapped through the home
 // camera on a world bigger than the screen, #129); `screenAim` is where the head points on the
-// screen (0..1), which the calibration wizard draws. A non-finite tilt (or a non-finite camera
-// mapping) used to poison the smoothing for good: every later frame stayed NaN, so the wizard
-// cursor and the in-game reticle silently drew nothing. Bad values are now dropped, a poisoned
-// state heals to the centre, and `aimFault` says why.
+// screen (0..1), which the calibration wizard draws (eeg-panel.js screenAimOf, #234). A
+// non-finite tilt (or camera mapping) used to poison the smoothing for good (util clamp passes
+// NaN, smooth keeps it): every later frame stayed NaN, so the wizard cursor and the in-game
+// reticle silently drew nothing. Bad values are now dropped, a poisoned state heals to the
+// centre, and `aimFault` says why.
 const finite2 = (p) => !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
-
-// The head's screen aim for drawing: the headset's screen point, else the map aim (the emulated
-// headset aims where the mouse is). null when neither is finite.
-export function headScreenAim(brain) {
-  if (finite2(brain?.screenAim)) return brain.screenAim;
-  if (finite2(brain?.aim)) return brain.aim;
-  return null;
-}
 
 const WINDOW = 6;            // frames averaged per feature window (~0.6 s)
 const TRAIN_EVERY = 2.5;     // seconds between retrains

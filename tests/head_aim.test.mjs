@@ -1,11 +1,13 @@
-// head aim (#221): the calibration wizard draws the head's SCREEN point, and a non-finite tilt or
-// camera mapping can no longer poison the aim for good (it used to stay NaN forever, so the wizard
+// head aim (#221): a non-finite tilt or camera mapping can no longer poison the aim for good (it used to stay NaN forever, so the wizard
 // cursor and the in-game reticle silently drew nothing).
 // Run: node --test tests/head_aim.test.mjs
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Brain, headScreenAim, setRustBrain } from '../src/brain/brain.js';
+import { Brain, setRustBrain } from '../src/brain/brain.js';
+
+// What the wizard draws (src/ui/eeg-panel.js screenAimOf, #234).
+const headScreenAim = (brain) => brain?.screenAim || brain?.aim || null;
 
 const BANDS = { delta: 0.25, theta: 0.2, alpha: 0.2, beta: 0.2, gamma: 0.15 };
 const frame = (tilt, extra = {}) => ({ bands: BANDS, blink: false, tilt, motion: 0, quality: 1, ...extra });
