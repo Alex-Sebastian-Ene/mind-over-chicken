@@ -20,6 +20,12 @@ import { PersonalModel, featuresFromBands } from './model.js';
 
 export const REST_STRESS = 0.15;   // stress of a player at rest: the small (1 - calm) term
 export const STRESSED = 0.5;       // above this the god counts as stressed (eras' thresholds)
+export const RAIN_THRESHOLD = 0.55; // beta+theta that counts as the Rain or Calm hold (#276)
+
+// Rain or Calm (#276): beta + theta, 0..1. Holding F in the emulated fallback counts as full.
+export function rainFromBands(bands = {}) {
+  return clamp((bands.beta || 0) + (bands.theta || 0));
+}
 const AG_MARGIN = 0.12;            // index above rest that still reads as rest (window noise)
 const AG_SPAN = 0.4;               // index above rest + margin that reads as full agitation
 const AG_WARMUP = 30;              // windows (~3 s) whose median starts the running average
@@ -82,6 +88,7 @@ export class Brain {
     this.feat = null;
     this.calm = 0;
     this.focus = 0;
+    this.rain = 0;
     this.calmRaw = 0;
     this.focusRaw = 0;
     this.genericCalm = 0;
@@ -138,6 +145,7 @@ export class Brain {
     this.feat = null;
     this.calm = 0;
     this.focus = 0;
+    this.rain = 0;
     this.calmRaw = 0;
     this.focusRaw = 0;
     this.anger = 0;
@@ -173,6 +181,8 @@ export class Brain {
     // Smooth the outputs the game reads, so a single noisy window can't flip a challenge.
     this.calm = smooth(this.calm, this.calmRaw, 4, dt);
     this.focus = smooth(this.focus, this.focusRaw, 4, dt);
+    const heldRain = this.source?.input?.focus ? 1 : 0;
+    this.rain = smooth(this.rain, Math.max(rainFromBands(this.bands), heldRain), 4, dt);
     this.agitation = smooth(this.agitation, this.agitationRaw, 3, dt);
     this.anger = faceAnger(mood);
     this.stress = stressFrom(this.calm, this.anger, this.agitation);

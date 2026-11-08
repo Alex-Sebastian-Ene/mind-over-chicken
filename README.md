@@ -87,6 +87,8 @@ The Rust/Wasm simulation loop and world rules.
 * **Blink lightning:** deliberate blinks strike at the head cursor.
 * **Calm / focus / stress:** EEG bands (and the keyboard fallback) drive the era mechanics.
 * **Pinch grab & two-hand zoom:** hand input moves living entities and the camera; it does not cast spells.
+* **Rain or Calm:** beta+theta held for ~2 s summons rain, putting out forest fires and the Stone campfire.
+* **Forest fires:** lightning aimed at a tree starts a fire that spreads to nearby trees.
 
 **Status:** the hand-gesture and keyboard spell casts (fireball, bounty, rain, bless, disaster, peace, point) were removed in #261.
 
