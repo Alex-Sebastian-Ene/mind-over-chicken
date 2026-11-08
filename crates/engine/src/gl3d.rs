@@ -80,6 +80,7 @@ pub struct WebGl3DRenderer {
     pub u_water_light_rad: WebGlUniformLocation,
     pub u_water_light_int: WebGlUniformLocation,
     pub u_water_world_h: Option<WebGlUniformLocation>,
+    pub u_water_wave_k: Option<WebGlUniformLocation>,
 
     // Billboard uniforms
     pub u_billboard_vp: WebGlUniformLocation,
@@ -200,6 +201,7 @@ attribute vec3 a_normal;
 
 uniform mat4 u_viewProjection;
 uniform mediump float u_time; // must match WATER_FS precision or the program fails to link
+uniform mediump vec4 u_waveK; // wave numbers (x1, z1, x2, z2), whole waves per world period
 uniform float u_offsetX;
 uniform float u_offsetZ;
 
@@ -208,9 +210,10 @@ varying vec3 v_worldPos;
 
 void main() {
     vec3 wpos = a_position + vec3(u_offsetX, 0.0, u_offsetZ);
-    // Two-octave animated 3D wave ripples using world position for seamless torus wrapping
-    float w1 = sin(wpos.x * 0.14 + u_time * 2.4) * cos(wpos.z * 0.14 + u_time * 1.9) * 0.36;
-    float w2 = sin(wpos.x * 0.28 - u_time * 3.1) * cos(wpos.z * 0.24 + u_time * 2.7) * 0.14;
+    // Two-octave animated 3D wave ripples. A whole number of waves fits each world period
+    // (u_waveK), so the copies meet at the seams and nothing jumps when the camera wraps (#198).
+    float w1 = sin(wpos.x * u_waveK.x + u_time * 2.4) * cos(wpos.z * u_waveK.y + u_time * 1.9) * 0.36;
+    float w2 = sin(wpos.x * u_waveK.z - u_time * 3.1) * cos(wpos.z * u_waveK.w + u_time * 2.7) * 0.14;
     wpos.y += w1 + w2;
 
     v_worldPos = wpos;
@@ -230,6 +233,7 @@ uniform vec3 u_camPos;
 uniform float u_night;
 uniform float u_time;
 uniform float u_worldH;
+uniform vec4 u_waveK;
 uniform int u_lightCount;
 uniform vec3 u_lightPos[16];
 uniform float u_lightRad[16];
@@ -249,10 +253,11 @@ void main() {
     vec3 col = mix(baseWater, nightWater, u_night);
 
     // Analytical wave normal from wave derivatives
-    float dw_dx = 0.14 * cos(v_worldPos.x * 0.14 + u_time * 2.4) * cos(v_worldPos.z * 0.14 + u_time * 1.9) * 0.36
-                + 0.28 * cos(v_worldPos.x * 0.28 - u_time * 3.1) * cos(v_worldPos.z * 0.24 + u_time * 2.7) * 0.14;
-    float dw_dz = -0.14 * sin(v_worldPos.x * 0.14 + u_time * 2.4) * sin(v_worldPos.z * 0.14 + u_time * 1.9) * 0.36
-                - 0.24 * sin(v_worldPos.x * 0.28 - u_time * 3.1) * sin(v_worldPos.z * 0.24 + u_time * 2.7) * 0.14;
+    vec4 k = u_waveK;
+    float dw_dx = k.x * cos(v_worldPos.x * k.x + u_time * 2.4) * cos(v_worldPos.z * k.y + u_time * 1.9) * 0.36
+                + k.z * cos(v_worldPos.x * k.z - u_time * 3.1) * cos(v_worldPos.z * k.w + u_time * 2.7) * 0.14;
+    float dw_dz = -k.y * sin(v_worldPos.x * k.x + u_time * 2.4) * sin(v_worldPos.z * k.y + u_time * 1.9) * 0.36
+                - k.w * sin(v_worldPos.x * k.z - u_time * 3.1) * sin(v_worldPos.z * k.w + u_time * 2.7) * 0.14;
     vec3 norm = normalize(vec3(-dw_dx, 1.0, -dw_dz));
 
     // Specular sunlight and moonlight glint (Fresnel / Blinn-Phong)
@@ -553,6 +558,7 @@ impl WebGl3DRenderer {
             .get_uniform_location(&water_program, "u_lightInt")
             .ok_or("Missing u_lightInt in water shader")?;
         let u_water_world_h = gl.get_uniform_location(&water_program, "u_worldH");
+        let u_water_wave_k = gl.get_uniform_location(&water_program, "u_waveK");
 
         // Billboard uniform locations
         let u_billboard_vp = gl
@@ -637,6 +643,7 @@ impl WebGl3DRenderer {
             u_water_light_rad,
             u_water_light_int,
             u_water_world_h,
+            u_water_wave_k,
             u_billboard_vp,
             u_billboard_cam_right,
             u_billboard_cam_up,
@@ -903,6 +910,10 @@ impl WebGl3DRenderer {
         if let Some(loc) = self.u_water_world_h.as_ref() {
             gl.uniform1f(Some(loc), self.world_h);
         }
+        if let Some(loc) = self.u_water_wave_k.as_ref() {
+            let [a, b, c, d] = wave_numbers(self.world_w, self.world_h);
+            gl.uniform4f(Some(loc), a, b, c, d);
+        }
 
         gl.enable(WebGlRenderingContext::BLEND);
         gl.blend_func(
@@ -1016,6 +1027,20 @@ impl WebGl3DRenderer {
     }
 }
 
+/// The water's wave numbers (x1, z1, x2, z2): the design's 0.14/0.14/0.28/0.24 rounded to a
+/// whole number of waves per world period, so every wrap copy of the sea lines up with its
+/// neighbours at the seams and the pattern doesn't jump when the camera wraps (#198).
+pub fn wave_numbers(world_w: f32, world_h: f32) -> [f32; 4] {
+    let tau = std::f32::consts::TAU;
+    let snap = |k: f32, period: f32| {
+        if period <= 0.0 {
+            return k;
+        }
+        (k * period / tau).round().max(1.0) * tau / period
+    };
+    [snap(0.14, world_w), snap(0.14, world_h), snap(0.28, world_w), snap(0.24, world_h)]
+}
+
 /// Point a vertex attribute at the bound ARRAY_BUFFER. Returns None, and touches nothing, when
 /// the shader compiler stripped the attribute (location -1); `-1 as u32` would otherwise be
 /// GL_INVALID_VALUE on every frame.
@@ -1086,5 +1111,26 @@ fn link_program(
         Err(gl
             .get_program_info_log(&program)
             .unwrap_or_else(|| "Unknown link error".into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wave_numbers;
+
+    #[test]
+    fn waves_fit_the_world_period() {
+        for (w, h) in [(640.0f32, 360.0f32), (320.0, 180.0), (2560.0, 1280.0), (100.0, 37.0)] {
+            let k = wave_numbers(w, h);
+            for (kk, period) in [(k[0], w), (k[1], h), (k[2], w), (k[3], h)] {
+                let waves = kk * period / std::f32::consts::TAU;
+                assert!((waves - waves.round()).abs() < 1e-3, "{waves} waves over {period}");
+                assert!(waves >= 1.0);
+            }
+            // Close to the designed look on real world sizes.
+            if w >= 320.0 {
+                assert!((k[0] - 0.14).abs() < 0.02 && (k[3] - 0.24).abs() < 0.03, "{k:?}");
+            }
+        }
     }
 }
