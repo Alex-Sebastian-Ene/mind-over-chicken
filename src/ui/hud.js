@@ -79,7 +79,18 @@ export class Hud {
 
   flashBlink() { this.blinkFlash = 0.3; this.powers.blink.classList.add('is-firing'); }
 
+  // The headset chip in the top bar. The Rust shell never writes it, so both builds do it here:
+  // under the Rust HUD update() used to return first, and a connected Muse still read "No headset".
+  showSource(src) {
+    if (!this.source || !src) return;
+    const text = String(src.status ?? '');
+    const ok = src.connected ? '1' : '0';
+    if (this.source.textContent !== text) this.source.textContent = text;
+    if (this.source.dataset.ok !== ok) this.source.dataset.ok = ok;
+  }
+
   update(dt, G) {
+    this.showSource(G.source);
     if (rustEngine) {
       if (this.blinkFlash > 0) {
         this.blinkFlash -= dt;
@@ -139,8 +150,6 @@ export class Hud {
     if (this.blinkFlash > 0) { this.blinkFlash -= dt; if (this.blinkFlash <= 0) this.powers.blink.classList.remove('is-firing'); }
     this.powers.blink.querySelector('.power-value').textContent = `${b.stats.blinks}`;
 
-    this.source.textContent = G.source.status;
-    this.source.dataset.ok = G.source.connected ? '1' : '0';
 
     if (!this.modelPanel.hidden) this.renderModel(b, G);
   }
