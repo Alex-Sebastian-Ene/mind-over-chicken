@@ -559,6 +559,12 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
   padding: 12px 14px;
   box-shadow: 0 20px 60px -10px rgba(0, 0, 0, 0.9);
 }
+/* #90: reduced motion (Settings, or the system setting) stops CSS animations and transitions. */
+body[data-reduced-motion="1"] *, body[data-reduced-motion="1"] *::before, body[data-reduced-motion="1"] *::after {
+  animation-duration: 0.001ms !important; animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important; scroll-behavior: auto !important;
+}
+.set-keys { margin: 0 0 4px; font-size: 12px; line-height: 1.6; }
 /* ---------- settings panel (#186, #89): above every overlay, it can open from the title ---------- */
 .settings-panel {
   position: fixed; z-index: 56;
