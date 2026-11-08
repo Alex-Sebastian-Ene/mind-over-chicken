@@ -340,40 +340,31 @@ export class CivSandbox {
   }
 
   // Living-entity pinch grab (#120)
+  // Pinch-grab (#120, #188): pick up a living person and set them down elsewhere. The Rust sim
+  // owns everyone's position, so the move goes through it (villages stay where they were built).
   onGrabStart(aim) {
     const civ = this.civ;
     if (!civ) return null;
     const p = this.aimPlanet(aim);
-    // Find closest village within 12 world units
-    let best = null, bestDist = 12;
-    for (const v of this.villages) {
-      const d = Math.hypot(p.x - v.x, p.y - v.y);
-      if (d < bestDist) { bestDist = d; best = v; }
-    }
-    if (best) {
-      const fac = this.byId.get(best.factionId);
-      const name = fac ? `${fac.name} village` : 'Village';
-      this.grabbedEntity = { village: best, p0: { x: best.x, y: best.y }, label: name };
-      return { ok: true, label: name, kind: 'village' };
-    }
-    return { ok: false, reason: 'Pinch over a village or tribe to grab' };
+    const i = civ.agentNear(p.x, p.y, 6);
+    if (i < 0) return { ok: false, reason: 'Pinch over a person to pick them up' };
+    const p0 = civ.agentPos(i);
+    this.grabbedEntity = { agent: i, p0, label: 'Villager' };
+    return { ok: true, label: 'Villager', kind: 'person' };
   }
 
   onGrabMove(aim) {
-    if (!this.grabbedEntity) return;
+    const g = this.grabbedEntity;
+    if (!g || !this.civ) return;
     const p = this.aimPlanet(aim);
-    this.grabbedEntity.village.x = p.x;
-    this.grabbedEntity.village.y = p.y;
+    this.civ.moveAgent(g.agent, p.x, p.y);   // they ride along under the hand (only over land)
   }
 
-  onGrabEnd({ x: aimX, y: aimY, cancelled = false }) {
-    if (!this.grabbedEntity) return;
-    const { village, p0 } = this.grabbedEntity;
+  onGrabEnd({ cancelled = false } = {}) {
+    const g = this.grabbedEntity;
+    if (!g) return;
     this.grabbedEntity = null;
-    if (cancelled) {
-      village.x = p0.x;
-      village.y = p0.y;
-    }
+    if (cancelled && this.civ) this.civ.moveAgent(g.agent, g.p0.x, g.p0.y);
   }
 
   // camera (#49): hand casts. aim is 0..1 like the brain's.

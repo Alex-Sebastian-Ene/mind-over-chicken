@@ -125,6 +125,10 @@ export class Civ {
   setupLines() { const len = this.ex.civ_setup_text_build(this.w); return this.str(this.ex.civ_text_buf_ptr(this.w), len).split('\n').filter(Boolean); }
   get time() { return this.ex.civ_time(this.w); }
   get agents() { return this.ex.civ_agent_count(this.w); }
+  // Pinch-grab a person (#188): the nearest living one, where they are, and setting them down.
+  agentNear(x, y, r) { return this.ex.civ_agent_near ? this.ex.civ_agent_near(this.w, x, y, r) : -1; }
+  agentPos(i) { return { x: this.ex.civ_agent_x(this.w, i), y: this.ex.civ_agent_y(this.w, i) }; }
+  moveAgent(i, x, y) { return !!this.ex.civ_move_agent?.(this.w, i, x, y); }
 
   // The camera's 320×180 view as ImageData (copied out of wasm memory).
   render() {
