@@ -106,6 +106,10 @@ export class Engine {
     pan_camera(dx: number, dz: number): void;
     project_to_screen(wx: number, wz: number, cw: number, ch: number): Float32Array;
     render_3d(dt: number, sun_x: number, sun_y: number, sun_z: number, night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
+    /**
+     * Blit an overlay canvas on top of the rendered 3D scene with alpha blending.
+     */
+    render_overlay_canvas(canvas: HTMLCanvasElement, alpha: number, canvas_w: number, canvas_h: number): void;
     render_uploaded_canvas(night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
     screen_to_ground(sx: number, sy: number, cw: number, ch: number): Float32Array;
     set_3d_mode(enabled: boolean): void;
@@ -114,7 +118,11 @@ export class Engine {
      * as open ocean. JS passes its palette's deep-water colour.
      */
     set_backdrop(r: number, g: number, b: number): void;
+    set_camera_distance(distance: number): void;
+    set_camera_pitch(pitch: number): void;
+    set_camera_pose(yaw: number, pitch: number, distance: number): void;
     set_camera_target(tx: number, tz: number): void;
+    set_camera_yaw(yaw: number): void;
     set_era(era: number): void;
     /**
      * Use the JS world's heights (row-major `width × height`, 0..1, sea level 0.33) for the 3D
@@ -429,6 +437,10 @@ export class RustWorldGen {
      */
     static planet(seed: number, biome: string): RustWorldGen;
     /**
+     * "learned, N steps" or "procedural".
+     */
+    static relief_status(): string;
+    /**
      * The base colour layer, RGBA.
      */
     rgba(): Uint8Array;
@@ -450,6 +462,14 @@ export class RustWorldGen {
      * Game tiles (the JS `T` codes).
      */
     types(): Uint8Array;
+    /**
+     * Use the learned relief (#110) for the worlds this wasm instance generates: the
+     * worldgen worker calls it, the main thread doesn't, so the model never runs on the main
+     * thread. Returns whether a model is loaded; without one (a build without
+     * `crates/moc-diffusion/weights/relief.mocd`, or weights that fail to load) generation stays
+     * exactly the procedural relief.
+     */
+    static use_learned_relief(on: boolean): boolean;
     width(): number;
 }
 
@@ -654,11 +674,16 @@ export interface InitOutput {
     readonly engine_pan_camera: (a: number, b: number, c: number) => void;
     readonly engine_project_to_screen: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly engine_render_3d: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
+    readonly engine_render_overlay_canvas: (a: number, b: any, c: number, d: number, e: number) => [number, number];
     readonly engine_render_uploaded_canvas: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly engine_screen_to_ground: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly engine_set_3d_mode: (a: number, b: number) => void;
     readonly engine_set_backdrop: (a: number, b: number, c: number, d: number) => void;
+    readonly engine_set_camera_distance: (a: number, b: number) => void;
+    readonly engine_set_camera_pitch: (a: number, b: number) => void;
+    readonly engine_set_camera_pose: (a: number, b: number, c: number, d: number) => void;
     readonly engine_set_camera_target: (a: number, b: number, c: number) => void;
+    readonly engine_set_camera_yaw: (a: number, b: number) => void;
     readonly engine_set_era: (a: number, b: number) => void;
     readonly engine_set_heightmap: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly engine_set_terrain_biome: (a: number, b: number, c: number) => void;
@@ -798,6 +823,7 @@ export interface InitOutput {
     readonly rustworldgen_new: (a: number) => number;
     readonly rustworldgen_owner: (a: number) => any;
     readonly rustworldgen_planet: (a: number, b: number, c: number) => number;
+    readonly rustworldgen_relief_status: () => [number, number];
     readonly rustworldgen_rgba: (a: number) => any;
     readonly rustworldgen_rivers: (a: number) => any;
     readonly rustworldgen_sites_json: (a: number) => [number, number];
@@ -810,6 +836,7 @@ export interface InitOutput {
     readonly rustworldgen_surface_types: (a: number) => any;
     readonly rustworldgen_surface_width: (a: number) => number;
     readonly rustworldgen_types: (a: number) => any;
+    readonly rustworldgen_use_learned_relief: (a: number) => number;
     readonly rustworldgen_width: (a: number) => number;
     readonly viewcamera_blits: (a: number) => [number, number];
     readonly viewcamera_blits_scaled: (a: number, b: number) => [number, number];
@@ -865,8 +892,8 @@ export interface InitOutput {
     readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
     readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
     readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__270: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__271: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__277: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__278: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

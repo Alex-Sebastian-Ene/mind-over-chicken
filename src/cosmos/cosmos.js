@@ -234,7 +234,7 @@ export class Cosmos extends ZoomState {
   }
 
   // Draw the cosmos into the low-res canvas, using what the scene just drew as the flat map.
-  render(low, ctx, G) {
+  render(low, ctx, G, { is3d = false } = {}) {
     if (this.z <= 0.001) return false;
     const fctx = this.flat.getContext('2d');
     fctx.clearRect(0, 0, W, H);
@@ -243,16 +243,15 @@ export class Cosmos extends ZoomState {
     const look = this.focusLook(G);
     const z = this.z;
     if (z <= 1) {
-      // #138: one continuous move. The flat map shrinks and curls onto a sphere (its rows bend
-      // in toward the poles), the real globe fades in at the same apparent size, and then the
-      // globe settles to its resting size. The globe used to grow from a small dot while the
-      // map shrank, so the two never lined up.
+      // #138: one continuous move. In 2D, the flat map shrinks and curls onto a sphere; in 3D,
+      // the true 3D surface mesh is rendered underneath and blends directly with the planetary globe.
       const bigR = lerp(BIG_R * 1.25, BIG_R, smoothstep(0.35, 1, z));
       const fa = 1 - smoothstep(0.42, 0.66, z);
-      if (fa > 0) this.drawCurledMap(ctx, smoothstep(0, 0.6, z), fa, bigR, look.atmosphere);
+      if (!is3d && fa > 0) this.drawCurledMap(ctx, smoothstep(0, 0.6, z), fa, bigR, look.atmosphere);
       const face = this.faceRot();
       const rot = face + wrapAngle(this.rot - face) * smoothstep(0.55, 1, z);
-      if (look.tex) this.globe.draw(ctx, look.tex, CENTER.x, CENTER.y, bigR, { rot, alpha: smoothstep(0.4, 0.62, z), light: SUN, atmosphere: look.atmosphere });
+      const globeAlpha = is3d ? smoothstep(0.12, 0.52, z) : smoothstep(0.4, 0.62, z);
+      if (look.tex) this.globe.draw(ctx, look.tex, CENTER.x, CENTER.y, bigR, { rot, alpha: globeAlpha, light: SUN, atmosphere: look.atmosphere });
       const lp = look.planet;
       if (lp && lp.flash > 0) drawPlanetBolt(ctx, CENTER.x, CENTER.y, bigR, lp.storms + 1, Math.min(1, lp.flash * 2) * smoothstep(0.5, 0.9, z));
       this.drawMoon(ctx, z);

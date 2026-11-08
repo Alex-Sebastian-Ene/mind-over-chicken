@@ -68,28 +68,9 @@ function label(ctx, x, y, text, color, size = 6, align = 'center') {
   ctx.fillText(text, x, y);
 }
 
-// The planet sizes a sandbox run can roll (Alex: different size planets).
-export const PLANET_SIZES = [
-  { name: 'small', w: 1280, h: 640, civs: 8 },
-  { name: 'medium', w: 1920, h: 960, civs: 12 },
-  { name: 'large', w: 2560, h: 1280, civs: 16 },
-  { name: 'huge', w: 3072, h: 1536, civs: 20 },
-];
-// The size for a run: a named size or WxH from the URL, else rolled from the seed.
-export function planetSize(seed, arg = null) {
-  const named = PLANET_SIZES.find((p) => p.name === arg);
-  if (named) return { ...named };
-  const m = /^(\d+)x(\d+)$/.exec(arg || '');
-  if (m) {
-    const [w, h] = [m[1], m[2]].map((v) => Math.max(320, Math.min(4096, Number(v))));
-    // Peoples in proportion to the area, as the named sizes have them.
-    return { name: `${w}x${h}`, w, h, civs: Math.max(4, Math.min(20, Math.round(8 * Math.sqrt((w * h) / (1280 * 640))))) };
-  }
-  let x = (seed ^ 0x9e3779b9) >>> 0;
-  x = Math.imul(x ^ (x >>> 16), 0x45d9f3b) >>> 0;
-  x = (x ^ (x >>> 16)) >>> 0;
-  return { ...PLANET_SIZES[x % PLANET_SIZES.length] };
-}
+// Planet sizes, the player's pick and the random roll live in planet-size.js (DOM-free, tested).
+export { PLANET_SIZES, planetSize, planetChoice, initPlanetSizePicker } from './planet-size.js';
+import { planetSize, planetChoice } from './planet-size.js';
 
 const smoothstep = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
 
@@ -100,7 +81,7 @@ export class CivSandbox {
     this.label = 'Sandbox · A crowded planet';
     this.intro = {
       title: 'A crowded planet',
-      goal: 'Found your four peoples on a planet of random size, one at a time: choose one, place it, and seed its temper from your mind for 5 seconds. Rival peoples rise on their own: 4 on a small planet, up to 16 on a huge one. Watch them all climb twenty ages, trade, ally, fight and split. Your mind tilts war and peace.',
+      goal: 'Found your four peoples on a planet of the size you picked (or a random one), one at a time: choose one, place it, and seed its temper from your mind for 5 seconds. Rival peoples rise on their own: 4 on a small planet, up to 16 on a huge one. Watch them all climb twenty ages, trade, ally, fight and split. Your mind tilts war and peace.',
       how: [
         ['Calm', 'Hold Space: friendlier chiefs, trade, peace treaties, fewer rebels.'],
         ['Stress', 'Hold Shift (or frown at the camera): stress and anger bring raids, wars and rebellions.'],
@@ -175,7 +156,7 @@ export class CivSandbox {
     // peoples on it (the player's four plus rivals that arrive on their own). Overrides:
     // ?planet=small|medium|large|huge or WxH, and ?civs=4..20.
     const q = new URLSearchParams(location.search);
-    const size = planetSize(this.seed, q.get('planet'));
+    const size = planetSize(this.seed, q.get('planet') || planetChoice());
     const civs = Math.max(4, Math.min(20, Number(q.get('civs')) || size.civs));
     this.planetSize = { ...size, civs };
     G.advisor.say('civ-intro', `A ${size.name} planet, my lord, and ${civs} peoples on it: your four and ${civs - 4} rivals. They will grow, squabble and split. Your moods are now everyone's problem.`, { priority: 3, cooldown: 999 });

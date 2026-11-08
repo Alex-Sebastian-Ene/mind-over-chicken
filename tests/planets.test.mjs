@@ -505,3 +505,22 @@ test('new worlds form one by one, FORM_SECONDS each', async () => {
     assert.equal(g.formQueue.length, 0);
   } finally { console.error = err; }
 });
+
+test('zoom in from planet globe to surface maintains continuous 3D camera zoom (#207)', () => {
+  const z = new ZoomState();
+  z.target = 1;
+  z.z = 1.0;
+  assert.equal(z.target, 1);
+  assert.equal(z.z, 1.0);
+
+  // Zoom in towards surface
+  z.zoomIn();
+  assert.equal(z.target, 0);
+
+  // Over spring interpolation down to 0, z smoothly descends without overshooting
+  for (let i = 0; i < 20; i++) {
+    z.update(0.05);
+  }
+  assert.ok(z.z < 0.2, `expected descent below 0.2, got ${z.z}`);
+  assert.ok(z.z >= 0, `expected non-negative zoom, got ${z.z}`);
+});

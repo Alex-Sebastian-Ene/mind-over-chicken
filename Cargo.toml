@@ -8,6 +8,7 @@ members = [
     "crates/moc-cosmos",
     "crates/moc-brain",
     "crates/moc-terrain",
+    "crates/moc-diffusion",
 ]
 resolver = "2"
 
@@ -20,3 +21,8 @@ opt-level = 3
 # its hot loops for a few seconds more of compile time.
 [profile.release.package.moc-terrain]
 codegen-units = 1
+
+# The learned relief (#110) is a few hundred million multiply-adds per map: keep it optimised
+# in debug and test builds as well.
+[profile.dev.package.moc-diffusion]
+opt-level = 3

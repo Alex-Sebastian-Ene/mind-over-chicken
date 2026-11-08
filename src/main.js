@@ -1,6 +1,8 @@
 // Mind over Chicken: boot, scene flow, render pipeline and input.
 
-import { W, H, HOME_W, HOME_H, clamp, wrapDelta } from './sim/util.js';
+import { W, H, HOME_W, HOME_H, clamp, lerp, wrapDelta } from './sim/util.js';
+
+const smoothstep = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
 import { World, setRustWorldGen } from './world/terrain.js';
 import { SimSource, BridgeSource, setRustSimSource } from './brain/sources.js';
 import { Brain, setRustBrain } from './brain/brain.js';
@@ -44,7 +46,7 @@ import { setRustAgentHelpers } from './sim/agents.js';
 import { initDebug } from './camera/debug.js'; // camera debug (#67)
 import { Calibration, readCalibrationConfig, setRustCalibration } from './brain/calibration.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
-import { CivSandbox } from './civ/sandbox.js'; // civ (#50)
+import { CivSandbox, initPlanetSizePicker } from './civ/sandbox.js'; // civ (#50)
 import { worldMeta, renderWorldDetail } from './cosmos/panel.js'; // planets (#68)
 import { SimPlanet } from './ai/planet.js';
 import { AIGod } from './ai/autopilot.js';
@@ -65,6 +67,8 @@ const textLayer = $('textLayer');
 const textCtx = textLayer.getContext('2d');
 const low = Object.assign(document.createElement('canvas'), { width: W, height: H });
 const lowCtx = low.getContext('2d');
+const cosmosCanvas = Object.assign(document.createElement('canvas'), { width: W, height: H });
+const cosmosCtx = cosmosCanvas.getContext('2d');
 let K = 3;
 let engine = null;
 let viewCam = null;
@@ -770,10 +774,10 @@ function render() {
   lowCtx.setTransform(1, 0, 0, 1, 0, 0);
   lowCtx.clearRect(0, 0, W, H);
   const windowed = worldScene(scene);
-  // 3D only on the surface itself: once the globe zoom starts, the flat 2D map takes over (the
-  // 3D camera has already tipped over to that exact frame, so the hand-over is seamless).
+  // In 3D mode, the 3D map is kept active continuously between orbit and surface (continuous zoom down from globe).
   G.render3d = in3dSurface();
   globalThis.__moc_render3d = G.render3d;
+  const z = cosmos?.z || 0;
   if (G.render3d) {
     if (windowed && cosmos.view) {
       // One camera for both views: the 3D target is the centre of the 2D window (#129).
@@ -785,7 +789,19 @@ function render() {
       const cz = scene.civ ? (H / 2) : clamp(((scene.camY ?? 0) + H / 2) / vh * H, 10, H - 10);
       engine.set_camera_target(cx, cz);
     }
-    stepCam3dTween();
+    if (z > 0.001 && z < 1.0) {
+      // Continuous camera zoom between orbit and ground
+      const k = clamp(z / 0.75);
+      const groundDist = CAM3D.blendFrom;
+      const targetDist = groundDist + (CAM3D.topDown - groundDist) * k;
+      const targetPitch = 1.05 + (CAM3D.topPitch - 1.05) * k;
+      if (typeof engine.set_camera_distance === 'function') {
+        engine.set_camera_distance(targetDist);
+        engine.set_camera_pitch(targetPitch);
+      }
+    } else {
+      stepCam3dTween();
+    }
   }
   // In 3D, scenes with draw3d stand their actors up as sprites, so they skip painting them flat.
   let ctx = lowCtx;
@@ -804,12 +820,20 @@ function render() {
     else cosmos.blitView(worldCanvas, low);
   }
   if (!G.render3d) scene.drawScreen?.(lowCtx);
-  const cosmic = cosmos.render(low, lowCtx, G);
+  if (!windowed && !G.render3d && scene?.phase !== 'voyage') cosmos.applyPan(low);
+
+  let cosmic = false;
+  if (!G.render3d || z >= 1.0) {
+    cosmic = cosmos.render(low, lowCtx, G, { is3d: false });
+  } else if (z > 0.001) {
+    cosmosCtx.imageSmoothingEnabled = false;
+    cosmosCtx.clearRect(0, 0, W, H);
+    cosmic = cosmos.render(low, cosmosCtx, G, { is3d: true });
+  }
 
   // Zooming out fades the surface's night lighting and labels; the globe and galaxy
   // carry their own shading, so the night shader must not dim space.
-  const z = cosmos.z || 0;
-  const surface = !cosmic || z < 0.3;
+  const surface = !cosmic || z < 1.0;
   const k = cosmic ? Math.max(0, 1 - z / 0.3) : 1;
   const dark = scene.phase === 'voyage' ? 0 : (scene.darkness || 0) * k;
   const flash = (scene.flash || 0) * k;
@@ -822,7 +846,7 @@ function render() {
 
   if (engine) {
     try {
-      if (surface && G.render3d) {
+      if (G.render3d && z < 1.0) {
         sync3dWorldMesh(scene);
         engine.begin_frame();
         // The 3D terrain texture: the home world's world-sized canvas (#129), or the view canvas
@@ -848,6 +872,14 @@ function render() {
         const sunY = 0.85;
         const sunZ = Math.sin(sunAngle);
         engine.render_3d(0.016, sunX, sunY, sunZ, dark, flash, fade, sx, sy, screen.width, screen.height);
+
+        // Continuous overlay blend between 3D planet view and 3D map view
+        if (z > 0.001) {
+          const overlayAlpha = smoothstep(0.04, 0.70, z);
+          if (overlayAlpha > 0.001 && typeof engine.render_overlay_canvas === 'function') {
+            engine.render_overlay_canvas(cosmosCanvas, overlayAlpha, screen.width, screen.height);
+          }
+        }
       } else {
         // begin_frame clears last frame's lights; without it they pile up every frame (#38).
         engine.begin_frame();
@@ -1088,15 +1120,14 @@ function sync3dWorldMesh(scene) {
   }
 }
 
-// 3D world: enabled whenever looking at home or other planet's surface at z <= 0.
+// 3D world: enabled whenever looking at any planet's surface (including continuous zoom down from globe).
 function in3dSurface() {
   const scene = cosmos?.viewScene?.(G) || G?.scene;
   if (scene?.phase === 'voyage') return false;
   return Boolean(
     engine &&
     engine.is_3d_mode() &&
-    !cosmos.active &&
-    !((cosmos.z || 0) > 0)
+    (!cosmos || !cosmos.active || (cosmos.z || 0) < 1.0)
   );
 }
 function applyCam3dBlend() {
@@ -1128,7 +1159,12 @@ function zoomOutFromSurface() {
     return;
   }
   if (!in3dSurface()) { cosmos.zoomOut(G); return; }
-  cam3dTween = { from: engine.get_camera_distance(), t0: performance.now(), dur: 350 };
+  const d = engine.get_camera_distance();
+  if (d < CAM3D.topDown - 4) {
+    cam3dTween = { from: d, t0: performance.now(), dur: 300 };
+  } else {
+    cosmos.zoomOut(G);
+  }
 }
 function zoomInOnSurface() {
   const scene = cosmos?.viewScene?.(G) || G?.scene;
@@ -1136,7 +1172,11 @@ function zoomInOnSurface() {
     scene.onWheel?.(-100);
     return;
   }
-  if (in3dSurface()) { cam3dTween = null; zoom3dBy(0.8); return; }
+  if (in3dSurface() && (cosmos?.z || 0) <= 0.01) {
+    cam3dTween = null;
+    zoom3dBy(0.8);
+    return;
+  }
   cosmos.zoomIn(G);
 }
 function stepCam3dTween() {
@@ -1266,7 +1306,7 @@ screen.addEventListener('wheel', (e) => {
   // Horizontal scroll (or Shift+scroll) pans the surface; in 3D the camera follows the pan.
   const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey;
   if (horizontal && !cosmos.active) { cosmos.pan(-(e.shiftKey ? e.deltaY : e.deltaX) * 0.15); return; }
-  if (in3dSurface()) {
+  if (in3dSurface() && (cosmos?.z || 0) <= 0.01) {
     cam3dTween = null;
     const scene = cosmos?.viewScene?.(G) || G?.scene;
     // Already looking straight down at the whole map: the next notch hands over to the globe.
@@ -1433,7 +1473,7 @@ function updateCosmosUi(dt) {
   if (uiTimer > 0 || !G) return;
   uiTimer = 0.2;
   $('zoomLabel').textContent = cosmos.levelLabel();
-  $('zoomIn').disabled = in3dSurface() ? (engine?.get_camera_distance?.() <= 14) : (cosmos.target <= cosmos.minLevel());
+  $('zoomIn').disabled = (in3dSurface() && (cosmos?.z || 0) <= 0.01) ? (engine?.get_camera_distance?.() <= 14) : (cosmos.target <= cosmos.minLevel());
   $('zoomOut').disabled = cosmos.target >= 2;
   const gal = cosmos.galaxy;
   const show = !!gal && (cosmos.target >= 1 || cosmos.z > 0.5 || G.sandbox);
@@ -1532,7 +1572,8 @@ $('playSandbox').addEventListener('click', () => {
   advisor.setEra('space');
   advisor.say('sandbox', 'Galaxy sandbox, my lord. Three worlds are forming from your thoughts. Make more planets and let them run.', { mood: 'happy', priority: 3, cooldown: 999 });
 });
-// civ (#50): "Sandbox: four civilisations" runs its own scene (Rust sim in src/civ/) on the emulated headset.
+// civ (#50): "Sandbox: a crowded planet" runs its own scene (Rust sim in src/civ/) on the emulated headset.
+initPlanetSizePicker($('planetSizePick'));   // Small/Medium/Large/Huge or Random (Alex)
 $('playCiv').addEventListener('click', () => {
   begin(new SimSource());
   const scene = new CivSandbox({ cosmos });
@@ -1588,7 +1629,7 @@ window.__moc.camera = initCamera({
   onZoomDelta: (delta, factor) => {
     // Two-hand continuous pinch zoom: delta > 0 is zoom in (hands spread), delta < 0 is zoom out (hands together)
     if (!G) return;
-    if (in3dSurface()) {
+    if (in3dSurface() && (cosmos?.z || 0) <= 0.01) {
       cam3dTween = null;
       if (delta < 0 && engine.get_camera_distance() >= CAM3D.topDown - 0.5) {
         cosmos.zoomOut(G);
@@ -1604,7 +1645,7 @@ window.__moc.camera = initCamera({
   onGrabMove: ({ dx, dy, active, started, released, aim }) => {
     // One-hand pinch grab & move the globe or world view
     if (!G) return;
-    if (cosmos.active || cosmos.z > 0.4) {
+    if (cosmos.active || (cosmos?.z || 0) > 0.05) {
       if (active) {
         // In normalized hand space (-1..1). Moving hand right rotates globe right.
         const spin = -dx * 3.5;
@@ -1613,7 +1654,7 @@ window.__moc.camera = initCamera({
       }
       return;
     }
-    if (in3dSurface()) {
+    if (in3dSurface() && (cosmos?.z || 0) <= 0.01) {
       if (active && (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001)) {
         engine.orbit_camera(-dx * 3.5, dy * 3.5);
         cam3dBase = null;

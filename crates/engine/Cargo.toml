@@ -17,6 +17,7 @@ moc-brain = { path = "../moc-brain" }
 moc-cosmos = { path = "../moc-cosmos" }
 moc-planet = { path = "../moc-planet" }
 moc-terrain = { path = "../moc-terrain" }
+moc-diffusion = { path = "../moc-diffusion" }
 
 [dependencies.web-sys]
 version = "0.3"
