@@ -164,6 +164,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 /* era intro card */
 .banner {
   position: absolute; inset: 0;
+  z-index: 28; /* above the coach panel (25): its Begin button must always be clickable (#182) */
   display: grid; place-items: center;
   background: rgba(5, 6, 15, 0.55);
   padding: 12px;

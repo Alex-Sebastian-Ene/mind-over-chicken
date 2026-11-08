@@ -1,0 +1,2356 @@
+{
+  "commander": "/scratch/ase1g23/civ_war/runs/full-s0/commander.mocp",
+  "council": "/scratch/ase1g23/civ_war/runs/full-s0/council.mocp",
+  "issue": 100,
+  "old": "/scratch/ase1g23/civ_war/runs/full-s0/league/council-c1_duel_small-final.mocp",
+  "scenarios": {
+    "duel": {
+      "calm_vs_stress": {
+        "ppo": {
+          "calm": {
+            "agents_peak": 746.969,
+            "battles_per_world": 3.469,
+            "decide_ms_mean": 0.0181,
+            "peaces_per_world": 0.688,
+            "raids_per_world": 1.5,
+            "sim_ms_per_sim_second": 1.293,
+            "war_time_share": 0.003,
+            "wars_per_world": 0.594,
+            "worlds": 32
+          },
+          "hostile_stance_share_calm": 0.089,
+          "hostile_stance_share_stress": 0.262,
+          "stances_calm": {
+            "alliance": 6896.0,
+            "peace": 3159.0,
+            "rivalry": 1426.0,
+            "submit": 0.0,
+            "trade": 4762.0,
+            "war": 24.0
+          },
+          "stances_stress": {
+            "alliance": 12310.0,
+            "peace": 7478.0,
+            "rivalry": 8485.0,
+            "submit": 879.0,
+            "trade": 10313.0,
+            "war": 2530.0
+          },
+          "stress": {
+            "agents_peak": 671.469,
+            "battles_per_world": 347.125,
+            "decide_ms_mean": 0.0156,
+            "peaces_per_world": 34.938,
+            "raids_per_world": 234.094,
+            "sim_ms_per_sim_second": 2.243,
+            "war_time_share": 0.439,
+            "wars_per_world": 44.563,
+            "worlds": 32
+          }
+        },
+        "rules": {
+          "calm": {
+            "agents_peak": 718.469,
+            "battles_per_world": 3.188,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 2.719,
+            "raids_per_world": 2.5,
+            "sim_ms_per_sim_second": 1.353,
+            "war_time_share": 0.069,
+            "wars_per_world": 2.781,
+            "worlds": 32
+          },
+          "stress": {
+            "agents_peak": 495.75,
+            "battles_per_world": 57.031,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 35.344,
+            "raids_per_world": 67.438,
+            "sim_ms_per_sim_second": 1.254,
+            "war_time_share": 0.429,
+            "wars_per_world": 44.719,
+            "worlds": 32
+          }
+        }
+      },
+      "conditions": {
+        "commander": {
+          "civs": {
+            "age_end": 4.766,
+            "ages_gained": -1.82,
+            "battles_lost": 12.604,
+            "battles_won": 13.234,
+            "civs": 111,
+            "peak_age": 6.973,
+            "pop_end": 46.144,
+            "pop_start": 145.234,
+            "score": 15.208,
+            "survival": 0.649,
+            "villages_captured": 1.766,
+            "villages_end": 8.27,
+            "villages_lost": 0.622,
+            "war_deaths": 110.225,
+            "war_seconds": 296.216,
+            "wars_declared": 4.405
+          },
+          "opportunistic_share_of_wars_events": 0.679,
+          "world": {
+            "agents_peak": 627.125,
+            "battles_per_world": 124.844,
+            "decide_ms_mean": 0.0164,
+            "peaces_per_world": 49.406,
+            "raids_per_world": 121.5,
+            "sim_ms_per_sim_second": 1.791,
+            "war_time_share": 0.329,
+            "wars_per_world": 65.375,
+            "worlds": 32
+          }
+        },
+        "mixed": {
+          "civs": {
+            "age_end": 4.505,
+            "ages_gained": -2.081,
+            "battles_lost": 8.126,
+            "battles_won": 10.414,
+            "civs": 111,
+            "peak_age": 6.874,
+            "pop_end": 43.144,
+            "pop_start": 145.234,
+            "score": 15.126,
+            "survival": 0.667,
+            "villages_captured": 2.072,
+            "villages_end": 8.261,
+            "villages_lost": 0.793,
+            "war_deaths": 115.279,
+            "war_seconds": 320.306,
+            "wars_declared": 4.973
+          },
+          "opportunistic_share_of_wars_events": 0.667,
+          "world": {
+            "agents_peak": 621.75,
+            "battles_per_world": 91.281,
+            "decide_ms_mean": 0.0154,
+            "peaces_per_world": 44.938,
+            "raids_per_world": 100.469,
+            "sim_ms_per_sim_second": 1.667,
+            "war_time_share": 0.356,
+            "wars_per_world": 57.594,
+            "worlds": 32
+          }
+        },
+        "old": {
+          "civs": {
+            "age_end": 4.775,
+            "ages_gained": -1.811,
+            "battles_lost": 13.171,
+            "battles_won": 13.369,
+            "civs": 111,
+            "peak_age": 6.991,
+            "pop_end": 58.216,
+            "pop_start": 145.234,
+            "score": 16.314,
+            "survival": 0.703,
+            "villages_captured": 1.865,
+            "villages_end": 9.541,
+            "villages_lost": 0.847,
+            "war_deaths": 116.387,
+            "war_seconds": 336.514,
+            "wars_declared": 4.937
+          },
+          "opportunistic_share_of_wars_events": 0.697,
+          "world": {
+            "agents_peak": 598.344,
+            "battles_per_world": 122.844,
+            "decide_ms_mean": 0.0164,
+            "peaces_per_world": 49.75,
+            "raids_per_world": 112.406,
+            "sim_ms_per_sim_second": 1.748,
+            "war_time_share": 0.374,
+            "wars_per_world": 65.375,
+            "worlds": 32
+          }
+        },
+        "ppo": {
+          "civs": {
+            "age_end": 4.135,
+            "ages_gained": -2.45,
+            "battles_lost": 19.459,
+            "battles_won": 21.288,
+            "civs": 111,
+            "peak_age": 7.009,
+            "pop_end": 43.486,
+            "pop_start": 145.234,
+            "score": 15.205,
+            "survival": 0.721,
+            "villages_captured": 0.315,
+            "villages_end": 7.405,
+            "villages_lost": 0.261,
+            "war_deaths": 111.784,
+            "war_seconds": 258.045,
+            "wars_declared": 3.541
+          },
+          "opportunistic_share_of_wars_events": 0.567,
+          "world": {
+            "agents_peak": 706.594,
+            "battles_per_world": 222.719,
+            "decide_ms_mean": 0.0165,
+            "peaces_per_world": 26.875,
+            "raids_per_world": 133.063,
+            "sim_ms_per_sim_second": 2.088,
+            "war_time_share": 0.287,
+            "wars_per_world": 32.125,
+            "worlds": 32
+          }
+        },
+        "ppo_calm": {
+          "civs": {
+            "age_end": 11.734,
+            "ages_gained": 4.313,
+            "battles_lost": 0.547,
+            "battles_won": 1.344,
+            "civs": 64,
+            "peak_age": 11.797,
+            "pop_end": 336.328,
+            "pop_start": 296.078,
+            "score": 35.441,
+            "survival": 1.0,
+            "villages_captured": 0.0,
+            "villages_end": 40.078,
+            "villages_lost": 0.078,
+            "war_deaths": 25.469,
+            "war_seconds": 3.109,
+            "wars_declared": 0.141
+          },
+          "opportunistic_share_of_wars_events": 0.556,
+          "world": {
+            "agents_peak": 746.969,
+            "battles_per_world": 3.469,
+            "decide_ms_mean": 0.0181,
+            "peaces_per_world": 0.688,
+            "raids_per_world": 1.5,
+            "sim_ms_per_sim_second": 1.293,
+            "war_time_share": 0.003,
+            "wars_per_world": 0.594,
+            "worlds": 32
+          }
+        },
+        "ppo_stress": {
+          "civs": {
+            "age_end": 3.481,
+            "ages_gained": -2.74,
+            "battles_lost": 28.317,
+            "battles_won": 27.827,
+            "civs": 104,
+            "peak_age": 5.817,
+            "pop_end": 28.25,
+            "pop_start": 135.952,
+            "score": 12.79,
+            "survival": 0.606,
+            "villages_captured": 0.413,
+            "villages_end": 5.779,
+            "villages_lost": 0.462,
+            "war_deaths": 101.394,
+            "war_seconds": 394.76,
+            "wars_declared": 4.817
+          },
+          "opportunistic_share_of_wars_events": 0.485,
+          "world": {
+            "agents_peak": 671.469,
+            "battles_per_world": 347.125,
+            "decide_ms_mean": 0.0156,
+            "peaces_per_world": 34.938,
+            "raids_per_world": 234.094,
+            "sim_ms_per_sim_second": 2.243,
+            "war_time_share": 0.439,
+            "wars_per_world": 44.563,
+            "worlds": 32
+          }
+        },
+        "rules": {
+          "civs": {
+            "age_end": 4.676,
+            "ages_gained": -1.91,
+            "battles_lost": 5.387,
+            "battles_won": 5.955,
+            "civs": 111,
+            "peak_age": 6.586,
+            "pop_end": 52.396,
+            "pop_start": 145.234,
+            "score": 15.481,
+            "survival": 0.649,
+            "villages_captured": 3.486,
+            "villages_end": 9.568,
+            "villages_lost": 1.342,
+            "war_deaths": 129.0,
+            "war_seconds": 264.054,
+            "wars_declared": 4.856
+          },
+          "opportunistic_share_of_wars_events": 0.594,
+          "world": {
+            "agents_peak": 552.625,
+            "battles_per_world": 50.938,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 30.531,
+            "raids_per_world": 60.719,
+            "sim_ms_per_sim_second": 1.314,
+            "war_time_share": 0.293,
+            "wars_per_world": 39.25,
+            "worlds": 32
+          }
+        },
+        "rules_calm": {
+          "civs": {
+            "age_end": 11.438,
+            "ages_gained": 4.016,
+            "battles_lost": 1.125,
+            "battles_won": 1.125,
+            "civs": 64,
+            "peak_age": 11.656,
+            "pop_end": 323.75,
+            "pop_start": 296.078,
+            "score": 34.779,
+            "survival": 1.0,
+            "villages_captured": 1.484,
+            "villages_end": 38.844,
+            "villages_lost": 0.969,
+            "war_deaths": 70.969,
+            "war_seconds": 62.156,
+            "wars_declared": 0.75
+          },
+          "opportunistic_share_of_wars_events": 0.021,
+          "world": {
+            "agents_peak": 718.469,
+            "battles_per_world": 3.188,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 2.719,
+            "raids_per_world": 2.5,
+            "sim_ms_per_sim_second": 1.353,
+            "war_time_share": 0.069,
+            "wars_per_world": 2.781,
+            "worlds": 32
+          }
+        },
+        "rules_stress": {
+          "civs": {
+            "age_end": 4.837,
+            "ages_gained": -1.385,
+            "battles_lost": 4.75,
+            "battles_won": 6.192,
+            "civs": 104,
+            "peak_age": 6.74,
+            "pop_end": 51.865,
+            "pop_start": 135.952,
+            "score": 16.677,
+            "survival": 0.702,
+            "villages_captured": 4.308,
+            "villages_end": 10.837,
+            "villages_lost": 1.74,
+            "war_deaths": 140.538,
+            "war_seconds": 385.894,
+            "wars_declared": 6.308
+          },
+          "opportunistic_share_of_wars_events": 0.637,
+          "world": {
+            "agents_peak": 495.75,
+            "battles_per_world": 57.031,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 35.344,
+            "raids_per_world": 67.438,
+            "sim_ms_per_sim_second": 1.254,
+            "war_time_share": 0.429,
+            "wars_per_world": 44.719,
+            "worlds": 32
+          }
+        }
+      },
+      "head_to_head_final_vs_old": {
+        "elo_gap": -5.186,
+        "games": 134.0,
+        "old": {
+          "age_end": 5.038,
+          "ages_gained": -1.654,
+          "battles_lost": 13.154,
+          "battles_won": 12.442,
+          "civs": 52,
+          "peak_age": 7.423,
+          "pop_end": 63.462,
+          "pop_start": 139.192,
+          "score": 17.152,
+          "survival": 0.731,
+          "villages_captured": 3.538,
+          "villages_end": 10.346,
+          "villages_lost": 0.538,
+          "war_deaths": 133.923,
+          "war_seconds": 324.692,
+          "wars_declared": 5.212
+        },
+        "ppo": {
+          "age_end": 4.542,
+          "ages_gained": -1.949,
+          "battles_lost": 13.186,
+          "battles_won": 14.186,
+          "civs": 59,
+          "peak_age": 6.61,
+          "pop_end": 53.593,
+          "pop_start": 150.559,
+          "score": 15.575,
+          "survival": 0.678,
+          "villages_captured": 0.39,
+          "villages_end": 8.831,
+          "villages_lost": 1.119,
+          "war_deaths": 100.932,
+          "war_seconds": 346.932,
+          "wars_declared": 4.695
+        },
+        "win_rate": 0.493
+      },
+      "head_to_head_ppo_vs_rules": {
+        "elo_gap": 2.593,
+        "games": 134.0,
+        "ppo": {
+          "age_end": 4.424,
+          "ages_gained": -2.068,
+          "battles_lost": 9.949,
+          "battles_won": 12.627,
+          "civs": 59,
+          "peak_age": 7.339,
+          "pop_end": 50.017,
+          "pop_start": 150.559,
+          "score": 15.755,
+          "survival": 0.712,
+          "villages_captured": 0.678,
+          "villages_end": 8.695,
+          "villages_lost": 0.949,
+          "war_deaths": 120.542,
+          "war_seconds": 348.746,
+          "wars_declared": 4.305
+        },
+        "rules": {
+          "age_end": 4.596,
+          "ages_gained": -2.096,
+          "battles_lost": 6.058,
+          "battles_won": 7.904,
+          "civs": 52,
+          "peak_age": 6.346,
+          "pop_end": 35.346,
+          "pop_start": 139.192,
+          "score": 14.413,
+          "survival": 0.615,
+          "villages_captured": 3.654,
+          "villages_end": 7.769,
+          "villages_lost": 0.615,
+          "war_deaths": 109.308,
+          "war_seconds": 288.038,
+          "wars_declared": 5.731
+        },
+        "win_rate": 0.504
+      },
+      "head_to_head_trained_vs_scripted_commander": {
+        "elo_gap": -5.186,
+        "games": 134.0,
+        "ppo": {
+          "age_end": 4.966,
+          "ages_gained": -1.525,
+          "battles_lost": 13.508,
+          "battles_won": 13.085,
+          "civs": 59,
+          "peak_age": 7.136,
+          "pop_end": 48.271,
+          "pop_start": 150.559,
+          "score": 15.641,
+          "survival": 0.661,
+          "villages_captured": 0.475,
+          "villages_end": 8.678,
+          "villages_lost": 0.78,
+          "war_deaths": 114.847,
+          "war_seconds": 319.288,
+          "wars_declared": 4.966
+        },
+        "scripted": {
+          "age_end": 4.538,
+          "ages_gained": -2.154,
+          "battles_lost": 11.577,
+          "battles_won": 13.404,
+          "civs": 52,
+          "peak_age": 6.788,
+          "pop_end": 43.731,
+          "pop_start": 139.192,
+          "score": 14.716,
+          "survival": 0.635,
+          "villages_captured": 3.231,
+          "villages_end": 7.808,
+          "villages_lost": 0.442,
+          "war_deaths": 104.981,
+          "war_seconds": 270.038,
+          "wars_declared": 3.769
+        },
+        "win_rate": 0.493
+      },
+      "n_civs": 2,
+      "planet": [
+        640,
+        320
+      ],
+      "seconds_after_warmup": 900.0,
+      "seeds": 32,
+      "strategy_mixed_ppo_civs": {
+        "multi_front_defence_share": 0.429,
+        "opportunistic_share_of_wars": 0.483,
+        "per_world": {
+          "alliances_formed": 15.781,
+          "coalitions_joined": 1.344,
+          "gang_ups_on_strongest": 0.219,
+          "multi_front_seconds": 233.375,
+          "opportunistic_strikes": 3.156,
+          "peace_sued": 12.5,
+          "peace_sued_while_losing": 7.469,
+          "raids_ordered": 10.5,
+          "truces_broken": 1.031,
+          "wars_declared": 6.531
+        },
+        "share_of_peace_offers_made_while_losing": 0.598,
+        "stances": {
+          "alliance": 6880.0,
+          "peace": 4248.0,
+          "rivalry": 3756.0,
+          "submit": 505.0,
+          "trade": 5454.0,
+          "war": 947.0
+        },
+        "war_goals": {
+          "capital": 1032.0,
+          "defend_ally": 1.0,
+          "punish": 1646.0,
+          "raid": 2882.0,
+          "village": 2651.0
+        }
+      },
+      "strategy_ppo": {
+        "multi_front_defence_share": 0.438,
+        "opportunistic_share_of_wars": 0.38,
+        "per_world": {
+          "alliances_formed": 17.688,
+          "coalitions_joined": 1.594,
+          "gang_ups_on_strongest": 0.781,
+          "multi_front_seconds": 262.688,
+          "opportunistic_strikes": 4.344,
+          "peace_sued": 32.5,
+          "peace_sued_while_losing": 19.813,
+          "raids_ordered": 33.594,
+          "truces_broken": 2.219,
+          "wars_declared": 11.438
+        },
+        "share_of_peace_offers_made_while_losing": 0.61,
+        "stances": {
+          "alliance": 14750.0,
+          "peace": 9264.0,
+          "rivalry": 9589.0,
+          "submit": 797.0,
+          "trade": 12392.0,
+          "war": 1871.0
+        },
+        "war_goals": {
+          "capital": 2160.0,
+          "defend_ally": 0.0,
+          "punish": 3150.0,
+          "raid": 6818.0,
+          "village": 4965.0
+        }
+      },
+      "traits": {
+        "aggressive (aggr>=0.6, friend<0.5)": {
+          "alliances": 4.38,
+          "civs": 50,
+          "friendly_stance_rate": 0.499,
+          "hostile_stance_rate": 0.291,
+          "mobilisation": 0.24,
+          "wars_declared": 3.68
+        },
+        "civs": 155,
+        "corr_aggressiveness_hostile_stance": 0.343,
+        "corr_aggressiveness_mobilisation": 0.111,
+        "corr_aggressiveness_wars": -0.015,
+        "corr_friendliness_friendly_stance": 0.36,
+        "corr_friendliness_hostile_stance": -0.318,
+        "friendly (friend>=0.6, aggr<0.5)": {
+          "alliances": 10.909,
+          "civs": 11,
+          "friendly_stance_rate": 0.649,
+          "hostile_stance_rate": 0.172,
+          "mobilisation": 0.205,
+          "wars_declared": 3.273
+        },
+        "others": {
+          "alliances": 7.787,
+          "civs": 94,
+          "friendly_stance_rate": 0.56,
+          "hostile_stance_rate": 0.228,
+          "mobilisation": 0.231,
+          "wars_declared": 4.117
+        }
+      }
+    },
+    "eight": {
+      "calm_vs_stress": {
+        "ppo": {
+          "calm": {
+            "agents_peak": 1672.031,
+            "battles_per_world": 46.688,
+            "decide_ms_mean": 0.0183,
+            "peaces_per_world": 4.281,
+            "raids_per_world": 12.563,
+            "sim_ms_per_sim_second": 3.858,
+            "war_time_share": 0.01,
+            "wars_per_world": 3.719,
+            "worlds": 32
+          },
+          "hostile_stance_share_calm": 0.093,
+          "hostile_stance_share_stress": 0.168,
+          "stances_calm": {
+            "alliance": 43255.0,
+            "peace": 22811.0,
+            "rivalry": 9995.0,
+            "submit": 47.0,
+            "trade": 33478.0,
+            "war": 225.0
+          },
+          "stances_stress": {
+            "alliance": 59851.0,
+            "peace": 34480.0,
+            "rivalry": 24398.0,
+            "submit": 1083.0,
+            "trade": 48608.0,
+            "war": 4736.0
+          },
+          "stress": {
+            "agents_peak": 1133.156,
+            "battles_per_world": 246.438,
+            "decide_ms_mean": 0.0169,
+            "peaces_per_world": 30.75,
+            "raids_per_world": 146.156,
+            "sim_ms_per_sim_second": 4.001,
+            "war_time_share": 0.159,
+            "wars_per_world": 29.719,
+            "worlds": 32
+          }
+        },
+        "rules": {
+          "calm": {
+            "agents_peak": 1598.594,
+            "battles_per_world": 16.906,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 16.844,
+            "raids_per_world": 24.5,
+            "sim_ms_per_sim_second": 3.748,
+            "war_time_share": 0.103,
+            "wars_per_world": 16.969,
+            "worlds": 32
+          },
+          "stress": {
+            "agents_peak": 1060.75,
+            "battles_per_world": 126.688,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 74.25,
+            "raids_per_world": 143.25,
+            "sim_ms_per_sim_second": 3.111,
+            "war_time_share": 0.371,
+            "wars_per_world": 85.594,
+            "worlds": 32
+          }
+        }
+      },
+      "conditions": {
+        "commander": {
+          "civs": {
+            "age_end": 5.739,
+            "ages_gained": -0.361,
+            "battles_lost": 9.754,
+            "battles_won": 10.146,
+            "civs": 349,
+            "peak_age": 7.063,
+            "pop_end": 83.126,
+            "pop_start": 113.398,
+            "score": 20.584,
+            "survival": 0.86,
+            "villages_captured": 1.238,
+            "villages_end": 14.175,
+            "villages_lost": 0.619,
+            "war_deaths": 113.931,
+            "war_seconds": 147.576,
+            "wars_declared": 2.33
+          },
+          "opportunistic_share_of_wars_events": 0.593,
+          "world": {
+            "agents_peak": 1341.25,
+            "battles_per_world": 147.688,
+            "decide_ms_mean": 0.0176,
+            "peaces_per_world": 48.313,
+            "raids_per_world": 105.313,
+            "sim_ms_per_sim_second": 4.148,
+            "war_time_share": 0.164,
+            "wars_per_world": 53.594,
+            "worlds": 32
+          }
+        },
+        "mixed": {
+          "civs": {
+            "age_end": 5.072,
+            "ages_gained": -1.029,
+            "battles_lost": 7.977,
+            "battles_won": 8.367,
+            "civs": 349,
+            "peak_age": 6.536,
+            "pop_end": 71.103,
+            "pop_start": 113.398,
+            "score": 18.593,
+            "survival": 0.797,
+            "villages_captured": 1.542,
+            "villages_end": 12.461,
+            "villages_lost": 1.112,
+            "war_deaths": 114.685,
+            "war_seconds": 231.711,
+            "wars_declared": 3.493
+          },
+          "opportunistic_share_of_wars_events": 0.561,
+          "world": {
+            "agents_peak": 1303.5,
+            "battles_per_world": 133.875,
+            "decide_ms_mean": 0.016,
+            "peaces_per_world": 60.031,
+            "raids_per_world": 116.063,
+            "sim_ms_per_sim_second": 3.889,
+            "war_time_share": 0.257,
+            "wars_per_world": 67.406,
+            "worlds": 32
+          }
+        },
+        "old": {
+          "civs": {
+            "age_end": 5.593,
+            "ages_gained": -0.507,
+            "battles_lost": 10.765,
+            "battles_won": 10.662,
+            "civs": 349,
+            "peak_age": 7.106,
+            "pop_end": 81.046,
+            "pop_start": 113.398,
+            "score": 20.379,
+            "survival": 0.865,
+            "villages_captured": 1.166,
+            "villages_end": 13.794,
+            "villages_lost": 0.659,
+            "war_deaths": 121.203,
+            "war_seconds": 170.748,
+            "wars_declared": 2.642
+          },
+          "opportunistic_share_of_wars_events": 0.611,
+          "world": {
+            "agents_peak": 1316.719,
+            "battles_per_world": 160.313,
+            "decide_ms_mean": 0.0175,
+            "peaces_per_world": 52.656,
+            "raids_per_world": 110.875,
+            "sim_ms_per_sim_second": 4.06,
+            "war_time_share": 0.19,
+            "wars_per_world": 58.438,
+            "worlds": 32
+          }
+        },
+        "ppo": {
+          "civs": {
+            "age_end": 5.885,
+            "ages_gained": -0.215,
+            "battles_lost": 12.312,
+            "battles_won": 12.645,
+            "civs": 349,
+            "peak_age": 7.284,
+            "pop_end": 88.312,
+            "pop_start": 113.398,
+            "score": 21.493,
+            "survival": 0.911,
+            "villages_captured": 0.132,
+            "villages_end": 14.335,
+            "villages_lost": 0.103,
+            "war_deaths": 120.785,
+            "war_seconds": 119.201,
+            "wars_declared": 1.676
+          },
+          "opportunistic_share_of_wars_events": 0.53,
+          "world": {
+            "agents_peak": 1327.344,
+            "battles_per_world": 183.844,
+            "decide_ms_mean": 0.0176,
+            "peaces_per_world": 24.438,
+            "raids_per_world": 87.75,
+            "sim_ms_per_sim_second": 4.259,
+            "war_time_share": 0.132,
+            "wars_per_world": 23.313,
+            "worlds": 32
+          }
+        },
+        "ppo_calm": {
+          "civs": {
+            "age_end": 7.977,
+            "ages_gained": 0.836,
+            "battles_lost": 4.293,
+            "battles_won": 4.801,
+            "civs": 256,
+            "peak_age": 8.363,
+            "pop_end": 185.535,
+            "pop_start": 184.824,
+            "score": 27.844,
+            "survival": 1.0,
+            "villages_captured": 0.031,
+            "villages_end": 24.801,
+            "villages_lost": 0.043,
+            "war_deaths": 55.168,
+            "war_seconds": 9.398,
+            "wars_declared": 0.324
+          },
+          "opportunistic_share_of_wars_events": 0.398,
+          "world": {
+            "agents_peak": 1672.031,
+            "battles_per_world": 46.688,
+            "decide_ms_mean": 0.0183,
+            "peaces_per_world": 4.281,
+            "raids_per_world": 12.563,
+            "sim_ms_per_sim_second": 3.858,
+            "war_time_share": 0.01,
+            "wars_per_world": 3.719,
+            "worlds": 32
+          }
+        },
+        "ppo_stress": {
+          "civs": {
+            "age_end": 5.027,
+            "ages_gained": -0.471,
+            "battles_lost": 14.441,
+            "battles_won": 15.524,
+            "civs": 374,
+            "peak_age": 6.324,
+            "pop_end": 66.981,
+            "pop_start": 89.572,
+            "score": 18.516,
+            "survival": 0.799,
+            "villages_captured": 0.16,
+            "villages_end": 12.08,
+            "villages_lost": 0.139,
+            "war_deaths": 116.233,
+            "war_seconds": 143.521,
+            "wars_declared": 1.925
+          },
+          "opportunistic_share_of_wars_events": 0.476,
+          "world": {
+            "agents_peak": 1133.156,
+            "battles_per_world": 246.438,
+            "decide_ms_mean": 0.0169,
+            "peaces_per_world": 30.75,
+            "raids_per_world": 146.156,
+            "sim_ms_per_sim_second": 4.001,
+            "war_time_share": 0.159,
+            "wars_per_world": 29.719,
+            "worlds": 32
+          }
+        },
+        "rules": {
+          "civs": {
+            "age_end": 4.96,
+            "ages_gained": -1.14,
+            "battles_lost": 4.871,
+            "battles_won": 5.289,
+            "civs": 349,
+            "peak_age": 6.479,
+            "pop_end": 63.665,
+            "pop_start": 113.398,
+            "score": 18.075,
+            "survival": 0.774,
+            "villages_captured": 3.332,
+            "villages_end": 12.158,
+            "villages_lost": 2.321,
+            "war_deaths": 130.269,
+            "war_seconds": 269.582,
+            "wars_declared": 4.12
+          },
+          "opportunistic_share_of_wars_events": 0.563,
+          "world": {
+            "agents_peak": 1277.813,
+            "battles_per_world": 82.031,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 56.063,
+            "raids_per_world": 93.219,
+            "sim_ms_per_sim_second": 3.577,
+            "war_time_share": 0.3,
+            "wars_per_world": 62.906,
+            "worlds": 32
+          }
+        },
+        "rules_calm": {
+          "civs": {
+            "age_end": 7.926,
+            "ages_gained": 0.785,
+            "battles_lost": 1.609,
+            "battles_won": 1.809,
+            "civs": 256,
+            "peak_age": 8.492,
+            "pop_end": 184.199,
+            "pop_start": 184.824,
+            "score": 27.513,
+            "survival": 0.98,
+            "villages_captured": 1.648,
+            "villages_end": 25.238,
+            "villages_lost": 1.293,
+            "war_deaths": 59.98,
+            "war_seconds": 92.871,
+            "wars_declared": 1.773
+          },
+          "opportunistic_share_of_wars_events": 0.139,
+          "world": {
+            "agents_peak": 1598.594,
+            "battles_per_world": 16.906,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 16.844,
+            "raids_per_world": 24.5,
+            "sim_ms_per_sim_second": 3.748,
+            "war_time_share": 0.103,
+            "wars_per_world": 16.969,
+            "worlds": 32
+          }
+        },
+        "rules_stress": {
+          "civs": {
+            "age_end": 3.652,
+            "ages_gained": -1.845,
+            "battles_lost": 5.826,
+            "battles_won": 6.447,
+            "civs": 374,
+            "peak_age": 4.893,
+            "pop_end": 41.118,
+            "pop_start": 89.572,
+            "score": 13.618,
+            "survival": 0.602,
+            "villages_captured": 3.591,
+            "villages_end": 8.639,
+            "villages_lost": 2.489,
+            "war_deaths": 101.187,
+            "war_seconds": 333.623,
+            "wars_declared": 4.559
+          },
+          "opportunistic_share_of_wars_events": 0.643,
+          "world": {
+            "agents_peak": 1060.75,
+            "battles_per_world": 126.688,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 74.25,
+            "raids_per_world": 143.25,
+            "sim_ms_per_sim_second": 3.111,
+            "war_time_share": 0.371,
+            "wars_per_world": 85.594,
+            "worlds": 32
+          }
+        }
+      },
+      "head_to_head_final_vs_old": {
+        "elo_gap": 17.237,
+        "games": 1049.0,
+        "old": {
+          "age_end": 5.749,
+          "ages_gained": -0.409,
+          "battles_lost": 9.38,
+          "battles_won": 8.544,
+          "civs": 171,
+          "peak_age": 7.111,
+          "pop_end": 85.819,
+          "pop_start": 112.906,
+          "score": 20.53,
+          "survival": 0.854,
+          "villages_captured": 2.094,
+          "villages_end": 14.31,
+          "villages_lost": 0.456,
+          "war_deaths": 125.439,
+          "war_seconds": 154.608,
+          "wars_declared": 2.743
+        },
+        "ppo": {
+          "age_end": 5.444,
+          "ages_gained": -0.601,
+          "battles_lost": 12.096,
+          "battles_won": 12.697,
+          "civs": 178,
+          "peak_age": 7.101,
+          "pop_end": 76.461,
+          "pop_start": 113.871,
+          "score": 20.233,
+          "survival": 0.876,
+          "villages_captured": 0.275,
+          "villages_end": 13.298,
+          "villages_lost": 0.854,
+          "war_deaths": 117.135,
+          "war_seconds": 186.253,
+          "wars_declared": 2.545
+        },
+        "win_rate": 0.525
+      },
+      "head_to_head_ppo_vs_rules": {
+        "elo_gap": 38.242,
+        "games": 1049.0,
+        "ppo": {
+          "age_end": 5.185,
+          "ages_gained": -0.86,
+          "battles_lost": 9.607,
+          "battles_won": 10.247,
+          "civs": 178,
+          "peak_age": 6.663,
+          "pop_end": 73.584,
+          "pop_start": 113.871,
+          "score": 19.226,
+          "survival": 0.831,
+          "villages_captured": 0.354,
+          "villages_end": 12.539,
+          "villages_lost": 1.022,
+          "war_deaths": 103.567,
+          "war_seconds": 226.337,
+          "wars_declared": 2.494
+        },
+        "rules": {
+          "age_end": 4.953,
+          "ages_gained": -1.205,
+          "battles_lost": 6.281,
+          "battles_won": 6.409,
+          "civs": 171,
+          "peak_age": 6.404,
+          "pop_end": 68.52,
+          "pop_start": 112.906,
+          "score": 17.934,
+          "survival": 0.76,
+          "villages_captured": 2.778,
+          "villages_end": 12.38,
+          "villages_lost": 1.205,
+          "war_deaths": 126.257,
+          "war_seconds": 237.304,
+          "wars_declared": 4.532
+        },
+        "win_rate": 0.555
+      },
+      "head_to_head_trained_vs_scripted_commander": {
+        "elo_gap": 1.325,
+        "games": 1049.0,
+        "ppo": {
+          "age_end": 5.663,
+          "ages_gained": -0.382,
+          "battles_lost": 10.506,
+          "battles_won": 11.14,
+          "civs": 178,
+          "peak_age": 7.034,
+          "pop_end": 78.73,
+          "pop_start": 113.871,
+          "score": 20.678,
+          "survival": 0.876,
+          "villages_captured": 0.236,
+          "villages_end": 14.006,
+          "villages_lost": 0.697,
+          "war_deaths": 106.27,
+          "war_seconds": 158.82,
+          "wars_declared": 2.382
+        },
+        "scripted": {
+          "age_end": 5.819,
+          "ages_gained": -0.339,
+          "battles_lost": 8.971,
+          "battles_won": 9.111,
+          "civs": 171,
+          "peak_age": 7.094,
+          "pop_end": 87.702,
+          "pop_start": 112.906,
+          "score": 20.487,
+          "survival": 0.842,
+          "villages_captured": 2.281,
+          "villages_end": 14.351,
+          "villages_lost": 0.538,
+          "war_deaths": 121.906,
+          "war_seconds": 135.871,
+          "wars_declared": 2.275
+        },
+        "win_rate": 0.502
+      },
+      "n_civs": 8,
+      "planet": [
+        1280,
+        640
+      ],
+      "seconds_after_warmup": 900.0,
+      "seeds": 32,
+      "strategy_mixed_ppo_civs": {
+        "multi_front_defence_share": 0.436,
+        "opportunistic_share_of_wars": 0.46,
+        "per_world": {
+          "alliances_formed": 55.844,
+          "coalitions_joined": 2.469,
+          "gang_ups_on_strongest": 0.313,
+          "multi_front_seconds": 257.563,
+          "opportunistic_strikes": 5.5,
+          "peace_sued": 30.813,
+          "peace_sued_while_losing": 16.594,
+          "raids_ordered": 18.688,
+          "truces_broken": 1.969,
+          "wars_declared": 11.969
+        },
+        "share_of_peace_offers_made_while_losing": 0.539,
+        "stances": {
+          "alliance": 25728.0,
+          "peace": 16164.0,
+          "rivalry": 10951.0,
+          "submit": 552.0,
+          "trade": 20733.0,
+          "war": 1661.0
+        },
+        "war_goals": {
+          "capital": 4321.0,
+          "defend_ally": 1.0,
+          "punish": 6668.0,
+          "raid": 9703.0,
+          "village": 8211.0
+        }
+      },
+      "strategy_ppo": {
+        "multi_front_defence_share": 0.432,
+        "opportunistic_share_of_wars": 0.393,
+        "per_world": {
+          "alliances_formed": 111.469,
+          "coalitions_joined": 2.281,
+          "gang_ups_on_strongest": 0.156,
+          "multi_front_seconds": 196.938,
+          "opportunistic_strikes": 6.813,
+          "peace_sued": 59.875,
+          "peace_sued_while_losing": 38.5,
+          "raids_ordered": 51.219,
+          "truces_broken": 3.438,
+          "wars_declared": 17.344
+        },
+        "share_of_peace_offers_made_while_losing": 0.643,
+        "stances": {
+          "alliance": 59870.0,
+          "peace": 33989.0,
+          "rivalry": 22879.0,
+          "submit": 629.0,
+          "trade": 48987.0,
+          "war": 2911.0
+        },
+        "war_goals": {
+          "capital": 11016.0,
+          "defend_ally": 1.0,
+          "punish": 15355.0,
+          "raid": 21676.0,
+          "village": 15360.0
+        }
+      },
+      "traits": {
+        "aggressive (aggr>=0.6, friend<0.5)": {
+          "alliances": 9.081,
+          "civs": 136,
+          "friendly_stance_rate": 0.591,
+          "hostile_stance_rate": 0.187,
+          "mobilisation": 0.212,
+          "wars_declared": 2.184
+        },
+        "civs": 501,
+        "corr_aggressiveness_hostile_stance": 0.193,
+        "corr_aggressiveness_mobilisation": 0.036,
+        "corr_aggressiveness_wars": 0.117,
+        "corr_friendliness_friendly_stance": 0.316,
+        "corr_friendliness_hostile_stance": -0.233,
+        "friendly (friend>=0.6, aggr<0.5)": {
+          "alliances": 11.845,
+          "civs": 58,
+          "friendly_stance_rate": 0.705,
+          "hostile_stance_rate": 0.112,
+          "mobilisation": 0.211,
+          "wars_declared": 0.862
+        },
+        "others": {
+          "alliances": 11.179,
+          "civs": 307,
+          "friendly_stance_rate": 0.642,
+          "hostile_stance_rate": 0.148,
+          "mobilisation": 0.202,
+          "wars_declared": 2.029
+        }
+      }
+    },
+    "four": {
+      "calm_vs_stress": {
+        "ppo": {
+          "calm": {
+            "agents_peak": 1295.781,
+            "battles_per_world": 31.781,
+            "decide_ms_mean": 0.0185,
+            "peaces_per_world": 4.438,
+            "raids_per_world": 7.375,
+            "sim_ms_per_sim_second": 2.991,
+            "war_time_share": 0.011,
+            "wars_per_world": 4.375,
+            "worlds": 32
+          },
+          "hostile_stance_share_calm": 0.096,
+          "hostile_stance_share_stress": 0.223,
+          "stances_calm": {
+            "alliance": 18856.0,
+            "peace": 9909.0,
+            "rivalry": 4476.0,
+            "submit": 1.0,
+            "trade": 14863.0,
+            "war": 140.0
+          },
+          "stances_stress": {
+            "alliance": 29815.0,
+            "peace": 16916.0,
+            "rivalry": 16156.0,
+            "submit": 1206.0,
+            "trade": 23450.0,
+            "war": 4314.0
+          },
+          "stress": {
+            "agents_peak": 935.719,
+            "battles_per_world": 287.719,
+            "decide_ms_mean": 0.0158,
+            "peaces_per_world": 37.813,
+            "raids_per_world": 187.656,
+            "sim_ms_per_sim_second": 3.318,
+            "war_time_share": 0.366,
+            "wars_per_world": 43.594,
+            "worlds": 32
+          }
+        },
+        "rules": {
+          "calm": {
+            "agents_peak": 1286.438,
+            "battles_per_world": 7.281,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 8.344,
+            "raids_per_world": 9.438,
+            "sim_ms_per_sim_second": 2.891,
+            "war_time_share": 0.115,
+            "wars_per_world": 8.344,
+            "worlds": 32
+          },
+          "stress": {
+            "agents_peak": 882.125,
+            "battles_per_world": 78.0,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 48.969,
+            "raids_per_world": 87.0,
+            "sim_ms_per_sim_second": 2.309,
+            "war_time_share": 0.42,
+            "wars_per_world": 58.313,
+            "worlds": 32
+          }
+        }
+      },
+      "conditions": {
+        "commander": {
+          "civs": {
+            "age_end": 5.15,
+            "ages_gained": -0.863,
+            "battles_lost": 11.868,
+            "battles_won": 12.397,
+            "civs": 234,
+            "peak_age": 6.803,
+            "pop_end": 64.654,
+            "pop_start": 137.342,
+            "score": 17.724,
+            "survival": 0.739,
+            "villages_captured": 2.376,
+            "villages_end": 11.491,
+            "villages_lost": 0.906,
+            "war_deaths": 115.41,
+            "war_seconds": 235.0,
+            "wars_declared": 3.624
+          },
+          "opportunistic_share_of_wars_events": 0.633,
+          "world": {
+            "agents_peak": 1052.656,
+            "battles_per_world": 156.625,
+            "decide_ms_mean": 0.0166,
+            "peaces_per_world": 60.125,
+            "raids_per_world": 133.188,
+            "sim_ms_per_sim_second": 3.352,
+            "war_time_share": 0.261,
+            "wars_per_world": 74.938,
+            "worlds": 32
+          }
+        },
+        "mixed": {
+          "civs": {
+            "age_end": 4.688,
+            "ages_gained": -1.325,
+            "battles_lost": 8.402,
+            "battles_won": 9.209,
+            "civs": 234,
+            "peak_age": 6.12,
+            "pop_end": 62.97,
+            "pop_start": 137.342,
+            "score": 16.302,
+            "survival": 0.671,
+            "villages_captured": 2.009,
+            "villages_end": 11.282,
+            "villages_lost": 1.179,
+            "war_deaths": 116.786,
+            "war_seconds": 268.675,
+            "wars_declared": 4.35
+          },
+          "opportunistic_share_of_wars_events": 0.594,
+          "world": {
+            "agents_peak": 1053.094,
+            "battles_per_world": 125.781,
+            "decide_ms_mean": 0.0158,
+            "peaces_per_world": 62.25,
+            "raids_per_world": 125.781,
+            "sim_ms_per_sim_second": 3.086,
+            "war_time_share": 0.299,
+            "wars_per_world": 75.25,
+            "worlds": 32
+          }
+        },
+        "old": {
+          "civs": {
+            "age_end": 4.936,
+            "ages_gained": -1.077,
+            "battles_lost": 11.299,
+            "battles_won": 11.496,
+            "civs": 234,
+            "peak_age": 6.744,
+            "pop_end": 66.534,
+            "pop_start": 137.342,
+            "score": 17.152,
+            "survival": 0.718,
+            "villages_captured": 2.06,
+            "villages_end": 11.333,
+            "villages_lost": 1.192,
+            "war_deaths": 118.936,
+            "war_seconds": 242.141,
+            "wars_declared": 3.585
+          },
+          "opportunistic_share_of_wars_events": 0.664,
+          "world": {
+            "agents_peak": 1055.406,
+            "battles_per_world": 149.094,
+            "decide_ms_mean": 0.0172,
+            "peaces_per_world": 62.656,
+            "raids_per_world": 125.625,
+            "sim_ms_per_sim_second": 3.363,
+            "war_time_share": 0.269,
+            "wars_per_world": 76.688,
+            "worlds": 32
+          }
+        },
+        "ppo": {
+          "civs": {
+            "age_end": 5.218,
+            "ages_gained": -0.795,
+            "battles_lost": 16.449,
+            "battles_won": 17.244,
+            "civs": 234,
+            "peak_age": 6.996,
+            "pop_end": 70.564,
+            "pop_start": 137.342,
+            "score": 18.765,
+            "survival": 0.799,
+            "villages_captured": 0.209,
+            "villages_end": 12.265,
+            "villages_lost": 0.162,
+            "war_deaths": 115.923,
+            "war_seconds": 200.098,
+            "wars_declared": 2.598
+          },
+          "opportunistic_share_of_wars_events": 0.518,
+          "world": {
+            "agents_peak": 1061.594,
+            "battles_per_world": 224.063,
+            "decide_ms_mean": 0.0166,
+            "peaces_per_world": 28.344,
+            "raids_per_world": 118.625,
+            "sim_ms_per_sim_second": 3.535,
+            "war_time_share": 0.222,
+            "wars_per_world": 31.219,
+            "worlds": 32
+          }
+        },
+        "ppo_calm": {
+          "civs": {
+            "age_end": 9.558,
+            "ages_gained": 2.109,
+            "battles_lost": 3.736,
+            "battles_won": 5.194,
+            "civs": 129,
+            "peak_age": 9.597,
+            "pop_end": 268.248,
+            "pop_start": 292.279,
+            "score": 31.964,
+            "survival": 0.992,
+            "villages_captured": 0.047,
+            "villages_end": 35.419,
+            "villages_lost": 0.124,
+            "war_deaths": 76.248,
+            "war_seconds": 9.651,
+            "wars_declared": 0.566
+          },
+          "opportunistic_share_of_wars_events": 0.589,
+          "world": {
+            "agents_peak": 1295.781,
+            "battles_per_world": 31.781,
+            "decide_ms_mean": 0.0185,
+            "peaces_per_world": 4.438,
+            "raids_per_world": 7.375,
+            "sim_ms_per_sim_second": 2.991,
+            "war_time_share": 0.011,
+            "wars_per_world": 4.375,
+            "worlds": 32
+          }
+        },
+        "ppo_stress": {
+          "civs": {
+            "age_end": 4.556,
+            "ages_gained": -1.842,
+            "battles_lost": 18.786,
+            "battles_won": 19.888,
+            "civs": 196,
+            "peak_age": 6.541,
+            "pop_end": 57.98,
+            "pop_start": 141.24,
+            "score": 17.144,
+            "survival": 0.76,
+            "villages_captured": 0.342,
+            "villages_end": 10.531,
+            "villages_lost": 0.26,
+            "war_deaths": 123.811,
+            "war_seconds": 329.607,
+            "wars_declared": 4.189
+          },
+          "opportunistic_share_of_wars_events": 0.536,
+          "world": {
+            "agents_peak": 935.719,
+            "battles_per_world": 287.719,
+            "decide_ms_mean": 0.0158,
+            "peaces_per_world": 37.813,
+            "raids_per_world": 187.656,
+            "sim_ms_per_sim_second": 3.318,
+            "war_time_share": 0.366,
+            "wars_per_world": 43.594,
+            "worlds": 32
+          }
+        },
+        "rules": {
+          "civs": {
+            "age_end": 4.333,
+            "ages_gained": -1.679,
+            "battles_lost": 5.675,
+            "battles_won": 5.85,
+            "civs": 234,
+            "peak_age": 5.923,
+            "pop_end": 63.594,
+            "pop_start": 137.342,
+            "score": 15.4,
+            "survival": 0.632,
+            "villages_captured": 3.372,
+            "villages_end": 11.214,
+            "villages_lost": 1.991,
+            "war_deaths": 135.949,
+            "war_seconds": 267.739,
+            "wars_declared": 4.624
+          },
+          "opportunistic_share_of_wars_events": 0.578,
+          "world": {
+            "agents_peak": 1035.438,
+            "battles_per_world": 85.688,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 53.344,
+            "raids_per_world": 100.0,
+            "sim_ms_per_sim_second": 2.722,
+            "war_time_share": 0.297,
+            "wars_per_world": 63.813,
+            "worlds": 32
+          }
+        },
+        "rules_calm": {
+          "civs": {
+            "age_end": 9.38,
+            "ages_gained": 1.93,
+            "battles_lost": 1.24,
+            "battles_won": 1.419,
+            "civs": 129,
+            "peak_age": 9.713,
+            "pop_end": 295.86,
+            "pop_start": 292.279,
+            "score": 32.661,
+            "survival": 1.0,
+            "villages_captured": 2.279,
+            "villages_end": 39.132,
+            "villages_lost": 1.45,
+            "war_deaths": 75.372,
+            "war_seconds": 103.07,
+            "wars_declared": 1.488
+          },
+          "opportunistic_share_of_wars_events": 0.141,
+          "world": {
+            "agents_peak": 1286.438,
+            "battles_per_world": 7.281,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 8.344,
+            "raids_per_world": 9.438,
+            "sim_ms_per_sim_second": 2.891,
+            "war_time_share": 0.115,
+            "wars_per_world": 8.344,
+            "worlds": 32
+          }
+        },
+        "rules_stress": {
+          "civs": {
+            "age_end": 4.73,
+            "ages_gained": -1.668,
+            "battles_lost": 5.224,
+            "battles_won": 6.352,
+            "civs": 196,
+            "peak_age": 6.235,
+            "pop_end": 64.934,
+            "pop_start": 141.24,
+            "score": 17.041,
+            "survival": 0.704,
+            "villages_captured": 3.745,
+            "villages_end": 12.25,
+            "villages_lost": 1.827,
+            "war_deaths": 133.571,
+            "war_seconds": 378.291,
+            "wars_declared": 5.163
+          },
+          "opportunistic_share_of_wars_events": 0.632,
+          "world": {
+            "agents_peak": 882.125,
+            "battles_per_world": 78.0,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 48.969,
+            "raids_per_world": 87.0,
+            "sim_ms_per_sim_second": 2.309,
+            "war_time_share": 0.42,
+            "wars_per_world": 58.313,
+            "worlds": 32
+          }
+        }
+      },
+      "head_to_head_final_vs_old": {
+        "elo_gap": 23.999,
+        "games": 580.0,
+        "old": {
+          "age_end": 5.221,
+          "ages_gained": -0.858,
+          "battles_lost": 11.372,
+          "battles_won": 10.186,
+          "civs": 113,
+          "peak_age": 6.823,
+          "pop_end": 74.965,
+          "pop_start": 142.018,
+          "score": 17.493,
+          "survival": 0.699,
+          "villages_captured": 3.726,
+          "villages_end": 12.522,
+          "villages_lost": 1.168,
+          "war_deaths": 125.628,
+          "war_seconds": 240.15,
+          "wars_declared": 3.973
+        },
+        "ppo": {
+          "age_end": 4.669,
+          "ages_gained": -1.281,
+          "battles_lost": 11.231,
+          "battles_won": 12.719,
+          "civs": 121,
+          "peak_age": 6.669,
+          "pop_end": 58.661,
+          "pop_start": 132.975,
+          "score": 16.834,
+          "survival": 0.736,
+          "villages_captured": 0.504,
+          "villages_end": 10.223,
+          "villages_lost": 1.215,
+          "war_deaths": 112.686,
+          "war_seconds": 244.0,
+          "wars_declared": 3.223
+        },
+        "win_rate": 0.534
+      },
+      "head_to_head_ppo_vs_rules": {
+        "elo_gap": 18.588,
+        "games": 580.0,
+        "ppo": {
+          "age_end": 4.562,
+          "ages_gained": -1.388,
+          "battles_lost": 9.339,
+          "battles_won": 11.14,
+          "civs": 121,
+          "peak_age": 6.157,
+          "pop_end": 59.149,
+          "pop_start": 132.975,
+          "score": 16.007,
+          "survival": 0.678,
+          "villages_captured": 0.529,
+          "villages_end": 10.19,
+          "villages_lost": 0.975,
+          "war_deaths": 96.76,
+          "war_seconds": 282.537,
+          "wars_declared": 3.463
+        },
+        "rules": {
+          "age_end": 4.823,
+          "ages_gained": -1.257,
+          "battles_lost": 7.398,
+          "battles_won": 7.142,
+          "civs": 113,
+          "peak_age": 6.08,
+          "pop_end": 67.062,
+          "pop_start": 142.018,
+          "score": 16.619,
+          "survival": 0.664,
+          "villages_captured": 3.593,
+          "villages_end": 12.451,
+          "villages_lost": 1.398,
+          "war_deaths": 138.23,
+          "war_seconds": 253.832,
+          "wars_declared": 5.301
+        },
+        "win_rate": 0.527
+      },
+      "head_to_head_trained_vs_scripted_commander": {
+        "elo_gap": -54.351,
+        "games": 580.0,
+        "ppo": {
+          "age_end": 4.851,
+          "ages_gained": -1.099,
+          "battles_lost": 11.843,
+          "battles_won": 12.033,
+          "civs": 121,
+          "peak_age": 6.818,
+          "pop_end": 56.372,
+          "pop_start": 132.975,
+          "score": 17.02,
+          "survival": 0.736,
+          "villages_captured": 0.595,
+          "villages_end": 10.264,
+          "villages_lost": 1.008,
+          "war_deaths": 112.587,
+          "war_seconds": 239.628,
+          "wars_declared": 3.397
+        },
+        "scripted": {
+          "age_end": 5.469,
+          "ages_gained": -0.611,
+          "battles_lost": 11.894,
+          "battles_won": 12.788,
+          "civs": 113,
+          "peak_age": 6.788,
+          "pop_end": 73.522,
+          "pop_start": 142.018,
+          "score": 18.478,
+          "survival": 0.743,
+          "villages_captured": 4.283,
+          "villages_end": 12.805,
+          "villages_lost": 0.796,
+          "war_deaths": 118.434,
+          "war_seconds": 230.044,
+          "wars_declared": 3.867
+        },
+        "win_rate": 0.422
+      },
+      "n_civs": 4,
+      "planet": [
+        1280,
+        640
+      ],
+      "seconds_after_warmup": 900.0,
+      "seeds": 32,
+      "strategy_mixed_ppo_civs": {
+        "multi_front_defence_share": 0.442,
+        "opportunistic_share_of_wars": 0.491,
+        "per_world": {
+          "alliances_formed": 29.75,
+          "coalitions_joined": 1.594,
+          "gang_ups_on_strongest": 0.125,
+          "multi_front_seconds": 302.281,
+          "opportunistic_strikes": 5.406,
+          "peace_sued": 22.531,
+          "peace_sued_while_losing": 12.75,
+          "raids_ordered": 15.969,
+          "truces_broken": 2.438,
+          "wars_declared": 11.0
+        },
+        "share_of_peace_offers_made_while_losing": 0.566,
+        "stances": {
+          "alliance": 14516.0,
+          "peace": 9037.0,
+          "rivalry": 7174.0,
+          "submit": 731.0,
+          "trade": 11303.0,
+          "war": 1514.0
+        },
+        "war_goals": {
+          "capital": 2087.0,
+          "defend_ally": 2.0,
+          "punish": 3246.0,
+          "raid": 6096.0,
+          "village": 4858.0
+        }
+      },
+      "strategy_ppo": {
+        "multi_front_defence_share": 0.432,
+        "opportunistic_share_of_wars": 0.341,
+        "per_world": {
+          "alliances_formed": 51.781,
+          "coalitions_joined": 2.625,
+          "gang_ups_on_strongest": 0.344,
+          "multi_front_seconds": 358.75,
+          "opportunistic_strikes": 5.813,
+          "peace_sued": 54.25,
+          "peace_sued_while_losing": 34.75,
+          "raids_ordered": 49.625,
+          "truces_broken": 3.375,
+          "wars_declared": 17.063
+        },
+        "share_of_peace_offers_made_while_losing": 0.641,
+        "stances": {
+          "alliance": 35710.0,
+          "peace": 21891.0,
+          "rivalry": 18857.0,
+          "submit": 900.0,
+          "trade": 29890.0,
+          "war": 2769.0
+        },
+        "war_goals": {
+          "capital": 5745.0,
+          "defend_ally": 5.0,
+          "punish": 8862.0,
+          "raid": 13759.0,
+          "village": 10764.0
+        }
+      },
+      "traits": {
+        "aggressive (aggr>=0.6, friend<0.5)": {
+          "alliances": 6.5,
+          "civs": 112,
+          "friendly_stance_rate": 0.54,
+          "hostile_stance_rate": 0.234,
+          "mobilisation": 0.233,
+          "wars_declared": 3.268
+        },
+        "civs": 320,
+        "corr_aggressiveness_hostile_stance": 0.271,
+        "corr_aggressiveness_mobilisation": 0.166,
+        "corr_aggressiveness_wars": 0.09,
+        "corr_friendliness_friendly_stance": 0.32,
+        "corr_friendliness_hostile_stance": -0.246,
+        "friendly (friend>=0.6, aggr<0.5)": {
+          "alliances": 9.833,
+          "civs": 24,
+          "friendly_stance_rate": 0.676,
+          "hostile_stance_rate": 0.139,
+          "mobilisation": 0.216,
+          "wars_declared": 1.417
+        },
+        "others": {
+          "alliances": 8.94,
+          "civs": 184,
+          "friendly_stance_rate": 0.61,
+          "hostile_stance_rate": 0.186,
+          "mobilisation": 0.214,
+          "wars_declared": 3.103
+        }
+      }
+    },
+    "twelve_big": {
+      "calm_vs_stress": {
+        "ppo": {
+          "calm": {
+            "agents_peak": 1726.906,
+            "battles_per_world": 59.063,
+            "decide_ms_mean": 0.019,
+            "peaces_per_world": 3.844,
+            "raids_per_world": 22.094,
+            "sim_ms_per_sim_second": 4.537,
+            "war_time_share": 0.007,
+            "wars_per_world": 3.125,
+            "worlds": 32
+          },
+          "hostile_stance_share_calm": 0.092,
+          "hostile_stance_share_stress": 0.142,
+          "stances_calm": {
+            "alliance": 69142.0,
+            "peace": 35910.0,
+            "rivalry": 15783.0,
+            "submit": 44.0,
+            "trade": 54648.0,
+            "war": 426.0
+          },
+          "stances_stress": {
+            "alliance": 82233.0,
+            "peace": 47180.0,
+            "rivalry": 27370.0,
+            "submit": 1125.0,
+            "trade": 65339.0,
+            "war": 4929.0
+          },
+          "stress": {
+            "agents_peak": 1203.156,
+            "battles_per_world": 209.813,
+            "decide_ms_mean": 0.0176,
+            "peaces_per_world": 25.844,
+            "raids_per_world": 147.063,
+            "sim_ms_per_sim_second": 4.293,
+            "war_time_share": 0.101,
+            "wars_per_world": 22.125,
+            "worlds": 32
+          }
+        },
+        "rules": {
+          "calm": {
+            "agents_peak": 1636.625,
+            "battles_per_world": 29.969,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 23.156,
+            "raids_per_world": 42.969,
+            "sim_ms_per_sim_second": 4.283,
+            "war_time_share": 0.094,
+            "wars_per_world": 23.094,
+            "worlds": 32
+          },
+          "stress": {
+            "agents_peak": 1056.281,
+            "battles_per_world": 147.156,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 79.281,
+            "raids_per_world": 169.938,
+            "sim_ms_per_sim_second": 3.467,
+            "war_time_share": 0.348,
+            "wars_per_world": 88.125,
+            "worlds": 32
+          }
+        }
+      },
+      "conditions": {
+        "commander": {
+          "civs": {
+            "age_end": 5.269,
+            "ages_gained": -0.769,
+            "battles_lost": 9.199,
+            "battles_won": 9.765,
+            "civs": 442,
+            "peak_age": 6.276,
+            "pop_end": 76.548,
+            "pop_start": 89.857,
+            "score": 20.381,
+            "survival": 0.887,
+            "villages_captured": 0.943,
+            "villages_end": 13.55,
+            "villages_lost": 0.615,
+            "war_deaths": 109.106,
+            "war_seconds": 89.923,
+            "wars_declared": 1.344
+          },
+          "opportunistic_share_of_wars_events": 0.559,
+          "world": {
+            "agents_peak": 1347.5,
+            "battles_per_world": 150.313,
+            "decide_ms_mean": 0.0184,
+            "peaces_per_world": 31.438,
+            "raids_per_world": 99.938,
+            "sim_ms_per_sim_second": 4.368,
+            "war_time_share": 0.1,
+            "wars_per_world": 33.531,
+            "worlds": 32
+          }
+        },
+        "mixed": {
+          "civs": {
+            "age_end": 4.665,
+            "ages_gained": -1.373,
+            "battles_lost": 6.799,
+            "battles_won": 7.124,
+            "civs": 442,
+            "peak_age": 5.869,
+            "pop_end": 65.683,
+            "pop_start": 89.857,
+            "score": 18.536,
+            "survival": 0.83,
+            "villages_captured": 1.36,
+            "villages_end": 11.925,
+            "villages_lost": 1.256,
+            "war_deaths": 105.805,
+            "war_seconds": 213.443,
+            "wars_declared": 3.256
+          },
+          "opportunistic_share_of_wars_events": 0.518,
+          "world": {
+            "agents_peak": 1325.781,
+            "battles_per_world": 120.375,
+            "decide_ms_mean": 0.0165,
+            "peaces_per_world": 58.125,
+            "raids_per_world": 119.906,
+            "sim_ms_per_sim_second": 4.31,
+            "war_time_share": 0.237,
+            "wars_per_world": 62.344,
+            "worlds": 32
+          }
+        },
+        "old": {
+          "civs": {
+            "age_end": 5.226,
+            "ages_gained": -0.812,
+            "battles_lost": 9.844,
+            "battles_won": 10.131,
+            "civs": 442,
+            "peak_age": 6.24,
+            "pop_end": 80.179,
+            "pop_start": 89.857,
+            "score": 20.325,
+            "survival": 0.889,
+            "villages_captured": 0.932,
+            "villages_end": 13.4,
+            "villages_lost": 0.579,
+            "war_deaths": 113.688,
+            "war_seconds": 106.081,
+            "wars_declared": 1.839
+          },
+          "opportunistic_share_of_wars_events": 0.576,
+          "world": {
+            "agents_peak": 1338.125,
+            "battles_per_world": 160.906,
+            "decide_ms_mean": 0.0184,
+            "peaces_per_world": 40.063,
+            "raids_per_world": 105.313,
+            "sim_ms_per_sim_second": 4.418,
+            "war_time_share": 0.118,
+            "wars_per_world": 41.781,
+            "worlds": 32
+          }
+        },
+        "ppo": {
+          "civs": {
+            "age_end": 5.59,
+            "ages_gained": -0.448,
+            "battles_lost": 10.948,
+            "battles_won": 11.287,
+            "civs": 442,
+            "peak_age": 6.563,
+            "pop_end": 89.045,
+            "pop_start": 89.857,
+            "score": 21.632,
+            "survival": 0.937,
+            "villages_captured": 0.086,
+            "villages_end": 14.548,
+            "villages_lost": 0.068,
+            "war_deaths": 110.014,
+            "war_seconds": 87.572,
+            "wars_declared": 0.989
+          },
+          "opportunistic_share_of_wars_events": 0.487,
+          "world": {
+            "agents_peak": 1420.969,
+            "battles_per_world": 175.469,
+            "decide_ms_mean": 0.018,
+            "peaces_per_world": 17.906,
+            "raids_per_world": 86.313,
+            "sim_ms_per_sim_second": 4.572,
+            "war_time_share": 0.097,
+            "wars_per_world": 15.813,
+            "worlds": 32
+          }
+        },
+        "ppo_calm": {
+          "civs": {
+            "age_end": 6.64,
+            "ages_gained": -0.1,
+            "battles_lost": 4.473,
+            "battles_won": 4.715,
+            "civs": 389,
+            "peak_age": 7.059,
+            "pop_end": 135.635,
+            "pop_start": 121.249,
+            "score": 24.861,
+            "survival": 0.997,
+            "villages_captured": 0.015,
+            "villages_end": 18.506,
+            "villages_lost": 0.015,
+            "war_deaths": 50.979,
+            "war_seconds": 6.337,
+            "wars_declared": 0.224
+          },
+          "opportunistic_share_of_wars_events": 0.287,
+          "world": {
+            "agents_peak": 1726.906,
+            "battles_per_world": 59.063,
+            "decide_ms_mean": 0.019,
+            "peaces_per_world": 3.844,
+            "raids_per_world": 22.094,
+            "sim_ms_per_sim_second": 4.537,
+            "war_time_share": 0.007,
+            "wars_per_world": 3.125,
+            "worlds": 32
+          }
+        },
+        "ppo_stress": {
+          "civs": {
+            "age_end": 4.851,
+            "ages_gained": -0.222,
+            "battles_lost": 12.114,
+            "battles_won": 12.385,
+            "civs": 483,
+            "peak_age": 5.952,
+            "pop_end": 66.963,
+            "pop_start": 67.625,
+            "score": 19.365,
+            "survival": 0.874,
+            "villages_captured": 0.097,
+            "villages_end": 12.304,
+            "villages_lost": 0.087,
+            "war_deaths": 111.296,
+            "war_seconds": 91.099,
+            "wars_declared": 1.246
+          },
+          "opportunistic_share_of_wars_events": 0.472,
+          "world": {
+            "agents_peak": 1203.156,
+            "battles_per_world": 209.813,
+            "decide_ms_mean": 0.0176,
+            "peaces_per_world": 25.844,
+            "raids_per_world": 147.063,
+            "sim_ms_per_sim_second": 4.293,
+            "war_time_share": 0.101,
+            "wars_per_world": 22.125,
+            "worlds": 32
+          }
+        },
+        "rules": {
+          "civs": {
+            "age_end": 4.337,
+            "ages_gained": -1.701,
+            "battles_lost": 5.244,
+            "battles_won": 5.615,
+            "civs": 442,
+            "peak_age": 5.41,
+            "pop_end": 56.704,
+            "pop_start": 89.857,
+            "score": 17.113,
+            "survival": 0.765,
+            "villages_captured": 3.19,
+            "villages_end": 11.102,
+            "villages_lost": 2.455,
+            "war_deaths": 115.131,
+            "war_seconds": 270.744,
+            "wars_declared": 4.118
+          },
+          "opportunistic_share_of_wars_events": 0.524,
+          "world": {
+            "agents_peak": 1288.125,
+            "battles_per_world": 101.688,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 67.906,
+            "raids_per_world": 122.656,
+            "sim_ms_per_sim_second": 3.81,
+            "war_time_share": 0.301,
+            "wars_per_world": 75.844,
+            "worlds": 32
+          }
+        },
+        "rules_calm": {
+          "civs": {
+            "age_end": 6.224,
+            "ages_gained": -0.517,
+            "battles_lost": 2.319,
+            "battles_won": 2.332,
+            "civs": 389,
+            "peak_age": 6.874,
+            "pop_end": 126.869,
+            "pop_start": 121.249,
+            "score": 23.577,
+            "survival": 0.959,
+            "villages_captured": 1.324,
+            "villages_end": 17.853,
+            "villages_lost": 1.257,
+            "war_deaths": 52.959,
+            "war_seconds": 84.362,
+            "wars_declared": 1.766
+          },
+          "opportunistic_share_of_wars_events": 0.122,
+          "world": {
+            "agents_peak": 1636.625,
+            "battles_per_world": 29.969,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 23.156,
+            "raids_per_world": 42.969,
+            "sim_ms_per_sim_second": 4.283,
+            "war_time_share": 0.094,
+            "wars_per_world": 23.094,
+            "worlds": 32
+          }
+        },
+        "rules_stress": {
+          "civs": {
+            "age_end": 3.174,
+            "ages_gained": -1.899,
+            "battles_lost": 6.54,
+            "battles_won": 7.025,
+            "civs": 483,
+            "peak_age": 4.112,
+            "pop_end": 38.899,
+            "pop_start": 67.625,
+            "score": 12.872,
+            "survival": 0.584,
+            "villages_captured": 3.335,
+            "villages_end": 8.286,
+            "villages_lost": 2.778,
+            "war_deaths": 96.122,
+            "war_seconds": 312.824,
+            "wars_declared": 4.058
+          },
+          "opportunistic_share_of_wars_events": 0.642,
+          "world": {
+            "agents_peak": 1056.281,
+            "battles_per_world": 147.156,
+            "decide_ms_mean": 0.0,
+            "peaces_per_world": 79.281,
+            "raids_per_world": 169.938,
+            "sim_ms_per_sim_second": 3.467,
+            "war_time_share": 0.348,
+            "wars_per_world": 88.125,
+            "worlds": 32
+          }
+        }
+      },
+      "head_to_head_final_vs_old": {
+        "elo_gap": 17.913,
+        "games": 1553.0,
+        "old": {
+          "age_end": 5.128,
+          "ages_gained": -0.84,
+          "battles_lost": 10.215,
+          "battles_won": 9.493,
+          "civs": 219,
+          "peak_age": 6.16,
+          "pop_end": 78.689,
+          "pop_start": 86.507,
+          "score": 19.929,
+          "survival": 0.872,
+          "villages_captured": 1.648,
+          "villages_end": 13.311,
+          "villages_lost": 0.667,
+          "war_deaths": 121.288,
+          "war_seconds": 110.402,
+          "wars_declared": 2.192
+        },
+        "ppo": {
+          "age_end": 5.323,
+          "ages_gained": -0.785,
+          "battles_lost": 9.48,
+          "battles_won": 10.758,
+          "civs": 223,
+          "peak_age": 6.318,
+          "pop_end": 81.641,
+          "pop_start": 93.148,
+          "score": 20.713,
+          "survival": 0.906,
+          "villages_captured": 0.229,
+          "villages_end": 13.489,
+          "villages_lost": 0.493,
+          "war_deaths": 106.224,
+          "war_seconds": 101.839,
+          "wars_declared": 1.493
+        },
+        "win_rate": 0.526
+      },
+      "head_to_head_ppo_vs_rules": {
+        "elo_gap": 42.266,
+        "games": 1553.0,
+        "ppo": {
+          "age_end": 4.96,
+          "ages_gained": -1.148,
+          "battles_lost": 7.668,
+          "battles_won": 8.126,
+          "civs": 223,
+          "peak_age": 6.161,
+          "pop_end": 74.632,
+          "pop_start": 93.148,
+          "score": 19.671,
+          "survival": 0.874,
+          "villages_captured": 0.377,
+          "villages_end": 12.713,
+          "villages_lost": 0.906,
+          "war_deaths": 102.305,
+          "war_seconds": 179.937,
+          "wars_declared": 1.982
+        },
+        "rules": {
+          "age_end": 4.365,
+          "ages_gained": -1.603,
+          "battles_lost": 5.913,
+          "battles_won": 6.105,
+          "civs": 219,
+          "peak_age": 5.571,
+          "pop_end": 56.571,
+          "pop_start": 86.507,
+          "score": 17.38,
+          "survival": 0.785,
+          "villages_captured": 2.361,
+          "villages_end": 11.123,
+          "villages_lost": 1.612,
+          "war_deaths": 109.37,
+          "war_seconds": 247.562,
+          "wars_declared": 4.553
+        },
+        "win_rate": 0.561
+      },
+      "head_to_head_trained_vs_scripted_commander": {
+        "elo_gap": 4.251,
+        "games": 1553.0,
+        "ppo": {
+          "age_end": 5.247,
+          "ages_gained": -0.861,
+          "battles_lost": 8.807,
+          "battles_won": 10.103,
+          "civs": 223,
+          "peak_age": 6.354,
+          "pop_end": 75.906,
+          "pop_start": 93.148,
+          "score": 20.514,
+          "survival": 0.901,
+          "villages_captured": 0.211,
+          "villages_end": 13.291,
+          "villages_lost": 0.637,
+          "war_deaths": 108.332,
+          "war_seconds": 92.081,
+          "wars_declared": 1.345
+        },
+        "scripted": {
+          "age_end": 5.292,
+          "ages_gained": -0.676,
+          "battles_lost": 9.598,
+          "battles_won": 9.42,
+          "civs": 219,
+          "peak_age": 6.196,
+          "pop_end": 77.201,
+          "pop_start": 86.507,
+          "score": 20.246,
+          "survival": 0.872,
+          "villages_captured": 1.689,
+          "villages_end": 13.813,
+          "villages_lost": 0.594,
+          "war_deaths": 109.895,
+          "war_seconds": 87.726,
+          "wars_declared": 1.342
+        },
+        "win_rate": 0.506
+      },
+      "n_civs": 12,
+      "planet": [
+        2560,
+        1280
+      ],
+      "seconds_after_warmup": 900.0,
+      "seeds": 32,
+      "strategy_mixed_ppo_civs": {
+        "multi_front_defence_share": 0.441,
+        "opportunistic_share_of_wars": 0.418,
+        "per_world": {
+          "alliances_formed": 81.469,
+          "coalitions_joined": 2.094,
+          "gang_ups_on_strongest": 0.156,
+          "multi_front_seconds": 268.125,
+          "opportunistic_strikes": 5.563,
+          "peace_sued": 38.031,
+          "peace_sued_while_losing": 21.531,
+          "raids_ordered": 22.406,
+          "truces_broken": 2.125,
+          "wars_declared": 13.313
+        },
+        "share_of_peace_offers_made_while_losing": 0.566,
+        "stances": {
+          "alliance": 34203.0,
+          "peace": 19172.0,
+          "rivalry": 11923.0,
+          "submit": 766.0,
+          "trade": 27123.0,
+          "war": 2137.0
+        },
+        "war_goals": {
+          "capital": 5783.0,
+          "defend_ally": 1.0,
+          "punish": 8921.0,
+          "raid": 12839.0,
+          "village": 10389.0
+        }
+      },
+      "strategy_ppo": {
+        "multi_front_defence_share": 0.437,
+        "opportunistic_share_of_wars": 0.385,
+        "per_world": {
+          "alliances_formed": 149.844,
+          "coalitions_joined": 1.375,
+          "gang_ups_on_strongest": 0.188,
+          "multi_front_seconds": 252.719,
+          "opportunistic_strikes": 5.0,
+          "peace_sued": 60.469,
+          "peace_sued_while_losing": 38.656,
+          "raids_ordered": 51.281,
+          "truces_broken": 3.156,
+          "wars_declared": 13.0
+        },
+        "share_of_peace_offers_made_while_losing": 0.639,
+        "stances": {
+          "alliance": 76499.0,
+          "peace": 43036.0,
+          "rivalry": 23605.0,
+          "submit": 646.0,
+          "trade": 62402.0,
+          "war": 2853.0
+        },
+        "war_goals": {
+          "capital": 14317.0,
+          "defend_ally": 2.0,
+          "punish": 20525.0,
+          "raid": 26877.0,
+          "village": 19739.0
+        }
+      },
+      "traits": {
+        "aggressive (aggr>=0.6, friend<0.5)": {
+          "alliances": 11.842,
+          "civs": 158,
+          "friendly_stance_rate": 0.623,
+          "hostile_stance_rate": 0.148,
+          "mobilisation": 0.212,
+          "wars_declared": 1.886
+        },
+        "civs": 641,
+        "corr_aggressiveness_hostile_stance": 0.197,
+        "corr_aggressiveness_mobilisation": 0.087,
+        "corr_aggressiveness_wars": 0.143,
+        "corr_friendliness_friendly_stance": 0.092,
+        "corr_friendliness_hostile_stance": -0.163,
+        "friendly (friend>=0.6, aggr<0.5)": {
+          "alliances": 11.553,
+          "civs": 85,
+          "friendly_stance_rate": 0.688,
+          "hostile_stance_rate": 0.102,
+          "mobilisation": 0.189,
+          "wars_declared": 0.694
+        },
+        "others": {
+          "alliances": 11.43,
+          "civs": 398,
+          "friendly_stance_rate": 0.663,
+          "hostile_stance_rate": 0.127,
+          "mobilisation": 0.2,
+          "wars_declared": 1.286
+        }
+      }
+    }
+  },
+  "score": "alive*10 + age + ln(1+pop) + 0.2*villages at the end; a 'win' is a higher score than the other civ in the same world",
+  "seeds": "1000000..1000032 (training uses 0..500000)",
+  "wall_seconds": 74.0,
+  "warmup_seconds_under_rules": 300
+}

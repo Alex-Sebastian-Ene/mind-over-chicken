@@ -1,0 +1,22 @@
+{
+ "config": "full",
+ "minutes_this_session": 460.1,
+ "stages": [
+  "c1_duel_small",
+  "c2_four",
+  "c3_eight",
+  "c4_ten_big",
+  "c5_twelve_big",
+  "k1_commander",
+  "k2_commander_big"
+ ],
+ "elapsed": {
+  "c1_duel_small": 40.00046656529109,
+  "c2_four": 70.00062900384268,
+  "c3_eight": 80.00241711537043,
+  "c4_ten_big": 90.00136864185333,
+  "c5_twelve_big": 70.00431421995164,
+  "k1_commander": 60.017492596308394,
+  "k2_commander_big": 50.01499094565709
+ }
+}

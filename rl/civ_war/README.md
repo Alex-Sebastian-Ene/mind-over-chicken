@@ -11,89 +11,91 @@ calm and stress) still apply on top. In the sandbox it drives the rival civilisa
 leaves the player's own to the rules (`?wars=all` drives every civilisation, `?wars=rules`
 turns it off). Without valid weights everything falls back to the rules.
 
-## Results (the local run, 60 min on 8 CPU cores)
+## Results: the shipped policy (the cluster run)
 
-The cluster run (Iridis, one 64-core node, the `full` config up to 12 civs on 2560×1280) is
-still training. These results are for the first policy, from the local run. All numbers are in
-`eval_results.json` (`civ_eval`, unseen seeds 1 000 000+). Each world is warmed up for 300 s
-under the rules, then played for 900 s with the same wandering player mood in every condition.
+The weights compiled into the game (`crates/moc-civ/policy/*.mocp`) come from Iridis job
+2148953. It ran the `full` config for 460 min on one 64-core node: 60 env processes, a league
+of 16 past checkpoints, about 20.3 M council samples and 0.9 M commander samples. Copies of the
+weights, the curves and every evaluation are in `models/full/`.
 
-**Training** (`models/curves/*.csv`, `models/curves.svg`) took 60.2 min of wall time, with 7 env
-processes and one learner:
-
-| stage | setup | minutes | samples | episode return | survival |
+| stage | setup | minutes | samples | episode return (first → last) | survival |
 |---|---|---|---|---|---|
-| c1 | council: 2 civs, 640×320 | 12 | 72 k | −2.5 → −2.3 | 0.78 → 0.77 |
-| c2 | council: 4 civs, 1280×640 | 20 | 133 k | −2.0 → +0.4 | 0.61 → 0.83 |
-| c3 | council: 8 civs, 1280×640 | 12 | 104 k | +2.7 → +1.0 | 0.97 → 0.86 |
-| k1 | commander: 4 civs, 1280×640 | 16 | 82 k | −1.3 → −0.5 | 0.85 → 0.94 |
+| c1 | council: 2 civs, 640×320 | 40 | 2.0 M | −3.2 → −0.4 | 0.63 → 0.78 |
+| c2 | council: 4 civs, 1280×640 | 70 | 3.7 M | −0.3 → +1.6 | 0.80 → 0.85 |
+| c3 | council: 8 civs, 1280×640 | 80 | 4.8 M | → +2.0 | → 0.88 |
+| c4 | council: 10 civs, 2560×1280 | 90 | 5.5 M | → +5.6 | → 0.98 |
+| c5 | council: 12 civs, 2560×1280 | 70 | 4.4 M | → +6.3 | → 0.95 |
+| k1 | commander: 6 civs, 1280×640 | 60 | 0.65 M | −0.9 → −0.7 | 0.92 → 0.94 |
+| k2 | commander: 10 civs, 2560×1280 | 50 | 0.25 M | −0.6 → −0.4 | 0.98 → 0.95 |
 
-The return is not comparable across stages: rewards depend on the world.
+The first rows of c3–c5 have no finished episodes yet, so only the last value is given.
 
-**All-council worlds against all-rules worlds** (same seeds; per civilisation):
+**Evaluation.** `eval_results.json` (= `models/full/eval_full_postfix.json`) was run by
+`civ_eval` on Iridis with `politics::scan_borders` fixed: 32 unseen seeds per scenario and
+condition, 300 s warm-up under the rules, then 900 s with the same wandering player mood in
+every condition. Head to head means half the civilisations of each world are on one side and
+half on the other. A win is the higher end score `alive·10 + age + ln(1+pop) + 0.2·villages`.
 
-| | duel 2×640² | four 4×1280² | eight 8×1280² | twelve 12×2560² (4 seeds) |
-|---|---|---|---|---|
-| survival | 0.67 vs 0.70 | 0.62 vs 0.65 | **0.85** vs 0.79 | **0.97** vs 0.91 |
-| population after 900 s | 64 vs 54 | 84 vs 68 | **118** vs 81 | **197** vs 131 |
-| villages lost | **0.28** vs 1.93 | **0.22** vs 2.00 | **0.22** vs 1.81 | **0.15** vs 1.77 |
-| ages gained | +0.19 vs −0.84 | −1.39 vs −0.98 | +0.20 vs −0.39 | +0.57 vs +0.21 |
-| wars per world | 22 vs 31 | 34 vs 65 | 31 vs 86 | 18 vs 74 |
-| battles per world | 260 vs 43 | 384 vs 88 | 310 vs 102 | 219 vs 75 |
-
-The councils keep more people and lose far fewer villages: they make fewer wars and sue for
-peace. Their worlds also have many more pitched battles: a council that holds a rival stance
-keeps border tension in the battle band (≥ 0.8), and battles are physics, not a decision.
-
-**Head to head** (half the civilisations on the councils, half on the rules, in the same worlds;
-a win is the higher end score `alive·10 + age + ln(1+pop) + 0.2·villages`):
-
-| | duel | four | eight |
+| | 4 civs, 1280×640 | 8 civs, 1280×640 | 12 civs, 2560×1280 |
 |---|---|---|---|
-| councils vs rules: win rate (Elo gap) | 0.42 (−60) | 0.47 (−21) | 0.45 (−32) |
-| final vs c1 checkpoint | 0.67 (+123) | 0.45 (−35) | 0.58 (+57) |
-| trained vs scripted commander | 0.56 (+40) | 0.52 (+11) | 0.51 (+6) |
+| **councils vs rules**: win rate (Elo gap) | **0.57 (+51)** | **0.57 (+47)** | **0.62 (+83)** |
+| councils vs the local policy of #115 | 0.67 (+120) | 0.60 (+67) | 0.53 (+24) |
+| trained vs scripted commander | 0.54 (+31) | 0.46 (−27) | 0.51 (+6) |
+| all-council worlds: survival, population, villages lost per civ | 0.69, 69, 1.31 | 0.87, 129, 0.68 | 0.95, 292, 0.36 |
+| all-rules worlds: survival, population, villages lost per civ | 0.43, 43, 4.41 | 0.57, 63, 4.40 | 0.82, 172, 4.83 |
 
-So after an hour the councils do **not** yet beat the rules head to head. Next to rule-driven
-neighbours they keep more people but fewer villages: they capture 0.4–0.5 villages per
-civilisation against the rules' 2.4–4.1. The commander is about even with the scripted one. The
-longer cluster run is meant to fix this.
+The councils now beat the rules head to head at every size. All-council worlds keep far more
+people and lose a fraction of the villages.
 
-**Behaviour differs by traits** (one shared policy; the stances a council takes toward its
-neighbours):
+**Behaviour differs by traits** (one shared policy):
 
-| | four: aggressive / friendly | eight: aggressive / friendly | duel: aggressive / friendly |
-|---|---|---|---|
-| rivalry or war stance | 0.50 / 0.17 | 0.33 / 0.26 | 0.54 / 0.20 |
-| trade or alliance stance | 0.43 / 0.69 | 0.45 / 0.48 | 0.37 / 0.61 |
-| alliances formed | 0.6 / 1.7 | 0.9 / 1.9 | 0.6 / 4.7 |
-| share under arms | 0.14 / 0.05 | 0.09 / 0.08 | 0.18 / 0.10 |
-| wars declared | 1.6 / 0.4 | 1.5 / 0.5 | 1.8 / 1.3 |
+| 4 civs, 1280×640 | aggressive | friendly |
+|---|---|---|
+| rivalry or war stance | 0.25 | 0.05 |
+| trade or alliance stance | 0.64 | 0.91 |
+| wars declared | 3.3 | 2.4 |
 
-Aggressive means aggressiveness ≥ 0.6 and friendliness < 0.5; friendly is the reverse. The
-correlation of aggressiveness with a hostile stance is 0.33–0.41.
+At 8 civs the rivalry or war stance is 0.15 against 0.03 and wars declared 2.6 against 0.9. The
+correlation of aggressiveness with a hostile stance is 0.29–0.45. The share under arms no longer
+differs by trait: about 0.2 for both.
 
 **Calm against stress** (the player held calm, or stressed, the whole game):
 
-| | duel | four | eight |
+| | 4 civs | 8 civs | 12 civs |
 |---|---|---|---|
-| councils: wars per world, calm / stress | 0.25 / 36 | 0.4 / 50 | 3.3 / 47 |
-| councils: share of time at war | 0.01 / 0.44 | 0.02 / 0.48 | 0.01 / 0.23 |
-| councils: rivalry or war stance | 0.04 / 0.43 | 0.08 / 0.44 | 0.12 / 0.40 |
-| rules: wars per world, calm / stress | 5.3 / 42 | 10 / 56 | 15 / 107 |
+| councils: wars per world, calm / stress | 2.8 / 81 | 3.4 / 66 | 5.3 / 34 |
+| councils: rivalry or war stance, calm / stress | 0.005 / 0.20 | 0.007 / 0.13 | 0.02 / 0.09 |
+| rules: wars per world, calm / stress | 7.2 / 86 | 8.9 / 127 | 9.2 / 99 |
 
-**Strategy** (per all-council world of four civilisations; duel and eight in the JSON):
+**Strategy**, per all-council world of four civilisations:
+- 21.7 wars declared, 39 % of them opportunistic (on a rival at war elsewhere, in a Dark Age, or
+  split by strife);
+- 4.7 joins of an ally's war and 0.4 gang-ups on the strongest;
+- 34 alliances formed;
+- 62 peace offers, 68 % of them made while losing;
+- 7.2 truces broken;
+- 62 raids, most of them under the raid war goal, which this policy uses most.
 
-- 10.8 wars declared, 3.2 of them opportunistic (30 %): on a rival at war elsewhere, in a Dark
-  Age, or split by strife;
-- 3.2 gang-ups on the strongest, and 1.25 joins of an ally's war;
-- 3.5 alliances formed;
-- 10.8 peace offers, 49 % of them made while losing;
-- 3.1 truces broken;
-- during the 464 s spent at war on two fronts or more, an army was sent home 99 % of the time.
+With the trained commander, an army is sent home in only 9 % of the seconds spent at war on two
+fronts (the scripted commander does it 99 % of the time).
 
-The war goal is almost always "take a village" or "raid". "Defend an ally" is never chosen, and
-coalitions are rare.
+**The `scan_borders` fix (in this branch).** `politics::scan_borders` cleared the nearest
+village pair of every civilisation pair inside its loop, which wiped the (higher, lower) entry
+right after the (lower, higher) pass wrote it. A civilisation therefore never marched on, or
+found a battlefield with, a lower-numbered enemy: wars were one-sided. Both policies were
+trained with the bug. Re-evaluated with the fix (`models/full/eval_*_{prefix,postfix}.json`):
+
+| councils vs rules (win rate) | 4 civs | 8 civs | 12 civs |
+|---|---|---|---|
+| cluster policy, before the fix → after | 0.55 → 0.57 | 0.57 → 0.57 | 0.64 → 0.62 |
+| local policy of #115, before → after | 0.51 → 0.48 | 0.48 → 0.48 | 0.58 → 0.56 |
+
+The fix doesn't hurt the cluster policy, so no fine-tune was needed. It makes the rules' wars
+much bloodier: villages lost per civilisation go from 1.5–1.9 to 4.4–4.8.
+
+**The first policy (#115)** came from the local 60-minute run (`configs/local.json`, 8 cores).
+It is still in `models/` as `council.mocp` and `commander.mocp`, and serves as the league
+baseline. It won 0.42–0.58 against the rules.
 
 **Runtime cost.** A council or commander decision takes 0.03–0.1 ms natively; a council decides
 every 4 s and a commander every 1 s.
@@ -138,10 +140,13 @@ The wasm grows by about 160 KB: 97 KB of weights and about 65 KB of code.
 
 ## What's missing
 
-- **The councils don't beat the rules head to head yet.** That is what the cluster run is for.
-- **The commander is only as good as the scripted one.** It trained for 16 min.
-- **Battles.** All-council worlds run many border battles.
-- **Unused options.** The "defend an ally" war goal is never chosen.
+- **The commander is about as good as the scripted one** (0.46–0.54), and rarely sends an army
+  home on two fronts.
+- **Unused options.** "Defend an ally" is almost never chosen, and "gang up on the strongest"
+  is rare.
+- **Battles.** All-council worlds still have more border battles than the rules' worlds.
+- **Retraining.** The policies were trained before the `scan_borders` fix; a retrain on the
+  fixed world may do better.
 - **Rebels.** Rebel civilisations born mid-game follow the newest council in all-council worlds
   and the rules in mixed ones.
 
