@@ -191,11 +191,17 @@ impl OrbitCamera {
         if t_end <= t_start {
             return None;
         }
-        let step = 0.5;
+        // Adaptive march (#215): the ray falls at a constant rate, so the distance it still has to
+        // fall is a good estimate of how far it can jump before the ground matters. Start with
+        // half that distance (capped at 8 units so a tall hill is never skipped) and shrink as the
+        // ray nears the surface, then bisect the crossing. A long flat-ground ray needs ~20
+        // samples instead of the old fixed 0.5 step's 600–1,600.
+        let drop = -d.y; // > 0: height lost per unit of t
         let mut t_prev = t_start;
         let mut t = t_start;
-        while t <= t_end {
-            if above(t) <= 0.0 {
+        loop {
+            let a = above(t);
+            if a <= 0.0 {
                 let (mut lo, mut hi) = (t_prev, t);
                 for _ in 0..12 {
                     let mid = 0.5 * (lo + hi);
@@ -204,9 +210,14 @@ impl OrbitCamera {
                 let p = o.add(d.scale(hi));
                 return Some([p.x, p.z]);
             }
+            if t >= t_end {
+                break;
+            }
             t_prev = t;
-            t += step;
+            let step = (a / drop * 0.5).clamp(0.5, 8.0);
+            t = (t + step).min(t_end);
         }
+        // The ray ran out over the edge of the heightfield: the old behaviour is sea level.
         let p = o.add(d.scale(t_end));
         Some([p.x, p.z])
     }
@@ -240,6 +251,20 @@ mod tests {
         let plane = cam.screen_to_ground(300.0, 350.0, 800.0, 600.0, 8.0).unwrap();
         let terr = cam.screen_to_terrain(300.0, 350.0, 800.0, 600.0, 24.0, |_, _| 8.0).unwrap();
         assert!((plane[0] - terr[0]).abs() < 0.05 && (plane[1] - terr[1]).abs() < 0.05, "{:?} vs {:?}", plane, terr);
+    }
+
+    #[test]
+    fn terrain_raycast_is_adaptive_not_a_fixed_fine_march() {
+        use std::cell::Cell;
+        let cam = OrbitCamera::new(160.0, 90.0);
+        let samples = Cell::new(0u32);
+        let hit = cam.screen_to_terrain(400.0, 300.0, 800.0, 600.0, 24.0, |_, _| {
+            samples.set(samples.get() + 1);
+            8.0
+        });
+        assert!(hit.is_some());
+        // The old fixed 0.5 step took hundreds of height lookups per ray (#215).
+        assert!(samples.get() < 100, "raycast sampled {} points", samples.get());
     }
 
     #[test]

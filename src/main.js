@@ -100,9 +100,19 @@ let gesture = null; // Rust (input.rs): with the main button or a finger, a tap 
 // north–south on vast worlds), and in 3D the camera also moves north–south over the map.
 // 3D: the ground point you pressed on stays under the cursor (raycast in Rust), at any zoom/orbit.
 let grab3d = null;
+// #215: one reusable buffer for screen→ground raycasts. The pointer-aim hot path passes it to
+// the wasm `screen_to_ground_into`, so a 1 kHz mouse no longer allocates two floats per move.
+const groundHit = new Float32Array(2);
+function groundHitAt(sx, sy, r) {
+  if (engine.screen_to_ground_into) {
+    engine.screen_to_ground_into(sx, sy, r.width, r.height, groundHit);
+    return groundHit;
+  }
+  return engine.screen_to_ground(sx, sy, r.width, r.height);
+}
 function groundAt(e) {
   const r = screen.getBoundingClientRect();
-  const h = engine.screen_to_ground(e.clientX - r.left, e.clientY - r.top, r.width, r.height);
+  const h = groundHitAt(e.clientX - r.left, e.clientY - r.top, r);
   return h && h[0] >= 0 ? { x: h[0], z: h[1] } : null;
 }
 function grabPan3d(e) {
@@ -465,7 +475,7 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null, setupP
     if (scene instanceof CivSandbox || scene?.civ) return { x, y };
     if (in3dSurface()) {
       const r = screen.getBoundingClientRect();
-      const hit = engine.screen_to_ground(x * r.width, y * r.height, r.width, r.height);
+      const hit = groundHitAt(x * r.width, y * r.height, r);
       if (hit && hit[0] >= 0 && hit[1] >= 0) return { x: hit[0] / cosmos.worldW, y: hit[1] / cosmos.worldH };
     }
     if (!cosmos.view) return { x, y };
@@ -1382,7 +1392,7 @@ function raycastAim3d() {
   const s = headAimLive() ? G?.brain?.screenAim : lastScreenAim;
   if (!s) return null;
   const r = screen.getBoundingClientRect();
-  const hit = engine.screen_to_ground(s.x * r.width, s.y * r.height, r.width, r.height);
+  const hit = groundHitAt(s.x * r.width, s.y * r.height, r);
   if (!hit || hit[0] < 0 || hit[1] < 0) return null;
   return { x: clamp(hit[0] / cosmos.worldW), y: clamp(hit[1] / cosmos.worldH) };
 }
@@ -1466,7 +1476,7 @@ function surfaceAim(e) {
     const r = screen.getBoundingClientRect();
     const sx = e.clientX - r.left;
     const sy = e.clientY - r.top;
-    const hit = engine.screen_to_ground(sx, sy, r.width, r.height);
+    const hit = groundHitAt(sx, sy, r);
     if (hit && hit[0] >= 0 && hit[1] >= 0) {
       return { x: hit[0] / cosmos.worldW, y: hit[1] / cosmos.worldH };
     }
@@ -1478,15 +1488,35 @@ function surfaceAim(e) {
 }
 
 function followCursorAim(e) {
-  if (!G?.brain || headAimLive()) return;
+  if (!G?.brain) return;
+  const head = headAimLive();
+  const hover = G.rivals && G.world && !cosmos.active;
+  if (head && !hover) return;   // the headset supplies the aim; there is nothing to raycast
   const a = surfaceAim(e);
+  if (hover) G.rivals.hover = { x: a.x * G.world.width, y: a.y * G.world.height };
+  if (head) return;
   G.brain.aim.x = a.x;
   G.brain.aim.y = a.y;
   const s = sim();
   if (s) s.setAim(a.x, a.y);
   G.scene?.setAim?.(a.x, a.y);
 }
-window.addEventListener('pointermove', followCursorAim, { passive: true });
+// #215: coalesce hardware pointer moves into one raycast per animation frame. A 1 kHz mouse used
+// to raycast the terrain on every event, and the canvas listener called this again after the
+// window one. The aim is at most one frame old, which is what the reticle draws anyway.
+let aimEvent = null;
+let aimFrame = 0;
+function queueCursorAim(e) {
+  aimEvent = e;
+  if (aimFrame) return;
+  aimFrame = requestAnimationFrame(() => {
+    aimFrame = 0;
+    const ev = aimEvent;
+    aimEvent = null;
+    if (ev) followCursorAim(ev);
+  });
+}
+window.addEventListener('pointermove', queueCursorAim, { passive: true });
 let panDrag = null;
 let orbitDrag = null;
 // ---------- 3D camera <-> globe hand-off ----------
@@ -1626,8 +1656,8 @@ function stepCam3dTween() {
 
 screen.addEventListener('pointermove', (e) => {
   if (intro.gate('pointer') !== 'pass') return;   // inputs are held during the era intro
-  followCursorAim(e);
-  if (G?.rivals && G.world && !cosmos.active) { const a = surfaceAim(e); G.rivals.hover = { x: a.x * G.world.width, y: a.y * G.world.height }; }
+  // The window listener above coalesces the aim raycast; the rival hover follows it there too
+  // (#215), so this handler never raycasts the terrain for a move.
   if (G && cosmos.active) { const p = worldFromEvent(e); cosmos.pointerMove(e.pointerId, p.x, p.y, G); return; }
   if (orbitDrag && orbitDrag.id === e.pointerId) {
     const dx = e.clientX - orbitDrag.x;

@@ -122,6 +122,12 @@ export class Engine {
     render_overlay_canvas(canvas: HTMLCanvasElement, alpha: number, canvas_w: number, canvas_h: number): void;
     render_uploaded_canvas(night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
     screen_to_ground(sx: number, sy: number, cw: number, ch: number): Float32Array;
+    /**
+     * Zero-allocation form of `screen_to_ground` (#215): writes `[x, z]` into `out`, or
+     * `[-1, -1]` when the ray misses. The pointer-aim hot path passes one reusable buffer
+     * instead of allocating a new `Float32Array` for every hardware pointer move.
+     */
+    screen_to_ground_into(sx: number, sy: number, cw: number, ch: number, out: Float32Array): void;
     set_3d_mode(enabled: boolean): void;
     /**
      * The colour around the map in 3D (the world's deep sea, 0..255), so the view's edges read
@@ -777,6 +783,7 @@ export interface InitOutput {
     readonly engine_render_overlay_canvas: (a: number, b: any, c: number, d: number, e: number) => [number, number];
     readonly engine_render_uploaded_canvas: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly engine_screen_to_ground: (a: number, b: number, c: number, d: number, e: number) => any;
+    readonly engine_screen_to_ground_into: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: any) => void;
     readonly engine_set_3d_mode: (a: number, b: number) => void;
     readonly engine_set_backdrop: (a: number, b: number, c: number, d: number) => void;
     readonly engine_set_camera_distance: (a: number, b: number) => void;
@@ -1017,10 +1024,10 @@ export interface InitOutput {
     readonly moc_sim_free: (a: number) => void;
     readonly moc_sim_new: (a: number) => number;
     readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__307: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__308: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__308: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__309: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
