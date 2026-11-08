@@ -49,13 +49,12 @@ test('forward thrust then palm releases exactly one fireball with the mood colou
   assert.equal(again.cast, false);
 });
 
-test('palm without a thrust cancels; thrust without palm does not fire', () => {
+test('opening the palm after a fist cast (no thrust needed); thrust without palm does not fire', () => {
   const c = new FireballController();
-  feed(c, 12, { start: 1000 });
-  const cancel = c.update({ hand: hand(1, 'palm'), gesture: palm, mood, now: 1600, aspect: 4 / 3 });
-  assert.equal(cancel.cancelled, true);
-  assert.equal(cancel.cast, false);
-  assert.equal(cancel.fizzle, true);
+  feed(c, 45, { start: 1000 });
+  const released = c.update({ hand: hand(1, 'palm'), gesture: palm, mood, now: 3300, aspect: 4 / 3 });
+  assert.equal(released.cancelled, false);
+  assert.equal(released.cast, true);
 
   const d = new FireballController();
   feed(d, 10, { start: 1000 });

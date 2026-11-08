@@ -33,7 +33,7 @@ function fakeDoc({ visible = [], wizard = false } = {}) {
 
 test('overlays hold the sidebar hotkeys (#211, #171-#173)', () => {
   assert.equal(overlayBlocksHotkeys(fakeDoc()), false);
-  for (const id of ['titleScreen', 'failScreen', 'endScreen', 'banner']) {
+  for (const id of ['titleScreen', 'planetSetup', 'failScreen', 'endScreen', 'banner']) {
     assert.equal(overlayBlocksHotkeys(fakeDoc({ visible: [id] })), true, id);
   }
   assert.equal(overlayBlocksHotkeys(fakeDoc({ wizard: true })), true, 'calibration wizard');

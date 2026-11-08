@@ -130,6 +130,22 @@
   </nav>
 </div>
 
+<section class="overlay planet-setup" id="planetSetup" hidden aria-labelledby="planetSetupHeading">
+  <div class="setup-inner">
+    <header class="setup-head">
+      <p class="eyebrow" data-setup-count>World 1 of 4</p>
+      <h1 id="planetSetupHeading">Your mind makes four worlds</h1>
+      <p class="setup-hint" data-setup-hint>Hold a feeling. Each world is made from it.</p>
+    </header>
+    <div class="pack-row" id="planetSetupGrid" aria-live="polite"></div>
+    <footer class="setup-actions">
+      <button type="button" class="btn" id="planetSetupBack">Back</button>
+      <button type="button" class="btn" id="planetSetupAgain" hidden>Read again</button>
+      <button type="button" class="btn btn-primary" id="planetSetupBegin" hidden>Begin on the home planet</button>
+    </footer>
+  </div>
+</section>
+
 <section class="overlay title-screen" id="titleScreen" aria-labelledby="titleHeading">
   <div class="title-inner title-menu">
     <h1 id="titleHeading">Mind <span>over</span> Chicken</h1>
@@ -289,7 +305,7 @@
   </section>
   <section class="set-group" aria-labelledby="setCamH">
     <h3 id="setCamH">Camera</h3>
-    <label class="set-row"><input type="checkbox" id="setCameraOnStart"> <span>Turn the camera on when a game starts <small>Off by default. Frames never leave this device.</small></span></label>
+    <label class="set-row"><input type="checkbox" id="setCameraOnStart"> <span>Turn the camera on when a game starts <small>On by default. Frames never leave this device.</small></span></label>
   </section>
   <section class="set-group" aria-labelledby="setSavesH">
     <h3 id="setSavesH">Saves</h3>

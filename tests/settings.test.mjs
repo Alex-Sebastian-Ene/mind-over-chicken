@@ -19,6 +19,14 @@ test('settings round-trip and fall back to the defaults', () => {
   assert.deepEqual(loadSettings(null), { ...SETTINGS_DEFAULTS });
 });
 
+test('the camera starts with a game by default; an explicit opt-out is respected', () => {
+  const s = memory();
+  assert.equal(loadSettings(s).cameraOnStart, true);
+  assert.equal(loadSettings(null).cameraOnStart, true);
+  s.setItem(SETTINGS_KEY, '{"cameraOnStart":false}');
+  assert.equal(loadSettings(s).cameraOnStart, false);
+});
+
 test('reduced motion follows the system until the player chooses', () => {
   assert.equal(reducedMotionOn({ reducedMotion: null }, true), true);
   assert.equal(reducedMotionOn({ reducedMotion: null }, false), false);
