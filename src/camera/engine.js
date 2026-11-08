@@ -4,9 +4,11 @@
 //                     and face run in parallel. The main thread only grabs a small frame
 //                     (createImageBitmap with resize, ~320 px wide) and transfers it; at most one
 //                     frame per worker is in flight, so nothing queues up and the game loop never
-//                     waits for inference.
+//                     waits for inference. Frames are fed as soon as the camera presents one or a
+//                     worker answers, not on the next game frame, so the rate is set by the camera
+//                     and the model, up to MAX_HZ (faster tracking, Alex).
 //   main (fallback)   the #59 path: the models run in this thread under a budget (at most one model
-//                     per game frame, ~8–15 Hz hands, ≤5 Hz face). Used when workers, module workers,
+//                     per game frame, ~12–25 Hz hands, ≤8 Hz face). Used when workers, module workers,
 //                     OffscreenCanvas or WebGL in a worker are unavailable, or a worker dies.
 //
 // Both report the same results to the handlers set with on():
@@ -24,7 +26,9 @@ import { loading } from '../ui/loading.js'; // loading screen
 import { RateMeter, Ema } from './meter.js';
 
 export const FRAME_WIDTH = { gesture: 320, face: 256 };
-export const MAX_HZ = { gesture: 30, face: 24 };
+// Caps, not targets: a 30 fps webcam gives at most 30 new frames a second, and each worker has one
+// frame in flight. Hands can follow a 60 fps camera; the face (CPU, blendshapes) stops at 30.
+export const MAX_HZ = { gesture: 60, face: 30 };
 // With one worker per model, the hands get the GPU and the face runs on the CPU (WebAssembly,
 // XNNPACK). Every WebGL context of the page, the game's included, runs in the browser's one GPU
 // process, so GPU models queue behind each other and behind the game. Measured on an i5-10300H
@@ -40,8 +44,8 @@ export function workerDelegates(search = globalThis.location?.search || '') {
   return { ...SPLIT_DELEGATES };
 }
 // Main-thread budget (#59): each model waits a multiple of its own measured cost.
-const HAND_MS = { tracking: 66, searching: 125, costX: 3 };
-const FACE_MS = { min: 200, costX: 6 };
+const HAND_MS = { tracking: 40, searching: 80, costX: 2.5 };
+const FACE_MS = { min: 125, costX: 5 };
 const INIT_TIMEOUT_MS = 60000;
 const STALL_MS = { first: 20000, later: 5000 };   // no answer to a frame for this long: the worker is stuck
 const MAX_ERRORS = 30;
@@ -61,11 +65,13 @@ export function workerSupport(g = globalThis) {
 
 const newStat = () => ({ rate: new RateMeter(), ms: new Ema(0.2), latency: new Ema(0.2) });
 
+
 class Engine {
   constructor(hands) {
     this.hands = hands;
     this.handlers = {};
     this.stats = { gesture: newStat(), face: newStat() };
+    this.videoRate = new RateMeter();   // frames the camera presents: the ceiling for both models
     this.delegates = { gesture: null, face: null };
     this.timings = {};
     this.alive = true;
@@ -81,7 +87,7 @@ class Engine {
     s.latency.add(latency);
   }
 
-  resetStats() { for (const s of Object.values(this.stats)) { s.rate.reset(); s.ms.reset(); s.latency.reset(); } }
+  resetStats() { for (const s of Object.values(this.stats)) { s.rate.reset(); s.ms.reset(); s.latency.reset(); } this.videoRate.reset(); }
 
   // { mode, note, gesture: { hz, ms, latency, delegate }, face: {...}, timings }
   snapshot(now = performance.now()) {
@@ -90,12 +96,13 @@ class Engine {
       const r = (v) => (v == null ? null : Math.round(v * 10) / 10);
       return { hz: r(s.rate.hz(now)), ms: r(s.ms.value), latency: r(s.latency.value), delegate: this.delegates[name], count: s.rate.count };
     };
-    return { mode: this.mode, workers: this.workers || 0, note: this.note, gesture: one('gesture'), face: one('face'), timings: { ...this.timings } };
+    const video = { hz: Math.round(this.videoRate.hz(now) * 10) / 10, count: this.videoRate.count };
+    return { mode: this.mode, workers: this.workers || 0, note: this.note, video, gesture: one('gesture'), face: one('face'), timings: { ...this.timings } };
   }
 }
 
 // ---------- worker path ----------
-class WorkerEngine extends Engine {
+export class WorkerEngine extends Engine {   // exported for the scheduler test (tests/camera_rates.test.mjs)
   constructor(hands, split, delegates = workerDelegates()) {
     super(hands);
     this.mode = 'worker';
@@ -163,9 +170,19 @@ class WorkerEngine extends Engine {
       if (!this.alive || this.watched !== video) return;
       this.frameSerial++;
       this.frameAt = performance.now();
+      this.noteFrame(`f${this.frameSerial}`, this.frameAt);
       video.requestVideoFrameCallback(onFrame);
+      this.kick();   // a new camera frame: feed idle workers now, not on the next game frame
     };
     video.requestVideoFrameCallback(onFrame);
+  }
+
+  // Count each new camera frame once, from requestVideoFrameCallback or, where that pauses (a
+  // background tab), from the media clock seen by the game loop.
+  noteFrame(key, now) {
+    if (key === this.lastFrameKey) return;
+    this.lastFrameKey = key;
+    this.videoRate.tick(now);
   }
 
   frameKey(video) {
@@ -176,33 +193,46 @@ class WorkerEngine extends Engine {
   pump(video, now, { hands = this.hands } = {}) {
     if (!this.alive) return;
     this.watch(video);
-    const key = this.frameKey(video);
-    for (const lane of this.lanes) {
-      if (!lane.ready) continue;
-      if (lane.busy) {
-        if (now - lane.sentAt > (lane.answered ? STALL_MS.later : STALL_MS.first)) this.fail(new Error('the camera worker stopped answering'));
-        continue;
-      }
-      // A few ms of slack so a 30 fps camera isn't aliased down to 15 Hz by a 30 Hz cap.
-      const run = lane.tasks.filter((t) => (t === 'face' || hands) && this.seen[t] !== key && now - this.lastRun[t] >= 1000 / MAX_HZ[t] - 6);
-      if (!run.length) continue;
-      const vw = video.videoWidth, vh = video.videoHeight;
-      if (!vw || !vh) continue;
-      lane.busy = true;
-      lane.sentAt = now;
-      lane.aspect = vw / vh;
-      for (const t of run) { this.seen[t] = key; this.lastRun[t] = now; }
-      const w = Math.min(vw, Math.max(...run.map((t) => FRAME_WIDTH[t])));
-      const h = Math.round((w * vh) / vw);
-      createImageBitmap(video, { resizeWidth: w, resizeHeight: h, resizeQuality: 'low' }).then((bitmap) => {
-        if (!this.alive || !lane.worker) { bitmap.close(); lane.busy = false; return; }
-        this.captureErrors = 0;
-        lane.worker.postMessage({ type: 'frame', id: ++lane.seq, ts: now, bitmap, run }, [bitmap]);
-      }, (err) => {
-        lane.busy = false;
-        if (++this.captureErrors > MAX_ERRORS) this.fail(err);
-      });
+    this.video = video;
+    this.pumpHands = hands;
+    this.noteFrame(this.frameKey(video), now);
+    for (const lane of this.lanes) this.pumpLane(lane, video, now, hands);
+  }
+
+  // Feed idle workers at once: on a new camera frame (requestVideoFrameCallback) and when a worker
+  // answers. Waiting for the next game frame added up to a frame (~17 ms) of idle time per cycle.
+  kick() {
+    if (!this.alive || !this.video) return;
+    const now = performance.now();
+    for (const lane of this.lanes) if (!lane.busy) this.pumpLane(lane, this.video, now, this.pumpHands);
+  }
+
+  pumpLane(lane, video, now, hands) {
+    if (!lane.ready) return;
+    if (lane.busy) {
+      if (now - lane.sentAt > (lane.answered ? STALL_MS.later : STALL_MS.first)) this.fail(new Error('the camera worker stopped answering'));
+      return;
     }
+    const key = this.frameKey(video);
+    // A few ms of slack so a 30 fps camera isn't aliased down to 15 Hz by a 30 Hz cap.
+    const run = lane.tasks.filter((t) => (t === 'face' || hands) && this.seen[t] !== key && now - this.lastRun[t] >= 1000 / MAX_HZ[t] - 6);
+    if (!run.length) return;
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return;
+    lane.busy = true;
+    lane.sentAt = now;
+    lane.aspect = vw / vh;
+    for (const t of run) { this.seen[t] = key; this.lastRun[t] = now; }
+    const w = Math.min(vw, Math.max(...run.map((t) => FRAME_WIDTH[t])));
+    const h = Math.round((w * vh) / vw);
+    createImageBitmap(video, { resizeWidth: w, resizeHeight: h, resizeQuality: 'low' }).then((bitmap) => {
+      if (!this.alive || !lane.worker) { bitmap.close(); lane.busy = false; return; }
+      this.captureErrors = 0;
+      lane.worker.postMessage({ type: 'frame', id: ++lane.seq, ts: now, bitmap, run }, [bitmap]);
+    }, (err) => {
+      lane.busy = false;
+      if (++this.captureErrors > MAX_ERRORS) this.fail(err);
+    });
   }
 
   onResult(lane, m) {
@@ -223,6 +253,7 @@ class WorkerEngine extends Engine {
       this.record('face', at, m.ms.face, latency);
       this.handlers.face?.({ ...m.face, at, latency, ms: m.ms.face });
     }
+    this.kick();   // the camera usually has a newer frame by now
   }
 
   usesGpu() { return this.lanes.some((l) => l.ready) && Object.values(this.delegates).includes('GPU'); }

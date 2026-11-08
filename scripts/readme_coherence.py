@@ -231,12 +231,12 @@ CHECKS = [
     {
         "key": "powers.god_powers",
         "group": "camera",
-        "claim": "God powers are implemented: blink lightning and hand-gesture casts (decided on #55).",
+        "claim": "God powers are implemented: blink lightning and the EEG powers; hands are movement only (#261).",
         "readme": r"God powers.*In scope|Status: implemented",
         "status": "required",
         "patterns": [r"\bfireball\b", r"spawn[A-Za-z_]*resource", r"natural[A-Za-z_]*disaster", r"\bdisaster\b"],
         "paths": ("src/", "crates/"),
-        "hint": "God powers are in scope: keep the casts wired (CAMERA_CASTS_ENABLED = true) or update README §1/§4.3.",
+        "hint": "God powers are blink lightning and the EEG powers; hand gestures only grab, move and zoom (#261). Update README §1/§4.3 if that changes.",
     },
 ]
 
