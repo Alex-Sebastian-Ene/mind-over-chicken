@@ -592,7 +592,7 @@ export class CivSandbox {
     if (s) {
       ctx.textAlign = 'right';
       ctx.fillStyle = '#7d80a0';
-      ctx.fillText(`×${s.speed} · ${Math.round(s.agents)} people · wars ${s.wars} · civil wars ${s.civilWars} · sim ${this.perf.avg.toFixed(1)} ms`, W - 3, H - 2.6);
+      ctx.fillText(`×${s.speed} · ${Math.round(s.agents)} people · wars ${s.wars} · civil wars ${s.civilWars} · ${this.civ?.ppo ? 'PPO councils' : 'rules'} · sim ${this.perf.avg.toFixed(1)} ms`, W - 3, H - 2.6);
     }
     ctx.textAlign = 'left';
   }
