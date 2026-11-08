@@ -13,6 +13,7 @@ import { FireballFX } from '../render/fireball.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
 import { eraTuning } from '../game/options.js'; // difficulty (#220)
+import { combatEnabled } from '../game/replay.js'; // challenge modifiers (#91)
 import { joyBuff, surpriseFires, surpriseEffect, sparkleCount, JOY_COLORS } from '../camera/mood-actions.js'; // #152
 import { reducedMotion } from '../ui/motion.js';
 
@@ -361,7 +362,7 @@ export class SpaceAge {
   // aim is 0..1 like the brain's.
   onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
     const G = this.G;
-    if (!G || this.done || this.phase === 'launch' || this.phase === 'voyage') return;
+    if (!G || this.done || this.phase === 'launch' || this.phase === 'voyage' || !combatEnabled(G)) return;
     const { x, y } = G.world.aimPoint(aim);
     this.fireballs.launch({ x, y }, { color, charge });
     G.audio?.blip?.();

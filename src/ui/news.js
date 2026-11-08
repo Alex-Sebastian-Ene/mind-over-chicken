@@ -14,6 +14,7 @@ export class News {
     this.max = max; this.keep = keep; this.dedupe = dedupe; this.speed = speed;
     this.t = 0;
     this.x = null;   // the tape's left edge on screen; null until first drawn
+    this.onLine = null;   // replay (#91): the run's chronicle hears real news lines
   }
 
   // Add a line. tone: 'info' | 'good' | 'bad' | 'warn' | 'market' (or a civ TONE number).
@@ -24,6 +25,7 @@ export class News {
     if (this.items.some((n) => n.text === text && this.t - n.t < this.dedupe)) return false;
     this.items.push({ text, tone, source, t: this.t });
     if (this.items.length > this.max) this.items.splice(0, this.items.length - this.max);
+    try { this.onLine?.({ text, tone, source, t: this.t }); } catch {}
     return true;
   }
 

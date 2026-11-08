@@ -7,6 +7,7 @@ import { Particles, clamp, dist, rand, chance, floater, pick } from '../sim/util
 import { walk, animate, villagerLook, sail } from '../sim/agents.js';
 import { forestFire, forestFireStep } from './forest-fire.js';
 import { eraTuning } from '../game/options.js'; // difficulty (#220)
+import { combatEnabled, modifierEffect } from '../game/replay.js'; // challenge modifiers (#91)
 import { drawPerson, drawMammoth, drawFire, makeBolt, drawBolt, drawReticle, drawChicken, drawBoat } from '../render/sprites.js';
 import { FireballFX } from '../render/fireball.js';
 import { joyBuff, surpriseFires, surpriseEffect, sparkleCount, JOY_COLORS } from '../camera/mood-actions.js'; // #152
@@ -104,7 +105,7 @@ export class StoneAge {
 
   onBlink(aim) {
     const G = this.G;
-    if (this.t - this.lastBolt < 0.5 || this.done) return;
+    if (!combatEnabled(G) || this.t - this.lastBolt < modifierEffect(G, 'blink-storm', 'boltCooldown', 0.5) || this.done) return;
     this.lastBolt = this.t;
     const { x, y } = G.world.aimPoint(aim);   // aims are 0..1 of the world (640×360 at home, #129)
     this.bolts.push({ pts: makeBolt(x, y), life: 0.35 });
@@ -312,7 +313,7 @@ export class StoneAge {
     // ---- Fire and the focus/insight challenge ----
     const f = this.fire;
     if (f.lit) {
-      const decayMult = (this.G.assistMode ? 0.5 : 1.0) * eraTuning(this.G).fireDecay;
+      const decayMult = (this.G.assistMode ? 0.5 : 1.0) * eraTuning(this.G).fireDecay * modifierEffect(this.G, 'fragile-fire', 'fireDecay', 1);
       f.heat -= dt * (this.hold.active ? 0.022 : 0.034) * decayMult;
       if (f.heat <= 0) {
         f.heat = 0; f.lit = false;
@@ -407,7 +408,7 @@ export class StoneAge {
         p.hunger = 0;
         p.starve = 0;
       } else {
-        const hungerRate = (this.G.assistMode ? STONE_HUNGER.assistRate : STONE_HUNGER.rate) * eraTuning(this.G).hunger;
+        const hungerRate = (this.G.assistMode ? STONE_HUNGER.assistRate : STONE_HUNGER.rate) * eraTuning(this.G).hunger * modifierEffect(this.G, 'fragile-fire', 'hunger', 1);
         p.hunger = clamp(p.hunger + dt * (p.colony ? -0.01 : hungerRate));
         // An opening starvation grace so new players have time to learn (× difficulty)
         const inGrace = this.t < STONE_HUNGER.grace * eraTuning(this.G).starvationGrace;
@@ -855,7 +856,7 @@ export class StoneAge {
   // before any impact effect fires (#315).
   onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
     const G = this.G;
-    if (!G || this.done) return;
+    if (!G || this.done || !combatEnabled(G)) return;
     const { x, y } = G.world.aimPoint(aim);
     this.fireballs.launch({ x, y }, { color, charge });
     G.audio?.blip?.();

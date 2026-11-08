@@ -14,6 +14,7 @@ import { FireballFX } from '../render/fireball.js';
 import { label } from './stone.js';
 import { joyBuff, surpriseFires, surpriseEffect, sparkleCount, JOY_COLORS } from '../camera/mood-actions.js'; // #152
 import { reducedMotion } from '../ui/motion.js';
+import { combatEnabled } from '../game/replay.js'; // challenge modifiers (#91)
 
 // What the scholars write down, one focus window each.
 export const INVENTIONS = [
@@ -211,7 +212,7 @@ export class FarmingToKingdoms {
 
   // ---- camera (#33): the montage has no gameplay to change, so casts and moods show a label. ----
   onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
-    if (!this.G) return;
+    if (!this.G || !combatEnabled(this.G)) return;
     const p = this.G.world.aimPoint(aim);
     this.fireballs.launch({ x: p.x, y: p.y }, { color, charge });
     this.G.audio?.blip?.();
@@ -286,7 +287,7 @@ export class InfoAge {
 
   // ---- camera (#33): this short bridge draws no gameplay, so the fireball just slams into the map. ----
   onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
-    if (!this.G) return;
+    if (!this.G || !combatEnabled(this.G)) return;
     const p = this.G.world.aimPoint(aim);
     this.fireballs.launch({ x: p.x, y: p.y }, { color, charge });
     this.G.audio?.blip?.();

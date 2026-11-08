@@ -15,6 +15,7 @@ import { FireballFX } from '../render/fireball.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
 import { eraTuning } from '../game/options.js'; // difficulty (#220)
+import { combatEnabled, modifierEffect } from '../game/replay.js'; // challenge modifiers (#91)
 import { joyBuff, surpriseFires, surpriseEffect, sparkleCount, JOY_COLORS } from '../camera/mood-actions.js'; // #152
 import { reducedMotion } from '../ui/motion.js';
 
@@ -119,12 +120,12 @@ export class Industry {
     if (this.newsT <= 0) {
       this.newsT = rand(10, 16);
       const good = chance(0.45);
-      this.momentum += good ? 0.012 : -0.016;
+      this.momentum += (good ? 0.012 : -0.016) * modifierEffect(G, 'volatile-market', 'momentum', 1);
       this.headlines.push(pick(good
         ? ['RUMOUR: CHICKENS CAN PREDICT RAIN', 'NEIGHBOURING TRIBE ORDERS 900 CHICKENS', 'EGGS DECLARED A HEALTH FOOD']
         : ['RUMOUR: THE EGG CAME FIRST', 'BIRD FLU REPORTED IN NEXT VALLEY', 'MAN SELLS ALL CHICKENS, WILL NOT SAY WHY']));
     }
-    const sigma = 0.003 + 0.016 * ar;
+    const sigma = (0.003 + 0.016 * ar) * modifierEffect(G, 'volatile-market', 'volatility', 1);
     // When traders are frightened, buyers vanish and quotes get marked down.
     const avgFear = this.agents.reduce((sum, a) => sum + a.fear, 0) / N;
     const dlnP = 0.05 * (demand / N) - 0.009 * (avgFear - 0.25) + sigma * gauss();
@@ -517,7 +518,7 @@ export class Industry {
 
   onBlink(aim) {
     const G = this.G;
-    if (this.t - this.lastBolt < 0.5 || this.done) return;
+    if (!combatEnabled(G) || this.t - this.lastBolt < 0.5 || this.done) return;
     this.lastBolt = this.t;
     const { x, y } = G.world.aimPoint(aim);
     this.bolts.push({ pts: makeBolt(x, y), life: 0.35 });
@@ -592,7 +593,7 @@ export class Industry {
   // aim is 0..1 like the brain's.
   onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
     const G = this.G;
-    if (!G || this.done) return;
+    if (!G || this.done || !combatEnabled(G)) return;
     const { x, y } = G.world.aimPoint(aim);
     this.fireballs.launch({ x, y }, { color, charge });
     G.audio?.blip?.();
