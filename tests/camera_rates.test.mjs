@@ -71,20 +71,20 @@ export async function simulate(Engine, { cameraFps = 30, inferMs = { gesture: 15
   }
 }
 
-test('a 30 fps camera: hands and face both run on every camera frame', async () => {
+test('a 30 fps camera: hands run every frame and face at its 20 Hz cap', async () => {
   const r = await simulate(WorkerEngine, { cameraFps: 30, inferMs: { gesture: 15, face: 20 } });
   assert.ok(r.gesture >= 29, `hands ${r.gesture} Hz`);
-  assert.ok(r.face >= 29, `face ${r.face} Hz`);
+  assert.ok(r.face >= 19, `face ${r.face} Hz`);
   assert.ok(r.video >= 29 && r.video <= 31, `camera ${r.video} fps`);
   // Each frame is grabbed when the camera presents it, so the lag is about one inference.
   assert.ok(r.lag.gesture <= 16, `hand lag ${r.lag.gesture} ms`);
-  assert.ok(r.lag.face <= 21, `face lag ${r.lag.face} ms`);
+  assert.ok(r.lag.face <= 34, `face lag ${r.lag.face} ms`);
 });
 
-test('a 60 fps camera: hands follow it, the face stays at its 30 Hz cap', async () => {
+test('a 60 fps camera: hands follow it, the face stays at its 20 Hz cap', async () => {
   const r = await simulate(WorkerEngine, { cameraFps: 60, inferMs: { gesture: 12, face: 20 } });
   assert.ok(r.gesture >= 55 && r.gesture <= MAX_HZ.gesture + 1, `hands ${r.gesture} Hz`);
-  assert.ok(r.face >= 25 && r.face <= MAX_HZ.face + 1, `face ${r.face} Hz`);
+  assert.ok(r.face >= 19 && r.face <= MAX_HZ.face + 1, `face ${r.face} Hz`);
 });
 
 test('a slow model is limited by its own time, never queues frames', async () => {

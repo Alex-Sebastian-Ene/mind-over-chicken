@@ -60,6 +60,9 @@ import { frameLoop } from './ui/loop.js';
 import { dayNight } from './render/daynight.js';
 import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
 import { mirrorHud } from './ui/hud-mirror.js';
+import { createRivals, playerState, applyRivalLine } from './civ/rivals.js'; // rivals on the home world (#212)
+import { readOptions, worldSizeOf, difficultyOf } from './game/options.js'; // world size and difficulty (#220)
+import { initNewGameOptions } from './ui/new-game.js';
 import { footprint3d } from './ui/minimap.js';   // the minimap's 3D window (release QA)
 import { AIM_VIEW, aimViewKind, clampHomeAim, clampScreenAim } from './input/visible-aim.js';
 import { listSaves, getSave, latestSave, saveRun, deleteSave, clearSaves, newRunId, nextRunNumber } from './game/saves.js'; // local saves
@@ -399,13 +402,21 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null } = {})
   previewBrain = null;
   if (G?.source && G.source !== source) G.source.disconnect();
   resetAIGod();
+  G?.rivals?.free?.();
   const brain = new Brain(source);
   cosmos.reset();
   intro.cancel(); introCam = null; delete document.body.dataset.intro;
-  const size = resume?.worldSize;
+  // The one game's options (#220): the home world's size and the difficulty every system reads.
+  // A continued save keeps its own world (seed and size) and its difficulty.
+  const options = { ...readOptions(), ...(resume?.options || {}) };
+  const seed = Number.isFinite(resume?.seed) ? resume.seed >>> 0 : (Math.random() * 1e9) >>> 0;
+  const picked = worldSizeOf(options.worldSize, seed);
+  const size = resume?.worldSize?.width ? { w: resume.worldSize.width, h: resume.worldSize.height, id: options.size || picked.id } : picked;
   const calibSeed = resume?.calibration?.config?.seed;
   G = {
-    world: new World(resume?.seed ?? undefined, { width: size?.width || HOME_W, height: size?.height || HOME_H }), // the bigger home world (#129)
+    world: new World(seed, { width: size.w || HOME_W, height: size.h || HOME_H }), // the home world, sized by the New Game choice (#129, #220)
+    options: { worldSize: options.worldSize, difficulty: options.difficulty, size: size.id },
+    difficulty: difficultyOf(options.difficulty),
     brain, source, advisor, hud, audio, engine,
     calibration: new Calibration(Number.isFinite(calibSeed) ? { ...calibConfig, seed: calibSeed >>> 0 } : calibConfig), // calibration (#54)
     scene: null, sceneIndex: startIndex, runTime: 0, shake: 0, invincible: false,
@@ -493,7 +504,35 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null } = {})
     engine.set_era(startIndex);   // startScene() starts the scene's Rust era sim, if it has one (#194)
   }
   startScene(startIndex);
+  startRivals(G);
   try { window.claude?.hot?.snapshot?.(() => ({ sceneIndex: G?.sceneIndex ?? 0, kind: G?.source?.kind })); } catch {}
+}
+
+// Rival peoples on the home world's other continents (#212, epic #220), driven by moc-civ with
+// the PPO war councils (?council=rules for the rules). ?rivals=0 plays without them.
+function startRivals(game) {
+  game.rivals = null;
+  const q = new URLSearchParams(location.search);
+  if (q.get('rivals') === '0' || !game.world?.continents?.length) return;
+  // Their number comes from the world's size (Rust: 3 / 5 / 8 / 12), shifted by the difficulty.
+  const d = game.difficulty?.rivals;
+  createRivals(game.world, { council: q.get('council') === 'rules' ? 'rules' : 'ppo', offset: d?.offset ?? 0 }).then((r) => {
+    if (G !== game) { r.free(); return; }
+    r.setDifficulty(d);
+    game.rivals = r;
+    r.setScene(game.sceneIndex);
+  }).catch((err) => console.warn('rivals unavailable:', err));
+  // Playtest handles: the rivals, and pointing the camera at a world point (a rival village).
+  window.__moc = Object.assign(window.__moc || {}, { rivals: () => G?.rivals, look: (x, y) => cosmos.lookAt(x, y), worldCanvas: () => worldCanvas });
+}
+
+// The rivals step with the era in play; what they do to you lands in the scene (food, people,
+// the goat market) and in the advisor's mouth.
+function updateRivals(dt) {
+  const r = G.rivals;
+  if (!r || !WORLD_SCENES.some((c) => G.scene instanceof c)) return;
+  const lines = r.update(dt, playerState(G.scene, G.world, G.sceneIndex));
+  for (const l of lines) applyRivalLine(l, { scene: G.scene, advisor, hud });
 }
 
 function startScene(i) {
@@ -507,6 +546,7 @@ function startScene(i) {
   G.sceneIndex = i;
   const scene = SCENES[i]();
   G.scene = scene;
+  G.rivals?.setScene(i);
   if (engine) {
     engine.set_era(i);
     // Only the playable eras have a Rust sim; a time skip must not restart the last one (#194).
@@ -864,6 +904,7 @@ function drawMinimap(ctx, scene) {
   ctx.drawImage(miniCache.canvas, x0, y0);
   // The camera's window, cut at the seams like the view itself.
   const sx = MINI.w / (world.width || W), sy = MINI.h / (world.height || H);
+  drawMiniRivals(ctx, x0, y0, sx, sy, world);   // under the camera's window (#212)
   ctx.strokeStyle = '#ffe066';
   ctx.lineWidth = 0.6;
   // In 3D the window is the ground the zoomed, tilted camera sees, not the 2D 320×180 (release QA).
@@ -890,6 +931,29 @@ function drawMinimap(ctx, scene) {
   const v = world.sites?.village;
   if (v) { ctx.fillStyle = '#ff9a2e'; ctx.fillRect(x0 + v.x * sx - 0.75, y0 + v.y * sy - 0.75, 1.5, 1.5); }
   ctx.globalAlpha = 1;
+}
+// The rivals on the minimap (#212): their territory, refreshed each second, and their capitals.
+const miniRivals = { canvas: null, t: -1, of: null };
+function drawMiniRivals(ctx, x0, y0, sx, sy, world) {
+  const r = G?.rivals;
+  if (!r) return;
+  if (miniRivals.of !== r || G.runTime - miniRivals.t > 1 || G.runTime < miniRivals.t) {
+    const img = r.territory(Math.max(1, Math.round((world.width || W) / MINI.w)));
+    if (img) {
+      const c = miniRivals.canvas || document.createElement('canvas');
+      c.width = img.w; c.height = img.h;
+      c.getContext('2d').putImageData(new ImageData(img.data, img.w, img.h), 0, 0);
+      miniRivals.canvas = c;
+    }
+    miniRivals.t = G.runTime; miniRivals.of = r;
+  }
+  if (miniRivals.canvas) ctx.drawImage(miniRivals.canvas, x0, y0, MINI.w, MINI.h);
+  const vs = r.villages, s = r.villageStride;
+  for (let i = 0; i + s <= vs.length; i += s) {
+    if (!vs[i + 5] || vs[i + 2] === r.mirror) continue;
+    ctx.fillStyle = r.colour(vs[i + 2]);
+    ctx.fillRect(x0 + vs[i] * sx - 1, y0 + vs[i + 1] * sy - 1, 2, 2);
+  }
 }
 
 // Frame cost for playtests (#129): render ms and whole-frame ms, read and reset via __moc.perf().
@@ -950,6 +1014,7 @@ function render() {
   }
   scene.draw(ctx);
   scene.drawAfterLight?.(ctx);
+  if (windowed && scene === G.scene) G.rivals?.draw(ctx, { flatPeople: !G.render3d, t: G.runTime });
   if (windowed && !G.render3d) {
     const zoom = intro.active && !reducedMotion() ? 1 + (INTRO_FROM.zoom2d - 1) * intro.away() : 1;   // #90
     if (zoom > 1.001) cosmos.blitViewScaled(worldCanvas, low, zoom);   // the intro's wider frame
@@ -993,6 +1058,7 @@ function render() {
           G.world?.draw3d?.(engine, windowed ? near3d(scene.G.world) : null);
           if (scene.draw3d) {
             scene.draw3d(engine, 0.016);
+            if (scene === G.scene && cosmos.view) G.rivals?.draw3d(engine, { cx: cosmos.view.center_x(), cy: cosmos.view.center_y(), t: G.runTime });
           } else if (typeof engine.draw_era_3d === 'function') {
             engine.draw_era_3d();
           }
@@ -1121,6 +1187,7 @@ function frame(ts) {
       G.calibration?.update(dt, G.brain, G.mood);
       if (aiGod) updateAIGodAutopilot(dt);
       G.scene?.update(dt);
+      updateRivals(dt);
     } else if (!$('endScreen').hidden) {
       G.scene?.update(dt);
     }
@@ -1439,6 +1506,7 @@ function stepCam3dTween() {
 screen.addEventListener('pointermove', (e) => {
   if (intro.gate('pointer') !== 'pass') return;   // inputs are held during the era intro
   followCursorAim(e);
+  if (G?.rivals && G.world && !cosmos.active) { const a = surfaceAim(e); G.rivals.hover = { x: a.x * G.world.width, y: a.y * G.world.height }; }
   if (G && cosmos.active) { const p = worldFromEvent(e); cosmos.pointerMove(e.pointerId, p.x, p.y, G); return; }
   if (orbitDrag && orbitDrag.id === e.pointerId) {
     const dx = e.clientX - orbitDrag.x;
@@ -1805,7 +1873,10 @@ function updateCosmosUi(dt) {
     const era = p.pop > 0 ? ERA_LABEL[ERA_NAMES[p.eraIndex]] : 'Barren';
     const owner = gal.attended === p ? `${ownerLabel(p)} · you're here` : ownerLabel(p);
     const tier = worldMeta(p); // planets (#68): settlement tier and strife
-    return { p, era: p.forming ? 'Forming' : tier ? `${era} · ${tier}` : era, pop: `${mirrored ? `${p.pop} people` : fmtPop(p.pop)} · ${owner}`, prog: mirrored ? (p.eraIndex + 1) / 4 : p.pop > 0 ? p.progress : 0 };
+    // Your world's card counts the rival peoples sharing it (#212).
+    const rivals = p.home && G.rivals ? G.rivals.alive() : 0;
+    const shared = rivals ? ` · ${rivals} rival ${rivals === 1 ? 'people' : 'peoples'}` : '';
+    return { p, era: p.forming ? 'Forming' : tier ? `${era} · ${tier}` : era, pop: `${mirrored ? `${p.pop} people` : fmtPop(p.pop)} · ${owner}${shared}`, prog: mirrored ? (p.eraIndex + 1) / 4 : p.pop > 0 ? p.progress : 0 };
   });
   renderWorldDetail($('worldDetail'), cosmos.detailPlanet()); // planets (#68): milestones and history
   const key = rows.map((r) => `${r.p.name}|${r.era}|${r.pop}|${Math.round(r.prog * 20)}|${gal.attended === r.p}|${cosmos.target}|${r.p.effect}|${r.p.channel}`).join(';');
@@ -1888,7 +1959,9 @@ function begin(source, { startIndex = 0, mode = 'story', resume = null } = {}) {
   // Settings › Camera: the player asked for the webcam with every game (#186).
   if (settingsUi?.settings.cameraOnStart) window.__moc?.camera?.start?.();
 }
-$('playSim').addEventListener('click', () => begin(playSource()));
+// New Game opens its step (world size, difficulty, #220); Start begins the run with those choices.
+$('newGameStart').addEventListener('click', () => begin(playSource()));
+initNewGameOptions($('titleScreen').querySelector('[data-title-view="new"]'));
 function startGalaxySandbox(source, resume = null) {
   begin(source, { mode: 'galaxy', resume });
   dismissBanner();

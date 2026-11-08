@@ -1,7 +1,7 @@
 // camera (#33, #67, #116–#123, #261): opt-in webcam input.
 //   Aim:   the webcam does NOT track the head (#189). G.brain.aim comes from the EEG headset's head
 //          pose while it streams, else the mouse (aim-source.js). Hands never overwrite it (#116, #120).
-//   Hands: MediaPipe Gesture Recognizer (numHands=2, #118) → movement only:
+//   Hands: MediaPipe Hand Landmarker (numHands=2, #118, #327) + landmark classifier → movement:
 //          1. One-hand pinch grabs & relocates living entities under the cursor (#120)
 //          2. Two-hand pinch distance continuously zooms in/out & freezes on release (#119)
 //          3. One deliberate cast (#291): fist → pull back → thrust + open palm = charged fireball.
@@ -22,6 +22,7 @@ import { GESTURE_LABEL } from './gestures.js';
 import { PinchMoveSmoother } from './pinch-move.js';
 import { initMovementCalibration, loadPinchCalibration, savePinchCalibration } from './movement-calibration.js';
 import { FireballController } from './fireball.js';
+import { formation, drawFireballSprite, drawPixels, drawSegmentRing, ringSegments, FB_HOT } from '../render/fireball-sprite.js';
 import { EMOTIONS, EmotionTracker, neutralMood, blendshapeMap } from './emotion.js';
 import { manualMood, surpriseRisingEdge } from './manual-mood.js';
 import { loadVision } from './vision.js';
@@ -100,8 +101,8 @@ const TEMPLATE = `
       <span class="eeg-qual" data-cam-fb-state>idle</span>
     </div>
     <div class="cam-fireball">
-      <span class="cam-fb-orb" data-cam-fb-orb></span>
-      <span class="cam-fb-meter"><i data-cam-fb-meter></i></span>
+      <canvas class="cam-fb-orb" data-cam-fb-orb width="24" height="24" aria-hidden="true"></canvas>
+      <span class="cam-fb-meter" data-cam-fb-meter><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
       <b data-cam-fb-pct>0%</b>
     </div>
     <p class="eeg-msg">Hold a fist, pull it back, then thrust forward and open your palm. Or hold <kbd>3</kbd> and release.</p>
@@ -835,12 +836,26 @@ export function initCamera({
     }
     if (ui.fbState) {
       ui.fbState.textContent = fireball.state;
-      ui.fbOrb.style.background = fireball.color;
-      ui.fbOrb.style.boxShadow = `0 0 10px ${fireball.color}`;
-      ui.fbMeter.style.width = `${Math.round(fireball.charge * 100)}%`;
-      ui.fbMeter.style.background = fireball.color;
+      drawPanelOrb(now);
+      const lit = ringSegments(fireball.charge, 10);
+      ui.fbMeter.querySelectorAll('i').forEach((el, i) => { el.style.background = i < lit ? fireball.color : ''; });
       ui.fbPct.textContent = `${Math.round(fireball.charge * 100)}%`;
     }
+  }
+
+  // The camera panel's fireball: the in-world pixel sprite, drawn 2x on a 24 px canvas.
+  function drawPanelOrb(now) {
+    const fbOrbCtx = ui.fbOrb?.getContext?.('2d');   // the same context every call; no TDZ at init
+    if (!fbOrbCtx) return;
+    fbOrbCtx.clearRect(0, 0, 24, 24);
+    const charging = fireball.state === 'charging' || fireball.state === 'primed';
+    if (!charging) {
+      drawFireballSprite(fbOrbCtx, 12, 12, { r: 2, frame: 0, color: fireball.color, alpha: 0.55, tongues: false });
+      return;
+    }
+    const f = formation(fireball.charge, now / 1000);
+    drawPixels(fbOrbCtx, 12, 12, f.embers.map((e) => ({ x: e.x, y: e.y, c: e.hot ? 'hot' : 'tint' })), { hot: FB_HOT, tint: fireball.color });
+    drawFireballSprite(fbOrbCtx, 12, 12, { r: f.r, frame: f.frame, color: fireball.color });
   }
 
   function drawFx(now) {
@@ -858,11 +873,6 @@ export function initCamera({
     fxCtx.clearRect(0, 0, cw, ch);
     fxDirty = true;
     const u = Math.max(1, cw / 320);
-    const ring = (x, y, r, frac, color, width = u) => {
-      fxCtx.lineWidth = width;
-      fxCtx.strokeStyle = color;
-      fxCtx.beginPath(); fxCtx.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac); fxCtx.stroke();
-    };
     const glyphAt = (glyph, x, y, size) => {
       fxCtx.font = `${Math.round(size)}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
       fxCtx.textAlign = 'center';
@@ -871,12 +881,15 @@ export function initCamera({
     const r = reticleOnScreen(G);
     const x = r.x * cw, y = r.y * ch;
     if (charging) {
-      ring(x, y, 12 * u, 1, 'rgba(242,232,213,0.2)');
-      ring(x, y, 12 * u, fireball.charge, fireball.color, 2.5 * u);
-      glyphAt('🔥', x, y - 16 * u, 9 * u);
+      // Pixel-art charge-up at the cursor (#319): a segmented ring fills, embers spiral in and the
+      // fireball grows from a spark; at full charge it strains, pulsing a pixel.
+      const f = formation(fireball.charge, now / 1000);
+      drawSegmentRing(fxCtx, x, y, 13, fireball.charge, fireball.color, { scale: u, n: 16 });
+      drawPixels(fxCtx, x, y, f.embers.map((e) => ({ x: e.x, y: e.y, c: e.hot ? 'hot' : 'tint' })), { hot: FB_HOT, tint: fireball.color }, { scale: u });
+      drawFireballSprite(fxCtx, x, y, { r: f.r, frame: f.frame, color: fireball.color, scale: u });
     }
     if (carrying) {
-      ring(x, y, 8 * u, 1, '#ff8a3d', 2 * u);
+      drawSegmentRing(fxCtx, x, y, 8, 1, '#ff8a3d', { scale: u, n: 12 });
       glyphAt('🤏', x, y - 11 * u, 8 * u);
     }
     fxCtx.globalAlpha = 1;

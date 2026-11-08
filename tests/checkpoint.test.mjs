@@ -98,7 +98,11 @@ test('main.js checkpoints every era start, resumes saves and exposes them (#loca
   const startScene = src.slice(src.indexOf('function startScene('), src.indexOf('function autosave('));
   assert.match(startScene, /G\.run\?\.mode === 'story'\) autosave\(\)/);
   const newGame = src.slice(src.indexOf('function newGame('), src.indexOf('function startScene('));
-  assert.match(newGame, /new World\(resume\?\.seed \?\? undefined, \{ width: size\?\.width \|\| HOME_W, height: size\?\.height \|\| HOME_H \}\)/);
+  // A resume keeps its world: its seed, its size and its New Game options (#220).
+  assert.match(newGame, /const seed = Number\.isFinite\(resume\?\.seed\) \? resume\.seed >>> 0/);
+  assert.match(newGame, /resume\?\.worldSize\?\.width \? \{ w: resume\.worldSize\.width, h: resume\.worldSize\.height/);
+  assert.match(newGame, /\.\.\.\(resume\?\.options \|\| \{\}\)/);
+  assert.match(newGame, /new World\(seed, \{ width: size\.w \|\| HOME_W, height: size\.h \|\| HOME_H \}\)/);
   assert.match(newGame, /G\.run = \{ id: resume\?\.id \|\| newRunId\(\)/);
   assert.match(newGame, /restoreBrain\(brain\.model, resume\.brain\)/);
   assert.match(src, /window\.__moc\.continueRun = /);

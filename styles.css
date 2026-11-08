@@ -670,25 +670,23 @@ body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
   margin: 6px 0 4px;
 }
 .cam-fb-orb {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #ffd54a;
-  box-shadow: 0 0 10px #ffd54a;
+  width: 48px;
+  height: 48px;
+  image-rendering: pixelated;
   flex: none;
 }
 .cam-fb-meter {
   flex: 1;
-  height: 6px;
-  border: 1px solid var(--line);
-  background: var(--ink);
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 2px;
+  height: 8px;
 }
 .cam-fb-meter > i {
   display: block;
-  width: 0;
   height: 100%;
-  background: #ffd54a;
-  transition: width 0.1s linear;
+  background: var(--ink);
+  border: 1px solid var(--line);
 }
 .cam-view {
   position: relative;

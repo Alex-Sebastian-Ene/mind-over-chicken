@@ -13,6 +13,7 @@ import { drawPerson, drawGoat, drawChicken, drawBoat, drawReticle, makeBolt, dra
 import { FireballFX } from '../render/fireball.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
+import { eraTuning } from '../game/options.js'; // difficulty (#220)
 
 const N = 38;
 const GDP_TARGET = 620;
@@ -130,7 +131,7 @@ export class Industry {
     this.peak = Math.max(...recent);
 
     this.crashCooldown -= TICK;
-    if (this.price < this.peak * 0.8 && this.crashCooldown <= 0 && this.t > 4) {
+    if (this.price < this.peak * eraTuning(this.G).crashThreshold && this.crashCooldown <= 0 && this.t > 4) {
       this.crashCooldown = 9;
       this.recessions++;
       G.stats.recessions++;
@@ -324,7 +325,7 @@ export class Industry {
     return [
       { label: 'GDP', value: gdpVal, done: gdpDone },
       { label: 'Goat IPO', value: st === 'done' ? 'priced' : st === 'active' ? `${ipoProgress}/${IPO_SECONDS}s` : 'soon', done: st === 'done' },
-      { label: 'Goat index', value: this.price.toFixed(1), plain: true, bad: this.price < this.peak * 0.8 },
+      { label: 'Goat index', value: this.price.toFixed(1), plain: true, bad: this.price < this.peak * eraTuning(this.G).crashThreshold },
       { label: 'Striking', value: `${this.agents.filter((a) => a.state === 'strike' || a.state === 'riot').length}`, plain: true },
     ];
   }
@@ -606,7 +607,6 @@ export class Industry {
     G.audio?.thunder?.();
     this.particles.burst(22 + Math.round(charge * 26), () => ({ x, y, vx: rand(-44, 44), vy: rand(-58, 4), g: 70, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color }));
     this.particles.burst(8 + Math.round(charge * 8), () => ({ x: x + rand(-4, 4), y: y + rand(-1, 2), vx: rand(-18, 18), vy: rand(-16, -2), g: 24, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color: pick(['#c9c2b0', '#8a7a5a', '#5f5545']) }));
-    floater(this.particles, x, y - 8, `SLAM! ${Math.round(charge * 100)}%`, color, 7);
     for (const a of this.agents) if (dist(x, y, a.x, a.y) < 18 + charge * 12) a.fear = clamp(a.fear + 0.25);
   }
 
