@@ -264,7 +264,9 @@ export class EegPanel {
     this.wasStreaming = false;
     this.wiz = null;
     this.buildWizardModal();
-    this.toggle(true);
+    // Closed until asked for (the EEG button or E): open on load it covered the playfield and the
+    // era card's Begin button (#182). ?eeg=1 opens it on load for headset sessions.
+    this.toggle(new URLSearchParams(globalThis.location?.search || '').has('eeg'));
     this.addLog('EEG & Rust/WASM calibration panel ready.');
 
     this.btn.addEventListener('click', () => this.toggle());

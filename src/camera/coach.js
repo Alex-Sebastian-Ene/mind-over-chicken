@@ -170,17 +170,18 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
     return [m.id, { canvas, ctx: canvas.getContext('2d') }];
   }));
 
-  // Default open on the first run; remember collapse preference afterwards.
-  let seenBefore = false;
-  try { seenBefore = localStorage.getItem('moc.coachSeen') === '1'; } catch {}
-  let open = !seenBefore;
-  try { localStorage.setItem('moc.coachSeen', '1'); } catch {}
+  // Collapsed by default: open on the first run it covered the playfield and the era card's
+  // Begin button (#182). The bar stays visible (H or its toggle opens it); the player's last
+  // choice is remembered.
+  let open = false;
+  try { open = localStorage.getItem('moc.coachOpen') === '1'; } catch {}
 
   let activeMoveId = COACH_CARDS[0].id;
   let flashState = null; // { text, kind: 'ok' | 'bad', until }
 
   function setOpen(next = !open) {
     open = !!next;
+    try { localStorage.setItem('moc.coachOpen', open ? '1' : '0'); } catch {}
     body.hidden = !open;
     panel.classList.toggle('is-collapsed', !open);
     toggleBtn.setAttribute('aria-expanded', String(open));
