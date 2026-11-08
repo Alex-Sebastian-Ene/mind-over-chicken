@@ -2,8 +2,10 @@
 // any era of any run. Pure and DOM-free (main.js hooks it up; the title screen lists it).
 //
 // One key holds every save, newest first:
-//   moc.saves.v1 = [{ id, name, mode, sceneIndex, sceneLabel, seed, worldSize, stats, runTimeMs,
-//                     calibration, galaxy, brain, runNumber, createdAt, updatedAt }, ...]
+//   moc.saves.v1 = [{ id, name, mode, sceneIndex, sceneLabel, era, seed, worldSize, stats, runTime,
+//                     eraTimes, calibration, galaxy, brain, runNumber, createdAt, updatedAt }, ...]
+// mode is 'story' (the eras), 'galaxy' or 'crowded' (the sandboxes); seed is the home world's;
+// runTime is seconds played. src/game/checkpoint.js builds these from the running game.
 // Every storage access is wrapped: a private window, a full quota or a corrupt value never
 // throws into the game, it just behaves as "no saves".
 

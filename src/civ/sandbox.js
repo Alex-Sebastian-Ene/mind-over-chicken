@@ -98,7 +98,7 @@ function drawSeedingCard(ctx, progress) {
 }
 
 export class CivSandbox {
-  constructor({ cosmos = null, seed = null } = {}) {
+  constructor({ cosmos = null, seed = null, planet = null } = {}) {
     this.id = 'civ';
     this.era = 'kingdoms';
     this.label = 'Sandbox · A crowded planet';
@@ -119,6 +119,7 @@ export class CivSandbox {
     this.flash = 0;
     this.cosmos = cosmos;
     this.seedArg = seed;
+    this.planetArg = planet;   // a resumed save's planet size (src/game/saves.js)
     this.seed = 0;
     this.civ = null;
     this.error = null;
@@ -179,7 +180,7 @@ export class CivSandbox {
     // peoples on it (the player's four plus rivals that arrive on their own). Overrides:
     // ?planet=small|medium|large|huge or WxH, and ?civs=4..20.
     const q = new URLSearchParams(location.search);
-    const size = planetSize(this.seed, q.get('planet') || planetChoice());
+    const size = planetSize(this.seed, q.get('planet') || this.planetArg || planetChoice());
     const civs = Math.max(4, Math.min(20, Number(q.get('civs')) || size.civs));
     this.planetSize = { ...size, civs };
     G.advisor.say('civ-intro', `A ${size.name} planet, my lord, and ${civs} peoples on it: your four and ${civs - 4} rivals. They will grow, squabble and split. Your moods are now everyone's problem.`, { priority: 3, cooldown: 999 });

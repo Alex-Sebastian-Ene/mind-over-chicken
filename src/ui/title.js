@@ -24,13 +24,17 @@ export function timeAgo(ts, now = Date.now()) {
   return new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
-// One saved run as the Load list shows it: "Run 3" over "Story · Industry · 5 min ago".
+// One saved run as the Load list shows it: "Run 3" over "Story · Era II · Industry · 5 min ago".
+// `where` is the short form for Continue: the section, or the mode for a sandbox.
 export function saveLabel(save, now = Date.now()) {
   const n = Math.floor(Number(save?.runNumber));
   const name = n > 0 ? `Run ${n}` : String(save?.name || 'Run').split(' · ')[0];
   const mode = MODE_LABELS[save?.mode] || '';
-  const scene = save?.sceneLabel && save.sceneLabel.toLowerCase() !== mode.toLowerCase() ? save.sceneLabel : '';
-  return { name, meta: [mode, scene, timeAgo(save?.updatedAt, now)].filter(Boolean).join(' · ') };
+  // A sandbox's section repeats its mode ("Sandbox · Galaxy"): shown once.
+  let scene = String(save?.sceneLabel || '').replace(/^Sandbox · /, '');
+  const m = mode.toLowerCase(), sl = scene.toLowerCase();
+  if (m && sl && (sl.includes(m) || m.includes(sl))) scene = '';
+  return { name, where: scene || mode, meta: [mode, scene, timeAgo(save?.updatedAt, now)].filter(Boolean).join(' · ') };
 }
 
 // The next entry for an arrow key, wrapping at both ends.
@@ -73,7 +77,7 @@ export function initTitle(doc, { saves = localSaves, onContinue, onSection, onCa
     contBtn.hidden = !latest;
     loadBtn.hidden = !show.load;
     newBtn.classList.toggle('btn-primary', !latest);
-    if (contSub) contSub.textContent = latest ? [saveLabel(latest).name, latest.sceneLabel].filter(Boolean).join(' · ') : '';
+    if (contSub) { const l = latest && saveLabel(latest); contSub.textContent = l ? [l.name, l.where].filter(Boolean).join(' · ') : ''; }
     renderSaves(list0);
     return list0;
   }
@@ -168,6 +172,11 @@ export function initTitle(doc, { saves = localSaves, onContinue, onSection, onCa
   // Every return to the title (Quit to Title, boot) starts on the main menu with fresh saves.
   const reset = () => { if (root.hidden) return; refresh(); show('main', false); opener = null; focusFirst(); };
   try { new MutationObserver(reset).observe(root, { attributes: true, attributeFilter: ['hidden'] }); } catch {}
+  // Saves changed elsewhere (Settings › Delete all saves): Continue and Load follow.
+  doc.defaultView?.addEventListener?.('moc:saves', () => {
+    if (root.hidden) return;
+    if (!refresh().length && view === 'load') show('main');
+  });
   reset();
 
   return { refresh, show, get view() { return view; }, syncCalibrate };

@@ -67,9 +67,11 @@ test('Continue and Load appear only with saves', () => {
 test('a save reads as its run, mode, section and age', () => {
   const now = Date.UTC(2026, 10, 8, 12);
   assert.deepEqual(saveLabel({ id: 'a', name: 'Run 3 · Stone Age', runNumber: 3, mode: 'story', sceneLabel: 'Era II · Industry', updatedAt: now - 5 * 60e3 }, now),
-    { name: 'Run 3', meta: 'Story · Era II · Industry · 5 min ago' });
-  // The galaxy's section repeats the mode: shown once.
-  assert.equal(saveLabel({ id: 'b', runNumber: 2, mode: 'galaxy', sceneLabel: 'Galaxy', updatedAt: now - 2 * 3600e3 }, now).meta, 'Galaxy · 2 h ago');
+    { name: 'Run 3', where: 'Era II · Industry', meta: 'Story · Era II · Industry · 5 min ago' });
+  // A sandbox's section repeats the mode ("Sandbox · Galaxy"): shown once.
+  assert.deepEqual(saveLabel({ id: 'b', runNumber: 2, mode: 'galaxy', sceneLabel: 'Sandbox · Galaxy', updatedAt: now - 2 * 3600e3 }, now),
+    { name: 'Run 2', where: 'Galaxy', meta: 'Galaxy · 2 h ago' });
+  assert.equal(saveLabel({ id: 'e', runNumber: 4, mode: 'crowded', sceneLabel: 'Sandbox · A crowded planet' }, now).meta, 'Crowded planet');
   assert.equal(saveLabel({ id: 'c', name: 'Run 7 · Space Age', mode: 'crowded' }, now).name, 'Run 7');
   assert.equal(saveLabel({ id: 'd' }, now).name, 'Run');
 });
@@ -96,10 +98,10 @@ test('arrow keys wrap around the menu', () => {
 test('main.js wires the menu: era sections start at their scene, Connect stays on the title', () => {
   const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
   assert.match(main, /initTitle\(document,/);
-  assert.match(main, /onSection: \(i\) => begin\(playSource\(\), i\)/);
-  assert.match(main, /window\.__moc\.continueRun\(save\)/);
+  assert.match(main, /onSection: \(i\) => begin\(playSource\(\), \{ startIndex: i \}\)/);
+  assert.match(main, /onContinue: \(save\) => window\.__moc\?\.continueRun\?\.\(save\)/);
   assert.match(main, /startWizard\('both'\)/);
-  const connect = main.slice(main.indexOf("$('playBridge').addEventListener"), main.indexOf('function resumeRun'));
+  const connect = main.slice(main.indexOf("$('playBridge').addEventListener"), main.indexOf('initTitle(document,'));
   assert.doesNotMatch(connect, /begin\(/, 'Connect no longer starts a game');
   assert.match(connect, /setGameSource\(src\)/);
 });
