@@ -10,9 +10,10 @@ build = "build.rs"
 [lib]
 crate-type = ["rlib", "cdylib"]
 
-# No dependencies on purpose: the weights parser, JSON reader, f16 widening and conv kernels
-# are all in this crate, so it adds nothing to the wasm bundle beyond its own code.
+# Only moc-terrain (the hook it plugs into): the weights parser, JSON reader, f16 widening and
+# conv kernels are all in this crate, so it adds little to the wasm bundle beyond its own code.
 [dependencies]
+moc-terrain = { path = "../moc-terrain" }
 
 [features]
 default = []

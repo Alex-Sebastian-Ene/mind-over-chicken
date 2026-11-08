@@ -3,7 +3,7 @@
 
 use moc_diffusion::grid;
 use moc_diffusion::rng::SplitMix64;
-use moc_diffusion::{procedural_detail, DetailError, DetailInput, Dims, LearnedDiffusion};
+use moc_diffusion::{DetailError, DetailInput, Dims, LearnedDiffusion, ProceduralDiffusion, ReliefDetail, Rng};
 
 const WEIGHTS: &[u8] = include_bytes!("fixtures/tiny.mocd");
 
@@ -109,22 +109,22 @@ fn no_seam_at_the_wrap() {
 }
 
 #[test]
-fn falls_back_when_weights_are_missing_or_broken() {
+fn falls_back_to_the_procedural_detail_when_weights_are_missing_or_broken() {
     let c = coarse(40, 24, 6);
     let inp = input(&c, 2);
-    let want = procedural_detail(&inp, 3);
+    let want = ProceduralDiffusion::default().detail(&inp, &mut Rng::new(3));
     for bytes in [&b""[..], &b"MOCDxxxxxxxxxxxx"[..], &WEIGHTS[..WEIGHTS.len() / 2]] {
         let ld = LearnedDiffusion::from_bytes(bytes);
         assert!(!ld.is_learned());
         assert!(ld.load_error().is_some());
         assert_eq!(ld.try_detail(&inp, 3), Err(DetailError::NoModel));
-        assert_eq!(ld.detail(&inp, 3), want);
+        assert_eq!(ld.detail(&inp, &mut Rng::new(3)), want, "fallback must be exactly the procedural detail");
     }
     // A build without weights/relief.mocd embeds nothing and falls back too.
     let e = LearnedDiffusion::embedded();
     if moc_diffusion::EMBEDDED_WEIGHTS.is_none() {
         assert!(!e.is_learned());
-        assert_eq!(e.detail(&inp, 3), want);
+        assert_eq!(e.detail(&inp, &mut Rng::new(3)), want);
     }
 }
 
@@ -136,17 +136,38 @@ fn bad_input_falls_back_instead_of_panicking() {
     let short = vec![0.0f32; 10];
     inp.uplift = &short;
     assert!(matches!(ld.try_detail(&inp, 1), Err(DetailError::BadInput(_))));
-    assert_eq!(ld.detail(&inp, 1).len(), 80 * 48);
 }
 
 #[test]
-fn procedural_fallback_keeps_layout_and_wraps() {
+fn the_hook_shapes_then_details() {
+    // Through the ReliefDetail hook: procedural ranges first, then the model; full map out,
+    // random per RNG state, land/sea of the shaped coarse map kept.
+    let ld = learned();
     let c = coarse(80, 45, 10);
     let inp = input(&c, 2);
-    let out = procedural_detail(&inp, 1);
-    assert_eq!(out.len(), 160 * 90);
-    let full = grid::resample_cubic(&c.heights, 80, 45, 160, 90);
-    assert!(out.iter().zip(&full).all(|(o, f)| (*f <= 0.012 || *o > 0.0) && (*f >= -0.012 || *o < 0.0)));
+    let a = ld.detail(&inp, &mut Rng::new(1));
+    let b = ld.detail(&inp, &mut Rng::new(2));
+    assert_eq!(a.len(), 160 * 90);
+    assert!(a.iter().all(|v| v.is_finite() && (-1.0..=1.06).contains(v)));
+    assert!(a.iter().zip(&b).filter(|(x, y)| (*x - *y).abs() > 1e-4).count() > a.len() / 2);
+    let (shaped, _) = ProceduralDiffusion::default().shape(&inp, &mut Rng::new(1));
+    let full = grid::resample_cubic(&shaped, 80, 45, 160, 90);
+    let band = ld.opts.coast_band;
+    assert!(a.iter().zip(&full).all(|(o, f)| (*f <= band || *o > 0.0) && (*f >= -band || *o < 0.0)));
+}
+
+#[test]
+fn whole_maps_generate_with_the_learned_hook() {
+    // moc-terrain end to end with the learned detail: the home world preset still holds its
+    // guarantees (continents, sites) and the map is full size.
+    let ld = learned();
+    let p = moc_terrain::TerrainParams::home_world(12345);
+    let relief = LearnedDiffusion::from_bytes(WEIGHTS).with_procedural(ProceduralDiffusion::from_params(&p));
+    let m = moc_terrain::generate_with(&p, &relief);
+    assert_eq!((m.width, m.height), (320, 180));
+    assert_eq!(m.heights.len(), 320 * 180);
+    assert!(m.heights.iter().all(|v| v.is_finite()));
+    assert!(ld.is_learned());
 }
 
 #[test]

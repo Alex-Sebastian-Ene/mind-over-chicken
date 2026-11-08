@@ -1,12 +1,14 @@
-//! Side-by-side images: procedural detail vs the learned model, per map size.
+//! Before/after images: the whole moc-terrain generator with the procedural detail vs with
+//! the learned detail, for each map size, on the same seed (same plates and continents).
 //!
 //!     cargo run --release -p moc-diffusion --example compare -- <weights.mocd> <out_dir> [seed]
 //!
-//! Until moc-terrain's hook lands, the coarse maps are a synthetic stand-in (fBm continents
-//! with uplift along ridges); after that this should take the real coarse stage.
-use moc_diffusion::grid;
-use moc_diffusion::rng::SplitMix64;
-use moc_diffusion::{procedural_detail, DetailInput, Dims, LearnedDiffusion};
+//! Each PNG is two columns (procedural | learned) and two rows (the game's painted map, then
+//! a hillshaded height view that shows the relief itself). The civ planet is drawn at half
+//! size. PNGs are stored uncompressed (no dependencies); `rl/terrain_diffusion/png.py
+//! --recompress` shrinks them.
+use moc_diffusion::{LearnedDiffusion, ProceduralDiffusion};
+use moc_terrain::{generate, generate_with, TerrainMap, TerrainParams};
 use std::time::Instant;
 
 fn colour(h: f32) -> [f32; 3] {
@@ -32,18 +34,33 @@ fn colour(h: f32) -> [f32; 3] {
     STOPS[8].1
 }
 
-fn render(h: &[f32], w: usize, ht: usize) -> Vec<u8> {
-    let mut out = Vec::with_capacity(w * ht * 3);
-    for y in 0..ht {
-        for x in 0..w {
-            let v = h[y * w + x];
-            let e = h[y * w + (x + 1) % w] - h[y * w + (x + w - 1) % w];
-            let n = h[((y + 1) % ht) * w + x] - h[((y + ht - 1) % ht) * w + x];
-            let light = if v > 0.0 { (1.0 - (e + n) * 6.0).clamp(0.55, 1.35) } else { 1.0 };
-            out.extend(colour(v).map(|c| (c * light).clamp(0.0, 255.0) as u8));
+/// RGB views of a map, downsampled by `k`: (painted, hillshaded heights).
+fn views(m: &TerrainMap, k: usize) -> (Vec<u8>, Vec<u8>, usize, usize) {
+    let (w, h) = (m.width, m.height);
+    let (ow, oh) = (w / k, h / k);
+    // Heights are 0..1 with the sea at m.sea_level; back to sea 0, peaks ~1, floor -1.
+    let rel = |i: usize| {
+        let v = m.heights[i];
+        if v >= m.sea_level {
+            (v - m.sea_level) / (1.0 - m.sea_level)
+        } else {
+            (v - m.sea_level) / m.sea_level
+        }
+    };
+    let (mut paint, mut shade) = (Vec::with_capacity(ow * oh * 3), Vec::with_capacity(ow * oh * 3));
+    for y in 0..oh {
+        for x in 0..ow {
+            let (sx, sy) = (x * k, y * k);
+            let i = sy * w + sx;
+            paint.extend_from_slice(&m.rgba[i * 4..i * 4 + 3]);
+            let e = rel(sy * w + (sx + k) % w) - rel(sy * w + (sx + w - k) % w);
+            let n = rel(((sy + k) % h) * w + sx) - rel(((sy + h - k) % h) * w + sx);
+            let v = rel(i);
+            let light = if v > 0.0 { (1.0 - (e + n) * 6.0 / k as f32).clamp(0.5, 1.4) } else { 1.0 };
+            shade.extend(colour(v).map(|c| (c * light).clamp(0.0, 255.0) as u8));
         }
     }
-    out
+    (paint, shade, ow, oh)
 }
 
 /// Minimal PNG (RGB8, zlib with stored blocks: big but dependency-free).
@@ -64,9 +81,9 @@ fn png(path: &std::path::Path, rgb: &[u8], w: usize, h: usize) {
         raw.extend_from_slice(&rgb[y * w * 3..(y + 1) * w * 3]);
     }
     let mut z = vec![0x78, 0x01];
-    for (i, block) in raw.chunks(65535).enumerate() {
-        let last = (i + 1) * 65535 >= raw.len();
-        z.push(last as u8);
+    let blocks: Vec<&[u8]> = raw.chunks(65535).collect();
+    for (i, block) in blocks.iter().enumerate() {
+        z.push((i + 1 == blocks.len()) as u8);
         z.extend_from_slice(&(block.len() as u16).to_le_bytes());
         z.extend_from_slice(&(!(block.len() as u16)).to_le_bytes());
         z.extend_from_slice(block);
@@ -99,33 +116,36 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let weights = std::fs::read(args.first().expect("usage: compare <weights.mocd> <out_dir> [seed]")).unwrap_or_default();
     let out_dir = std::path::PathBuf::from(args.get(1).map(String::as_str).unwrap_or("."));
-    let seed: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as u64);
+    let seed: u32 = args
+        .get(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos());
     std::fs::create_dir_all(&out_dir).unwrap();
-    let ld = LearnedDiffusion::from_bytes(&weights);
-    println!("learned: {} ({:?}), steps {}, seed {seed}", ld.is_learned(), ld.load_error(), ld.opts.steps);
-    for (name, w, h, cell) in [("home", 320, 180, 2), ("galaxy", 640, 360, 2), ("civ", 2560, 1280, 4)] {
-        let (cw, ch) = (w / cell, h / cell);
-        let mut r = SplitMix64::new(seed ^ w as u64);
-        let base = grid::fbm(cw, ch, 5, 3, 5, &mut r);
-        let ridge = grid::fbm(cw, ch, 9, 5, 3, &mut r);
-        let coarse: Vec<f32> = base.iter().zip(&ridge).map(|(b, q)| b * 0.9 - 0.08 + (0.25 - q.abs()).max(0.0) * (b * 3.0).clamp(0.0, 1.0)).collect();
-        let uplift: Vec<f32> = ridge.iter().zip(&coarse).map(|(q, c)| ((0.25 - q.abs()) * 4.0).clamp(0.0, 1.0) * (*c > 0.0) as u8 as f32).collect();
-        let land: Vec<f32> = coarse.iter().map(|c| (*c > 0.0) as u8 as f32).collect();
-        let input = DetailInput { coarse: &coarse, coarse_dims: Dims::torus(cw, ch), dims: Dims::torus(w, h), cell, uplift: &uplift, land: &land, scale: w as f32 / 4.0 };
+    let base = LearnedDiffusion::from_bytes(&weights);
+    println!("learned: {} ({:?}), steps {}, seed {seed}", base.is_learned(), base.load_error(), base.opts.steps);
+    for (name, p, k) in [
+        ("home", TerrainParams::home_world(seed), 1),
+        ("galaxy", TerrainParams::galaxy_surface(seed, "temperate"), 1),
+        ("civ", TerrainParams::civ_planet(seed, 2560, 1280), 2),
+    ] {
+        let relief = LearnedDiffusion::from_bytes(&weights).with_procedural(ProceduralDiffusion::from_params(&p));
         let t = Instant::now();
-        let proc_ = procedural_detail(&input, seed);
+        let a = generate(&p);
         let tp = t.elapsed().as_secs_f64();
         let t = Instant::now();
-        let learned = ld.detail(&input, seed);
+        let b = generate_with(&p, &relief);
         let tl = t.elapsed().as_secs_f64();
-        let (a, b) = (render(&proc_, w, h), render(&learned, w, h));
-        let mut both = Vec::with_capacity(a.len() * 2);
-        for y in 0..h {
-            both.extend_from_slice(&a[y * w * 3..(y + 1) * w * 3]);
-            both.extend_from_slice(&b[y * w * 3..(y + 1) * w * 3]);
+        let (pa, sa, w, h) = views(&a, k);
+        let (pb, sb, _, _) = views(&b, k);
+        let mut img = Vec::with_capacity(w * h * 12);
+        for (l, r) in [(&pa, &pb), (&sa, &sb)] {
+            for y in 0..h {
+                img.extend_from_slice(&l[y * w * 3..(y + 1) * w * 3]);
+                img.extend_from_slice(&r[y * w * 3..(y + 1) * w * 3]);
+            }
         }
         let path = out_dir.join(format!("{name}_{seed}.png"));
-        png(&path, &both, 2 * w, h);
-        println!("{name:6} {w}x{h}: procedural {:.0} ms, learned {:.0} ms -> {}", tp * 1e3, tl * 1e3, path.display());
+        png(&path, &img, 2 * w, 2 * h);
+        println!("{name:6} {}x{}: procedural {:.0} ms, with learned detail {:.0} ms -> {}", p.w, p.h, tp * 1e3, tl * 1e3, path.display());
     }
 }

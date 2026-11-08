@@ -3,35 +3,25 @@
 //! A small conditional diffusion UNet, trained offline on real elevation data
 //! (`rl/terrain_diffusion/`), turns the procedural generator's coarse heightmap into
 //! realistic relief: ranges with spurs and valleys, plateaus, rough hills, ragged coasts.
-//! Inference is pure Rust (no dependencies) and runs in wasm.
+//! Inference is pure Rust (no dependencies beyond moc-terrain) and runs in wasm.
 //!
-//! How a map is detailed ([`LearnedDiffusion::detail`]):
-//! 1. The coarse heights, uplift and land weight are resampled onto the *model grid*: two
+//! [`LearnedDiffusion`] implements moc-terrain's [`ReliefDetail`] hook:
+//! 1. The procedural stage shapes the coarse grid first ([`ProceduralDiffusion::shape`]: DLA
+//!    ranges along the plates' uplift, erosion), so ranges stay where the plates put them.
+//! 2. The coarse heights, uplift and land weight are resampled onto the *model grid*: two
 //!    model pixels per coarse cell (the full map for the 320x180 and 640x360 maps, half
 //!    resolution for the 2560x1280 civ planet), rounded to a multiple of 8.
-//! 2. A fourth conditioning channel, *roughness*, comes from the uplift plus a smooth random
+//! 3. A fourth conditioning channel, *roughness*, comes from the uplift plus a smooth random
 //!    field, so different regions of one map get different landforms (plains, hills,
 //!    plateaus, ranges) instead of one landform everywhere.
-//! 3. DDIM (a few steps) denoises a fresh random field into a height residual, running the
+//! 4. DDIM (a few steps) denoises a fresh random field into a height residual, running the
 //!    UNet on the whole map with wrap-around padding: the map is a torus, so there are no
 //!    patches and no seams on either axis.
-//! 4. The residual is added to the coarse heights at full resolution, and the coarse
+//! 5. The residual is added to the coarse heights at full resolution, and the coarse
 //!    land/sea layout is kept (only a thin band around the coast may move).
 //!
-//! Every run is random: the sampling noise comes from the seed the caller draws from the
-//! game's RNG. If the weights are missing or do not load, [`LearnedDiffusion::detail`] uses
-//! the procedural detail instead.
-//!
-//! The hook types ([`Dims`], [`DetailInput`]) mirror `moc-terrain`'s `ReliefDetail` hook; the
-//! adapter, once that lands, is:
-//! ```ignore
-//! impl ReliefDetail for LearnedDiffusion {
-//!     fn detail(&self, input: &DetailInput, rng: &mut Rng) -> Vec<f32> {
-//!         let seed = rng.next_u64();
-//!         self.try_detail(input, seed).unwrap_or_else(|_| ProceduralDiffusion.detail(input, rng))
-//!     }
-//! }
-//! ```
+//! Every run is random: the sampling noise comes from the game's RNG. If the weights are
+//! missing or do not load, the procedural detail runs instead, unchanged.
 
 pub mod format;
 pub mod grid;
@@ -46,46 +36,9 @@ pub mod bench_ffi;
 
 use format::LoadError;
 use json::Json;
+pub use moc_terrain::{DetailInput, Dims, ProceduralDiffusion, ReliefDetail, Rng};
 use rng::SplitMix64;
 use unet::{ReliefUNet, Workspace};
-
-/// Grid size and wrap flags (mirror of moc-terrain's `grid::Dims`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Dims {
-    pub w: usize,
-    pub h: usize,
-    pub wrap_x: bool,
-    pub wrap_y: bool,
-}
-
-impl Dims {
-    pub fn torus(w: usize, h: usize) -> Self {
-        Dims { w, h, wrap_x: true, wrap_y: true }
-    }
-    pub fn len(&self) -> usize {
-        self.w * self.h
-    }
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
-
-/// What the relief hook receives (mirror of moc-terrain's `DetailInput`).
-#[derive(Clone, Copy, Debug)]
-pub struct DetailInput<'a> {
-    /// Coarse heights, row-major `coarse_dims`: sea 0, land up to ~0.35 before mountains, floor -1.
-    pub coarse: &'a [f32],
-    pub coarse_dims: Dims,
-    /// Output size in tiles (`dims.w == coarse_dims.w * cell`).
-    pub dims: Dims,
-    pub cell: usize,
-    /// 0..1 per coarse cell: where mountain ranges belong.
-    pub uplift: &'a [f32],
-    /// 0..1 per coarse cell: land weight.
-    pub land: &'a [f32],
-    /// Typical continent size, tiles.
-    pub scale: f32,
-}
 
 /// Sampling knobs. Defaults come from the weights' header where it sets them.
 #[derive(Clone, Debug, PartialEq)]
@@ -169,11 +122,14 @@ pub struct Model {
     pub norm: Norm,
 }
 
-/// The learned relief detail. Cheap to keep around; holds the unpacked weights.
+/// The learned relief detail. Holds the unpacked weights; build it once and reuse it.
 pub struct LearnedDiffusion {
     model: Option<Model>,
     error: Option<String>,
     pub opts: SampleOptions,
+    /// Shapes the coarse grid before the model (and is the whole detail stage when there is
+    /// no model). Set it from the preset with [`with_procedural`](Self::with_procedural).
+    pub procedural: ProceduralDiffusion,
 }
 
 /// The weights baked in at build time (`crates/moc-diffusion/weights/relief.mocd`), if any.
@@ -190,7 +146,7 @@ impl LearnedDiffusion {
     /// detail and [`load_error`](Self::load_error) says why.
     pub fn from_bytes(bytes: &[u8]) -> Self {
         match Self::load(bytes) {
-            Ok((model, opts)) => LearnedDiffusion { model: Some(model), error: None, opts },
+            Ok((model, opts)) => LearnedDiffusion { model: Some(model), error: None, opts, procedural: ProceduralDiffusion::default() },
             Err(e) => Self::without_model(e.to_string()),
         }
     }
@@ -204,14 +160,14 @@ impl LearnedDiffusion {
     }
 
     pub fn without_model(reason: String) -> Self {
-        LearnedDiffusion { model: None, error: Some(reason), opts: SampleOptions::default() }
+        LearnedDiffusion { model: None, error: Some(reason), opts: SampleOptions::default(), procedural: ProceduralDiffusion::default() }
     }
 
     /// A model with random weights of the given size: timing runs only.
     #[doc(hidden)]
     pub fn random_for_timing(arch: unet::Arch, seed: u64) -> Self {
         let model = Model { net: ReliefUNet::random(arch, seed), norm: Norm { coarse_mean: 0.0, coarse_std: 0.35, resid_std: 0.05 } };
-        LearnedDiffusion { model: Some(model), error: None, opts: SampleOptions::default() }
+        LearnedDiffusion { model: Some(model), error: None, opts: SampleOptions::default(), procedural: ProceduralDiffusion::default() }
     }
 
     fn load(bytes: &[u8]) -> Result<(Model, SampleOptions), LoadError> {
@@ -248,10 +204,10 @@ impl LearnedDiffusion {
         self.model.as_ref()
     }
 
-    /// Detailed heights for every tile, from the model, or the procedural fallback when
-    /// there is no model or the input is unusable.
-    pub fn detail(&self, input: &DetailInput, seed: u64) -> Vec<f32> {
-        self.try_detail(input, seed).unwrap_or_else(|_| procedural_detail(input, seed))
+    /// The same model with a preset's procedural stage (`ProceduralDiffusion::from_params`).
+    pub fn with_procedural(mut self, p: ProceduralDiffusion) -> Self {
+        self.procedural = p;
+        self
     }
 
     /// The model grid used for a map: `(w, h)`, multiples of 8.
@@ -270,6 +226,8 @@ impl LearnedDiffusion {
         (w, h)
     }
 
+    /// The model alone on `input.coarse` (no procedural shaping first): what the hook runs
+    /// after [`ProceduralDiffusion::shape`]. `seed` sets the sampling noise.
     pub fn try_detail(&self, input: &DetailInput, seed: u64) -> Result<Vec<f32>, DetailError> {
         let model = self.model.as_ref().ok_or(DetailError::NoModel)?;
         check(input)?;
@@ -320,10 +278,10 @@ impl LearnedDiffusion {
 fn check(input: &DetailInput) -> Result<(), DetailError> {
     let (cd, d) = (input.coarse_dims, input.dims);
     let bad = |m: &str| Err(DetailError::BadInput(m.to_string()));
-    if cd.is_empty() || d.is_empty() {
+    if cd.n() == 0 || d.n() == 0 {
         return bad("empty dims");
     }
-    if input.coarse.len() != cd.len() || input.uplift.len() != cd.len() || input.land.len() != cd.len() {
+    if input.coarse.len() != cd.n() || input.uplift.len() != cd.n() || input.land.len() != cd.n() {
         return bad("coarse, uplift and land must be coarse_dims.w * coarse_dims.h");
     }
     if d.w < 8 || d.h < 8 {
@@ -356,26 +314,27 @@ fn finish(coarse: &[f32], resid: &[f32], band: f32) -> Vec<f32> {
         .collect()
 }
 
-/// A self-contained procedural stand-in: cubic upsampling plus fBm whose strength follows
-/// the uplift. Used when there are no weights; moc-terrain's `ProceduralDiffusion` replaces
-/// it once the hook lands.
-pub fn procedural_detail(input: &DetailInput, seed: u64) -> Vec<f32> {
-    let (cw, ch) = (input.coarse_dims.w, input.coarse_dims.h);
-    let (w, h) = (input.dims.w, input.dims.h);
-    if check(input).is_err() {
-        // Nothing sensible to detail: hand back the coarse map, nearest-upsampled.
-        return (0..w * h)
-            .map(|i| {
-                let (x, y) = (i % w * cw.max(1) / w.max(1), i / w * ch.max(1) / h.max(1));
-                input.coarse.get(y * cw + x).copied().unwrap_or(0.0)
-            })
-            .collect();
+/// The hook: procedural shaping on the coarse grid, then the learned detail; procedural all
+/// the way when there is no model or the input is unusable.
+impl ReliefDetail for LearnedDiffusion {
+    fn detail(&self, input: &DetailInput, rng: &mut Rng) -> Vec<f32> {
+        if self.model.is_none() || check(input).is_err() {
+            return self.procedural.detail(input, rng);
+        }
+        let (shaped, _) = self.procedural.shape(input, rng);
+        let seed = rng.next_u64();
+        let shaped_in = DetailInput {
+            coarse: &shaped,
+            coarse_dims: input.coarse_dims,
+            dims: input.dims,
+            cell: input.cell,
+            uplift: input.uplift,
+            land: input.land,
+            scale: input.scale,
+        };
+        match self.try_detail(&shaped_in, seed) {
+            Ok(v) => v,
+            Err(_) => self.procedural.upsample(input, &shaped, rng),
+        }
     }
-    let mut rng = SplitMix64::new(seed ^ 0x5eed_0f_f0a1);
-    let coarse = grid::resample_cubic(input.coarse, cw, ch, w, h);
-    let uplift = grid::resample_linear(input.uplift, cw, ch, w, h);
-    let cells = |n: usize| (n / 24).max(2);
-    let noise = grid::fbm(w, h, cells(w), cells(h), 4, &mut rng);
-    let resid: Vec<f32> = noise.iter().zip(&uplift).map(|(n, u)| n * (0.012 + 0.09 * u)).collect();
-    finish(&coarse, &resid, 0.012)
 }

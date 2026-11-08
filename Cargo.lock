@@ -265,6 +265,9 @@ dependencies = [
 [[package]]
 name = "moc-diffusion"
 version = "0.1.0"
+dependencies = [
+ "moc-terrain",
+]
 
 [[package]]
 name = "moc-planet"
