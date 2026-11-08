@@ -6,7 +6,7 @@
 //! `moc_planet` fixes the planet at `PW`×`PH` (640×320) in its wrap helpers, `Camera`,
 //! `Framebuffer::blit_planet` and `Field`. The civilisation sandbox runs on a bigger planet
 //! (default 1280×640, #50), so this module carries the same maths with the size as a value:
-//! [`Dims`] (wrap east–west, clamp at the poles), [`Cam`] (the 320×180 view, panning across
+//! [`Dims`] (wraps both ways), [`Cam`] (the 320×180 view, panning across
 //! the seam), [`blit`] (seam-safe copy of the visible window) and [`LocalField`] (a wrap-aware
 //! BFS distance field limited to a window round its target, so building one stays cheap on a
 //! big planet). The 320×180 view itself is `moc_planet::fb::Framebuffer`.
@@ -167,17 +167,14 @@ impl Cam {
         self.y = self.d.wrap_yf(self.y + dy);
     }
 
-    /// Planet → screen. Points up to a view-width west (or a view-height north) of the view
-    /// come out negative.
+    /// Planet → screen, the short way round from the *centre* of the view (#230). Every point
+    /// in the view comes out inside it, on any planet size: measuring from the view's top-left
+    /// corner instead flipped the bottom rows of a 320-high planet (half its height, 160, is
+    /// less than the view's 180) to the far side, so villages and agents there vanished.
     pub fn to_screen(&self, px: f32, py: f32) -> (f32, f32) {
-        let mut sx = self.d.dx(self.x, px);
-        if sx < -(VW as f32) {
-            sx += self.d.w as f32;
-        }
-        let mut sy = self.d.dy(self.y, py);
-        if sy < -(VH as f32) {
-            sy += self.d.h as f32;
-        }
+        let (hw, hh) = (VW as f32 / 2.0, VH as f32 / 2.0);
+        let sx = self.d.dx(self.x + hw, px) + hw;
+        let sy = self.d.dy(self.y + hh, py) + hh;
         (sx, sy)
     }
 
@@ -407,6 +404,22 @@ mod tests {
         assert!((sx - 30.0).abs() < 1e-4 && (sy - 60.0).abs() < 1e-4);
         let (px, py) = c.to_planet(sx, sy);
         assert!((px - 10.0).abs() < 1e-4 && (py - 100.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn every_point_in_view_lands_on_screen() {
+        // #230: on a 320-high planet half the planet (160) is less than the view (180).
+        let d = Dims::new(640, 320);
+        for &(cx, cy) in &[(0.0, 0.0), (630.0, 300.0), (100.0, 150.0), (639.5, 319.5)] {
+            let c = Cam { x: cx, y: cy, d };
+            for sy in 0..VH {
+                for sx in (0..VW).step_by(7) {
+                    let (px, py) = c.to_planet(sx as f32 + 0.5, sy as f32 + 0.5);
+                    let (rx, ry) = c.to_screen(px, py);
+                    assert!((rx - (sx as f32 + 0.5)).abs() < 1e-2 && (ry - (sy as f32 + 0.5)).abs() < 1e-2, "({sx},{sy}) from cam ({cx},{cy}) came back at ({rx},{ry})");
+                }
+            }
+        }
     }
 
     #[test]
