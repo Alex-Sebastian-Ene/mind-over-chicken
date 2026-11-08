@@ -300,10 +300,16 @@ export class PlanetSurface {
       for (let y = 0; y < H; y++) {
         const vy = y * 2;
         const rowOffsetV = vy * VW;
+        const rowOffsetVNext = Math.min(vy + 1, VH - 1) * VW;
         const rowOffsetSlice = y * W;
         for (let x = 0; x < W; x++) {
           const vx = x * 2;
-          this._globeHeight[rowOffsetSlice + x] = vh[rowOffsetV + vx];
+          const vxNext = (vx + 1) % VW;
+          const h00 = vh[rowOffsetV + vx];
+          const h10 = vh[rowOffsetV + vxNext];
+          const h01 = vh[rowOffsetVNext + vx];
+          const h11 = vh[rowOffsetVNext + vxNext];
+          this._globeHeight[rowOffsetSlice + x] = (h00 + h10 + h01 + h11) * 0.25;
         }
       }
     }

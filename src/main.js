@@ -78,25 +78,8 @@ function groundAt(e) {
 function grabPan3d(e) {
   if (!grab3d) return false;
   const scene = cosmos?.viewScene?.(G) || G?.scene;
-  if (scene && typeof scene.centerColumn === 'function') {
-    const g = groundAt(e);
-    if (!g) return true;
-    let dx = grab3d.x - g.x;
-    dx = ((dx + W * 1.5) % W) - W / 2;
-    const dz = grab3d.z - g.z;
-    if (Math.abs(dx) > 0.05 || Math.abs(dz) > 0.05) {
-      if (scene.panBy) {
-        scene.panBy(dx, dz);
-      } else if (scene.pan) {
-        scene.pan(dx * 2, dz * 2);
-      }
-      const cx = scene.centerColumn();
-      const vh = scene.v?.h ?? (scene.civ ? H : 360);
-      const cz = scene.civ ? (H / 2) : clamp(((scene.camY ?? 0) + H / 2) / vh * H, 10, H - 10);
-      engine.set_camera_target(cx, cz);
-    }
-    cam3dBase = null;
-    return true;
+  if (scene && scene !== G?.scene && typeof scene.centerColumn === 'function') {
+    return false;
   }
   for (let pass = 0; pass < 3; pass++) {
     const g = groundAt(e);
