@@ -263,7 +263,11 @@ export class RustBrain {
     blinks(): number;
     calm(): number;
     focus(): number;
-    ingest(delta: number, theta: number, alpha: number, beta: number, gamma: number, blink: boolean, hr: number, tilt_x: number, tilt_y: number, motion: number, quality: number): boolean;
+    /**
+     * One headset frame: EEG bands, blink, head tilt, motion and contact quality. There is no
+     * heart-rate argument: the game does not read heart rate (#99, #153).
+     */
+    ingest(delta: number, theta: number, alpha: number, beta: number, gamma: number, blink: boolean, tilt_x: number, tilt_y: number, motion: number, quality: number): boolean;
     constructor();
     retrain(): boolean;
     set_cue(cue_id: number): void;
@@ -409,6 +413,11 @@ export class RustSimSource {
     blink(): void;
     constructor(seed: number);
     set_input(calm: boolean, focus: boolean, panic: boolean): void;
+    /**
+     * The last frame emitted over `dt`, as `SIM_FRAME_LEN` numbers: delta, theta, alpha, beta,
+     * gamma, blink (0 or 1), tilt x, tilt y, motion, quality. All zeros when no frame was due
+     * (quality 0). No heart rate (#153).
+     */
     step(dt: number): Float32Array;
 }
 
@@ -758,7 +767,7 @@ export interface InitOutput {
     readonly rustbrain_blinks: (a: number) => number;
     readonly rustbrain_calm: (a: number) => number;
     readonly rustbrain_focus: (a: number) => number;
-    readonly rustbrain_ingest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => number;
+    readonly rustbrain_ingest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
     readonly rustbrain_new: () => number;
     readonly rustbrain_retrain: (a: number) => number;
     readonly rustbrain_set_cue: (a: number, b: number) => void;
@@ -894,11 +903,10 @@ export interface InitOutput {
     readonly moc_brain_get_agitation: (a: number) => number;
     readonly moc_brain_get_calm: (a: number) => number;
     readonly moc_brain_get_focus: (a: number) => number;
-    readonly moc_brain_get_hr_delta: (a: number) => number;
     readonly moc_brain_get_model_accuracy: (a: number) => number;
     readonly moc_brain_get_model_trust: (a: number, b: number) => number;
     readonly moc_brain_get_stress: (a: number) => number;
-    readonly moc_brain_ingest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => number;
+    readonly moc_brain_ingest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
     readonly moc_brain_new: () => number;
     readonly moc_brain_set_cue: (a: number, b: number) => void;
     readonly moc_brain_update: (a: number, b: number) => number;

@@ -75,18 +75,19 @@ export class SimSource {
       this.acc += dt;
       while (this.acc >= FRAME_DT) {
         this.acc -= FRAME_DT;
+        // RustSimSource.step: delta, theta, alpha, beta, gamma, blink, tilt x, tilt y, motion,
+        // quality (0 when no frame was due). No heart rate (#153).
         const out = this.wasm.step(FRAME_DT);
-        if (out && out[10] > 0) {
+        if (out && out[9] > 0) {
           emit({
             bands: { delta: out[0], theta: out[1], alpha: out[2], beta: out[3], gamma: out[4] },
             blink: out[5] > 0.5,
-            hr: out[6] > 0 ? out[6] : null,
             // The emulated head points where the mouse aims (setAim), like makeFrame: the Rust
             // sim's own tilt array left brain.aim NaN, so clicks missed (#129).
             tilt: { x: this.aim.x * 2 - 1, y: this.aim.y * 2 - 1 },
             isSim: true,
-            motion: out[9],
-            quality: out[10],
+            motion: out[8],
+            quality: out[9],
           });
         } else {
           emit(this.makeFrame());

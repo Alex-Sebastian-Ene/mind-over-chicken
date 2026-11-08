@@ -1929,6 +1929,8 @@ impl RustBrain {
         self.inner.set_cue(cue);
     }
 
+    /// One headset frame: EEG bands, blink, head tilt, motion and contact quality. There is no
+    /// heart-rate argument: the game does not read heart rate (#99, #153).
     pub fn ingest(
         &mut self,
         delta: f32,
@@ -1937,7 +1939,6 @@ impl RustBrain {
         beta: f32,
         gamma: f32,
         blink: bool,
-        hr: f32,
         tilt_x: f32,
         tilt_y: f32,
         motion: f32,
@@ -1952,7 +1953,6 @@ impl RustBrain {
                 gamma,
             },
             blink,
-            hr: if hr > 0.0 { Some(hr) } else { None },
             tilt: Some((tilt_x, tilt_y)),
             motion,
             quality,
@@ -2014,8 +2014,20 @@ impl RustSimSource {
         self.inner.blink();
     }
 
+    /// The last frame emitted over `dt`, as `SIM_FRAME_LEN` numbers: delta, theta, alpha, beta,
+    /// gamma, blink (0 or 1), tilt x, tilt y, motion, quality. All zeros when no frame was due
+    /// (quality 0). No heart rate (#153).
     pub fn step(&mut self, dt: f32) -> js_sys::Float32Array {
-        let mut out = [0.0f32; 11];
+        js_sys::Float32Array::from(&self.step_values(dt)[..])
+    }
+}
+
+/// Numbers per `RustSimSource::step` frame (src/brain/sources.js reads this layout).
+pub const SIM_FRAME_LEN: usize = 10;
+
+impl RustSimSource {
+    fn step_values(&mut self, dt: f32) -> [f32; SIM_FRAME_LEN] {
+        let mut out = [0.0f32; SIM_FRAME_LEN];
         self.inner.update(dt, |f| {
             out = [
                 f.bands.delta,
@@ -2024,14 +2036,51 @@ impl RustSimSource {
                 f.bands.beta,
                 f.bands.gamma,
                 if f.blink { 1.0 } else { 0.0 },
-                f.hr.unwrap_or(0.0),
                 f.tilt.map(|t| t.0).unwrap_or(0.0),
                 f.tilt.map(|t| t.1).unwrap_or(0.0),
                 f.motion,
                 f.quality,
             ];
         });
-        js_sys::Float32Array::from(&out[..])
+        out
+    }
+}
+
+#[cfg(test)]
+mod brain_input_tests {
+    use super::*;
+
+    #[test]
+    fn sim_frames_carry_no_heart_rate() {
+        // #153: every number in an emulated frame is a band share, a 0/1 blink, a tilt in -1..1,
+        // a motion or a quality: a pulse in beats per minute has no slot left.
+        let mut sim = RustSimSource::new(153);
+        let mut frames = 0;
+        for _ in 0..40 {
+            let v = sim.step_values(0.1);
+            if v[SIM_FRAME_LEN - 1] <= 0.0 {
+                continue;
+            }
+            frames += 1;
+            let bands: f32 = v[..5].iter().sum();
+            assert!((bands - 1.0).abs() < 1e-4, "bands sum to 1: {v:?}");
+            assert!(v.iter().all(|x| x.abs() <= 1.0), "a value outside -1..1: {v:?}");
+            assert_eq!(v[SIM_FRAME_LEN - 1], 1.0, "quality: {v:?}");
+        }
+        assert!(frames >= 35, "frames = {frames}");
+    }
+
+    #[test]
+    fn brain_ingest_reads_tilt_where_heart_rate_used_to_be() {
+        // #153: RustBrain::ingest is bands, blink, tilt x/y, motion, quality (src/brain/brain.js
+        // passes exactly these). Its seventh argument is now the head tilt, not a heart rate.
+        let mut brain = RustBrain::new();
+        for _ in 0..30 {
+            brain.ingest(0.2, 0.2, 0.2, 0.2, 0.2, false, 1.0, -1.0, 0.0, 1.0);
+        }
+        let aim = brain.inner.aim;
+        assert!(aim.0 > 0.95 && aim.1 < 0.05, "aim = {aim:?}");
+        assert_eq!(brain.inner.stats.frames_seen, 30);
     }
 }
 

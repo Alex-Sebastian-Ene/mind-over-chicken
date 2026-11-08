@@ -1,9 +1,10 @@
-//! Emulated EEG & PPG headset (`SimSource`) with per-player fingerprint.
+//! Emulated EEG headset (`SimSource`) with per-player fingerprint.
 //!
-//! Generates synthetic 10 Hz brain frames matching real Muse 2 data,
+//! Generates synthetic 10 Hz brain frames matching real Muse 2 EEG data,
 //! allowing headless tests, bots, and demo setups without hardware.
+//! Frames carry no heart rate or PPG: the game does not read either (#99, #153).
 
-use crate::math::{clamp, round3, smooth, Mulberry32};
+use crate::math::{clamp, smooth, Mulberry32};
 use crate::model::Bands;
 
 pub const FRAME_DT: f32 = 0.1;
@@ -14,7 +15,6 @@ pub struct SimFingerprint {
     pub beta_gain: f32,
     pub theta_focus: f32,
     pub gamma_arousal: f32,
-    pub rest_hr: f32,
 }
 
 impl SimFingerprint {
@@ -24,7 +24,6 @@ impl SimFingerprint {
             beta_gain: rng.range_f32(0.55, 1.20),
             theta_focus: rng.range_f32(-0.4, 0.5),
             gamma_arousal: rng.range_f32(0.3, 1.0),
-            rest_hr: rng.range_f32(62.0, 76.0).round(),
         }
     }
 
@@ -34,7 +33,6 @@ impl SimFingerprint {
             beta_gain: 0.85,
             theta_focus: 0.1,
             gamma_arousal: 0.6,
-            rest_hr: 68.0,
         }
     }
 }
@@ -67,7 +65,6 @@ impl Default for SimLatent {
 pub struct BrainFrame {
     pub bands: Bands,
     pub blink: bool,
-    pub hr: Option<f32>,
     pub tilt: Option<(f32, f32)>,
     pub motion: f32,
     pub quality: f32,
@@ -78,7 +75,6 @@ pub struct SimSource {
     pub fp: SimFingerprint,
     pub input: SimInput,
     pub latent: SimLatent,
-    pub hr: f32,
     pub startle: f32,
     pub aim: (f32, f32),
     pub aim_vel: f32,
@@ -91,12 +87,10 @@ impl SimSource {
     pub fn new(seed: u32) -> Self {
         let mut rng = Mulberry32::new(seed);
         let fp = SimFingerprint::random(&mut rng);
-        let hr = fp.rest_hr;
         Self {
             fp,
             input: SimInput::default(),
             latent: SimLatent::default(),
-            hr,
             startle: 0.0,
             aim: (0.5, 0.6),
             aim_vel: 0.0,
@@ -108,12 +102,10 @@ impl SimSource {
 
     pub fn with_fingerprint(fp: SimFingerprint, seed: u32) -> Self {
         let rng = Mulberry32::new(seed);
-        let hr = fp.rest_hr;
         Self {
             fp,
             input: SimInput::default(),
             latent: SimLatent::default(),
-            hr,
             startle: 0.0,
             aim: (0.5, 0.6),
             aim_vel: 0.0,
@@ -170,10 +162,6 @@ impl SimSource {
 
         self.startle = (self.startle - dt * 0.12).max(0.0);
 
-        let hr_target =
-            self.fp.rest_hr + 42.0 * self.latent.arousal - 7.0 * self.latent.calm + 2.0 * self.latent.focus;
-        self.hr = smooth(self.hr, hr_target, 0.45, dt) + self.rng.gauss() * 0.15;
-
         self.acc += dt;
         while self.acc >= FRAME_DT {
             self.acc -= FRAME_DT;
@@ -220,7 +208,6 @@ impl SimSource {
                 gamma: gamma / sum,
             },
             blink,
-            hr: Some(round3(self.hr)),
             tilt: Some((self.aim.0 * 2.0 - 1.0, self.aim.1 * 2.0 - 1.0)),
             motion,
             quality: 1.0,

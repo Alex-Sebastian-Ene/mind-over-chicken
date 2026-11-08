@@ -64,7 +64,6 @@ pub const SETTLE_POP: f32 = 12.0;
 pub const REINFORCE_POP: f32 = 8.0;
 pub const REINFORCE_PROGRESS: f32 = 0.1;
 
-pub const STRESS_BPM: f32 = 20.0;
 pub const STRESS_MAX: f32 = 1.5;
 pub const MIND_SECONDS: f32 = 5.0;
 pub const MIND_SECONDS_PER_PLANET: f32 = 5.0;
