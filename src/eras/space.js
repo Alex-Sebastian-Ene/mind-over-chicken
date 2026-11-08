@@ -192,6 +192,7 @@ export class SpaceAge {
   }
 
   lights() {
+    if (this.phase === 'voyage') return [];
     const L = [];
     const pad = this.pad;
     if (pad) {

@@ -202,3 +202,37 @@ test('space age: stress drops parts; the countdown needs focus and low stress, a
   s.update(0.5);
   near(s.count, c);
 });
+
+test('space age finale: countdown triggers liftoff, transitions to voyage cinematic, and finishes the game', () => {
+  let finished = false;
+  let completed = false;
+  const brain = fakeBrain({ focus: 0.95, calm: 0.5, stress: 0.1 });
+  const s = scene(SpaceAge, brain);
+  s.G.finish = () => { finished = true; };
+  s.G.complete = () => { completed = true; };
+
+  // Countdown finishes
+  s.phase = 'countdown';
+  s.count = 0.05;
+  s.update(0.1);
+  assert.equal(s.phase, 'launch', 'countdown transitions to launch');
+  assert.equal(completed, false, 'G.complete must not be called during launch');
+
+  // Liftoff progresses until rocket clears the island
+  while (s.phase === 'launch') {
+    s.update(0.1);
+  }
+  assert.equal(s.phase, 'voyage', 'rocket launch transitions to interplanetary voyage');
+  assert.ok(s.voyageT >= 0);
+  assert.deepEqual(s.lights(), [], 'no surface pad light in outer space voyage');
+  assert.equal(completed, false, 'G.complete must not be called during voyage');
+
+  // Voyage progresses for 7.5 seconds
+  while (s.phase === 'voyage' && !finished) {
+    s.update(0.2);
+  }
+  assert.equal(finished, true, 'voyage completes by calling G.finish()');
+  assert.equal(s.done, true);
+  assert.equal(completed, false, 'G.complete must never be called in Space Age');
+});
+

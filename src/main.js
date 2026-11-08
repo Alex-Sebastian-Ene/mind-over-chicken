@@ -296,7 +296,11 @@ function newGame(source, startIndex = 0) {
     scene: null, sceneIndex: startIndex, runTime: 0, shake: 0,
     stats: { lightning: 0, smitten: 0, births: 0, deaths: 0, recessions: 0, restarts: 0 },
     eraTimes: [], eraStart: 0, finished: false,
-    complete(delay = 2) { pendingScene = G.sceneIndex + 1; pendingTimer = delay; },
+    complete(delay = 2) {
+      if (G.sceneIndex >= SCENES.length - 1) return;
+      pendingScene = G.sceneIndex + 1;
+      pendingTimer = delay;
+    },
     fail(reason) { showFail(reason); },
     finish(extra) { G.finished = true; G.extra = extra; setTimeout(showEnd, 2200); },
   };
@@ -331,7 +335,11 @@ function newGame(source, startIndex = 0) {
 }
 
 function startScene(i) {
-  if (i >= SCENES.length) return;
+  if (i >= SCENES.length) {
+    pendingScene = null;
+    fade = 0;
+    return;
+  }
   if (G.scene) G.eraTimes.push({ label: G.scene.label, seconds: G.runTime - G.eraStart });
   G.eraStart = G.runTime;
   G.sceneIndex = i;
@@ -555,7 +563,7 @@ function render() {
   // In 3D, scenes with draw3d stand their actors up as sprites, so they skip painting them flat.
   scene.draw(lowCtx);
   scene.drawAfterLight?.(lowCtx);
-  if (!G.render3d) cosmos.applyPan(low);   // the surface is a planet: it wraps east–west (3D pans the camera instead)
+  if (!G.render3d && scene?.phase !== 'voyage') cosmos.applyPan(low);   // the surface is a planet: it wraps east–west (3D pans the camera instead)
   const cosmic = cosmos.render(low, lowCtx, G);
 
   // Zooming out fades the surface's night lighting and labels; the globe and galaxy
@@ -660,7 +668,7 @@ function frame(ts) {
     if (engine) {
       const b = G.brain;
       engine.game_tick(dt, b.calm || 0, b.focus || 0, b.stress ?? 0, b.stats?.blinks || 0);
-      if (engine.is_game_era_complete?.() && !pendingScene && !G.finished) {
+      if (engine.is_game_era_complete?.() && !pendingScene && !G.finished && G.sceneIndex < SCENES.length - 1 && G.scene?.era !== 'space') {
         G.complete(1.5);
       }
       if (engine.is_game_era_failed?.() && $('failScreen').hidden && !G.finished) {
@@ -684,6 +692,10 @@ function frame(ts) {
     } else if (!$('endScreen').hidden) {
       if (aiPlanet) aiPlanet.update(dt);
       G.scene?.update(dt);
+    }
+    if (G.scene?.phase === 'launch' || G.scene?.phase === 'voyage') {
+      fade = 0;
+      pendingScene = null;
     }
     if (pendingScene != null) {
       pendingTimer -= dt;
