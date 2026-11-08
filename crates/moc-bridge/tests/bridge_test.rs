@@ -19,9 +19,9 @@ fn test_synthetic_generator_produces_valid_frames() {
             sum
         );
 
-        if let Some(hr) = frame.hr {
-            assert!(hr >= 50.0 && hr <= 120.0, "HR out of reasonable range: {}", hr);
-        }
+        // #153: the wire frame has no heart-rate field.
+        let json: serde_json::Value = serde_json::to_value(&frame).unwrap();
+        assert!(json.get("hr").is_none(), "bridge frame carries heart rate: {json}");
     }
 }
 
@@ -64,6 +64,8 @@ async fn test_bridge_websocket_handshake_and_frames() {
         .expect("WebSocket read error");
 
     let frame_text = second_msg.to_text().unwrap();
+    let raw: serde_json::Value = serde_json::from_str(frame_text).expect("frame JSON parse error");
+    assert!(raw.get("hr").is_none(), "streamed frame carries heart rate: {raw}");
     let frame: BridgeFrame = serde_json::from_str(frame_text).expect("BridgeFrame JSON parse error");
     assert!(frame.t >= 0.0);
     assert!(frame.bands.alpha > 0.0);

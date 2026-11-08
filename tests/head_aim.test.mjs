@@ -87,8 +87,10 @@ test('the Rust brain receives the tilt as numbers, not tilt[0] of an object (NaN
     b.ingest(frame({ x: 0.25, y: -0.5 }));
     b.ingest(frame(null));
     assert.equal(calls.length, 2);
-    assert.deepEqual(calls[0].slice(7, 9), [0.25, -0.5]);
-    assert.deepEqual(calls[1].slice(7, 9), [0, 0]);
+    // ingest(delta, theta, alpha, beta, gamma, blink, tilt_x, tilt_y, motion, quality): no heart rate (#153).
+    assert.equal(calls[0].length, 10);
+    assert.deepEqual(calls[0].slice(6, 8), [0.25, -0.5]);
+    assert.deepEqual(calls[1].slice(6, 8), [0, 0]);
     for (const args of calls) assert.ok(args.every((v) => typeof v === 'boolean' || Number.isFinite(v)), `finite args: ${args}`);
   } finally {
     setRustBrain(null);
