@@ -6,7 +6,7 @@
 
 export const SETTINGS_KEY = 'moc.settings';
 // reducedMotion: null follows the system setting (prefers-reduced-motion), true/false overrides it.
-export const SETTINGS_DEFAULTS = Object.freeze({ reducedMotion: null, cameraOnStart: false, cursorSize: 'm', cursorContrast: false });
+export const SETTINGS_DEFAULTS = Object.freeze({ reducedMotion: null, cameraOnStart: true, cursorSize: 'm', cursorContrast: false });
 export const CURSOR_SIZES = ['s', 'm', 'l'];
 
 function safeStorage() { try { return globalThis.localStorage ?? null; } catch { return null; } }
@@ -16,7 +16,7 @@ export function loadSettings(storage = safeStorage()) {
   try { saved = JSON.parse(storage?.getItem(SETTINGS_KEY) || '{}') || {}; } catch { saved = {}; }
   return {
     reducedMotion: typeof saved.reducedMotion === 'boolean' ? saved.reducedMotion : null,
-    cameraOnStart: saved.cameraOnStart === true,
+    cameraOnStart: saved.cameraOnStart !== false,   // on by default; only an explicit opt-out disables it
     cursorSize: CURSOR_SIZES.includes(saved.cursorSize) ? saved.cursorSize : 'm',
     cursorContrast: saved.cursorContrast === true,
   };

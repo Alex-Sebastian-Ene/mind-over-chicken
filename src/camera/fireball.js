@@ -1,9 +1,9 @@
 // Charged fireball (#291): the one deliberate hand cast. Pure state machine and colour mapping,
 // no DOM, so Node can test it:
 //
-//   idle → (fist held 180 ms) → charging → (pull back / time) → primed
-//   primed → (palm opens within 350 ms) → released (one fireball)
-//   anything → pinch / hand lost / fist relaxed / palm without thrust → cancelled
+//   idle → (fist held 180 ms) → charging
+//   charging → (open palm / release the wrist) → released (one fireball)
+//   pull-back still builds charge faster; pinch / hand lost / too little charge → cancelled
 //
 // Depth uses pinchMetrics().size (wrist→middle-MCP, aspect-corrected), never raw z alone.
 
@@ -109,7 +109,20 @@ export class FireballController {
     }
 
     if (this.state === 'charging') {
-      if (!fist || palm) { this.cancel(now); return snapshot(); }
+      if (palm) {
+        if (this.charge >= o.minCharge) {
+          this.cast = true;
+          this.state = 'cooldown';
+          this.cooldownUntil = now + o.cooldownMs;
+        } else {
+          this.cancelled = true;
+          this.fizzle = true;
+          this.state = 'cooldown';
+          this.cooldownUntil = now + o.cancelCooldownMs;
+        }
+        return snapshot(m, thrust, palm);
+      }
+      if (!fist) { this.cancel(now); return snapshot(); }
       const pull = clamp01((this.neutralSize - size) / Math.max(this.neutralSize * o.pullFull, 1e-6));
       this.charge = clamp01(this.charge + dt / o.chargeTime * (0.25 + 0.75 * pull));
       this.lastSize = size;
