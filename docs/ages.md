@@ -77,9 +77,9 @@ Fights are **agent against agent** and come out of the simulation. They also hap
 **The player on the battlefield:**
 - anger or stress pushes conflicts up the ladder;
 - calm drifts them down toward a truce;
-- the peace cast forces a truce around the aim point;
-- lightning breaks a charge, and the struck side loses morale;
-- fireball and disaster strike armies as well as land.
+- lightning breaks a charge, and the struck side loses morale.
+
+The peace, fireball and disaster casts went with the other hand-gesture spells in #261; hands now only grab, pan and zoom.
 
 ## Where the player's brain comes in
 Every age has a "brain moment" (the `brain` field in the data). Examples:
