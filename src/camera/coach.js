@@ -128,7 +128,7 @@ const TEMPLATE = `
   </div>
 `;
 
-export function initCoach({ getContext = () => 'surface', onCastMove = null } = {}) {
+export function initCoach({ getContext = () => 'surface' } = {}) {
   const panel = document.getElementById('coachPanel');
   if (!panel) return null;
   panel.innerHTML = TEMPLATE;
