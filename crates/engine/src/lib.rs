@@ -237,19 +237,30 @@ impl Engine {
 
     // Unproject screen coordinates to 3D terrain surface for click aiming & lightning
     pub fn screen_to_ground(&self, sx: f32, sy: f32, cw: f32, ch: f32) -> js_sys::Float32Array {
+        let mut hit = [-1.0f32, -1.0];
+        self.screen_to_ground_into(sx, sy, cw, ch, &mut hit);
         let result = js_sys::Float32Array::new_with_length(2);
+        result.set_index(0, hit[0]);
+        result.set_index(1, hit[1]);
+        result
+    }
+
+    /// Zero-allocation form of `screen_to_ground` (#215): writes `[x, z]` into `out`, or
+    /// `[-1, -1]` when the ray misses. The pointer-aim hot path passes one reusable buffer
+    /// instead of allocating a new `Float32Array` for every hardware pointer move.
+    pub fn screen_to_ground_into(&self, sx: f32, sy: f32, cw: f32, ch: f32, out: &mut [f32]) {
+        if out.len() < 2 {
+            return;
+        }
         // Land on the terrain surface (hills included), never below the sea. Seamless torus (#111).
         let ground_at = |x: f32, z: f32| (self.grid.height_at(x, z) * 24.0).max(7.92);
         if let Some([hx, hz]) = self.camera_3d.screen_to_terrain(sx, sy, cw, ch, 24.0, ground_at) {
-            let hx = view::wrap(hx, self.grid.width());
-            let hz = view::wrap(hz, self.grid.depth());
-            result.set_index(0, hx);
-            result.set_index(1, hz);
+            out[0] = view::wrap(hx, self.grid.width());
+            out[1] = view::wrap(hz, self.grid.depth());
         } else {
-            result.set_index(0, -1.0);
-            result.set_index(1, -1.0);
+            out[0] = -1.0;
+            out[1] = -1.0;
         }
-        result
     }
 
     // Project 3D terrain world coordinates [wx, wz] to screen pixels [sx, sy]
