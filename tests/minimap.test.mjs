@@ -3,7 +3,7 @@
 // the screen showed. It is now the ground under the screen's corners.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { footprint3d } from '../src/ui/minimap.js';
+import { footprint3d, minimapWindow3d, viewWindow } from '../src/ui/minimap.js';
 
 const opts = { tx: 100, tz: 100, ww: 640, wh: 360, sw: 960, sh: 540 };
 // A straight-down camera that sees `span` world px across, wrapped into the world like Rust does.
@@ -41,4 +41,22 @@ test('a top corner over the horizon walks down until it meets the ground', () =>
 
 test('no ground in view: no 3D window (the caller falls back to the 2D rectangle)', () => {
   assert.equal(footprint3d(() => null, opts), null);
+});
+
+
+test('off-map 3D footprints are rejected so the minimap can fall back', () => {
+  assert.equal(minimapWindow3d(topDown(160), opts)?.length, 4);
+  assert.equal(minimapWindow3d(topDown(900), opts), null, 'a quad wider than the world wraps badly');
+  // footprint3d asks for top-left, top-right, bottom-right, bottom-left.
+  const bow = [[60, 60], [580, 60], [60, 300], [580, 300]];
+  let n = 0;
+  const crossed = () => bow[n++ % bow.length];
+  assert.equal(minimapWindow3d(crossed, opts), null, 'a self-intersecting quad is not a window');
+});
+
+test('the fallback camera box stays inside the minimap world', () => {
+  assert.deepEqual(viewWindow(320, 180, 640, 360), { x: 160, y: 90, w: 320, h: 180 });
+  assert.deepEqual(viewWindow(10, 10, 640, 360), { x: 0, y: 0, w: 320, h: 180 });
+  assert.deepEqual(viewWindow(630, 350, 640, 360), { x: 320, y: 180, w: 320, h: 180 });
+  assert.deepEqual(viewWindow(90, 50, 200, 100), { x: 0, y: 0, w: 200, h: 100 });
 });

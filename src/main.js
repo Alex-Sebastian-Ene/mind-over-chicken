@@ -64,7 +64,7 @@ import { createRivals, playerState, applyRivalLine } from './civ/rivals.js'; // 
 import { readOptions, worldSizeOf, difficultyOf, bootModeOf } from './game/options.js'; // world size and difficulty (#220)
 import { News } from './ui/news.js'; // the one news ticker (#220)
 import { initNewGameOptions } from './ui/new-game.js';
-import { footprint3d } from './ui/minimap.js';   // the minimap's 3D window (release QA)
+import { minimapWindow3d, viewWindow } from './ui/minimap.js';   // the minimap's 3D window (release QA)
 import { AIM_VIEW, aimViewKind, clampHomeAim, clampScreenAim } from './input/visible-aim.js';
 import { listSaves, getSave, latestSave, saveRun, deleteSave, clearSaves, newRunId, nextRunNumber } from './game/saves.js'; // local saves
 import { buildCheckpoint, galaxySummary, restoreBrain } from './game/checkpoint.js';
@@ -560,6 +560,7 @@ function startScene(i) {
   scene.enter(G);
   lookAtStage(scene);
   hud.setScene(scene);
+  syncInvincibleButton();
   document.body.dataset.era = scene.era;
   fade = 1;
   G.failing = false;
@@ -619,6 +620,7 @@ function restartScene() {
   scene.enter(G);
   lookAtStage(scene);
   hud.setScene(scene);
+  syncInvincibleButton();
   fade = 1;
   // A fresh attempt: no fail pending, and no controls card left over from the fail screen (#172).
   G.failing = false;
@@ -809,6 +811,33 @@ function toggleAssistMode() {
   updateAssistUI();
 }
 
+function syncInvincibleButton() {
+  const btn = $('invincibleBtn');
+  if (!btn) return;
+  const people = G?.scene?.id === 'stone' && Array.isArray(G.scene.people) && G.scene.people.length > 0;
+  btn.hidden = !people;
+  const on = !!G?.invincible;
+  btn.setAttribute('aria-pressed', String(on));
+  btn.classList.toggle('is-active', on);
+  btn.style.setProperty('--level', on ? '100%' : '0%');
+  const state = btn.querySelector('[data-invincible-state]');
+  if (state) state.textContent = on ? 'ON' : 'OFF';
+  btn.title = on
+    ? 'People invincibility ON: hunger, lightning and trampling cannot kill them (I)'
+    : 'Toggle people invincibility: hunger and deaths paused (I)';
+}
+
+function toggleInvincible() {
+  if (!G) return;
+  G.invincible = !G.invincible;
+  if (G.invincible && G.scene?.people) for (const p of G.scene.people) { p.hunger = 0; p.starve = 0; }
+  syncInvincibleButton();
+  G.hud?.showCause?.(G.invincible ? '🛡️ People invincible: ON · hunger and death paused' : '🛡️ People invincible: OFF');
+  G.advisor?.say('invincible', G.invincible
+    ? 'The tribe is invincible. Hunger, lightning and trampling cannot touch them.'
+    : 'The tribe is mortal again. Try to keep them fed.', { priority: 2, cooldown: 2 });
+}
+
 function quitToTitle() {
   clearTimeout(failTimer);
   failTimer = null;
@@ -823,6 +852,7 @@ function quitToTitle() {
   if (G?.source && G.source !== keep) G.source.disconnect();
   G = null;
   hudScene = null;
+  syncInvincibleButton();
   fade = 0;
   setGameSource(keep);
   $('titleScreen').hidden = false;
@@ -888,6 +918,7 @@ function addLights2d(scene, offsets) {
 }
 // Small map of the whole world with the camera's window on it (#129), in the screen's corner.
 const MINI = { w: 64, h: 36, pad: 4 };
+const MINIMAP_MIN_PITCH = 0.35;   // below this the horizon makes the ground quad unsafe; use the 2D window
 const miniCache = { layer: null, canvas: null };
 function drawMinimap(ctx, scene) {
   const world = scene.G.world, layer = scene.layer || world.layers?.stone;
@@ -912,8 +943,9 @@ function drawMinimap(ctx, scene) {
   ctx.strokeStyle = '#ffe066';
   ctx.lineWidth = 0.6;
   // In 3D the window is the ground the zoomed, tilted camera sees, not the 2D 320×180 (release QA).
-  const fp = G.render3d && typeof engine?.screen_to_ground === 'function'
-    ? footprint3d((x, y) => engine.screen_to_ground(x, y, screen.width, screen.height), {
+  const pitch = engine?.get_camera_pitch?.() ?? 1;
+  const fp = G.render3d && pitch >= MINIMAP_MIN_PITCH && typeof engine?.screen_to_ground === 'function'
+    ? minimapWindow3d((x, y) => engine.screen_to_ground(x, y, screen.width, screen.height), {
       tx: engine.get_camera_target_x(), tz: engine.get_camera_target_z(),
       ww: world.width || W, wh: world.height || H, sw: screen.width, sh: screen.height,
     })
@@ -921,13 +953,20 @@ function drawMinimap(ctx, scene) {
   if (fp) {
     ctx.save();
     ctx.beginPath(); ctx.rect(x0, y0, MINI.w, MINI.h); ctx.clip();
-    for (const ox of [-MINI.w, 0, MINI.w]) for (const oy of [-MINI.h, 0, MINI.h]) {   // wrap copies
-      ctx.beginPath();
-      fp.forEach(([x, y], i) => (i ? ctx.lineTo(x0 + ox + x * sx, y0 + oy + y * sy) : ctx.moveTo(x0 + ox + x * sx, y0 + oy + y * sy)));
-      ctx.closePath();
-      ctx.stroke();
-    }
+    ctx.beginPath();
+    fp.forEach(([x, y], i) => (i ? ctx.lineTo(x0 + x * sx, y0 + y * sy) : ctx.moveTo(x0 + x * sx, y0 + y * sy)));
+    ctx.closePath();
+    ctx.stroke();
     ctx.restore();
+  } else if (G.render3d) {
+    // Low pitch / off-map quad: one stable box around the 2D camera window instead of a wrapped
+    // ground trapezoid that can cross the whole minimap (#332).
+    const box = viewWindow(
+      cosmos.view?.center_x?.() ?? (world.width || W) / 2,
+      cosmos.view?.center_y?.() ?? (world.height || H) / 2,
+      world.width || W, world.height || H, W, H,
+    );
+    ctx.strokeRect(x0 + box.x * sx, y0 + box.y * sy, box.w * sx, box.h * sy);
   } else {
     const r = cosmos.view.blits();
     for (let i = 0; i < r.length; i += 6) ctx.strokeRect(x0 + r[i] * sx, y0 + r[i + 1] * sy, r[i + 2] * sx, r[i + 3] * sy);
@@ -1710,12 +1749,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyT') { toggle3D(); return; }
   if (e.code === 'KeyG') { toggleAIGod(); return; }
   if (G && e.code === 'KeyI' && !e.repeat) {
-    G.invincible = !G.invincible;
-    if (G.invincible && G.scene?.people) for (const p of G.scene.people) { p.hunger = 0; p.starve = 0; }
-    G.hud?.showCause?.(G.invincible ? '🛡️ People invincible: ON · hunger and death paused' : '🛡️ People invincible: OFF');
-    G.advisor?.say('invincible', G.invincible
-      ? 'The tribe is invincible. Hunger, lightning and trampling cannot touch them.'
-      : 'The tribe is mortal again. Try to keep them fed.', { priority: 2, cooldown: 2 });
+    toggleInvincible();
     e.preventDefault();
     return;
   }
@@ -1818,6 +1852,7 @@ function toggle3D() {
 }
 $('mode3dBtn')?.addEventListener('click', toggle3D);
 $('aiGodBtn')?.addEventListener('click', toggleAIGod);
+$('invincibleBtn')?.addEventListener('click', toggleInvincible);
 function showSound(on) {
   $('soundBtn').textContent = on ? 'Sound on' : 'Sound off';
   $('soundBtn').setAttribute('aria-pressed', String(on));
@@ -1990,6 +2025,7 @@ function startCivSandbox(source, resume = null) {
   advisor.setEra(scene.era);
   scene.enter(G);
   hud.setScene(scene);
+  syncInvincibleButton();
   document.body.dataset.era = scene.era;
   startIntro(scene, -1);
   autosave({ civSeed: scene.seed, planet: scene.planetSize?.name ?? null });
