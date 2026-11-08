@@ -107,3 +107,20 @@ test('recenter() takes a new neutral pose', () => {
   near(f.tilt.x, 0, 0.02);
   near(f.tilt.y, 0, 1e-9);
 });
+
+// #185: Play again and the sandboxes keep a connected headset instead of swapping in the emulator.
+test('liveBridge keeps a connected bridge and nothing else', async () => {
+  const { liveBridge, SimSource } = await import('../src/brain/sources.js');
+  const sim = { kind: 'sim', connected: true };
+  const run = new S('ws://run');
+  const preview = new S('ws://preview');
+  assert.equal(liveBridge(sim, null, undefined), null, 'no bridge: fall back to the emulator');
+  assert.equal(liveBridge(run, preview), null, 'a bridge that never connected is not kept');
+  preview.connected = true;
+  assert.equal(liveBridge(run, preview), preview, 'the title screen\'s connected bridge');
+  run.connected = true;
+  assert.equal(liveBridge(run, preview), run, 'the run\'s own bridge first');
+  run.connected = false;   // the socket closed mid-run
+  assert.equal(liveBridge(run), null);
+  assert.equal(typeof SimSource, 'function');
+});

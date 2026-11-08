@@ -4,7 +4,7 @@ import { W, H, HOME_W, HOME_H, clamp, lerp, wrapDelta } from './sim/util.js';
 
 const smoothstep = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
 import { World, setRustWorldGen } from './world/terrain.js';
-import { SimSource, BridgeSource, setRustSimSource } from './brain/sources.js';
+import { SimSource, BridgeSource, liveBridge, setRustSimSource } from './brain/sources.js';
 import { Brain, setRustBrain } from './brain/brain.js';
 import { Advisor, setRustAdvisorEngine } from './ui/advisor.js';
 import { EraIntro } from './ui/intro.js'; // era intro transition (no click-to-dismiss card)
@@ -672,7 +672,7 @@ function quitToTitle() {
   intro.cancel(); introCam = null; delete document.body.dataset.intro;
   pendingScene = null;
   resetAIGod();
-  const keep = G?.source?.kind === 'bridge' && G.source.connected ? G.source : null;
+  const keep = liveBridge(G?.source);
   if (G?.source && G.source !== keep) G.source.disconnect();
   G = null;
   hudScene = null;
@@ -695,6 +695,7 @@ function showEnd() {
   const t = Math.floor(G.runTime);
   const rows = [
     ['Run time', `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`],
+    ['Headset', G.source?.kind === 'bridge' ? `Muse via the bridge (${G.source.connected ? 'connected' : 'disconnected'})` : 'Emulated headset (keyboard)'],
     ['Era restarts', s.restarts],
     ['Lightning bolts', s.lightning],
     ['Villagers who found religion', s.smitten],
@@ -1458,7 +1459,7 @@ $('biometricFeedbackBtn')?.addEventListener('click', () => {
     advisor?.say('assist', 'Tolerance widened. Take a deep breath; the gods are forgiving today.', { mood: 'happy', priority: 4, cooldown: 0 });
   }
 });
-$('againBtn').addEventListener('click', () => { $('endScreen').hidden = true; newGame(new SimSource()); });
+$('againBtn').addEventListener('click', () => { $('endScreen').hidden = true; newGame(playSource()); });
 $('endModelBtn').addEventListener('click', toggleModel);
 
 // ---------- zoom + galaxy UI ----------
@@ -1563,14 +1564,17 @@ $('galaxyBtn').addEventListener('click', () => {
 });
 
 // ---------- title screen ----------
+// Every entry point (Play, both sandboxes, Play again) keeps a connected headset and only falls
+// back to the emulator without one; newGame() disconnects whatever it isn't given (#185).
+function playSource() { return liveBridge(G?.source, previewSource) || new SimSource(); }
 function begin(source) {
   audio.unlock();
   $('titleScreen').hidden = true;
   newGame(source);
 }
-$('playSim').addEventListener('click', () => begin(previewSource?.kind === 'bridge' && previewSource.connected ? previewSource : new SimSource()));
+$('playSim').addEventListener('click', () => begin(playSource()));
 $('playSandbox').addEventListener('click', () => {
-  begin(previewSource?.kind === 'bridge' && previewSource.connected ? previewSource : new SimSource());
+  begin(playSource());
   dismissBanner();
   G.sandbox = true;
   cosmos.sandbox = true;
@@ -1580,10 +1584,10 @@ $('playSandbox').addEventListener('click', () => {
   advisor.setEra('space');
   advisor.say('sandbox', 'Galaxy sandbox, my lord. Three worlds are forming from your thoughts. Make more planets and let them run.', { mood: 'happy', priority: 3, cooldown: 999 });
 });
-// civ (#50): "Sandbox: a crowded planet" runs its own scene (Rust sim in src/civ/) on the emulated headset.
+// civ (#50): "Sandbox: a crowded planet" runs its own scene (Rust sim in src/civ/) on the connected headset, or the emulated one (#185).
 initPlanetSizePicker($('planetSizePick'));   // Small/Medium/Large/Huge or Random (Alex)
 $('playCiv').addEventListener('click', () => {
-  begin(new SimSource());
+  begin(playSource());
   const scene = new CivSandbox({ cosmos });
   G.scene = scene;
   advisor.setEra(scene.era);

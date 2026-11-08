@@ -151,6 +151,12 @@ export class SimSource {
   }
 }
 
+// The headset to keep for the next run (#185): the first connected bridge among the candidates
+// (the run's source, the title screen's preview), or null to fall back to the emulator.
+export function liveBridge(...sources) {
+  return sources.find((s) => s?.kind === 'bridge' && s.connected) || null;
+}
+
 // Reads frames from the Python bridge (BrainFlow → band powers, blinks, accelerometer and
 // gyroscope). With the bridge's fused `orientation` the aim follows yaw (left/right) and pitch
 // (up/down); without it (no gyro, older bridge) it falls back to accelerometer tilt.
