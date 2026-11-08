@@ -26,5 +26,5 @@ for n in 8 4; do
   wait $PID
   prev="$out/ckpt.pt"
 done
-"$TD_PYTHON" export.py --ckpt "$TD_RUNS/$TEACHER/ckpt.pt" --out "$TD_RUNS/relief_teacher.mocd" --steps 8
-"$TD_PYTHON" export.py --ckpt "$prev" --out "$TD_RUNS/relief_d4.mocd"
+"$TD_PYTHON" export.py --ckpt "$TD_RUNS/$TEACHER/ckpt.pt" --out "$TD_RUNS/relief_${TEACHER}.mocd" --steps 8
+"$TD_PYTHON" export.py --ckpt "$prev" --out "$TD_RUNS/relief_${TEACHER}_d4.mocd"

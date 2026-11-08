@@ -71,7 +71,7 @@ ssh iridis 'bash -lc "sbatch /scratch/ase1g23/moc_diffusion/repo/rl/terrain_diff
 ssh iridis 'bash -lc "bash /scratch/ase1g23/moc_diffusion/repo/rl/terrain_diffusion/slurm/submit_all.sh"'
 ```
 
-Then copy `runs/relief_d4.mocd` to `crates/moc-diffusion/weights/relief.mocd`; the crate
+Then copy `runs/relief_<teacher>_d4.mocd` to `crates/moc-diffusion/weights/relief.mocd`; the crate
 embeds it at build time when present.
 
 Everything lives under `/scratch/ase1g23/moc_diffusion` (`raw/`, `data/`, `runs/`, `logs/`,
