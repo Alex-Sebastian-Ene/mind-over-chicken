@@ -993,6 +993,7 @@ function frame(ts) {
   lastTs = ts;
   if (G) {
     G.brain.update(dt, G.mood);   // the camera's face anger counts toward brain.stress
+    signalNotices();
     // The Rust shell draws the WebGL HUD (objectives, clock, meters, advisor text) in game_tick.
     // It shows the JS scene on screen (#191): mirrorHud hands over its objectives and clock, and
     // the Rust era sim stands still, so it runs every frame, time skips and intros included.
@@ -1018,6 +1019,8 @@ function frame(ts) {
     } else if (G.sandbox) {
       G.runTime += dt;   // the hand-played game stays paused in the sandbox
       G.calibration?.update(dt, G.brain, G.mood);
+    } else if (G.signalPaused && $('failScreen').hidden && $('endScreen').hidden) {
+      // #175: poor contact. The era waits (no scoring on garbage calm/focus) and resumes by itself.
     } else if ($('failScreen').hidden && $('endScreen').hidden) {
       G.runTime += dt;
       G.calibration?.update(dt, G.brain, G.mood);
@@ -1066,6 +1069,31 @@ function isEegLive() {
   return !!(src && src.kind === 'bridge' && src.connected && src.streaming && src.lastFrameAt > 0 && (performance.now() - src.lastFrameAt < 3000));
 }
 
+// The headset aims only while it is sending head tilt (#175): a live Muse with no orientation
+// used to freeze the cursor, because a live headset turned the mouse aim off.
+function headAimLive() { return isEegLive() && !!G?.brain?.headTracking; }
+
+// #175: say once per run when the headset can't aim, and while its contact is unusable.
+function signalNotices() {
+  const b = G?.brain;
+  if (!b) return;
+  // Only a live headset can be unusable; if it stops streaming the pause lifts (no stuck era).
+  if (G.source?.kind !== 'bridge' || !isEegLive()) { G.signalPaused = false; return; }
+  if (!b.headTracking && b.stats.framesSeen > 20 && !G.headNoticeShown) {
+    G.headNoticeShown = true;
+    advisor.say('head-lost', 'Head tracking unavailable, my lord: aim with the mouse or the arrow keys.', { mood: 'nervous', priority: 3, cooldown: 30 });
+    hud.showCause?.('Head tracking unavailable: aim with the mouse or the arrow keys', { ms: 5000, tone: 'wait' });
+  }
+  if (b.signalUnusable && !G.signalPaused) {
+    G.signalPaused = true;
+    advisor.say('signal-bad', 'I cannot read your mind, my lord: the headset has poor contact. Settle the band on your forehead and behind your ears. The era waits for you.', { mood: 'panic', priority: 4, cooldown: 10 });
+  } else if (!b.signalUnusable && G.signalPaused) {
+    G.signalPaused = false;
+    advisor.say('signal-ok', 'There you are. The signal is back; the era resumes.', { mood: 'happy', priority: 3, cooldown: 5 });
+  }
+  if (G.signalPaused) hud.showCause?.(`Headset signal unusable (quality ${Math.round(b.signalQuality * 100)}%): the era is paused`, { ms: 600, tone: 'wait' });
+}
+
 function aimFromEvent(e) {
   const r = screen.getBoundingClientRect();
   return { x: clamp((e.clientX - r.left) / r.width), y: clamp((e.clientY - r.top) / r.height) };
@@ -1092,7 +1120,7 @@ function surfaceAim(e) {
 }
 
 function followCursorAim(e) {
-  if (!G?.brain || isEegLive()) return;
+  if (!G?.brain || headAimLive()) return;
   const a = surfaceAim(e);
   G.brain.aim.x = a.x;
   G.brain.aim.y = a.y;
@@ -1442,6 +1470,16 @@ window.addEventListener('keydown', (e) => {
     else if (!$('failScreen').hidden) retryEra();
     else if (G && cosmos.z > 0.5) cosmos.zoomIn(G);   // galaxy → the chosen world's globe → its surface
     else G?.scene?.skip?.();
+    return;
+  }
+  if (!sim() && e.code.startsWith('Arrow') && G?.brain && !headAimLive()) {
+    // A headset without head tracking: the arrows aim, as they do on the emulator (#175).
+    const a = G.brain.aim, step = 0.04;
+    if (e.code === 'ArrowLeft') a.x = clamp(a.x - step);
+    if (e.code === 'ArrowRight') a.x = clamp(a.x + step);
+    if (e.code === 'ArrowUp') a.y = clamp(a.y - step);
+    if (e.code === 'ArrowDown') a.y = clamp(a.y + step);
+    e.preventDefault();
     return;
   }
   const s = sim(); if (!s) return;
