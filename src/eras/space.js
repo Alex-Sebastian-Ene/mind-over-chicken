@@ -156,7 +156,7 @@ export class SpaceAge {
         this.phase = 'launch';
         brain.setCue(null);
         G.audio.rumble(4);
-        G.advisor.say('liftoff', 'LIFTOFF! From a fire pit to the stars. I would like to thank the mammoths.', { mood: 'happy', priority: 5, cooldown: 0 });
+        G.advisor.say('liftoff', 'LIFTOFF! From a fire pit to the stars. I would like to thank the chickens.', { mood: 'happy', priority: 5, cooldown: 0 });
         for (const c of this.citizens) if (c.state !== 'aboard') c.state = 'cheer';
       }
     }

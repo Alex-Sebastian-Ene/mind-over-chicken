@@ -141,22 +141,34 @@ export function drawPerson(ctx, x, y, o = {}) {
   if (o.mark) px(ctx, x, sy - 8, o.mark);
 }
 
+// The Stone Age's prey (Alex: "change the mammoth to a chicken"): a giant chicken, drawn where
+// the mammoth was (same feet position and footprint, taller). Dead, it's a roast chicken.
 export function drawMammoth(ctx, x, y, o = {}) {
   x = Math.round(x); y = Math.round(y);
-  const f = o.facing || 1, fur = o.dead ? '#5a4030' : '#7b5536', dark = '#5e3f27';
+  const f = o.facing || 1;
+  // A rect of width w starting dx columns right of x when facing right, mirrored when facing left.
+  const m = (dx, w = 1) => (f > 0 ? x + dx : x - dx - w + 1);
   if (o.dead) {
-    px(ctx, x - 3, y - 2, fur, 7, 2);
-    px(ctx, x - 3, y - 3, '#8f6a48', 7, 1);
+    px(ctx, x - 3, y, 'rgba(0,0,0,0.25)', 7, 1);
+    px(ctx, x - 3, y - 2, '#b8672a', 6, 2);                     // roast, golden brown
+    px(ctx, x - 2, y - 3, '#d98a3d', 4, 1);
+    px(ctx, m(3), y - 2, '#f2e6c8'); px(ctx, m(-4), y - 2, '#f2e6c8'); // drumstick bones
     return;
   }
-  px(ctx, x - 3, y, 'rgba(0,0,0,0.25)', 7, 1);
-  px(ctx, x - 3, y - 5, fur, 6, 3);
-  px(ctx, x - 2, y - 6, fur, 4, 1);
-  px(ctx, x + (f > 0 ? 2 : -4), y - 6, dark, 2, 3);           // head
-  px(ctx, x + (f > 0 ? 4 : -5), y - 4, '#f4ecd8');             // tusk
-  px(ctx, x + (f > 0 ? 3 : -4), y - 3, dark);                  // trunk
-  const leg = o.frame % 2;
-  px(ctx, x - 3 + leg, y - 2, dark, 1, 2); px(ctx, x + 1 - leg, y - 2, dark, 1, 2);
+  const white = '#fbf6ea', shade = '#e2d6bd', red = '#e53935', orange = '#f6a623';
+  const step = o.frame % 2;
+  px(ctx, x - 3, y, 'rgba(0,0,0,0.25)', 7, 1);                 // shadow
+  px(ctx, m(-4, 2), y - 7, shade, 2, 3);                       // tail feathers
+  px(ctx, m(-3, 6), y - 5, white, 6, 3);                       // body
+  px(ctx, m(-2, 4), y - 2, white, 4, 1);                       // belly
+  px(ctx, m(-2, 3), y - 4, shade, 3, 1);                       // wing
+  px(ctx, m(-1, 2), y - 3, shade, 2, 1);
+  px(ctx, m(2, 2), y - 8, white, 2, 3);                        // neck and head
+  px(ctx, m(2, 2), y - 9, red, 2, 1);                          // comb
+  px(ctx, m(3), y - 7, '#2a1a10');                             // eye
+  px(ctx, m(4), y - 7, orange);                                // beak
+  px(ctx, m(4), y - 6, red);                                   // wattle
+  px(ctx, m(-1 + step), y - 1, orange); px(ctx, m(1 - step), y - 1, orange); // legs
 }
 
 export function drawGoat(ctx, x, y, o = {}) {

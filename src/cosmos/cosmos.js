@@ -24,6 +24,10 @@ const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 const smoothstep = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
+// Continuous zoom input (#143): levels per wheel delta unit, and per e-fold of pinch spread.
+const WHEEL_LEVELS = 0.0025;
+const PINCH_LEVELS = 3;
+
 export class Cosmos extends ZoomState {
   constructor() {
     super();               // z, target, focus, sandbox (zoom.js)
@@ -397,8 +401,9 @@ export class Cosmos extends ZoomState {
     if (this.pinch && this.pointers.size === 2) {
       const [a, b] = [...this.pointers.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
-      if (d > this.pinch.d * 1.35) { this.zoomIn(G); this.pinch.d = d; }
-      else if (d < this.pinch.d / 1.35) { this.zoomOut(G); this.pinch.d = d; }
+      // Continuous (#143): spreading the fingers zooms in smoothly, about a level per 1.4x spread.
+      if (d > 0 && this.pinch.d > 0) this.nudgeZoom(-Math.log(d / this.pinch.d) * PINCH_LEVELS, G);
+      this.pinch.d = d;
       return;
     }
     if (this.drag) {
@@ -435,12 +440,19 @@ export class Cosmos extends ZoomState {
     this.rot = this.galaxy ? this.galaxy.time * p.spin + p.phase : this.rot;
   }
 
+  // Continuous (#143): every wheel delta moves the zoom (a mouse notch of 100 is a quarter level;
+  // a trackpad's small deltas glide), with no 320 ms gate. The two-hand pinch comes through here too.
   wheel(deltaY, G) {
-    const now = performance.now();
-    this.wheelAcc += deltaY;
-    if (now - this.wheelAt < 320) return;
-    if (this.wheelAcc > 40) { this.zoomOut(G); this.wheelAt = now; this.wheelAcc = 0; }
-    else if (this.wheelAcc < -40) { this.zoomIn(G); this.wheelAt = now; this.wheelAcc = 0; }
+    this.nudgeZoom(clamp(deltaY, -240, 240) * WHEEL_LEVELS, G);
+  }
+
+  nudgeZoom(dz, G) {
+    if (this.z + dz >= 1.5) this.ensureGalaxy(G);
+    const fromSurface = this.target === 0;
+    const r = this.nudge(dz);
+    if (!r) return;
+    if (r.refused) this.say(r.refused);
+    if (r.level === 1 && fromSurface) this.rot = this.faceRot();
   }
 
   levelLabel() { return this.label(); }

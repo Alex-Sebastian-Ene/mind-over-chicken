@@ -12,7 +12,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 - [ ] **Headset**:
   - **Option A (Muse 2 hardware)**: Bluetooth paired. `python bridge/muse_bridge.py --board muse2` running in terminal, showing green stream.
   - **Option B (Emulated Headset fallback)**: Title screen selected as **"Emulated headset (keyboard)"**.
-- [ ] **Webcam**: Camera positioned at eye level with even lighting. Click **"Camera"** button on top bar (status turns green).
+- [ ] **Webcam**: Camera positioned at eye level with even lighting. Click **"Camera"** on the top bar to open the sidebar, then **"Start Camera"** and allow the permission prompt (status turns green).
 - [ ] **Hotkeys Reference Card**:
   - `Space`: Hold Calm (high alpha)
   - `F`: Hold Focus (beta / mental effort)
@@ -57,13 +57,13 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 #### Spoken Script
 > *"We start in the Stone Age. My tribe is freezing, and Oog, the High Priest, is quietly judging me.*  
 > *Watch the reticle. When I perform a deliberate double-blink—[BLINK]—lightning strikes the fire pit, igniting civilization's first flame.*  
-> *Now I strike a woolly mammoth across the river—[BLINK]—barbecuing dinner for the hunters.*  
+> *Now I strike a giant chicken across the river—[BLINK]—barbecuing dinner for the hunters.*  
 > *Notice the fire fading! The game demands serenity. As I take a deep breath and enter calm hold... [HOLD 5s]... my alpha-to-beta wave ratio spikes above 60%, the fire roars back, and a baby is born.*  
 > *And with our camera vision, when I hold up a closed fist—a fireball crashes down; an open palm blesses the harvest with divine food."*
 
 #### Operator Actions
 - **0:22**: Aim mouse/head at the fire pit. Press `B` (or physical blink). Lightning crashes, fire ignites, audio synth roars.
-- **0:30**: Aim at a mammoth. Press `B`. Mammoth barbecue appears, food count rises to 5+.
+- **0:30**: Aim at a giant chicken. Press `B`. A roast chicken appears, food count rises to 5+.
 - **0:36**: Fire heat drops under 50%; calm hold begins. Hold `Space` (or close eyes for EEG calm). Meter fills to 100%, advisor celebrates, tribe population grows.
 - **0:50**: Show camera gesture: raise a fist (or press `2`) to cast fireball. Raise open palm (or press `3`) to drop resources.
 
