@@ -60,6 +60,7 @@ import { dayNight } from './render/daynight.js';
 import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
 import { mirrorHud } from './ui/hud-mirror.js';
 import { createRivals, playerState, applyRivalLine } from './civ/rivals.js'; // rivals on the home world (#212)
+import { readOptions, worldSizeOf, difficultyOf } from './game/options.js'; // world size and difficulty (#220)
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
 // mind read uses the same window.
@@ -396,8 +397,14 @@ function newGame(source, startIndex = 0) {
   const brain = new Brain(source);
   cosmos.reset();
   intro.cancel(); introCam = null; delete document.body.dataset.intro;
+  // The one game's options (#220): the home world's size and the difficulty every system reads.
+  const options = readOptions();
+  const seed = (Math.random() * 1e9) >>> 0;
+  const size = worldSizeOf(options.worldSize, seed);
   G = {
-    world: new World(undefined, { width: HOME_W, height: HOME_H }), // the bigger home world (#129)
+    world: new World(seed, { width: size.w, height: size.h }), // the home world, sized by the New Game choice (#129, #220)
+    options: { ...options, size: size.id },
+    difficulty: difficultyOf(options.difficulty),
     brain, source, advisor, hud, audio, engine,
     calibration: new Calibration(calibConfig), // calibration (#54)
     scene: null, sceneIndex: startIndex, runTime: 0, shake: 0,
@@ -472,8 +479,11 @@ function startRivals(game) {
   game.rivals = null;
   const q = new URLSearchParams(location.search);
   if (q.get('rivals') === '0' || !game.world?.continents?.length) return;
-  createRivals(game.world, { council: q.get('council') === 'rules' ? 'rules' : 'ppo' }).then((r) => {
+  // Their number comes from the world's size (Rust: 3 / 5 / 8 / 12), shifted by the difficulty.
+  const d = game.difficulty?.rivals;
+  createRivals(game.world, { council: q.get('council') === 'rules' ? 'rules' : 'ppo', offset: d?.offset ?? 0 }).then((r) => {
     if (G !== game) { r.free(); return; }
+    r.setDifficulty(d);
     game.rivals = r;
     r.setScene(game.sceneIndex);
   }).catch((err) => console.warn('rivals unavailable:', err));

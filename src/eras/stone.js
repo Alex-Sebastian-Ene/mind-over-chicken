@@ -5,6 +5,7 @@
 
 import { Particles, clamp, dist, rand, chance, floater, pick } from '../sim/util.js';
 import { walk, animate, villagerLook, sail } from '../sim/agents.js';
+import { eraTuning } from '../game/options.js'; // difficulty (#220)
 import { drawPerson, drawMammoth, drawFire, makeBolt, drawBolt, drawReticle, drawChicken, drawBoat } from '../render/sprites.js';
 
 const POP_START = 10;
@@ -81,6 +82,8 @@ export class StoneAge {
   }
 
   living() { return this.people.filter((p) => p.alive); }
+  // Seconds of calm that feed the fire: 5 on Normal (the difficulty table, #220).
+  holdSeconds() { return this.G ? eraTuning(this.G).holdSeconds : HOLD_SECONDS; }
 
   onBlink(aim) {
     const G = this.G;
@@ -277,7 +280,7 @@ export class StoneAge {
     // ---- Fire and the calm challenge ----
     const f = this.fire;
     if (f.lit) {
-      const decayMult = this.G.assistMode ? 0.5 : 1.0;
+      const decayMult = (this.G.assistMode ? 0.5 : 1.0) * eraTuning(this.G).fireDecay;
       f.heat -= dt * (this.hold.active ? 0.022 : 0.034) * decayMult;
       if (f.heat <= 0) {
         f.heat = 0; f.lit = false;
@@ -295,14 +298,14 @@ export class StoneAge {
       G.audio.blip();
     }
     if (this.hold.active) {
-      const thr = brain.threshold('calm', 0.55);
+      const thr = brain.threshold('calm', eraTuning(G).calmThreshold);
       this.hold.thr = thr;
       if (brain.calm >= thr) this.hold.progress += dt;
       else {
         if (this.hold.progress > 1.5) G.advisor.say('broke', 'You flinched. The fire flinched. We all flinched.', { priority: 2, cooldown: 10 });
         this.hold.progress = Math.max(0, this.hold.progress - dt * 1.5);
       }
-      if (this.hold.progress >= HOLD_SECONDS) this.endHold(true);
+      if (this.hold.progress >= this.holdSeconds()) this.endHold(true);
     }
 
     this.updateForest(dt);
@@ -341,7 +344,7 @@ export class StoneAge {
         m.alive = false; m.dead = true;
         this.meat.push({ x: m.x, y: m.y, amount: 4, cooked: false, claimed: 0 });
         floater(this.particles, m.x, m.y - 8, 'hunted!', '#f2e8d5', 6);
-        if (chance(0.2)) {
+        if (chance(Math.min(0.9, 0.2 * eraTuning(G).mammothDanger))) {
           const victim = this.people.find((p) => p.alive && p.target === m);
           if (victim) { this.kill(victim); G.advisor.say('trample', `${victim.name} was trampled. The tribe agrees it was the chicken's fault, not yours.`, { priority: 2 }); }
         }
@@ -362,13 +365,13 @@ export class StoneAge {
       }
       animate(p, dt, 6);
       const dFire = dist(p.x, p.y, f.x, f.y);
-      const hungerRate = this.G.assistMode ? 0.008 : 0.017;
+      const hungerRate = (this.G.assistMode ? 0.008 : 0.017) * eraTuning(this.G).hunger;
       p.hunger = clamp(p.hunger + dt * (p.colony ? -0.01 : hungerRate));
       p.faith = clamp(p.faith - dt * 0.008);
       if ((f.lit && dFire < 24) || p.colony) p.fear = clamp(p.fear - dt * 0.22);
       else p.fear = clamp(p.fear + dt * 0.03 * (1 - 0.5 * p.faith));
-      // 75-second initial starvation grace period so new players have time to learn
-      const inGrace = this.t < 75;
+      // 75-second initial starvation grace period so new players have time to learn (× difficulty)
+      const inGrace = this.t < 75 * eraTuning(this.G).starvationGrace;
       if (p.hunger >= 1 && !inGrace) {
         p.starve += dt;
         if (p.starve > 8) {
@@ -730,13 +733,13 @@ export class StoneAge {
         }
       }
       if (this.hold.active) {
-        const p = this.hold.progress / HOLD_SECONDS;
+        const p = this.hold.progress / this.holdSeconds();
         ctx.lineWidth = 1.4;
         ctx.strokeStyle = 'rgba(10,12,30,0.7)';
         ctx.beginPath(); ctx.arc(f.x, f.y - 3, 13, 0, Math.PI * 2); ctx.stroke();
         ctx.strokeStyle = '#59d8c8';
         ctx.beginPath(); ctx.arc(f.x, f.y - 3, 13, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2); ctx.stroke();
-        label(ctx, f.x, f.y - 20, `HOLD CALM  ${(HOLD_SECONDS - this.hold.progress).toFixed(1)}s`, '#59d8c8', 7);
+        label(ctx, f.x, f.y - 20, `HOLD CALM  ${(this.holdSeconds() - this.hold.progress).toFixed(1)}s`, '#59d8c8', 7);
       }
     }
     this.particles.drawText(ctx);

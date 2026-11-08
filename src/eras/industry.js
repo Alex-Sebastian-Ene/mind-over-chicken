@@ -12,6 +12,7 @@ import { walk, animate, villagerLook, sail } from '../sim/agents.js';
 import { drawPerson, drawGoat, drawChicken, drawBoat, drawReticle } from '../render/sprites.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
+import { eraTuning } from '../game/options.js'; // difficulty (#220)
 
 const N = 38;
 const GDP_TARGET = 620;
@@ -124,7 +125,7 @@ export class Industry {
     this.peak = Math.max(...recent);
 
     this.crashCooldown -= TICK;
-    if (this.price < this.peak * 0.8 && this.crashCooldown <= 0 && this.t > 4) {
+    if (this.price < this.peak * eraTuning(this.G).crashThreshold && this.crashCooldown <= 0 && this.t > 4) {
       this.crashCooldown = 9;
       this.recessions++;
       G.stats.recessions++;
@@ -315,7 +316,7 @@ export class Industry {
     return [
       { label: 'GDP', value: gdpVal, done: gdpDone },
       { label: 'Goat IPO', value: st === 'done' ? 'priced' : st === 'active' ? `${ipoProgress}/${IPO_SECONDS}s` : 'soon', done: st === 'done' },
-      { label: 'Goat index', value: this.price.toFixed(1), plain: true, bad: this.price < this.peak * 0.8 },
+      { label: 'Goat index', value: this.price.toFixed(1), plain: true, bad: this.price < this.peak * eraTuning(this.G).crashThreshold },
       { label: 'Striking', value: `${this.agents.filter((a) => a.state === 'strike' || a.state === 'riot').length}`, plain: true },
     ];
   }
