@@ -153,7 +153,7 @@ export class Hud {
     const weights = m.weights();
     const wRows = weights.map(({ c, w }) => `<tr><th>${c}</th>${w.map((x) => `<td class="${x >= 0 ? 'pos' : 'neg'}">${x.toFixed(1)}</td>`).join('')}</tr>`).join('');
     this.modelBody.innerHTML = `
-      <p class="model-lede">Trained silently on the moments the game asked you to relax, look around and do sums. There was no calibration screen.</p>
+      <p class="model-lede">Trained silently on the moments the game asked you to relax, look around and concentrate. There was no calibration screen.</p>
       <dl class="model-stats">
         <div><dt>Rest windows</dt><dd>${m.count('rest')}</dd></div>
         <div><dt>Calm windows</dt><dd>${m.count('calm')}</dd></div>
