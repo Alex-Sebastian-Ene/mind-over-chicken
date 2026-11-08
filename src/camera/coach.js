@@ -119,6 +119,21 @@ export const COACH_MOVES = [
       return [{ hand: buildGhostHand('fist', 'open', k, at), state: {} }];
     },
   },
+  {
+    id: 'rain_spell',
+    title: 'Rain',
+    key: '',
+    glyph: '🌧',
+    instruction: 'Hold an open palm to the camera with Insight/Focus for two seconds. No camera, no Rain.',
+    contexts: ['surface'],
+    sample(phase) {
+      const bob = Math.sin(phase * Math.PI * 2) * 0.012;
+      return [{
+        hand: buildGhostHand('open', 'open', 1, { cx: 0.5, cy: 0.78 + bob, size: 0.28 }),
+        state: { held: true, aiming: true },
+      }];
+    },
+  },
 ];
 
 export const COACH_MOVE_BY_ID = Object.fromEntries(COACH_MOVES.map((m) => [m.id, m]));
@@ -248,6 +263,15 @@ export function initCoach({ getContext = () => 'surface' } = {}) {
     for (const g of ghosts) drawHand(ctx, g.hand, w, h, g.state);
     ctx.restore();
 
+    if (move.id === 'rain_spell') {
+      ctx.fillStyle = 'rgba(158, 201, 255, 0.75)';
+      for (let i = 0; i < 9; i++) {
+        const x = 18 + ((i * 37 + 11) % (w - 36));
+        const y = 20 + ((now / 14 + i * 17) % (h - 30));
+        ctx.fillRect(Math.round(x), Math.round(y), 1, 3);
+      }
+    }
+
     ctx.fillStyle = 'rgba(255, 207, 74, 0.85)';
     ctx.font = '11px "Pixelify Sans", monospace';
     ctx.textAlign = 'center';
@@ -257,6 +281,8 @@ export function initCoach({ getContext = () => 'surface' } = {}) {
       ctx.fillText('PINCH · HAND PANS · HEAD TILTS', w / 2, 16);
     } else if (move.id === 'charged_fireball') {
       ctx.fillText(phase < 0.65 ? 'FIST · PULL BACK' : phase < 0.8 ? 'THRUST' : 'OPEN PALM', w / 2, 16);
+    } else if (move.id === 'rain_spell') {
+      ctx.fillText('OPEN PALM · HOLD INSIGHT 2s', w / 2, 16);
     }
   }
 

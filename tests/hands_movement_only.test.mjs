@@ -1,5 +1,5 @@
-// Hands are movement-first (#261, #168) with one deliberate exception: the charged fireball (#291).
-// The old seven-spell cast path must stay gone; pinch grab and two-hand zoom remain the movement moves.
+// Hands are movement-first (#261, #168) with two deliberate casts: the charged fireball (#291)
+// and the camera-only Rain spell (#330, #340). The old seven-spell cast path must stay gone.
 // Run: node --test tests/hands_movement_only.test.mjs
 
 import test from 'node:test';
@@ -8,14 +8,14 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { COACH_MOVES, COACH_CARDS, buildGhostHand } from '../src/camera/coach.js';
 import { MultiHandTracker } from '../src/camera/fingers.js';
 
-const HAND_MOVES = ['pinch_grab', 'two_hand_zoom', 'charged_fireball'];
+const HAND_MOVES = ['pinch_grab', 'two_hand_zoom', 'charged_fireball', 'rain_spell'];
 
-test('the coach shows the two movement moves plus the charged fireball exception (#261, #168, #291)', () => {
+test('the coach shows the movement moves plus the two deliberate casts (#261, #168, #291, #340)', () => {
   assert.deepEqual(COACH_MOVES.map((m) => m.id), HAND_MOVES);
   assert.deepEqual(COACH_CARDS.map((m) => m.id), HAND_MOVES);
-  assert.deepEqual(COACH_CARDS.map((m) => m.title), ['Pinch Grab', 'Two-Hand Zoom', 'Charged Fireball']);
+  assert.deepEqual(COACH_CARDS.map((m) => m.title), ['Pinch Grab', 'Two-Hand Zoom', 'Charged Fireball', 'Rain']);
   for (const m of COACH_CARDS) {
-    if (m.id === 'charged_fireball') continue;
+    if (m.id === 'charged_fireball' || m.id === 'rain_spell') continue;
     assert.doesNotMatch(`${m.instruction} ${m.key}`, /\b[1-7]\b|cast|spell|fireball|calm/i, m.id);
   }
 });
