@@ -44,7 +44,7 @@ const MOOD_LINES = {
 const TEMPLATE = `
   <header class="eeg-head">
     <h2>Camera &amp; Hand Moves</h2>
-    <button type="button" class="tool" data-cam-close title="Close Camera sidebar (\`)">Close <kbd>\`</kbd></button>
+    <button type="button" class="tool" data-cam-close title="Close Camera sidebar (C)">Close <kbd>C</kbd></button>
   </header>
 
   <section class="eeg-sec">
@@ -238,7 +238,7 @@ export function initCamera({
     btn.dataset.state = next;
     btn.dataset.live = live ? '1' : '0';
     btn.setAttribute('aria-pressed', String(!panel.hidden));
-    btn.innerHTML = live ? 'Camera on <kbd>`</kbd>' : next === 'starting' ? 'Camera… <kbd>`</kbd>' : 'Camera <kbd>`</kbd>';
+    btn.innerHTML = live ? 'Camera on <kbd>C</kbd>' : next === 'starting' ? 'Camera… <kbd>C</kbd>' : 'Camera <kbd>C</kbd>';
     panel.dataset.state = next;
     panel.dataset.live = live ? '1' : '0';
     if (ui.dot) ui.dot.dataset.ok = live ? '1' : next === 'starting' ? 'wait' : '0';

@@ -52,6 +52,7 @@ import { SimPlanet } from './ai/planet.js';
 import { AIGod } from './ai/autopilot.js';
 import { observe, decodeAction, scriptedAction, BOLT_COOLDOWN } from './ai/observe.js';
 import { loading } from './ui/loading.js'; // loading screen
+import { panelHotkey } from './ui/hotkeys.js'; // E / C / Shift+C sidebars (#211)
 import { engineFailToShow } from './ui/fail.js';
 import { frameLoop } from './ui/loop.js';
 import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
@@ -1369,8 +1370,11 @@ window.addEventListener('keydown', (e) => {
   if (gate === 'hold') return;
   if (banner && e.code !== 'Enter') return;
   if (e.code === 'KeyM') { toggleModel(); return; }
-  if (e.code === 'KeyE') { eegPanel?.toggle(); return; }
-  if (e.code === 'KeyC') { eegPanel?.calibrateCenter(); return; }
+  // E / C toggle the EEG / Camera sidebars; Shift+C re-centres the EEG head pose (#211).
+  const panelKey = panelHotkey(e);   // ` stays a Camera alias in camera/debug.js
+  if (panelKey === 'eeg') { eegPanel?.toggle(); return; }
+  if (panelKey === 'camera') { e.preventDefault(); window.__moc?.camera?.togglePanel(); return; }
+  if (panelKey === 'eegCenter') { e.preventDefault(); eegPanel?.calibrateCenter(); return; }
   if (e.code === 'KeyT') { toggle3D(); return; }
   if (e.code === 'KeyG') { toggleAIGod(); return; }
   if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { zoomOutFromSurface(); return; }

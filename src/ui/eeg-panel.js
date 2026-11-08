@@ -57,7 +57,7 @@ const TEMPLATE = `
       <h3>Head Cursor &amp; Motion Calibration</h3>
       <div class="eeg-btn-group">
         <button type="button" class="btn btn-small" data-eeg-dot-calib disabled title="Calibrate 9 separate dots at the full edges & corners of the screen (Up/Down/Left/Right)">⚪ 9-Dot Edge Calib</button>
-        <button type="button" class="btn btn-primary btn-small" data-eeg-recenter title="Look at the center of the screen and click (or press C) to zero Pitch/Yaw and recalibrate gyro drift" disabled>Center <kbd>C</kbd></button>
+        <button type="button" class="btn btn-primary btn-small" data-eeg-recenter title="Look at the center of the screen and click (or press Shift+C) to zero Pitch/Yaw and recalibrate gyro drift" disabled>Center <kbd>Shift+C</kbd></button>
       </div>
     </div>
     <div class="eeg-calib-row">
