@@ -16,9 +16,9 @@ pub struct IndustryEra {
     pub general_strike: f32,
     pub ipo_progress: f32,
     pub ipo_done: bool,
+    pub strikes: u32,
     pub done: bool,
     pub failed: Option<String>,
-    pub strikes: u32,
 }
 
 impl Default for IndustryEra {
@@ -42,9 +42,9 @@ impl IndustryEra {
             general_strike: 0.0,
             ipo_progress: 0.0,
             ipo_done: false,
+            strikes: 0,
             done: false,
             failed: None,
-            strikes: 0,
         }
     }
 }
