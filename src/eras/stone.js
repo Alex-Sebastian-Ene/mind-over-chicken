@@ -129,6 +129,11 @@ export class StoneAge {
       if (!p.alive) continue;
       const d = dist(x, y, p.x, p.y - 2);
       if (d < 12) {
+        if (G.invincible) {
+          p.fear = Math.min(1, p.fear + 0.5);
+          if (['idle', 'warm', 'dance', 'huddle', 'hunt'].includes(p.state)) { p.state = 'cower'; p.target = null; }
+          continue;
+        }
         p.alive = false;
         p.dead = true;
         p.deadT = 0;
@@ -365,22 +370,27 @@ export class StoneAge {
       }
       animate(p, dt, 6);
       const dFire = dist(p.x, p.y, f.x, f.y);
-      const hungerRate = this.G.assistMode ? 0.008 : 0.017;
-      p.hunger = clamp(p.hunger + dt * (p.colony ? -0.01 : hungerRate));
+      if (G.invincible) {
+        p.hunger = 0;
+        p.starve = 0;
+      } else {
+        const hungerRate = this.G.assistMode ? 0.008 : 0.017;
+        p.hunger = clamp(p.hunger + dt * (p.colony ? -0.01 : hungerRate));
+        // 75-second initial starvation grace period so new players have time to learn
+        const inGrace = this.t < 75;
+        if (p.hunger >= 1 && !inGrace) {
+          p.starve += dt;
+          if (p.starve > 8) {
+            this.kill(p);
+            floater(this.particles, p.x, p.y - 7, `${p.name} starved`, '#c9c2b0', 6);
+            G.advisor.say('starve', `${p.name} has starved. The tribe asks if you could be slightly more of a god.`, { mood: 'nervous', priority: 2, cooldown: 12 });
+            continue;
+          }
+        } else p.starve = 0;
+      }
       p.faith = clamp(p.faith - dt * 0.008);
       if ((f.lit && dFire < 24) || p.colony) p.fear = clamp(p.fear - dt * 0.22);
       else p.fear = clamp(p.fear + dt * 0.03 * (1 - 0.5 * p.faith));
-      // 75-second initial starvation grace period so new players have time to learn
-      const inGrace = this.t < 75;
-      if (p.hunger >= 1 && !inGrace) {
-        p.starve += dt;
-        if (p.starve > 8) {
-          this.kill(p);
-          floater(this.particles, p.x, p.y - 7, `${p.name} starved`, '#c9c2b0', 6);
-          G.advisor.say('starve', `${p.name} has starved. The tribe asks if you could be slightly more of a god.`, { mood: 'nervous', priority: 2, cooldown: 12 });
-          continue;
-        }
-      } else p.starve = 0;
 
       if (p.colony || p.state === 'embark' || p.state === 'aboard') { this.actTraveller(p, dt); continue; }
       p.decide -= dt;
@@ -494,7 +504,10 @@ export class StoneAge {
     }
   }
 
-  kill(p) { p.alive = false; p.state = 'dead'; p.deadT = 0; this.G.stats.deaths++; }
+  kill(p) {
+    if (this.G?.invincible) { p.alive = true; p.state = 'idle'; p.starve = 0; return; }
+    p.alive = false; p.state = 'dead'; p.deadT = 0; this.G.stats.deaths++;
+  }
 
   decide(p) {
     const f = this.fire;

@@ -400,7 +400,7 @@ function newGame(source, startIndex = 0) {
     world: new World(undefined, { width: HOME_W, height: HOME_H }), // the bigger home world (#129)
     brain, source, advisor, hud, audio, engine,
     calibration: new Calibration(calibConfig), // calibration (#54)
-    scene: null, sceneIndex: startIndex, runTime: 0, shake: 0,
+    scene: null, sceneIndex: startIndex, runTime: 0, shake: 0, invincible: false,
     stats: { lightning: 0, smitten: 0, births: 0, deaths: 0, recessions: 0, restarts: 0 },
     eraTimes: [], eraStart: 0, finished: false,
     complete(delay = 2) {
@@ -1569,6 +1569,16 @@ window.addEventListener('keydown', (e) => {
   if (panelKey === 'eegCenter') { e.preventDefault(); eegPanel?.calibrateCenter(); return; }
   if (e.code === 'KeyT') { toggle3D(); return; }
   if (e.code === 'KeyG') { toggleAIGod(); return; }
+  if (G && e.code === 'KeyI' && !e.repeat) {
+    G.invincible = !G.invincible;
+    if (G.invincible && G.scene?.people) for (const p of G.scene.people) { p.hunger = 0; p.starve = 0; }
+    G.hud?.showCause?.(G.invincible ? '🛡️ People invincible: ON · hunger and death paused' : '🛡️ People invincible: OFF');
+    G.advisor?.say('invincible', G.invincible
+      ? 'The tribe is invincible. Hunger, lightning and trampling cannot touch them.'
+      : 'The tribe is mortal again. Try to keep them fed.', { priority: 2, cooldown: 2 });
+    e.preventDefault();
+    return;
+  }
   if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { zoomOutFromSurface(); return; }
   if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { zoomInOnSurface(); return; }
   // The galaxy picker (Alex): Left/Right or A/D move between planets; Enter lands on the chosen one.
