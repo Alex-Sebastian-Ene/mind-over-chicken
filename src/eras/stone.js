@@ -551,13 +551,14 @@ export class StoneAge {
 
   draw(ctx) {
     const G = this.G;
-    const base = G.render3d ? (G.world?.layers3d?.stone || this.layer) : this.layer;
+    const is3d = Boolean(G?.render3d || globalThis.__moc_render3d);
+    const base = is3d ? (G?.world?.layers3d?.stone || this.layer) : this.layer;
     ctx.drawImage(base, 0, 0);
-    if (!G.render3d) G.world.drawWater(ctx, this.t);
+    if (!is3d) G?.world?.drawWater?.(ctx, this.t);
     for (const m of this.meat) { ctx.fillStyle = m.cooked ? '#c0562f' : '#9e3d3d'; ctx.fillRect(m.x - 1, m.y - 1, 3, 2); }
     // In 3D, draw3d stands people, mammoths, fires and the chicken up as sprites; painting them
     // flat as well showed everything twice. Boats have no sprite yet, so they stay painted.
-    if (G.render3d) {
+    if (is3d) {
       for (const b of this.boats) drawBoat(ctx, b.x, b.y, b);
       this.particles.draw(ctx);
       return;

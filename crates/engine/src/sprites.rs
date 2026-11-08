@@ -171,9 +171,6 @@ pub fn draw_person(
     // Ground contact shadow
     fill_rect(buf, x - 2, y, 5, 1, 0, 0, 0, 76);
 
-    // Dark silhouette backing for crisp readability on any background
-    fill_rect(buf, x - 2, sy - 7, 5, 7, 0x12, 0x0d, 0x09, 255);
-
     // Legs and boots
     let leg_step = if pose == 0 && (frame % 2 == 1) { 1 } else { 0 };
     let boot = (0x2b, 0x1d, 0x14);

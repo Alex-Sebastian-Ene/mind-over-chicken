@@ -369,11 +369,12 @@ export class Industry {
 
   draw(ctx) {
     const G = this.G;
-    const base = G.render3d ? (G.world?.layers3d?.industry || this.layer) : this.layer;
+    const is3d = Boolean(G?.render3d || globalThis.__moc_render3d);
+    const base = is3d ? (G?.world?.layers3d?.industry || this.layer) : this.layer;
     ctx.drawImage(base, 0, 0);
-    if (!G.render3d) G.world.drawWater(ctx, this.t);
+    if (!is3d) G?.world?.drawWater?.(ctx, this.t);
     // In 3D, draw3d stands workers, traders, goats and chicken up as billboards
-    if (G.render3d) {
+    if (is3d) {
       for (const sh of this.ships) drawBoat(ctx, sh.x, sh.y, sh);
       this.particles.draw(ctx);
       return;

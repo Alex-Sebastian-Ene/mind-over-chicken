@@ -690,10 +690,13 @@ fn scan_borders(w: &mut World, survey: bool) {
             lists[v.owner as usize].push((v.x, v.y, w.terrain.land(v.x, v.y), i as u16));
         }
     }
+    // #100 fix: clear every pair first. Clearing inside the loop wiped the reverse entry
+    // (b, a) that the (a, b) pass had just written, so a civilisation never had a nearest pair,
+    // a march or a battlefield toward a lower-numbered one.
+    w.near_pairs.iter_mut().for_each(|p| *p = (f32::MAX, NO_V, NO_V));
     for a in 0..MAX_FACTIONS {
         for b in 0..MAX_FACTIONS {
             let k = a * MAX_FACTIONS + b;
-            w.near_pairs[k] = (f32::MAX, NO_V, NO_V);
             let met = w.rel[k].met || w.rel[b * MAX_FACTIONS + a].met;
             if a >= b || !met || lists[a].is_empty() || lists[b].is_empty() {
                 continue;
