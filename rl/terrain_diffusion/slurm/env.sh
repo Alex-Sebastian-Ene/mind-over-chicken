@@ -12,7 +12,8 @@ export ETOPO_URL="https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s
 export ETOPO_FILE="$TD_RAW/ETOPO_2022_v1_60s_N90W180_surface.tif"
 export ETOPO_BYTES=465969062
 
-module load python/3.12.6 >/dev/null 2>&1 || true
+# No "module load": the venv python is the argus conda python, which is self-contained, and
+# the python module's LD_LIBRARY_PATH breaks the system curl.
 # Our venv sits on top of the read-only argus conda env (torch 2.9.1+cu128); see setup.sh.
 export TD_PYTHON="${TD_PYTHON:-$TD_VENV/bin/python}"
 export PYTHONUNBUFFERED=1

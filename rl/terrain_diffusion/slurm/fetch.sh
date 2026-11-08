@@ -9,7 +9,7 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 mkdir -p "$TD_RAW"
 # -C - resumes a partial download; --fail stops on HTTP errors.
-curl --fail --location --retry 3 -C - -o "$ETOPO_FILE" "$ETOPO_URL"
+env -u LD_LIBRARY_PATH /usr/bin/curl --fail --location --retry 3 -C - -o "$ETOPO_FILE" "$ETOPO_URL"
 size=$(stat -c %s "$ETOPO_FILE")
 if [ "$size" != "$ETOPO_BYTES" ]; then
   echo "unexpected size $size (want $ETOPO_BYTES)" >&2
