@@ -21,6 +21,11 @@
 //! and its crises; fights run up and down an escalation ladder, between civilisations and
 //! inside one ([`conflict`]).
 //!
+//! **War councils (#100).** A trained PPO policy can take each civilisation's war-and-peace
+//! decisions ([`council`]) and command its armies ([`commander`]) through the seam in
+//! [`politics`]; the weights run here ([`policy_rt`]), and [`gym`] is the training environment.
+//! Without valid weights the rules decide.
+//!
 //! **Space (#166).** From age 19 a civilisation runs a space program ([`space`]): fleets that
 //! strike other planets of the galaxy (`moc_cosmos::war`, run by the host), and from age 20
 //! the endgame tiers.
@@ -31,18 +36,23 @@
 pub mod ages;
 pub mod ages_table;
 pub mod agents;
+pub mod commander;
 pub mod conflict;
+pub mod council;
 pub mod ffi;
+pub mod gym;
 pub mod jobs;
 pub mod life;
 pub mod news;
 pub mod planet;
+pub mod policy_rt;
 pub mod politics;
 pub mod powers;
 pub mod render;
 pub mod setup;
 pub mod space;
 pub mod terrain;
+pub mod war_ffi;
 pub mod world;
 
 pub use planet::{Cam, Dims};

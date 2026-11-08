@@ -254,6 +254,7 @@ version = "0.1.0"
 dependencies = [
  "moc-cosmos",
  "moc-planet",
+ "serde_json",
 ]
 
 [[package]]

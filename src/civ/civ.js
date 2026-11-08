@@ -47,6 +47,16 @@ export class Civ {
     this.ex = ex;
     this.seed = seed >>> 0;
     this.w = staged ? ex.civ_new_staged_with(this.seed, width, height, 4, rivals) : ex.civ_new_sized(this.seed, width, height);
+    // #100: the trained PPO war councils (Rust, weights compiled into the module) drive the
+    // rival civilisations by default. ?council=rules (or ?wars=rules) keeps the rules; ?wars=all
+    // also drives the player's own civilisations. If the weights are missing or don't fit this
+    // build's observation layout, Rust falls back to the rules and says why.
+    const q = new URLSearchParams(globalThis.location?.search ?? '');
+    const council = q.get('council') ?? (q.get('wars') === 'rules' ? 'rules' : 'ppo');
+    const mode = council === 'rules' ? 0 : q.get('wars') === 'all' ? 2 : 1;
+    this.ppo = ex.civ_ppo_enable ? ex.civ_ppo_enable(this.w, mode) : 0;
+    const why = ex.civ_ppo_error_len?.() ? new TextDecoder().decode(new Uint8Array(ex.memory.buffer, ex.civ_ppo_error_ptr(), ex.civ_ppo_error_len()).slice()) : '';
+    if (mode && (!this.ppo || why)) console.warn(`civ: ${why || 'war councils unavailable in this build; the rules decide'}`);
     this.pw = ex.civ_planet_w(this.w);
     this.ph = ex.civ_planet_h(this.w);
     this.slots = ex.civ_faction_slots();
