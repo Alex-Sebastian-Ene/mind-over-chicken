@@ -466,6 +466,12 @@ export class ViewCamera {
      * smaller than the view). Draw each with `drawImage(world, sx, sy, w, h, dx, dy, w, h)`.
      */
     blits(): Float32Array;
+    /**
+     * Like `blits`, for a window `scale` times the view's size around the same centre, with the
+     * destination rectangles shrunk back onto the view: `[sx, sy, w, h, dx, dy, dw, dh]` per
+     * rectangle. A zoomed-out frame, e.g. an era's intro easing in onto its stage.
+     */
+    blits_scaled(scale: number): Float32Array;
     center_x(): number;
     center_y(): number;
     /**
@@ -806,6 +812,7 @@ export interface InitOutput {
     readonly rustworldgen_types: (a: number) => any;
     readonly rustworldgen_width: (a: number) => number;
     readonly viewcamera_blits: (a: number) => [number, number];
+    readonly viewcamera_blits_scaled: (a: number, b: number) => [number, number];
     readonly viewcamera_center_x: (a: number) => number;
     readonly viewcamera_center_y: (a: number) => number;
     readonly viewcamera_copies: (a: number, b: number) => [number, number];
@@ -858,8 +865,8 @@ export interface InitOutput {
     readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
     readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
     readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__269: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__270: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__271: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
