@@ -81,3 +81,22 @@ test('setScene disables and hides the tiles that do nothing', () => {
   assert.equal(tile('stress').hidden, true);
   assert.equal(tile('blink').disabled, false);
 });
+
+test('the headset chip follows the run source under the Rust HUD too', () => {
+  const doc = fakeDoc();
+  const hud = new Hud(doc);
+  setRustHudEngine({});
+  try {
+    const chip = doc.getElementById('sourceStatus');
+    chip.textContent = 'No headset'; chip.dataset.ok = '0';
+    const G = { brain: fakeBrain(), runTime: 1, scene: null, source: { kind: 'bridge', connected: true, status: 'Streaming Muse 2 (256 Hz)' } };
+    hud.update(0.016, G);
+    assert.equal(chip.textContent, 'Streaming Muse 2 (256 Hz)');
+    assert.equal(chip.dataset.ok, '1');
+    G.source = { kind: 'bridge', connected: false, status: 'Bridge disconnected — reconnecting…' };
+    hud.update(0.016, G);
+    assert.deepEqual([chip.textContent, chip.dataset.ok], ['Bridge disconnected — reconnecting…', '0']);
+  } finally {
+    setRustHudEngine(null);
+  }
+});
