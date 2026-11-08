@@ -58,6 +58,8 @@ export class Hud {
       stress: doc.querySelector('[data-power="stress"]'),
     };
     this.source = doc.getElementById('sourceStatus');
+    this.cause = doc.getElementById('causeToast');   // #177: what your hands and face just did
+    this.causeLeft = 0;
     this.modelPanel = doc.getElementById('modelPanel');
     this.modelBody = doc.getElementById('modelBody');
     this.lastObj = '';
@@ -77,6 +79,17 @@ export class Hud {
     }
   }
 
+  // A short line over the map saying what a camera action did (grab, drop, palm, fireball, a
+  // smile or surprise), or when a cooling cast will be ready (#177). The camera called this
+  // optionally and it didn't exist, so every one of those calls did nothing.
+  showCause(text, { ms = 2600, tone = 'ok' } = {}) {
+    if (!this.cause || !text) return;
+    this.cause.textContent = text;
+    this.cause.dataset.tone = tone;
+    this.cause.hidden = false;
+    this.causeLeft = ms / 1000;
+  }
+
   flashBlink() { this.blinkFlash = 0.3; this.powers.blink.classList.add('is-firing'); }
 
   // The headset chip in the top bar. The Rust shell never writes it, so both builds do it here:
@@ -90,6 +103,10 @@ export class Hud {
   }
 
   update(dt, G) {
+    if (this.causeLeft > 0) {
+      this.causeLeft -= dt;
+      if (this.causeLeft <= 0 && this.cause) this.cause.hidden = true;
+    }
     this.showSource(G.source);
     if (rustEngine) {
       if (this.blinkFlash > 0) {

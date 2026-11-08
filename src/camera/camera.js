@@ -426,6 +426,15 @@ export function initCamera({
     const G = getG();
     const scene = G?.scene;
     if (!scene || !SPELL_BY_ID[id] || !canCast()) return false;
+    // A cast refused by its cooldown says when it will be ready, in the panel and on the map (#177).
+    const cooling = () => {
+      const left = casts.cooldownLeft(id, now);
+      if (left > 0) {
+        miss = { id, at: now };
+        G.hud?.showCause?.(`${SPELL_BY_ID[id].glyph} ${SPELL_BY_ID[id].name} ready in ${(left / 1000).toFixed(1)} s`, { ms: MISS_MS, tone: 'wait' });
+      }
+      return false;
+    };
 
     // Key 1 or Pinch button toggles living-entity grab at the reticle (#120, #122)
     if (id === 'pinch') {
@@ -434,13 +443,13 @@ export function initCamera({
       }
       if (tryGrabStart(G, now)) return true;
       // Fallback if scene doesn't implement onGrabStart or nothing under cursor
-      if (via !== 'gesture' && !casts.trigger(id, now)) return false;
+      if (via !== 'gesture' && !casts.trigger(id, now)) return cooling();
       const aim = { x: G.brain.aim.x, y: G.brain.aim.y };
       scene.onCast?.('pinch', aim);
       return true;
     }
 
-    if (via !== 'gesture' && !casts.trigger(id, now)) return false;
+    if (via !== 'gesture' && !casts.trigger(id, now)) return cooling();
     const aim = { x: G.brain.aim.x, y: G.brain.aim.y };
     try {
       if (id === 'fireball' && scene.onBlink && !scene.onCast) {
