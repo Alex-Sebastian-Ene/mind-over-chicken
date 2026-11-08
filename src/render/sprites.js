@@ -65,6 +65,237 @@ export function drawPad(ctx, x, y) {
   px(ctx, x - 3, y, '#f2c14e', 1, 1); px(ctx, x + 3, y, '#f2c14e', 1, 1);
 }
 
+// ---------- biome / era building variants (#206) ----------
+// Every variant keeps the same chunk size and dark-outline language as the core buildings, and
+// is anchored at its feet (bottom centre) like drawHut/drawHouse.
+
+// Stone Age: a long timber hall with a thatched ridge.
+export function drawLonghouse(ctx, x, y, variant = 0) {
+  const wall = variant === 1 ? '#6b4a2c' : '#7a5530';
+  const roof = variant === 2 ? '#d8b56a' : '#c9a35a';
+  px(ctx, x - 6, y - 3, wall, 13, 3);
+  px(ctx, x - 5, y - 4, roof, 11, 1);
+  px(ctx, x - 4, y - 5, roof, 9, 1);
+  px(ctx, x - 2, y - 6, roof, 5, 1);
+  px(ctx, x - 6, y - 3, '#5a3e24', 1, 3);
+  px(ctx, x + 5, y - 3, '#5a3e24', 1, 3);
+  px(ctx, x - 1, y - 2, '#2a1c10', 2, 2);
+  if (variant !== 1) px(ctx, x + 2, y - 2, '#ffd36e');
+  px(ctx, x - 4, y - 2, '#ffd36e');
+  px(ctx, x, y - 7, '#8d6a40');
+}
+
+// Stone Age: a stepped adobe pueblo with small dark windows.
+export function drawPueblo(ctx, x, y, variant = 0) {
+  const adobe = variant === 1 ? '#c9955f' : '#c98d5a';
+  const shade = variant === 2 ? '#a86f42' : '#b87a4a';
+  px(ctx, x - 6, y - 3, adobe, 12, 3);
+  px(ctx, x - 4, y - 6, adobe, 9, 3);
+  px(ctx, x - 2, y - 9, adobe, 5, 3);
+  px(ctx, x - 6, y - 3, shade, 12, 1);
+  px(ctx, x - 4, y - 6, shade, 9, 1);
+  px(ctx, x - 2, y - 9, shade, 5, 1);
+  px(ctx, x - 4, y - 2, '#4a2f1b'); px(ctx, x - 1, y - 2, '#4a2f1b'); px(ctx, x + 2, y - 2, '#4a2f1b');
+  px(ctx, x - 3, y - 5, '#4a2f1b'); px(ctx, x, y - 5, '#4a2f1b'); px(ctx, x + 2, y - 5, '#4a2f1b');
+  px(ctx, x - 1, y - 8, '#4a2f1b'); px(ctx, x + 1, y - 8, '#4a2f1b');
+}
+
+// Stone Age: a thatched hut raised on stilts over the shallows.
+export function drawStiltHut(ctx, x, y, variant = 0) {
+  const wall = variant === 1 ? '#6b4a2c' : '#7a5530';
+  px(ctx, x - 2, y - 3, '#5a3e24', 1, 3);
+  px(ctx, x + 2, y - 3, '#5a3e24', 1, 3);
+  px(ctx, x - 3, y - 6, wall, 7, 3);
+  px(ctx, x - 4, y - 7, '#c9a35a', 9, 1);
+  px(ctx, x - 3, y - 8, '#d8b56a', 7, 1);
+  px(ctx, x - 1, y - 9, '#e2c27a', 3, 1);
+  px(ctx, x, y - 5, '#2a1c10', 1, 2);
+  px(ctx, x - 3, y - 4, '#8a6a40', 7, 1);
+  if (variant) px(ctx, x + 2, y - 5, '#ffd36e');
+}
+
+// Stone Age: a log cabin under a thick snow roof.
+export function drawSnowCabin(ctx, x, y, variant = 0) {
+  const log = variant === 1 ? '#6b4a2c' : '#7a5530';
+  px(ctx, x - 5, y - 3, log, 11, 3);
+  px(ctx, x - 6, y - 4, '#e8eef6', 13, 1);
+  px(ctx, x - 5, y - 5, '#f4f8ff', 11, 1);
+  px(ctx, x - 3, y - 6, '#f4f8ff', 7, 1);
+  px(ctx, x - 2, y - 7, '#ffffff', 5, 1);
+  px(ctx, x - 1, y - 2, '#2a1c10', 2, 2);
+  px(ctx, x + 2, y - 2, '#ffd36e');
+  px(ctx, x, y - 9, '#c9d4e2', 1, 2);
+  px(ctx, x + 1, y - 10, '#dbe6f2');
+}
+
+// Stone Age: a ring of standing stones with a lintel and altar.
+export function drawHenge(ctx, x, y, variant = 0) {
+  const stone = variant === 1 ? '#9a9a9a' : '#8a8a86';
+  const shade = '#6f6f6a';
+  // Two outer trilithons with a taller one in the middle read as a stone circle, not a table.
+  px(ctx, x - 7, y - 5, shade, 2, 5); px(ctx, x - 7, y - 5, stone, 1, 5);
+  px(ctx, x - 4, y - 4, shade, 1, 4);
+  px(ctx, x - 7, y - 6, stone, 5, 1);
+  px(ctx, x + 3, y - 5, shade, 2, 5); px(ctx, x + 3, y - 5, stone, 1, 5);
+  px(ctx, x + 6, y - 4, shade, 1, 4);
+  px(ctx, x + 3, y - 6, stone, 5, 1);
+  px(ctx, x - 2, y - 7, stone, 1, 7);
+  px(ctx, x + 1, y - 7, stone, 1, 7);
+  px(ctx, x - 2, y - 8, stone, 4, 1);
+  px(ctx, x - 1, y - 1, '#b0b0aa', 3, 1);
+  if (variant) px(ctx, x, y - 2, '#ffcf5c');
+}
+
+// Stone Age: a woodcutter's lodge with a bark roof and a log pile.
+export function drawLodge(ctx, x, y, variant = 0) {
+  const log = variant === 1 ? '#6b4a2c' : '#7a5530';
+  px(ctx, x - 5, y - 3, log, 10, 3);
+  px(ctx, x - 6, y - 4, '#8e5a2c', 12, 1);
+  px(ctx, x - 4, y - 5, '#8e5a2c', 8, 1);
+  px(ctx, x - 2, y - 6, '#a86a38', 4, 1);
+  px(ctx, x - 1, y - 2, '#2a1c10', 2, 2);
+  px(ctx, x + 4, y - 1, '#9a7040', 4, 1);
+  px(ctx, x + 4, y - 2, '#7a5530', 4, 1);
+  px(ctx, x + 4, y - 1, '#b98a52'); px(ctx, x + 7, y - 1, '#b98a52');
+  if (variant) { px(ctx, x - 5, y - 6, '#c9a35a', 1, 3); px(ctx, x - 4, y - 6, '#c0c4cc', 2, 1); }
+}
+
+// Industry: a stone mill house with a turning water wheel.
+export function drawWatermill(ctx, x, y, variant = 0) {
+  const wall = variant === 1 ? '#a08a72' : '#b09a82';
+  px(ctx, x - 6, y - 5, wall, 10, 5);
+  px(ctx, x - 6, y - 6, '#6f5a44', 10, 1);
+  px(ctx, x - 4, y - 8, '#6f5a44', 6, 2);
+  px(ctx, x - 3, y - 9, '#7d6a52', 4, 1);
+  px(ctx, x - 2, y - 2, '#3a2a1c', 2, 2);
+  px(ctx, x - 5, y - 4, '#ffd36e');
+  px(ctx, x + 3, y - 5, '#8a6a40', 1, 5);
+  px(ctx, x + 4, y - 4, '#b98a52', 3, 1); px(ctx, x + 4, y - 2, '#b98a52', 3, 1);
+  px(ctx, x + 4, y - 3, '#b98a52'); px(ctx, x + 6, y - 3, '#b98a52');
+  px(ctx, x + 5, y - 4, '#b98a52', 1, 3);
+  px(ctx, x + 4, y, '#5a9ad0', 4, 1);
+  px(ctx, x + 5, y + 1, '#7ab8e8', 3, 1);
+}
+
+// Industry: a tapered windmill with four sails.
+export function drawWindmill(ctx, x, y, variant = 0) {
+  const tower = variant === 1 ? '#cfc3a8' : '#e3d3b4';
+  px(ctx, x - 3, y - 12, tower, 7, 12);
+  px(ctx, x - 4, y - 13, '#8a7a62', 9, 1);
+  px(ctx, x - 4, y - 14, '#a08a6a', 5, 1);
+  px(ctx, x - 1, y - 2, '#4b3524', 2, 2);
+  px(ctx, x - 2, y - 8, '#8a7a62'); px(ctx, x + 1, y - 9, '#8a7a62');
+  const sail = '#d8d0bd';
+  px(ctx, x - 1, y - 18, sail, 1, 9); px(ctx, x + 2, y - 18, sail, 1, 9);
+  px(ctx, x - 6, y - 14, sail, 12, 1); px(ctx, x - 6, y - 11, sail, 12, 1);
+  px(ctx, x, y - 14, '#6f5a44');
+}
+
+// Industry: a row of three attached terraced houses.
+export function drawTerraced(ctx, x, y, variant = 0) {
+  const tints = ['#e3d3b4', '#dcc7a2', '#eadcc2'];
+  const wall = tints[variant % tints.length];
+  const roof = variant === 1 ? '#8e5a2c' : '#a4402f';
+  for (let i = -1; i <= 1; i++) {
+    const bx = x + i * 5;
+    const h = 5 + ((i + 3) % 3);
+    px(ctx, bx - 2, y - h, wall, 5, h);
+    px(ctx, bx - 3, y - h - 1, roof, 7, 1);
+    px(ctx, bx - 2, y - h - 2, roof, 5, 1);
+    px(ctx, bx, y - 2, '#4b3524', 1, 2);
+    px(ctx, bx - 2, y - 3, '#ffd36e');
+  }
+}
+
+// Industry: an open market hall with a striped awning and crates.
+export function drawMarketHall(ctx, x, y, variant = 0) {
+  const awning = variant === 1 ? '#3e8ed0' : '#c0392b';
+  px(ctx, x - 7, y - 4, '#d8d0bd', 15, 4);
+  for (let i = 0; i < 15; i += 3) px(ctx, x - 7 + i, y - 6, awning, 2, 2);
+  px(ctx, x - 7, y - 7, '#efe9da', 15, 1);
+  px(ctx, x - 1, y - 3, '#4b3524', 2, 3);
+  px(ctx, x - 5, y - 3, '#ffd36e');
+  px(ctx, x + 4, y - 3, '#ffd36e');
+  px(ctx, x + 5, y - 2, '#9a7040', 3, 2);
+  px(ctx, x + 6, y - 1, '#7a5530');
+}
+
+// Industry: a brick clock tower with a lit face and a spire.
+export function drawClockTower(ctx, x, y, variant = 0) {
+  const brick = variant === 1 ? '#a05a44' : '#8e4a38';
+  px(ctx, x - 3, y - 14, brick, 7, 14);
+  px(ctx, x - 4, y - 15, '#6f3a2c', 9, 1);
+  px(ctx, x - 3, y - 17, '#6f3a2c', 7, 2);
+  px(ctx, x - 2, y - 20, '#7d4434', 5, 3);
+  px(ctx, x, y - 22, '#c9c3b8', 1, 2);
+  px(ctx, x - 2, y - 16, '#f2ead8', 5, 5);
+  px(ctx, x, y - 16, '#2a1c10', 1, 2);
+  px(ctx, x, y - 14, '#2a1c10', 2, 1);
+  px(ctx, x - 1, y - 2, '#2a1c10', 2, 2);
+  px(ctx, x - 2, y - 9, '#ffd36e'); px(ctx, x + 1, y - 11, '#ffd36e');
+}
+
+// Industry: a long warehouse with a big slatted door and a crate.
+export function drawWarehouse(ctx, x, y, variant = 0) {
+  const wall = variant === 1 ? '#8a5a42' : '#9a6448';
+  px(ctx, x - 7, y - 5, wall, 15, 5);
+  px(ctx, x - 7, y - 6, '#5d3a2a', 15, 1);
+  px(ctx, x - 6, y - 7, '#5d3a2a', 13, 1);
+  px(ctx, x - 3, y - 4, '#3a2a1c', 7, 4);
+  for (let i = -2; i <= 2; i += 2) px(ctx, x + i, y - 4, '#4a3524', 1, 4);
+  px(ctx, x - 6, y - 4, '#ffd36e');
+  px(ctx, x + 5, y - 2, '#b98a52', 2, 2);
+}
+
+// Space: two tilted solar arrays on posts.
+export function drawSolarArray(ctx, x, y, variant = 0) {
+  const panel = variant === 1 ? '#3e6ec0' : '#3e8ed0';
+  const edge = '#244a78';
+  px(ctx, x - 5, y - 2, '#8a93a3', 1, 2); px(ctx, x + 4, y - 2, '#8a93a3', 1, 2);
+  px(ctx, x - 7, y - 7, edge, 15, 4);
+  px(ctx, x - 6, y - 6, panel, 13, 2);
+  for (let i = -4; i <= 4; i += 4) px(ctx, x + i, y - 6, edge, 1, 2);
+  px(ctx, x - 7, y - 8, '#d8e8f8', 15, 1);
+  px(ctx, x - 4, y - 3, '#8a93a3', 9, 1);
+}
+
+// Space: a glass dome habitat on a lit base ring.
+export function drawDome(ctx, x, y, variant = 0) {
+  const glass = variant === 1 ? '#8ad0e8' : '#9adcf2';
+  px(ctx, x - 6, y - 2, '#c9d4e2', 13, 2);
+  px(ctx, x - 5, y - 4, glass, 11, 2);
+  px(ctx, x - 4, y - 6, glass, 9, 2);
+  px(ctx, x - 2, y - 8, glass, 5, 2);
+  px(ctx, x - 1, y - 9, '#d8f4ff', 3, 1);
+  px(ctx, x, y - 8, '#3e6e8a', 1, 6);
+  px(ctx, x - 4, y - 4, '#3e6e8a', 1, 2); px(ctx, x + 3, y - 4, '#3e6e8a', 1, 2);
+  px(ctx, x - 5, y - 1, '#ffd36e'); px(ctx, x + 4, y - 1, '#ffd36e');
+}
+
+// Space: a comms dish on a mast, with a faint signal.
+export function drawCommsDish(ctx, x, y, variant = 0) {
+  px(ctx, x - 3, y - 2, '#5f6470', 7, 2);
+  px(ctx, x - 1, y - 8, '#8a93a3', 1, 6);
+  px(ctx, x - 1, y - 10, '#d8dde6', 5, 3);
+  px(ctx, x - 3, y - 12, '#f0f4fa', 5, 2);
+  px(ctx, x - 3, y - 13, '#d8dde6', 3, 1);
+  px(ctx, x + 1, y - 9, '#3b4252');
+  if (variant) { px(ctx, x - 5, y - 15, '#7ad8ff'); px(ctx, x - 6, y - 17, '#a8e8ff'); }
+}
+
+// Space: a cargo depot with hazard stripes and stacked containers.
+export function drawCargoDepot(ctx, x, y, variant = 0) {
+  const wall = variant === 1 ? '#6f7a8a' : '#7f8a9a';
+  px(ctx, x - 7, y - 4, wall, 15, 4);
+  px(ctx, x - 7, y - 5, '#4d5d7a', 15, 1);
+  px(ctx, x - 6, y - 2, '#3b4252', 5, 2);
+  for (let i = -5; i <= 5; i += 5) px(ctx, x + i, y - 2, '#ffcf5c', 1, 2);
+  px(ctx, x + 4, y - 7, '#c0392b', 4, 2);
+  px(ctx, x + 4, y - 7, '#e8452c', 1, 2);
+  px(ctx, x + 5, y - 9, '#3e8ed0', 3, 2);
+  px(ctx, x + 4, y - 1, '#b98a52', 2, 1);
+}
+
 // ---------- animated sprites ----------
 
 // Villager. opts: shirt, skin, hair, frame (walk cycle), pose, carry (color), facing (-1|1)
@@ -352,4 +583,41 @@ export function drawBoat(ctx, x, y, o = {}) {
   }
   // wake
   if (o.moving) px(ctx, x - 4 * f, y + 1, 'rgba(220,235,255,0.6)', 2, 1);
+}
+
+// ---------- structure dispatcher (#206) ----------
+// One uniform entry point for every baked structure, so the campaign, the galaxy surfaces and
+// the rival villages all draw the same kinds with the same options.
+export const STRUCTURE_DRAWERS = {
+  hut: (ctx, x, y) => drawHut(ctx, x, y),
+  house: (ctx, x, y, o = {}) => drawHouse(ctx, x, y, o.roof),
+  tower: (ctx, x, y, o = {}) => drawTower(ctx, x, y, o.h),
+  factory: (ctx, x, y) => drawFactory(ctx, x, y),
+  exchange: (ctx, x, y) => drawExchange(ctx, x, y),
+  hangar: (ctx, x, y) => drawHangar(ctx, x, y),
+  pad: (ctx, x, y) => drawPad(ctx, x, y),
+  longhouse: (ctx, x, y, o = {}) => drawLonghouse(ctx, x, y, o.variant),
+  pueblo: (ctx, x, y, o = {}) => drawPueblo(ctx, x, y, o.variant),
+  stilthut: (ctx, x, y, o = {}) => drawStiltHut(ctx, x, y, o.variant),
+  snowcabin: (ctx, x, y, o = {}) => drawSnowCabin(ctx, x, y, o.variant),
+  henge: (ctx, x, y, o = {}) => drawHenge(ctx, x, y, o.variant),
+  lodge: (ctx, x, y, o = {}) => drawLodge(ctx, x, y, o.variant),
+  watermill: (ctx, x, y, o = {}) => drawWatermill(ctx, x, y, o.variant),
+  windmill: (ctx, x, y, o = {}) => drawWindmill(ctx, x, y, o.variant),
+  terraced: (ctx, x, y, o = {}) => drawTerraced(ctx, x, y, o.variant),
+  markethall: (ctx, x, y, o = {}) => drawMarketHall(ctx, x, y, o.variant),
+  clocktower: (ctx, x, y, o = {}) => drawClockTower(ctx, x, y, o.variant),
+  warehouse: (ctx, x, y, o = {}) => drawWarehouse(ctx, x, y, o.variant),
+  solar: (ctx, x, y, o = {}) => drawSolarArray(ctx, x, y, o.variant),
+  dome: (ctx, x, y, o = {}) => drawDome(ctx, x, y, o.variant),
+  commsdish: (ctx, x, y, o = {}) => drawCommsDish(ctx, x, y, o.variant),
+  cargodepot: (ctx, x, y, o = {}) => drawCargoDepot(ctx, x, y, o.variant),
+};
+
+// Draw a structure kind; unknown kinds are ignored rather than guessed.
+export function drawStructure(ctx, kind, x, y, o = {}) {
+  const fn = STRUCTURE_DRAWERS[kind];
+  if (!fn) return false;
+  fn(ctx, x, y, o);
+  return true;
 }

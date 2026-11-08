@@ -6,7 +6,8 @@
 // the game's W × H by default, #129).
 
 import { W, H, lerp, mulberry32, dist, wrap, wrapDelta } from '../sim/util.js';
-import { drawHouse, drawHut, drawFactory, drawExchange, drawTower, drawHangar, drawPad } from '../render/sprites.js';
+import { drawStructure } from '../render/sprites.js';
+import { STRUCTURE_SPRITES, chooseStructureKind, sampleBiome, structureVariant } from './buildings.js';
 import * as wasm from '../../pkg/mind_over_chicken_engine.js';
 
 export const T = { DEEP: 0, SHALLOW: 1, SAND: 2, GRASS: 3, FOREST: 4, HILL: 5, MOUNTAIN: 6, SNOW: 7, FARM: 8, ROAD: 9, PAVED: 10 };
@@ -178,6 +179,21 @@ export class World {
     return null;
   }
 
+  // The building biome around (x, y) (#206): snow > coast > hills > forest > plains. It reads
+  // the untouched base terrain, so roads, farms and earlier structures cannot change it.
+  biomeAtPoint(x, y) {
+    return sampleBiome((px, py) => this.baseType[this.idx(px, py)], x, y, this.biome);
+  }
+
+  // A generated structure: deterministic kind and visual variant from the seed, position,
+  // biome and era. It never draws from the world RNG, so existing placements stay put.
+  structureAt(era, x, y, baseKind = 'hut', extra = {}) {
+    const biome = this.biomeAtPoint(x, y);
+    const kind = chooseStructureKind(era, biome, this.seed, x, y, baseKind);
+    const variant = structureVariant(kind, { biome, seed: this.seed, x, y, era });
+    return { kind, x, y, biome, variant, ...extra };
+  }
+
   // Era-specific land use. Called once per era before painting.
   shape(era) {
     this.type = this.baseType.slice();
@@ -206,14 +222,14 @@ export class World {
     if (era === 'stone') {
       for (let i = 0; i < 4; i++) {
         const p = this.clusterSpot(v.x, v.y, 13, 8, null, this.structures, rng, 6, 4);
-        if (p) this.structures.push({ kind: 'hut', ...p });
+        if (p) this.structures.push(this.structureAt('stone', p.x, p.y, 'hut'));
       }
     }
     if (era === 'farming') {
       farms(14, 18, 60);
       for (let i = 0; i < 10; i++) {
         const p = this.clusterSpot(v.x, v.y, 19, 12, null, this.structures, rng, 6, 4);
-        if (p) this.structures.push({ kind: 'hut', ...p });
+        if (p) this.structures.push(this.structureAt('farming', p.x, p.y, 'hut'));
       }
     }
     // Settlements spread to the other continents from the farming age on.
@@ -223,9 +239,9 @@ export class World {
         for (let i = 0; i < n; i++) {
           const p = this.clusterSpot(c.village.x, c.village.y, 9, 6, null, this.structures, rng, 3, 2);
           if (!p) continue;
-          if (era === 'farming') this.structures.push({ kind: 'hut', ...p });
-          else if (era === 'space' && i % 3 === 0) this.structures.push({ kind: 'tower', ...p, h: 7 + (i % 4) });
-          else this.structures.push({ kind: 'house', ...p, roof: era === 'space' ? '#5a6b8c' : '#8e3b2a' });
+          if (era === 'farming') this.structures.push(this.structureAt('farming', p.x, p.y, 'hut'));
+          else if (era === 'space' && i % 3 === 0) this.structures.push(this.structureAt('space', p.x, p.y, 'tower', { h: 7 + (i % 4) }));
+          else this.structures.push(this.structureAt(era, p.x, p.y, 'house', { roof: era === 'space' ? '#5a6b8c' : '#8e3b2a' }));
         }
         if (era !== 'farming' && c.harbor) road(c.village, c.harbor.land, 1);
       }
@@ -242,16 +258,16 @@ export class World {
           (x, y) => dist(x, y, s.exchange.x, s.exchange.y) >= 9 && dist(x, y, s.factory.x, s.factory.y) >= 12,
           this.structures, rng, 9, 6);
         if (!p) continue;
-        if (era === 'space' && i % 10 === 0) this.structures.push({ kind: 'tower', ...p, h: 8 + Math.floor(rng() * 7) });
-        else this.structures.push({ kind: 'house', ...p, roof: roofs[i % roofs.length] });
+        if (era === 'space' && i % 10 === 0) this.structures.push(this.structureAt('space', p.x, p.y, 'tower', { h: 8 + Math.floor(rng() * 7) }));
+        else this.structures.push(this.structureAt(era, p.x, p.y, 'house', { roof: roofs[i % roofs.length] }));
       }
-      this.structures.push({ kind: 'factory', x: s.factory.x, y: s.factory.y, smoke: era === 'industry' });
-      this.structures.push({ kind: 'exchange', x: s.exchange.x, y: s.exchange.y });
+      this.structures.push({ kind: 'factory', x: s.factory.x, y: s.factory.y, smoke: era === 'industry', variant: 0 });
+      this.structures.push({ kind: 'exchange', x: s.exchange.x, y: s.exchange.y, variant: 0 });
     }
     if (era === 'space') {
       for (let y = -6; y <= 6; y++) for (let x = -8; x <= 8; x++) if (this.walkable(s.pad.x + x, s.pad.y + y)) setT(s.pad.x + x, s.pad.y + y, T.PAVED);
-      this.structures.push({ kind: 'hangar', x: s.hangar.x, y: s.hangar.y });
-      this.structures.push({ kind: 'pad', x: s.pad.x, y: s.pad.y });
+      this.structures.push({ kind: 'hangar', x: s.hangar.x, y: s.hangar.y, variant: 0 });
+      this.structures.push({ kind: 'pad', x: s.pad.x, y: s.pad.y, variant: 0 });
     }
     this.structures.sort((a, b) => a.y - b.y);
   }
@@ -292,13 +308,7 @@ export class World {
     const ctx2d = c2d.getContext('2d');
     ctx2d.drawImage(c3d, 0, 0);
     for (const s of this.structures) {
-      if (s.kind === 'hut') drawHut(ctx2d, s.x, s.y);
-      if (s.kind === 'house') drawHouse(ctx2d, s.x, s.y, s.roof);
-      if (s.kind === 'tower') drawTower(ctx2d, s.x, s.y, s.h);
-      if (s.kind === 'factory') drawFactory(ctx2d, s.x, s.y);
-      if (s.kind === 'exchange') drawExchange(ctx2d, s.x, s.y);
-      if (s.kind === 'hangar') drawHangar(ctx2d, s.x, s.y);
-      if (s.kind === 'pad') drawPad(ctx2d, s.x, s.y);
+      drawStructure(ctx2d, s.kind, s.x, s.y, { roof: s.roof, h: s.h, variant: s.variant });
     }
     this.layers[era] = c2d;
     return c2d;
@@ -315,33 +325,13 @@ export class World {
         engine.add_billboard(14, t.x, t.y, 1, 0, t.variant || 0);
       }
     }
-    // 3D Structures
+    // 3D Structures: the same kind → atlas sprite table the 2D layer uses (#206).
     if (this.structures) {
       for (const s of this.structures) {
         if (near && !near(s.x, s.y)) continue;
-        switch (s.kind) {
-          case 'hut':
-            engine.add_billboard(5, s.x, s.y, 1, 0, 0);
-            break;
-          case 'house':
-            engine.add_billboard(6, s.x, s.y, 1, 0, 0);
-            break;
-          case 'tower':
-            engine.add_billboard(7, s.x, s.y, 1, 0, 0);
-            break;
-          case 'factory':
-            engine.add_billboard(8, s.x, s.y, 1, 0, 0);
-            break;
-          case 'exchange':
-            engine.add_billboard(9, s.x, s.y, 1, 0, 0);
-            break;
-          case 'hangar':
-            engine.add_billboard(10, s.x, s.y, 1, 0, 0);
-            break;
-          case 'pad':
-            engine.add_billboard(11, s.x, s.y, 1, 0, 0);
-            break;
-        }
+        const sprite = STRUCTURE_SPRITES[s.kind];
+        if (sprite == null) continue;
+        engine.add_billboard(sprite, s.x, s.y, 1, 0, s.variant || 0);
       }
     }
   }

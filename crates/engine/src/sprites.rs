@@ -21,6 +21,24 @@ pub const SPRITE_ROCKET: u32 = 12;
 pub const SPRITE_RETICLE: u32 = 13;
 pub const SPRITE_TREE: u32 = 14;
 pub const SPRITE_SHADOW: u32 = 15;
+// Biome / era building variants (#206). Append-only: the JS table in src/world/buildings.js
+// mirrors these ids, and tests/buildings.test.mjs checks the two stay in step.
+pub const SPRITE_LONGHOUSE: u32 = 16;
+pub const SPRITE_PUEBLO: u32 = 17;
+pub const SPRITE_STILT_HUT: u32 = 18;
+pub const SPRITE_SNOW_CABIN: u32 = 19;
+pub const SPRITE_HENGE: u32 = 20;
+pub const SPRITE_LODGE: u32 = 21;
+pub const SPRITE_WATERMILL: u32 = 22;
+pub const SPRITE_WINDMILL: u32 = 23;
+pub const SPRITE_TERRACED: u32 = 24;
+pub const SPRITE_MARKET_HALL: u32 = 25;
+pub const SPRITE_CLOCK_TOWER: u32 = 26;
+pub const SPRITE_WAREHOUSE: u32 = 27;
+pub const SPRITE_SOLAR_ARRAY: u32 = 28;
+pub const SPRITE_DOME: u32 = 29;
+pub const SPRITE_COMMS_DISH: u32 = 30;
+pub const SPRITE_CARGO_DEPOT: u32 = 31;
 
 #[derive(Clone, Copy, Debug)]
 pub struct AtlasEntry {
@@ -143,6 +161,222 @@ pub fn draw_pad(buf: &mut [u8], x: i32, y: i32) {
     fill_rect(buf, x - 5, y - 2, 11, 1, 0x76, 0x7c, 0x88, 255);
     put_pixel(buf, x - 3, y, 0xf2, 0xc1, 0x4e, 255);
     put_pixel(buf, x + 3, y, 0xf2, 0xc1, 0x4e, 255);
+}
+
+// ---- Biome / era building variants (#206) ----
+// The same shapes as src/render/sprites.js, in the 32 px atlas cell.
+
+pub fn draw_longhouse(buf: &mut [u8], x: i32, y: i32) {
+    fill_rect(buf, x - 6, y - 3, 13, 3, 0x7a, 0x55, 0x30, 255);
+    fill_rect(buf, x - 5, y - 4, 11, 1, 0xc9, 0xa3, 0x5a, 255);
+    fill_rect(buf, x - 4, y - 5, 9, 1, 0xc9, 0xa3, 0x5a, 255);
+    fill_rect(buf, x - 2, y - 6, 5, 1, 0xc9, 0xa3, 0x5a, 255);
+    fill_rect(buf, x - 6, y - 3, 1, 3, 0x5a, 0x3e, 0x24, 255);
+    fill_rect(buf, x + 5, y - 3, 1, 3, 0x5a, 0x3e, 0x24, 255);
+    fill_rect(buf, x - 1, y - 2, 2, 2, 0x2a, 0x1c, 0x10, 255);
+    put_pixel(buf, x + 2, y - 2, 0xff, 0xd3, 0x6e, 255);
+    put_pixel(buf, x - 4, y - 2, 0xff, 0xd3, 0x6e, 255);
+    put_pixel(buf, x, y - 7, 0x8d, 0x6a, 0x40, 255);
+}
+
+pub fn draw_pueblo(buf: &mut [u8], x: i32, y: i32) {
+    fill_rect(buf, x - 6, y - 3, 12, 3, 0xc9, 0x8d, 0x5a, 255);
+    fill_rect(buf, x - 4, y - 6, 9, 3, 0xc9, 0x8d, 0x5a, 255);
+    fill_rect(buf, x - 2, y - 9, 5, 3, 0xc9, 0x8d, 0x5a, 255);
+    fill_rect(buf, x - 6, y - 3, 12, 1, 0xb8, 0x7a, 0x4a, 255);
+    fill_rect(buf, x - 4, y - 6, 9, 1, 0xb8, 0x7a, 0x4a, 255);
+    fill_rect(buf, x - 2, y - 9, 5, 1, 0xb8, 0x7a, 0x4a, 255);
+    for dx in [-4, -1, 2] {
+        fill_rect(buf, x + dx, y - 2, 1, 2, 0x4a, 0x2f, 0x1b, 255);
+    }
+    for dx in [-3, 0, 2] {
+        put_pixel(buf, x + dx, y - 5, 0x4a, 0x2f, 0x1b, 255);
+    }
+    put_pixel(buf, x - 1, y - 8, 0x4a, 0x2f, 0x1b, 255);
+    put_pixel(buf, x + 1, y - 8, 0x4a, 0x2f, 0x1b, 255);
+}
+
+pub fn draw_stilt_hut(buf: &mut [u8], x: i32, y: i32) {
+    fill_rect(buf, x - 2, y - 3, 1, 3, 0x5a, 0x3e, 0x24, 255);
+    fill_rect(buf, x + 2, y - 3, 1, 3, 0x5a, 0x3e, 0x24, 255);
+    fill_rect(buf, x - 3, y - 6, 7, 3, 0x7a, 0x55, 0x30, 255);
+    fill_rect(buf, x - 4, y - 7, 9, 1, 0xc9, 0xa3, 0x5a, 255);
+    fill_rect(buf, x - 3, y - 8, 7, 1, 0xd8, 0xb5, 0x6a, 255);
+    fill_rect(buf, x - 1, y - 9, 3, 1, 0xe2, 0xc2, 0x7a, 255);
+    fill_rect(buf, x, y - 5, 1, 2, 0x2a, 0x1c, 0x10, 255);
+    fill_rect(buf, x - 3, y - 4, 7, 1, 0x8a, 0x6a, 0x40, 255);
+}
+
+pub fn draw_snow_cabin(buf: &mut [u8], x: i32, y: i32) {
+    fill_rect(buf, x - 5, y - 3, 11, 3, 0x7a, 0x55, 0x30, 255);
+    fill_rect(buf, x - 6, y - 4, 13, 1, 0xe8, 0xee, 0xf6, 255);
+    fill_rect(buf, x - 5, y - 5, 11, 1, 0xf4, 0xf8, 0xff, 255);
+    fill_rect(buf, x - 3, y - 6, 7, 1, 0xf4, 0xf8, 0xff, 255);
+    fill_rect(buf, x - 2, y - 7, 5, 1, 0xff, 0xff, 0xff, 255);
+    fill_rect(buf, x - 1, y - 2, 2, 2, 0x2a, 0x1c, 0x10, 255);
+    put_pixel(buf, x + 2, y - 2, 0xff, 0xd3, 0x6e, 255);
+    fill_rect(buf, x, y - 9, 1, 2, 0xc9, 0xd4, 0xe2, 255);
+    put_pixel(buf, x + 1, y - 10, 0xdb, 0xe6, 0xf2, 255);
+}
+
+pub fn draw_henge(buf: &mut [u8], x: i32, y: i32) {
+    fill_rect(buf, x - 7, y - 5, 2, 5, 0x6f, 0x6f, 0x6a, 255);
+    fill_rect(buf, x - 7, y - 5, 1, 5, 0x8a, 0x8a, 0x86, 255);
+    fill_rect(buf, x - 4, y - 4, 1, 4, 0x6f, 0x6f, 0x6a, 255);
+    fill_rect(buf, x - 7, y - 6, 5, 1, 0x8a, 0x8a, 0x86, 255);
+    fill_rect(buf, x + 3, y - 5, 2, 5, 0x6f, 0x6f, 0x6a, 255);
+    fill_rect(buf, x + 3, y - 5, 1, 5, 0x8a, 0x8a, 0x86, 255);
+    fill_rect(buf, x + 6, y - 4, 1, 4, 0x6f, 0x6f, 0x6a, 255);
+    fill_rect(buf, x + 3, y - 6, 5, 1, 0x8a, 0x8a, 0x86, 255);
+    fill_rect(buf, x - 2, y - 7, 1, 7, 0x8a, 0x8a, 0x86, 255);
+    fill_rect(buf, x + 1, y - 7, 1, 7, 0x8a, 0x8a, 0x86, 255);
+    fill_rect(buf, x - 2, y - 8, 4, 1, 0x8a, 0x8a, 0x86, 255);
+    fill_rect(buf, x - 1, y - 1, 3, 1, 0xb0, 0xb0, 0xaa, 255);
+    put_pixel(buf, x, y - 2, 0xff, 0xcf, 0x5c, 255);
+}
+
+pub fn draw_lodge(buf: &mut [u8], x: i32, y: i32) {
+    fill_rect(buf, x - 5, y - 3, 10, 3, 0x7a, 0x55, 0x30, 255);
+    fill_rect(buf, x - 6, y - 4, 12, 1, 0x8e, 0x5a, 0x2c, 255);
+    fill_rect(buf, x - 4, y - 5, 8, 1, 0x8e, 0x5a, 0x2c, 255);
+    fill_rect(buf, x - 2, y - 6, 4, 1, 0xa8, 0x6a, 0x38, 255);
+    fill_rect(buf, x - 1, y - 2, 2, 2, 0x2a, 0x1c, 0x10, 255);
+    fill_rect(buf, x + 4, y - 1, 4, 1, 0x9a, 0x70, 0x40, 255);
+    fill_rect(buf, x + 4, y - 2, 4, 1, 0x7a, 0x55, 0x30, 255);
+    put_pixel(buf, x + 4, y - 1, 0xb9, 0x8a, 0x52, 255);
+    put_pixel(buf, x + 7, y - 1, 0xb9, 0x8a, 0x52, 255);
+}
+
+pub fn draw_watermill(buf: &mut [u8], x: i32, y: i32) {
+    fill_rect(buf, x - 6, y - 5, 10, 5, 0xb0, 0x9a, 0x82, 255);
+    fill_rect(buf, x - 6, y - 6, 10, 1, 0x6f, 0x5a, 0x44, 255);
+    fill_rect(buf, x - 4, y - 8, 6, 2, 0x6f, 0x5a, 0x44, 255);
+    fill_rect(buf, x - 3, y - 9, 4, 1, 0x7d, 0x6a, 0x52, 255);
+    fill_rect(buf, x - 2, y - 2, 2, 2, 0x3a, 0x2a, 0x1c, 255);
+    put_pixel(buf, x - 5, y - 4, 0xff, 0xd3, 0x6e, 255);
+    fill_rect(buf, x + 3, y - 5, 1, 5, 0x8a, 0x6a, 0x40, 255);
+    fill_rect(buf, x + 4, y - 4, 3, 1, 0xb9, 0x8a, 0x52, 255);
+    fill_rect(buf, x + 4, y - 2, 3, 1, 0xb9, 0x8a, 0x52, 255);
+    put_pixel(buf, x + 4, y - 3, 0xb9, 0x8a, 0x52, 255);
+    put_pixel(buf, x + 6, y - 3, 0xb9, 0x8a, 0x52, 255);
+    fill_rect(buf, x + 4, y, 4, 1, 0x5a, 0x9a, 0xd0, 255);
+    fill_rect(buf, x + 5, y + 1, 3, 1, 0x7a, 0xb8, 0xe8, 255);
+}
+
+pub fn draw_windmill(buf: &mut [u8], x: i32, y: i32) {
+    fill_rect(buf, x - 3, y - 12, 7, 12, 0xe3, 0xd3, 0xb4, 255);
+    fill_rect(buf, x - 4, y - 13, 9, 1, 0x8a, 0x7a, 0x62, 255);
+    fill_rect(buf, x - 4, y - 14, 5, 1, 0xa0, 0x8a, 0x6a, 255);
+    fill_rect(buf, x - 1, y - 2, 2, 2, 0x4b, 0x35, 0x24, 255);
+    put_pixel(buf, x - 2, y - 8, 0x8a, 0x7a, 0x62, 255);
+    put_pixel(buf, x + 1, y - 9, 0x8a, 0x7a, 0x62, 255);
+    let sail = (0xd8, 0xd0, 0xbd);
+    fill_rect(buf, x - 1, y - 18, 1, 9, sail.0, sail.1, sail.2, 255);
+    fill_rect(buf, x + 2, y - 18, 1, 9, sail.0, sail.1, sail.2, 255);
+    fill_rect(buf, x - 6, y - 14, 12, 1, sail.0, sail.1, sail.2, 255);
+    fill_rect(buf, x - 6, y - 11, 12, 1, sail.0, sail.1, sail.2, 255);
+    put_pixel(buf, x, y - 14, 0x6f, 0x5a, 0x44, 255);
+}
+
+pub fn draw_terraced(buf: &mut [u8], x: i32, y: i32) {
+    let walls = [(0xe3, 0xd3, 0xb4), (0xdc, 0xc7, 0xa2), (0xea, 0xdc, 0xc2)];
+    for i in -1..=1 {
+        let bx = x + i * 5;
+        let h = 5 + ((i + 3) % 3);
+        let w = walls[((i + 3) % 3) as usize];
+        fill_rect(buf, bx - 2, y - h, 5, h, w.0, w.1, w.2, 255);
+        fill_rect(buf, bx - 3, y - h - 1, 7, 1, 0xa4, 0x40, 0x2f, 255);
+        fill_rect(buf, bx - 2, y - h - 2, 5, 1, 0xa4, 0x40, 0x2f, 255);
+        fill_rect(buf, bx, y - 2, 1, 2, 0x4b, 0x35, 0x24, 255);
+        put_pixel(buf, bx - 2, y - 3, 0xff, 0xd3, 0x6e, 255);
+    }
+}
+
+pub fn draw_market_hall(buf: &mut [u8], x: i32, y: i32) {
+    fill_rect(buf, x - 7, y - 4, 15, 4, 0xd8, 0xd0, 0xbd, 255);
+    for i in (0..15).step_by(3) {
+        fill_rect(buf, x - 7 + i, y - 6, 2, 2, 0xc0, 0x39, 0x2b, 255);
+    }
+    fill_rect(buf, x - 7, y - 7, 15, 1, 0xef, 0xe9, 0xda, 255);
+    fill_rect(buf, x - 1, y - 3, 2, 3, 0x4b, 0x35, 0x24, 255);
+    put_pixel(buf, x - 5, y - 3, 0xff, 0xd3, 0x6e, 255);
+    put_pixel(buf, x + 4, y - 3, 0xff, 0xd3, 0x6e, 255);
+    fill_rect(buf, x + 5, y - 2, 3, 2, 0x9a, 0x70, 0x40, 255);
+    put_pixel(buf, x + 6, y - 1, 0x7a, 0x55, 0x30, 255);
+}
+
+pub fn draw_clock_tower(buf: &mut [u8], x: i32, y: i32) {
+    fill_rect(buf, x - 3, y - 14, 7, 14, 0x8e, 0x4a, 0x38, 255);
+    fill_rect(buf, x - 4, y - 15, 9, 1, 0x6f, 0x3a, 0x2c, 255);
+    fill_rect(buf, x - 3, y - 17, 7, 2, 0x6f, 0x3a, 0x2c, 255);
+    fill_rect(buf, x - 2, y - 20, 5, 3, 0x7d, 0x44, 0x34, 255);
+    fill_rect(buf, x, y - 22, 1, 2, 0xc9, 0xc3, 0xb8, 255);
+    fill_rect(buf, x - 2, y - 16, 5, 5, 0xf2, 0xea, 0xd8, 255);
+    fill_rect(buf, x, y - 16, 1, 2, 0x2a, 0x1c, 0x10, 255);
+    fill_rect(buf, x, y - 14, 2, 1, 0x2a, 0x1c, 0x10, 255);
+    fill_rect(buf, x - 1, y - 2, 2, 2, 0x2a, 0x1c, 0x10, 255);
+    put_pixel(buf, x - 2, y - 9, 0xff, 0xd3, 0x6e, 255);
+    put_pixel(buf, x + 1, y - 11, 0xff, 0xd3, 0x6e, 255);
+}
+
+pub fn draw_warehouse(buf: &mut [u8], x: i32, y: i32) {
+    fill_rect(buf, x - 7, y - 5, 15, 5, 0x9a, 0x64, 0x48, 255);
+    fill_rect(buf, x - 7, y - 6, 15, 1, 0x5d, 0x3a, 0x2a, 255);
+    fill_rect(buf, x - 6, y - 7, 13, 1, 0x5d, 0x3a, 0x2a, 255);
+    fill_rect(buf, x - 3, y - 4, 7, 4, 0x3a, 0x2a, 0x1c, 255);
+    for i in [-2, 0, 2] {
+        fill_rect(buf, x + i, y - 4, 1, 4, 0x4a, 0x35, 0x24, 255);
+    }
+    put_pixel(buf, x - 6, y - 4, 0xff, 0xd3, 0x6e, 255);
+    fill_rect(buf, x + 5, y - 2, 2, 2, 0xb9, 0x8a, 0x52, 255);
+}
+
+pub fn draw_solar_array(buf: &mut [u8], x: i32, y: i32) {
+    fill_rect(buf, x - 5, y - 2, 1, 2, 0x8a, 0x93, 0xa3, 255);
+    fill_rect(buf, x + 4, y - 2, 1, 2, 0x8a, 0x93, 0xa3, 255);
+    fill_rect(buf, x - 7, y - 7, 15, 4, 0x24, 0x4a, 0x78, 255);
+    fill_rect(buf, x - 6, y - 6, 13, 2, 0x3e, 0x8e, 0xd0, 255);
+    for i in [-4, 0, 4] {
+        fill_rect(buf, x + i, y - 6, 1, 2, 0x24, 0x4a, 0x78, 255);
+    }
+    fill_rect(buf, x - 7, y - 8, 15, 1, 0xd8, 0xe8, 0xf8, 255);
+    fill_rect(buf, x - 4, y - 3, 9, 1, 0x8a, 0x93, 0xa3, 255);
+}
+
+pub fn draw_dome(buf: &mut [u8], x: i32, y: i32) {
+    let glass = (0x9a, 0xdc, 0xf2);
+    fill_rect(buf, x - 6, y - 2, 13, 2, 0xc9, 0xd4, 0xe2, 255);
+    fill_rect(buf, x - 5, y - 4, 11, 2, glass.0, glass.1, glass.2, 255);
+    fill_rect(buf, x - 4, y - 6, 9, 2, glass.0, glass.1, glass.2, 255);
+    fill_rect(buf, x - 2, y - 8, 5, 2, glass.0, glass.1, glass.2, 255);
+    fill_rect(buf, x - 1, y - 9, 3, 1, 0xd8, 0xf4, 0xff, 255);
+    fill_rect(buf, x, y - 8, 1, 6, 0x3e, 0x6e, 0x8a, 255);
+    fill_rect(buf, x - 4, y - 4, 1, 2, 0x3e, 0x6e, 0x8a, 255);
+    fill_rect(buf, x + 3, y - 4, 1, 2, 0x3e, 0x6e, 0x8a, 255);
+    put_pixel(buf, x - 5, y - 1, 0xff, 0xd3, 0x6e, 255);
+    put_pixel(buf, x + 4, y - 1, 0xff, 0xd3, 0x6e, 255);
+}
+
+pub fn draw_comms_dish(buf: &mut [u8], x: i32, y: i32) {
+    fill_rect(buf, x - 3, y - 2, 7, 2, 0x5f, 0x64, 0x70, 255);
+    fill_rect(buf, x - 1, y - 8, 1, 6, 0x8a, 0x93, 0xa3, 255);
+    fill_rect(buf, x - 1, y - 10, 5, 3, 0xd8, 0xdd, 0xe6, 255);
+    fill_rect(buf, x - 3, y - 12, 5, 2, 0xf0, 0xf4, 0xfa, 255);
+    fill_rect(buf, x - 3, y - 13, 3, 1, 0xd8, 0xdd, 0xe6, 255);
+    put_pixel(buf, x + 1, y - 9, 0x3b, 0x42, 0x52, 255);
+}
+
+pub fn draw_cargo_depot(buf: &mut [u8], x: i32, y: i32) {
+    fill_rect(buf, x - 7, y - 4, 15, 4, 0x7f, 0x8a, 0x9a, 255);
+    fill_rect(buf, x - 7, y - 5, 15, 1, 0x4d, 0x5d, 0x7a, 255);
+    fill_rect(buf, x - 6, y - 2, 5, 2, 0x3b, 0x42, 0x52, 255);
+    for i in [-5, 0, 5] {
+        fill_rect(buf, x + i, y - 2, 1, 2, 0xff, 0xcf, 0x5c, 255);
+    }
+    fill_rect(buf, x + 4, y - 7, 4, 2, 0xc0, 0x39, 0x2b, 255);
+    fill_rect(buf, x + 4, y - 7, 1, 2, 0xe8, 0x45, 0x2c, 255);
+    fill_rect(buf, x + 5, y - 9, 3, 2, 0x3e, 0x8e, 0xd0, 255);
+    fill_rect(buf, x + 4, y - 1, 2, 1, 0xb9, 0x8a, 0x52, 255);
 }
 
 // Entities
@@ -541,6 +775,23 @@ pub fn get_sprite_atlas_entry(sprite_id: u32, facing: i32, frame: u32, variant: 
             let col = if variant == 1 { 5 } else { 4 };
             (col, 3, 14.0, 18.0)
         }
+        // Biome / era building variants (#206): row 4 and the free cells of rows 5–6.
+        SPRITE_LONGHOUSE => (1, 4, 16.0, 12.0),
+        SPRITE_PUEBLO => (2, 4, 16.0, 14.0),
+        SPRITE_STILT_HUT => (3, 4, 12.0, 14.0),
+        SPRITE_SNOW_CABIN => (6, 4, 16.0, 12.0),
+        SPRITE_HENGE => (7, 4, 18.0, 12.0),
+        SPRITE_LODGE => (0, 5, 16.0, 12.0),
+        SPRITE_WATERMILL => (1, 5, 18.0, 14.0),
+        SPRITE_WINDMILL => (2, 5, 16.0, 22.0),
+        SPRITE_TERRACED => (3, 5, 20.0, 14.0),
+        SPRITE_MARKET_HALL => (4, 5, 20.0, 12.0),
+        SPRITE_CLOCK_TOWER => (5, 5, 10.0, 26.0),
+        SPRITE_WAREHOUSE => (6, 5, 20.0, 12.0),
+        SPRITE_SOLAR_ARRAY => (7, 5, 20.0, 12.0),
+        SPRITE_DOME => (0, 6, 18.0, 12.0),
+        SPRITE_COMMS_DISH => (1, 6, 14.0, 18.0),
+        SPRITE_CARGO_DEPOT => (2, 6, 20.0, 12.0),
         SPRITE_SHADOW => match variant {
             0 => (6, 3, 8.0, 5.0),
             1 => (7, 3, 16.0, 8.0),
@@ -740,6 +991,74 @@ pub fn create_sprite_atlas() -> Vec<u8> {
     draw_unlit_wood(&mut temp, cx, cy);
     copy_cell(&mut atlas, &temp, 0, 4, 31);
 
+    // Biome / era building variants (#206). Row 4: the cells free beside the unlit firewood
+    // and the two tree shadows.
+    temp.fill(0);
+    draw_longhouse(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 1, 4, 32);
+
+    temp.fill(0);
+    draw_pueblo(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 2, 4, 32);
+
+    temp.fill(0);
+    draw_stilt_hut(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 3, 4, 32);
+
+    temp.fill(0);
+    draw_snow_cabin(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 6, 4, 32);
+
+    temp.fill(0);
+    draw_henge(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 7, 4, 32);
+
+    // Row 5: Industry.
+    temp.fill(0);
+    draw_lodge(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 0, 5, 32);
+
+    temp.fill(0);
+    draw_watermill(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 1, 5, 32);
+
+    temp.fill(0);
+    draw_windmill(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 2, 5, 32);
+
+    temp.fill(0);
+    draw_terraced(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 3, 5, 32);
+
+    temp.fill(0);
+    draw_market_hall(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 4, 5, 32);
+
+    temp.fill(0);
+    draw_clock_tower(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 5, 5, 32);
+
+    temp.fill(0);
+    draw_warehouse(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 6, 5, 32);
+
+    temp.fill(0);
+    draw_solar_array(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 7, 5, 32);
+
+    // Row 6: Space.
+    temp.fill(0);
+    draw_dome(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 0, 6, 32);
+
+    temp.fill(0);
+    draw_comms_dish(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 1, 6, 32);
+
+    temp.fill(0);
+    draw_cargo_depot(&mut temp, cx, cy);
+    copy_cell(&mut atlas, &temp, 2, 6, 32);
+
     atlas
 }
 
@@ -770,6 +1089,13 @@ mod tests {
         assert!(tree_shadow_entry.u1 > tree_shadow_entry.u0);
         assert_eq!(tree_shadow_entry.world_w, 5.0);
         assert_eq!(tree_shadow_entry.world_h, 3.5);
+
+        // #206: every biome/era building variant has an atlas cell inside the 256 px atlas.
+        for id in SPRITE_LONGHOUSE..=SPRITE_CARGO_DEPOT {
+            let e = get_sprite_atlas_entry(id, 1, 0, 0);
+            assert!(e.u0 >= 0.0 && e.u1 <= 1.0 && e.v0 >= 0.0 && e.v1 <= 1.0, "sprite {id} inside atlas");
+            assert!(e.world_w > 0.0 && e.world_h > 0.0, "sprite {id} has a size");
+        }
 
         // Test newly added sprites
         let mut buf = vec![0u8; W * H * 4];

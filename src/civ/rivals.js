@@ -10,7 +10,8 @@
 // Like civ.js, the module is plain `extern "C"` WebAssembly: views on memory.buffer are made
 // fresh on every read, because any call may grow (and so replace) the buffer.
 import { loadCivModule, TONE } from './civ.js';
-import { drawHut, drawHouse, drawTower, drawPerson, drawBoat } from '../render/sprites.js';
+import { drawTower, drawPerson, drawBoat, drawStructure } from '../render/sprites.js';
+import { chooseStructureKind } from '../world/buildings.js';
 
 // homeworld::he, the kinds of line.
 export const RIVAL = { CONTACT: 1, TRADE: 2, RAID: 3, SACK: 4, WAR: 5, PEACE: 6, ALLY: 7, ARRIVE: 8, LANDING: 9, WORLD: 10, LAUNCH: 11, CLASH: 12 };
@@ -312,12 +313,17 @@ function drawVillage(ctx, x, y, o) {
     }
   }
   const n = Math.max(1, Math.min(8, Math.round(o.pop / 3)));
+  const seed = (Math.imul(x, 73856093) ^ Math.imul(y, 19349663)) >>> 0;
+  const era = o.age >= 13 ? 'space' : o.age >= 4 ? 'industry' : 'stone';
   for (let k = 0; k < n; k++) {
     const a = (k / n) * Math.PI * 2 + 0.3;
     const hx = Math.round(x + Math.cos(a) * r * 0.7), hy = Math.round(y + Math.sin(a) * r * 0.45);
     if (o.age >= 13 && k % 3 === 0) drawTower(ctx, hx, hy, 6 + (k % 3) * 2);
-    else if (o.age >= 4) drawHouse(ctx, hx, hy, o.col);
-    else drawHut(ctx, hx, hy);
+    else {
+      // #206: the same biome/era kinds as the campaign, deterministic per village spot.
+      const kind = chooseStructureKind(era, 'plains', seed, hx, hy, o.age >= 4 ? 'house' : 'hut');
+      drawStructure(ctx, kind, hx, hy, { roof: o.col });
+    }
   }
   if (o.capital) {
     ctx.fillStyle = '#4a3a2a';

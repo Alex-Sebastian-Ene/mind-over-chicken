@@ -14,7 +14,8 @@ import { T } from '../world/terrain.js';
 import { label } from '../eras/stone.js';
 import { SimPlanet } from '../ai/planet.js';
 import { AIGod } from '../ai/autopilot.js';
-import { drawHut, drawHouse, drawTower, drawFactory, drawPad, drawPerson, drawBolt, makeBolt, drawReticle } from '../render/sprites.js';
+import { drawPerson, drawBolt, makeBolt, drawReticle, drawStructure } from '../render/sprites.js';
+import { STRUCTURE_SPRITES, chooseStructureKind, sampleBiome, structureVariant } from '../world/buildings.js';
 import { FireballFX } from '../render/fireball.js';
 import { villagerLook, animate } from '../sim/agents.js';
 import { VW, VH, wrapX, wrapDx, wrapY, wrapDy, typeAt, walkableAt, settlementPlan } from './vast.js';
@@ -214,6 +215,7 @@ export class PlanetSurface {
     // place while avoiding the ringed look. A little spacing stops the sprites piling up.
     const spreadX = (s.capital ? 15 : 9) + size * 3;
     const spreadY = spreadX * (s.capital ? 0.62 : 0.7);
+    const biome = sampleBiome((bx, by) => typeAt(v, bx, by), s.x, s.y, this.world.biome);
     for (let i = 0; i < n; i++) {
       let x = 0, y = 0, clear = false;
       for (let tries = 0; tries < 14 && !clear; tries++) {
@@ -226,20 +228,16 @@ export class PlanetSurface {
           && !placed.some((b) => Math.abs(wrapDx(x - b.x)) < 4 && Math.abs(y - b.y) < 3);
       }
       if (!clear) continue;
-      const kind = era === 'stone' ? 'hut' : era === 'farming' ? (size >= 2 && i % 3 === 0 ? 'house' : 'hut') : era === 'space' && size >= 2 && i % 3 === 0 ? 'tower' : 'house';
-      placed.push({ kind, x, y, h: 7 + Math.floor(rng() * 7), roof: pick(ROOFS[era] || ROOFS.farming) });
+      const baseKind = era === 'stone' ? 'hut' : era === 'farming' ? (size >= 2 && i % 3 === 0 ? 'house' : 'hut') : era === 'space' && size >= 2 && i % 3 === 0 ? 'tower' : 'house';
+      const kind = chooseStructureKind(era, biome, this.world.seed, x, y, baseKind);
+      const variant = structureVariant(kind, { biome, seed: this.world.seed, x, y, era });
+      placed.push({ kind, x, y, biome, variant, h: 7 + Math.floor(rng() * 7), roof: pick(ROOFS[era] || ROOFS.farming) });
     }
     if (size >= 2 && (era === 'industry' || era === 'space') && walkableAt(v, s.x - 14, s.y + 10)) placed.push({ kind: 'factory', x: wrapX(s.x - 14), y: s.y + 10 });
     if (s.capital && era === 'space' && size >= 2 && walkableAt(v, s.x + 18, s.y + 8)) placed.push({ kind: 'pad', x: wrapX(s.x + 18), y: s.y + 8 });
     placed.sort((a, b) => a.y - b.y);
     for (const b of placed) {
-      wrapDraw(b.x, (x) => {
-        if (b.kind === 'hut') drawHut(ctx, x, b.y);
-        else if (b.kind === 'house') drawHouse(ctx, x, b.y, b.roof);
-        else if (b.kind === 'tower') drawTower(ctx, x, b.y, b.h);
-        else if (b.kind === 'factory') drawFactory(ctx, x, b.y);
-        else if (b.kind === 'pad') drawPad(ctx, x, b.y);
-      });
+      wrapDraw(b.x, (x) => drawStructure(ctx, b.kind, x, b.y, { roof: b.roof, h: b.h, variant: b.variant }));
       structs.push(b);
     }
     // Two factions after a civil war: banners show who holds which settlement.
@@ -422,11 +420,11 @@ export class PlanetSurface {
       engine.add_3d_light(s.x / 2, 8.0, s.y / 2, 14.0 + s.size * 6.0, 1.3);
     }
 
-    // 2. Upright 3D structures (SPRITE_HUT=5, SPRITE_HOUSE=6, SPRITE_TOWER=7, SPRITE_FACTORY=8, SPRITE_PAD=11)
+    // 2. Upright 3D structures, the same kind → atlas sprite table as the campaign (#206).
     if (this.placedStructs) {
       for (const b of this.placedStructs) {
-        const spriteId = b.kind === 'hut' ? 5 : b.kind === 'house' ? 6 : b.kind === 'tower' ? 7 : b.kind === 'factory' ? 8 : b.kind === 'pad' ? 11 : 5;
-        engine.add_billboard(spriteId, b.x / 2, b.y / 2, 1, 0, 0);
+        const spriteId = STRUCTURE_SPRITES[b.kind] ?? 5;
+        engine.add_billboard(spriteId, b.x / 2, b.y / 2, 1, 0, b.variant || 0);
       }
     }
 

@@ -11,6 +11,7 @@ import { W, H, Particles, rand, pick, floater, clamp } from '../sim/util.js';
 import { walk, animate, villagerLook } from '../sim/agents.js';
 import { drawPerson, drawGoat, drawChicken } from '../render/sprites.js';
 import { FireballFX } from '../render/fireball.js';
+import { isLitBuilding } from '../world/buildings.js';
 import { label } from './stone.js';
 
 // What the scholars write down, one focus window each.
@@ -268,7 +269,8 @@ export class InfoAge {
   lights() {
     // City lights twinkle on at night.
     const L = [];
-    for (const s of this.G.world.structures) if (s.kind === 'tower' || s.kind === 'house') L.push({ x: s.x, y: s.y - 3, r: 6 });
+    // The new variant kinds light up too (#206).
+    for (const s of this.G.world.structures) if (isLitBuilding(s.kind)) L.push({ x: s.x, y: s.y - 3, r: 6 });
     return L;
   }
 
