@@ -492,6 +492,17 @@ export class Industry {
   // ---- camera (#33): hand casts and face mood. Extra inputs on top of the brain, never instead of it. ----
 
   // aim is 0..1 like the brain's.
+  onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
+    const G = this.G;
+    if (!G || this.done) return;
+    const { x, y } = G.world.aimPoint(aim);
+    G.shake = Math.max(G.shake || 0, 1.0);
+    G.audio?.thunder?.();
+    this.particles.burst(12 + Math.round(charge * 16), () => ({ x, y, vx: rand(-32, 32), vy: rand(-42, 6), g: 50, life: rand(0.45, 0.8), maxLife: 0.8, size: 1, color }));
+    floater(this.particles, x, y - 8, `fireball ${Math.round(charge * 100)}%`, color, 7);
+    for (const a of this.agents) if (dist(x, y, a.x, a.y) < 18 + charge * 12) a.fear = clamp(a.fear + 0.25);
+  }
+
   onCast(spell, aim) {
     const G = this.G;
     if (!G || this.done) return;

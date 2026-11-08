@@ -19,6 +19,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
   - `F`: Hold Focus / Insight. Hold ~2 s (Rain or Calm) to summon rain and put out a forest fire
   - `Shift`: Spike Stress (drops calm)
   - `B`: Deliberate Blink. On a surface it throws lightning (a tree strike starts a forest fire); in the galaxy/globe it selects/lands like a left click
+  - `3`: Hold to charge the charged fireball, release to throw (or fist → pull back → thrust + open palm with the camera). Its colour follows joy (red) / surprise (blue)
   - `T`: Toggle 3D Heightmap Terrain vs 2D Classic
   - `Z` / `X`: Zoom Out (Galaxy) / Zoom In (Surface)
   - `M`: Toggle Personalized Brain Model & Judge Panel

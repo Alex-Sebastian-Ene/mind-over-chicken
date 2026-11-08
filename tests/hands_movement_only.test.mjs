@@ -1,6 +1,5 @@
-// Hands are for movement only (#261, #168): no hand shape and no key casts a spell; the only hand
-// moves are one-hand pinch (grab / move) and two-hand pinch (zoom), and the coach shows exactly those.
-// Regression guard for the cast path removed in #268.
+// Hands are movement-first (#261, #168) with one deliberate exception: the charged fireball (#291).
+// The old seven-spell cast path must stay gone; pinch grab and two-hand zoom remain the movement moves.
 // Run: node --test tests/hands_movement_only.test.mjs
 
 import test from 'node:test';
@@ -9,13 +8,16 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { COACH_MOVES, COACH_CARDS, buildGhostHand } from '../src/camera/coach.js';
 import { MultiHandTracker } from '../src/camera/fingers.js';
 
-const HAND_MOVES = ['pinch_grab', 'two_hand_zoom'];
+const HAND_MOVES = ['pinch_grab', 'two_hand_zoom', 'charged_fireball'];
 
-test('the coach shows exactly Pinch Grab and Two-Hand Zoom, each backed by a tracker action (#261, #168)', () => {
+test('the coach shows the two movement moves plus the charged fireball exception (#261, #168, #291)', () => {
   assert.deepEqual(COACH_MOVES.map((m) => m.id), HAND_MOVES);
   assert.deepEqual(COACH_CARDS.map((m) => m.id), HAND_MOVES);
-  assert.deepEqual(COACH_CARDS.map((m) => m.title), ['Pinch Grab', 'Two-Hand Zoom']);
-  for (const m of COACH_CARDS) assert.doesNotMatch(`${m.instruction} ${m.key}`, /\b[1-7]\b|cast|spell|fireball|calm/i, m.id);
+  assert.deepEqual(COACH_CARDS.map((m) => m.title), ['Pinch Grab', 'Two-Hand Zoom', 'Charged Fireball']);
+  for (const m of COACH_CARDS) {
+    if (m.id === 'charged_fireball') continue;
+    assert.doesNotMatch(`${m.instruction} ${m.key}`, /\b[1-7]\b|cast|spell|fireball|calm/i, m.id);
+  }
 });
 
 test('no spell table, cast controller or cast call is left in src/camera (#261)', () => {

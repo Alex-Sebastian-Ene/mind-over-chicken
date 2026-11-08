@@ -656,6 +656,33 @@ body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
 .cam-msg { margin: 0; font-size: 12px; line-height: 1.35; color: var(--bone); }
 .cam-panel[data-state="error"] [data-cam-msg] { color: #ffb3c0; }
 .cam-body { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px; align-items: start; }
+.cam-fireball {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 4px;
+}
+.cam-fb-orb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ff9a2e;
+  box-shadow: 0 0 10px #ff9a2e;
+  flex: none;
+}
+.cam-fb-meter {
+  flex: 1;
+  height: 6px;
+  border: 1px solid var(--line);
+  background: var(--ink);
+}
+.cam-fb-meter > i {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: #ff9a2e;
+  transition: width 0.1s linear;
+}
 .cam-view {
   position: relative;
   aspect-ratio: 4 / 3;

@@ -86,11 +86,12 @@ The Rust/Wasm simulation loop and world rules.
 
 * **Blink lightning:** deliberate blinks strike at the head cursor. In the galaxy/globe a blink is a world click: it selects a planet or lands, never a UI control.
 * **Calm / focus / stress:** EEG bands (and the keyboard fallback) drive the era mechanics.
-* **Pinch grab & two-hand zoom:** hand input moves living entities and the camera; it does not cast spells. The Camera sidebar has a guided pinch movement calibration with the live camera and hand wireframe: left, right, up and down targets for each hand, auto-advancing and auto-closing when complete. Per-axis gains persist per browser; head tilt is not calibrated because it already works.
+* **Pinch grab & two-hand zoom:** hand input moves living entities and the camera. The Camera sidebar has a guided pinch movement calibration with the live camera and hand wireframe: left, right, up and down targets for each hand, auto-advancing and auto-closing when complete. Per-axis gains persist per browser; head tilt is not calibrated because it already works.
+* **Charged fireball (#291):** hold a fist, pull it back, then thrust forward and open the palm; or hold `3` and release. Colour follows mood: joy red, surprise blue, neutral ember. This is the one deliberate hand cast.
 * **Rain or Calm:** the Insight/focus signal held for ~2 s summons rain, putting out forest fires and the Stone campfire.
 * **Forest fires:** lightning aimed at a tree starts a fire that spreads to nearby trees.
 
-**Status:** the hand-gesture and keyboard spell casts (fireball, bounty, rain, bless, disaster, peace, point) were removed in #261.
+**Status:** the old hand-gesture and keyboard spell set (bounty, rain, bless, disaster, peace, point) was removed in #261. The single deliberate charged fireball is the exception (#291).
 
 ---
 
