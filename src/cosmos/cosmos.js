@@ -25,7 +25,7 @@ const smoothstep = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x *
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 // Continuous zoom input (#143): levels per wheel delta unit, and per e-fold of pinch spread.
-const WHEEL_LEVELS = 0.0025;
+const WHEEL_LEVELS = 0.004;   // a mouse notch is 0.4 of a level (Alex: easier zoom)
 const PINCH_LEVELS = 3;
 
 export class Cosmos extends ZoomState {
@@ -440,10 +440,10 @@ export class Cosmos extends ZoomState {
     this.rot = this.galaxy ? this.galaxy.time * p.spin + p.phase : this.rot;
   }
 
-  // Continuous (#143): every wheel delta moves the zoom (a mouse notch of 100 is a quarter level;
+  // Continuous (#143): every wheel delta moves the zoom (a mouse notch of 100 is 0.4 of a level;
   // a trackpad's small deltas glide), with no 320 ms gate. The two-hand pinch comes through here too.
   wheel(deltaY, G) {
-    this.nudgeZoom(clamp(deltaY, -240, 240) * WHEEL_LEVELS, G);
+    this.nudgeZoom(clamp(deltaY, -300, 300) * WHEEL_LEVELS, G);
   }
 
   nudgeZoom(dz, G) {
