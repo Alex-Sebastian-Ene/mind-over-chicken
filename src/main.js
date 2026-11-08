@@ -61,6 +61,7 @@ import { panelHotkey } from './ui/hotkeys.js'; // E / C / Shift+C sidebars (#211
 import { engineFailToShow } from './ui/fail.js';
 import { frameLoop } from './ui/loop.js';
 import { dayNight } from './render/daynight.js';
+import { faceFeeling } from './ai/personality.js';
 import { surfaceMaxDistance } from './render/surface-zoom.js';
 import { drawAimReticle } from './render/reticle.js';
 import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
@@ -2117,6 +2118,9 @@ const planetSetup = new PlanetSetup($('planetSetup'), {
   getBrain: () => {
     // Shift is the emulated headset's Stress key: full agitation (as in ai/proxyBrain.js). A fresh
     // brain has no resting baseline yet to read agitation against, so the setup reads the key.
+    // A live face on the camera shapes the worlds: its expression is the feeling read.
+    const felt = faceFeeling(window.__moc?.camera?.mood);
+    if (felt) return { ...felt, stats: setupBrain?.stats };
     const s = setupSim();
     if (!setupBrain || !s?.input?.panic) return setupBrain;
     return { calm: setupBrain.calm, focus: setupBrain.focus * 0.4, stress: 1, stats: setupBrain.stats };

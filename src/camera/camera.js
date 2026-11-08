@@ -9,7 +9,8 @@
 //   Face:  MediaPipe Face Landmarker blendshapes → Joy (continuous) + Surprise (debounced event) (#117).
 //   Coach: Collapsible bottom panel with procedural 21-landmark ghost hands (#123).
 //
-// PRIVACY: the camera starts only when the player clicks "Start Camera" in the sidebar (#183):
+// PRIVACY: by default the camera starts with a game (Settings › Camera can turn that off, #186);
+// a game with it disabled waits for the player to click "Start Camera" in the sidebar (#183):
 // the toolbar Camera button and the ` key only open the sidebar. Frames go from the <video>
 // element to MediaPipe inside this tab (or its own workers). Nothing is recorded, stored or
 // uploaded: no frame, landmark or score leaves the device. Turning the camera off stops every
