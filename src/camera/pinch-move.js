@@ -8,7 +8,7 @@
 
 export const PINCH_HAND_DEADZONE = 0.001;
 export const PINCH_HEAD_DEADZONE = 0.004;
-export const PINCH_MOVE_TAU = 0.07;   // s, exponential low-pass time constant
+export const PINCH_MOVE_TAU = 0.045;  // s, exponential low-pass time constant (was 0.07: snappier at 30-60 Hz)
 
 export function lowPass(prev, next, dt, tau = PINCH_MOVE_TAU) {
   if (!Number.isFinite(prev)) return next;
