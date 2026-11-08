@@ -22,6 +22,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
   - `Z` / `X`: Zoom Out (Galaxy) / Zoom In (Surface)
   - `M`: Toggle Personalized Brain Model & Judge Panel
   - `G`: Toggle PPO AI God Autopilot
+  - `E` / `C`: Toggle the EEG / Camera sidebars (`` ` `` still toggles Camera); `Shift+C`: re-centre the headset's head pose
   - `1`–`7`: Keyboard gesture spell casts (fireball, rain, harvest, earthquake, etc.)
 
 ---

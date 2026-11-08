@@ -1,5 +1,5 @@
 // camera debug (#67): the Debug tab. A small panel, opened from the top bar or with the backquote
-// key (` — D already pans the planet), that shows what the game reads from you:
+// key (` — an alias of C, which toggles the Camera sidebar, #211), that shows what the game reads from you:
 //   - the mirrored camera thumbnail with the 21 hand landmarks, the aiming fingertip, the pinch and the face box;
 //   - the recognised gesture and its confidence, hold progress, the pinch, the learned hand range and cooldowns;
 //   - live emotion bars and the dominant mood;
@@ -11,6 +11,7 @@ import { SPELL_BY_ID, GESTURE_LABEL } from './spells.js';
 import { EMOTIONS } from './emotion.js';
 import { drawHand } from './draw.js';
 import { FrameMeter } from './meter.js';
+import { overlayBlocksHotkeys } from '../ui/hotkeys.js';
 import { aimSource } from './aim-source.js';
 
 export const DEBUG_KEY = 'Backquote';
@@ -90,6 +91,7 @@ export function initDebug({ getG, camera }) {
   window.addEventListener('keydown', (e) => {
     if (e.code !== DEBUG_KEY || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+    if (overlayBlocksHotkeys(document)) return;   // like C and E: held behind title/fail/end/banner/wizard (#211)
     e.preventDefault();
     toggle();
   });
