@@ -23,7 +23,6 @@ import initEngine, {
   PointerGesture,
   ViewCamera, // the 320×180 window onto the bigger home world (#129)
   RustWorldGen,
-  RustCastController,
   RustFingerController,
   RustEmotionTracker,
   RustGalaxy,
@@ -38,7 +37,6 @@ import { Cosmos } from './cosmos/cosmos.js';
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel, setRustGalaxy } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
 import { initCameraAdapter } from './camera/adapter.js';
-import { setRustCastController } from './camera/casts.js';
 import { setRustFingerController } from './camera/fingers.js';
 import { setRustEmotionTracker } from './camera/emotion.js';
 import { setRustAiPolicy } from './ai/policy.js';
@@ -133,7 +131,6 @@ try {
   loading.start('engine', 'Starting the game engine', { blocking: true }); // loading screen
   await initEngine();
   setRustWorldGen(RustWorldGen);
-  setRustCastController(RustCastController);
   setRustFingerController(RustFingerController);
   setRustEmotionTracker(RustEmotionTracker);
   setRustGalaxy(RustGalaxy);

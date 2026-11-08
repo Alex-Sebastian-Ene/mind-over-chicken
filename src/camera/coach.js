@@ -58,7 +58,7 @@ export const COACH_MOVES = [
   {
     id: 'pinch_grab',
     title: 'Pinch Grab',
-    key: '1',
+    key: '',
     glyph: '🤏',
     instruction: 'Pinch to pick up a living creature under the cursor, move the cursor (headset or mouse), release to drop.',
     contexts: ['surface', 'civ'],
@@ -97,31 +97,6 @@ export const COACH_MOVES = [
       ];
     },
   },
-  {
-    id: 'palm_calm',
-    title: 'Open Palm · Calm',
-    key: '2',
-    glyph: '🖐️',
-    instruction: 'Hold an open palm (or press 2) to calm fear, broker peace and bless the land.',
-    contexts: ['surface', 'civ'],
-    coachHidden: true,
-    sample(phase) {
-      const k = clamp(phase / 0.35);
-      return [{ hand: buildGhostHand('open', 'open', k, { cx: 0.5, cy: 0.78, size: 0.27 }), state: { held: phase > 0.25 } }];
-    },
-  },
-  {
-    id: 'fist_strike',
-    title: 'Closed Fist · Strike',
-    key: '3',
-    glyph: '✊',
-    instruction: 'Hold a closed fist (or press 3) to strike lightning at the cursor.',
-    contexts: ['surface', 'civ'],
-    sample(phase) {
-      const k = phase < 0.3 ? phase / 0.3 : phase > 0.8 ? 1 - (phase - 0.8) / 0.2 : 1;
-      return [{ hand: buildGhostHand('open', 'fist', k, { cx: 0.5, cy: 0.76, size: 0.27 }), state: { held: k > 0.75 } }];
-    },
-  },
 ];
 
 export const COACH_MOVE_BY_ID = Object.fromEntries(COACH_MOVES.map((m) => [m.id, m]));
@@ -144,7 +119,7 @@ const TEMPLATE = `
           <div class="coach-card-head">
             <span class="coach-card-glyph" aria-hidden="true">${m.glyph}</span>
             <span class="coach-card-title">${m.title}</span>
-            <kbd>${m.key}</kbd>
+            ${m.key ? `<kbd>${m.key}</kbd>` : ''}
           </div>
           <canvas class="coach-canvas" width="220" height="110" data-coach-canvas="${m.id}" role="img" aria-label="Animated demonstration of ${m.title}"></canvas>
           <p class="coach-instr">${m.instruction}</p>
@@ -153,7 +128,7 @@ const TEMPLATE = `
   </div>
 `;
 
-export function initCoach({ getContext = () => 'surface', onCastMove = null } = {}) {
+export function initCoach({ getContext = () => 'surface' } = {}) {
   const panel = document.getElementById('coachPanel');
   if (!panel) return null;
   panel.innerHTML = TEMPLATE;
@@ -264,19 +239,18 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
 
     if (state.bothPinched) selectMove('two_hand_zoom');
     else if (state.grabActive) selectMove('pinch_grab');
-    else if (state.heldMove === 'fist') selectMove('fist_strike');
 
     const handCount = (state.leftVisible ? 1 : 0) + (state.rightVisible ? 1 : 0);
     dotEl.dataset.ok = state.live ? (handCount > 0 ? '1' : 'wait') : '0';
     liveEl.textContent = !state.live
-      ? 'Camera off · Keys 1–3 active'
+      ? 'Camera off · pinch and two-hand zoom need the camera'
       : handCount === 2
         ? '2 hands tracked'
         : handCount === 1
           ? '1 hand tracked'
           : 'Show hand(s) to camera';
 
-    const strength = clamp(state.holdProgress || state.pinchStrength || 0);
+    const strength = clamp(state.pinchStrength || 0);
     meterEl.style.width = `${Math.round(strength * 100)}%`;
 
     if (flashState && now < flashState.until) {

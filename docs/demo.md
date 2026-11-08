@@ -18,12 +18,12 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
   - `F`: Hold Focus (beta / mental effort)
   - `Shift`: Spike Stress (drops calm)
   - `B`: Deliberate Blink (lightning bolt)
-  - `T` or `3`: Toggle 3D Heightmap Terrain vs 2D Classic
+  - `T`: Toggle 3D Heightmap Terrain vs 2D Classic
   - `Z` / `X`: Zoom Out (Galaxy) / Zoom In (Surface)
   - `M`: Toggle Personalized Brain Model & Judge Panel
   - `G`: Toggle PPO AI God Autopilot
   - `E` / `C`: Toggle the EEG / Camera sidebars (`` ` `` still toggles Camera); `Shift+C`: re-centre the headset's head pose
-  - `1`–`7`: Keyboard gesture spell casts (fireball, rain, harvest, earthquake, etc.)
+  - Hands: pinch to grab/move, two hands to zoom. No hand gesture casts a spell (#261).
 
 ---
 
