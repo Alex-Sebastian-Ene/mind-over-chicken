@@ -313,11 +313,11 @@ impl Era for StoneAge {
             let reason = if !self.fire.ever_lit {
                 "The tribe froze in the dark: blink directly on the fire pit to light it."
             } else if self.food <= 0.0 {
-                "The tribe starved: blink to strike mammoths and feed your people."
+                "The tribe starved: blink to strike giant chickens and feed your people."
             } else if !self.fire.lit {
                 "The fire went out: stay calm when the flame fades to kindle it."
             } else {
-                "The tribe has perished: keep the fire lit and hunt mammoths for dinner."
+                "The tribe has perished: keep the fire lit and hunt giant chickens for dinner."
             };
             self.failed = Some(reason.to_string());
             events.push(EraEvent::PlaySound(SoundKind::Bad));
@@ -365,7 +365,7 @@ impl Era for StoneAge {
                     events.push(EraEvent::PlaySound(SoundKind::Coin));
                     events.push(EraEvent::AdvisorSay {
                         key: "cooked-mammoth".to_string(),
-                        text: "Cooked mammoth! Barbecue time for the tribe.".to_string(),
+                        text: "Roast chicken! Barbecue time for the tribe.".to_string(),
                         mood: "happy".to_string(),
                         priority: 2,
                         cooldown: 5.0,
