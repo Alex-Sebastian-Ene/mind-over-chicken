@@ -183,11 +183,14 @@ const LAUNCH: i32 = 3;
 
 /// The sea route's rule for a voyage to (gx, gy): water, the landing beach, and for a goal
 /// inland (a colonist's site) the goal's own landmass, which the colonist walks.
-fn sea_rule(t: &Terrain, gx: i32, gy: i32) -> impl Fn(i32, i32) -> bool + '_ {
-    let d = t.d;
+pub(crate) fn sea_passable(t: &Terrain, gx: i32, gy: i32, x: i32, y: i32) -> bool {
     let inland = t.walkable(gx, gy) && !t.near_water(gx, gy, DOCK);
     let goal_land = t.land(gx, gy);
-    move |x: i32, y: i32| sailable(t, x, y) || d.cheb(x, y, gx, gy) <= DOCK || (inland && t.walkable(x, y) && t.land(x, y) == goal_land)
+    sailable(t, x, y) || t.d.cheb(x, y, gx, gy) <= DOCK || (inland && t.walkable(x, y) && t.land(x, y) == goal_land)
+}
+
+fn sea_rule(t: &Terrain, gx: i32, gy: i32) -> impl Fn(i32, i32) -> bool + '_ {
+    move |x: i32, y: i32| sea_passable(t, gx, gy, x, y)
 }
 
 enum Voyage {

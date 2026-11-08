@@ -345,8 +345,8 @@ pub struct Paths {
     pub builds: u32,
     /// Requests deferred because this step's budget (or the cache's cold capacity) ran out.
     pub deferred: u32,
-    /// First-come, deduped requests waiting for a later step this step.
-    pending: VecDeque<(i32, i32)>,
+    /// First-come, deduped requests waiting for a later step: `(x, y, queued tick)`.
+    pending: VecDeque<(i32, i32, u64)>,
     /// Recycled distance buffer; moved into the next field (see [`LocalField::build_with`]).
     scratch_dist: Vec<u16>,
     /// Reused BFS queue.
@@ -428,13 +428,52 @@ impl Paths {
         self.pending.len()
     }
 
-    /// Allow `n` new fields this step.
+    /// Allow `n` new fields this step (no proactive rebuild: callers that want queued
+    /// requests served first use [`Paths::refill_with`]).
     pub fn refill(&mut self, n: u32) {
         self.budget = n;
         self.tick += 1;
-        // Requests are retried by the agents next step, in their deterministic order. Drop
-        // any that nobody asked for again (a dead agent or a changed goal).
+        // Without a passability rule requests cannot be rebuilt ahead of the agents; the
+        // agents re-ask this step and queue afresh.
         self.pending.clear();
+    }
+
+    /// Start a step and first serve the requests deferred last step, oldest first. This is the
+    /// prioritized retry the world uses (#217): an agent that waited keeps its place instead of
+    /// losing every step to agents earlier in the loop. `passable(target_x, target_y, x, y)`
+    /// supplies the field's walkability rule for a queued target.
+    pub fn refill_with(&mut self, n: u32, d: Dims, passable: impl Fn(i32, i32, i32, i32) -> bool) {
+        self.budget = n;
+        self.tick += 1;
+        let tick = self.tick;
+        while self.budget > 0 {
+            let Some(&(x, y, _)) = self.pending.front() else {
+                break;
+            };
+            if self.fields.iter().any(|(f, _)| f.tx == x && f.ty == y) {
+                self.pending.pop_front();
+                continue;
+            }
+            if !self.make_room() {
+                break;
+            }
+            self.budget -= 1;
+            self.builds += 1;
+            self.pending.pop_front();
+            let f = LocalField::build_with(
+                d,
+                x,
+                y,
+                self.radius,
+                |px, py| passable(x, y, px, py),
+                &mut self.scratch_dist,
+                &mut self.scratch_queue,
+            );
+            self.fields.push((f, tick));
+        }
+        // A request is retried for one step. If it still cannot be served (budget or a cache
+        // full of fields in use), it expires; the agent asks again with its current goal.
+        self.pending.retain(|&(_, _, t)| tick.saturating_sub(t) <= 1);
     }
 
     /// The field toward (x, y): cached, or built now if this step's budget allows.
@@ -458,26 +497,9 @@ impl Paths {
             self.defer(x, y);
             return None;
         }
-        if self.fields.len() >= self.cap {
-            // Evict the coldest field, but never a field already used this step: agents that
-            // have a field keep it, and a full cache of hot fields makes the request wait.
-            let oldest = self
-                .fields
-                .iter()
-                .enumerate()
-                .filter(|(_, (_, t))| *t < tick)
-                .min_by_key(|(_, (_, t))| *t)
-                .map(|(i, _)| i);
-            match oldest {
-                Some(i) => {
-                    let (old, _) = self.fields.swap_remove(i);
-                    self.scratch_dist = old.dist;
-                }
-                None => {
-                    self.defer(x, y);
-                    return None;
-                }
-            }
+        if !self.make_room() {
+            self.defer(x, y);
+            return None;
         }
         self.budget -= 1;
         self.builds += 1;
@@ -495,15 +517,42 @@ impl Paths {
         self.fields.last().map(|(f, _)| f)
     }
 
+    /// Evict the coldest field if the cache is full, never one already used this step: agents
+    /// that have a field keep it, and a cache full of fields in use makes the new request wait.
+    fn make_room(&mut self) -> bool {
+        if self.fields.len() < self.cap {
+            return true;
+        }
+        let tick = self.tick;
+        let oldest = self
+            .fields
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, t))| *t < tick)
+            .min_by_key(|(_, (_, t))| *t)
+            .map(|(i, _)| i);
+        match oldest {
+            Some(i) => {
+                let (old, _) = self.fields.swap_remove(i);
+                self.scratch_dist = old.dist;
+                true
+            }
+            None => false,
+        }
+    }
+
     fn defer(&mut self, x: i32, y: i32) {
-        if !self.pending.iter().any(|&(px, py)| px == x && py == y) {
-            self.pending.push_back((x, y));
+        let tick = self.tick;
+        if let Some(e) = self.pending.iter_mut().find(|(px, py, _)| *px == x && *py == y) {
+            e.2 = tick;
+        } else {
+            self.pending.push_back((x, y, tick));
         }
         self.deferred = self.deferred.saturating_add(1);
     }
 
     fn unpend(&mut self, x: i32, y: i32) {
-        if let Some(i) = self.pending.iter().position(|&(px, py)| px == x && py == y) {
+        if let Some(i) = self.pending.iter().position(|&(px, py, _)| px == x && py == y) {
             self.pending.remove(i);
         }
     }
@@ -512,7 +561,7 @@ impl Paths {
     /// (and counting `stuck`) while its field is queued.
     pub fn is_pending(&self, d: Dims, x: i32, y: i32) -> bool {
         let (x, y) = (d.wrap_x(x), d.wrap_y(y));
-        self.pending.iter().any(|&(px, py)| px == x && py == y)
+        self.pending.iter().any(|&(px, py, _)| px == x && py == y)
     }
 
     pub fn has(&self, d: Dims, x: i32, y: i32) -> bool {

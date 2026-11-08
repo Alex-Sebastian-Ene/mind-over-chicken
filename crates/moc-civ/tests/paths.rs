@@ -147,6 +147,29 @@ fn requests_over_the_budget_are_queued_and_built_next_step() {
 }
 
 #[test]
+fn queued_requests_are_served_first_next_step() {
+    let d = Dims::SMALL;
+    let mut paths = Paths::new();
+    paths.refill(1);
+    assert!(paths.get_by(d, 10, 10, pass).is_some());
+    assert!(paths.get_by(d, 20, 20, pass).is_none());
+    assert!(paths.get_by(d, 30, 30, pass).is_none());
+    assert_eq!(paths.pending_len(), 2);
+    let builds = paths.builds;
+    // The oldest queued request is built before any new request, even with a fresh budget.
+    paths.refill_with(1, d, |_, _, px, py| pass(px, py));
+    assert_eq!(paths.builds, builds + 1);
+    assert!(paths.has(d, 20, 20), "first-come request served first");
+    assert!(!paths.has(d, 30, 30));
+    assert_eq!(paths.pending_len(), 1);
+    assert!(paths.get_by(d, 40, 40, pass).is_none(), "budget went to the queue");
+    // Next step serves the second queued request before the one that arrived later.
+    paths.refill_with(1, d, |_, _, px, py| pass(px, py));
+    assert!(paths.has(d, 30, 30));
+    assert!(!paths.has(d, 40, 40));
+}
+
+#[test]
 fn an_agent_with_a_queued_field_waits_without_getting_stuck() {
     let d = Dims::SMALL;
     let mut w = World::with_terrain(1, Terrain::uniform(d, GRASS));
@@ -165,7 +188,7 @@ fn an_agent_with_a_queued_field_waits_without_getting_stuck() {
     // Every later step rebuilds the budget; the queued field is served and the walker arrives.
     let mut arrived = false;
     for _ in 0..300 {
-        paths.refill(2);
+        paths.refill_with(2, d, |_, _, px, py| w.terrain.walkable(px, py));
         if walk(&mut a, &w.terrain, &mut paths, 7.0, DT, ROUTE_FIELD) {
             arrived = true;
             break;
