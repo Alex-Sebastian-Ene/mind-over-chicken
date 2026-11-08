@@ -368,7 +368,8 @@ body[data-reticle="1"] #screen { cursor: none; }   /* one cursor: the in-game re
 /* ---------- power tiles ---------- */
 .powers {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 440px));
+  justify-content: center;
   gap: 8px;
 }
 .power {

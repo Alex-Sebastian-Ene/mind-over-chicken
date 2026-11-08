@@ -190,6 +190,14 @@ export class Rivals {
 
   alive() { return this.h ? this.ex.civ_home_rivals_alive(this.h) : 0; }
 
+  // A fireball blast: kill rival people inside `radius`, return how many died.
+  smite(x, y, radius) {
+    if (!this.h) return 0;
+    const n = this.ex.civ_home_smite(this.h, x, y, radius) | 0;
+    if (n) this.snapshot();
+    return n;
+  }
+
   // The rivals' territory as an RGBA image `w`×`h`, one pixel per `step` tiles.
   territory(step) {
     const ex = this.ex;

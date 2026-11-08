@@ -344,3 +344,9 @@ pub extern "C" fn civ_home_line_str_ptr(p: *mut HomeWorld, seq: u32, k: u32) -> 
 pub extern "C" fn civ_home_line_str_len(p: *mut HomeWorld, seq: u32, k: u32) -> u32 {
     hw(p).map(|h| line_str(h, seq, k).len() as u32).unwrap_or(0)
 }
+
+/// A divine blast at a world point: kill rival people inside `radius`, return how many died.
+#[no_mangle]
+pub extern "C" fn civ_home_smite(p: *mut HomeWorld, x: f32, y: f32, radius: f32) -> u32 {
+    hw(p).map_or(0, |h| h.smite(x, y, radius))
+}
