@@ -535,10 +535,18 @@ export class Galaxy {
   drawOverlay(ctx, { alpha = 1, hover = null } = {}) {
     if (alpha < 0.05) return;
     ctx.globalAlpha = alpha;
-    for (const p of this.planets) {
+    // Readable labels (#148): the selected or hovered world first, then home, then the rest; a
+    // label block that would land on one already placed shows just the world's name.
+    const order = [...this.planets].sort((a, b) => (b === hover) - (a === hover) || (b.home === true) - (a.home === true));
+    const placed = [];
+    for (const p of order) {
       const q = this.pos(p);
       const ch = CHANNELS[p.channel];
+      const top = q.y + p.size + 3, block = { x: q.x, y0: top, y1: top + 16 };
+      const crowded = placed.some((r) => Math.abs(r.x - block.x) < 34 && block.y0 < r.y1 && r.y0 < block.y1);
+      placed.push(crowded ? { x: q.x, y0: top, y1: top + 6 } : block);
       label(ctx, q.x, q.y + p.size + 7, p.name, p === hover ? '#ffe066' : '#f2e8d5', 5);
+      if (crowded) continue;
       const sub = p.forming ? (p.mindSlot && !this.mind.done ? `reading your mind ${Math.max(0, Math.ceil(SIM.MIND_SECONDS - this.mind.t))}s`
         : p.formQueued ? 'waiting to form' : p.formPending ? `forming ${Math.max(1, Math.ceil(FORM_SECONDS - (p.formT || 0)))}s` : 'forming…')
         : p.pop > 0 ? `${ERA_LABEL[ERA_NAMES[p.eraIndex]]} · ${p.home && !p.autonomous ? `${p.pop} people` : fmtPop(p.pop)}` : 'barren';
