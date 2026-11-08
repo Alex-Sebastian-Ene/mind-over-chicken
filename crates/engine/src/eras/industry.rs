@@ -18,6 +18,7 @@ pub struct IndustryEra {
     pub ipo_done: bool,
     pub done: bool,
     pub failed: Option<String>,
+    pub strikes: u32,
 }
 
 impl Default for IndustryEra {
@@ -43,6 +44,7 @@ impl IndustryEra {
             ipo_done: false,
             done: false,
             failed: None,
+            strikes: 0,
         }
     }
 }
@@ -112,6 +114,21 @@ impl Era for IndustryEra {
 
     fn update(&mut self, dt: f32, brain: &BrainInput) -> Vec<EraEvent> {
         let mut events = Vec::new();
+        if self.done {
+            return events;
+        }
+        if self.price < 12.0 {
+            self.done = true;
+            self.failed = Some("The Great Goat Depression. A goat is now worth less than its hat.".to_string());
+            events.push(EraEvent::PlaySound(SoundKind::Crash));
+            return events;
+        }
+        if self.general_strike > 8.0 {
+            self.done = true;
+            self.failed = Some("General strike. The economy has stopped. The goats have unionised.".to_string());
+            events.push(EraEvent::PlaySound(SoundKind::Bad));
+            return events;
+        }
         self.time += dt;
 
         if self.crash_cooldown > 0.0 {
@@ -127,18 +144,40 @@ impl Era for IndustryEra {
 
         // Market price dynamics: fundamental pull + chartist momentum + stress herding
         let fundamental_pull = 0.4 * (self.value / self.price).ln();
-        let chart_momentum = herding * self.momentum * 12.0;
+        let chart_momentum = herding * self.momentum * 0.8;
 
         let return_rate = fundamental_pull + chart_momentum;
-        self.momentum = self.momentum * 0.85 + return_rate * 0.15;
-        self.price = (self.price * (1.0 + return_rate * dt * 3.0)).clamp(10.0, 500.0);
+        self.momentum = (self.momentum * 0.85 + return_rate * 0.15).clamp(-0.5, 0.5);
+        self.price = (self.price * (1.0 + return_rate * dt)).clamp(5.0, 500.0);
+
+        // Failure condition 1: The Great Goat Depression (price drops below 12.0)
+        if self.price < 12.0 {
+            self.done = true;
+            self.failed = Some("The Great Goat Depression. A goat is now worth less than its hat.".to_string());
+            events.push(EraEvent::PlaySound(SoundKind::Crash));
+            return events;
+        }
 
         // GDP grows when confidence is healthy and factories aren't on strike
         if self.general_strike <= 0.0 {
             let productivity = (self.confidence * 15.0).max(1.0);
             self.gdp += productivity * dt;
         } else {
-            self.general_strike -= dt;
+            if arousal > 0.6 {
+                self.general_strike += dt;
+            } else if brain.calm < 0.4 {
+                self.general_strike += dt * 0.2;
+            } else {
+                self.general_strike -= dt;
+            }
+        }
+
+        // Failure condition 2: General strike lasts too long (> 8 seconds)
+        if self.general_strike > 8.0 {
+            self.done = true;
+            self.failed = Some("General strike. The economy has stopped. The goats have unionised.".to_string());
+            events.push(EraEvent::PlaySound(SoundKind::Bad));
+            return events;
         }
         if self.gdp >= GDP_TARGET {
             self.gdp_reached = true;
@@ -195,15 +234,67 @@ impl Era for IndustryEra {
         events
     }
 
-    fn on_blink(&mut self, _aim_x: f32, _aim_y: f32) -> Vec<EraEvent> {
+    fn on_blink(&mut self, aim_x: f32, aim_y: f32) -> Vec<EraEvent> {
         let mut events = Vec::new();
+        self.strikes += 1;
+        events.push(EraEvent::StatAddLightning);
         events.push(EraEvent::PlaySound(SoundKind::Thunder));
+
+        // 1. Strike Factory (turbines / production): divine boost
+        let df = ((aim_x - 76.0).powi(2) + (aim_y - 130.0).powi(2))
+            .sqrt()
+            .min(((aim_x - 112.0).powi(2) + (aim_y - 92.0).powi(2)).sqrt());
+        if df < 24.0 {
+            self.gdp += 15.0;
+            events.push(EraEvent::PlaySound(SoundKind::Good));
+            events.push(EraEvent::AdvisorSay {
+                key: "factory-shock".to_string(),
+                text: "Divine lightning struck the factory turbines! Production surged.".to_string(),
+                mood: "happy".to_string(),
+                priority: 2,
+                cooldown: 4.0,
+            });
+        }
+
+        // 2. Strike Picket Line / Strikers: breaks strike and restores worker confidence
+        let dp = ((aim_x - 80.0).powi(2) + (aim_y - 128.0).powi(2)).sqrt();
+        if dp < 22.0 && self.general_strike > 0.0 {
+            self.general_strike = (self.general_strike - 0.5).max(0.0);
+            self.confidence = (self.confidence + 0.15).min(1.0);
+            events.push(EraEvent::PlaySound(SoundKind::Good));
+            events.push(EraEvent::AdvisorSay {
+                key: "strike-break".to_string(),
+                text: "Lightning scattered the picket line! The workers are scurrying back to work."
+                    .to_string(),
+                mood: "happy".to_string(),
+                priority: 2,
+                cooldown: 4.0,
+            });
+        }
+
+        // 3. Strike Goat Exchange / Trading Floor: market volatility spike
+        let de = ((aim_x - 130.0).powi(2) + (aim_y - 95.0).powi(2)).sqrt();
+        if de < 24.0 {
+            self.momentum += 0.15;
+            events.push(EraEvent::PlaySound(SoundKind::Coin));
+            events.push(EraEvent::AdvisorSay {
+                key: "exchange-shock".to_string(),
+                text: "Lightning struck the Goat Exchange! Traders are scrambling in volatile excitement."
+                    .to_string(),
+                mood: "panic".to_string(),
+                priority: 2,
+                cooldown: 4.0,
+            });
+        }
+
         events
     }
 
-    fn on_cast(&mut self, spell: &str, _aim_x: f32, _aim_y: f32) -> Vec<EraEvent> {
+    fn on_cast(&mut self, spell: &str, aim_x: f32, aim_y: f32) -> Vec<EraEvent> {
         let mut events = Vec::new();
-        if spell == "peace" {
+        if spell == "fireball" {
+            events.extend(self.on_blink(aim_x, aim_y));
+        } else if spell == "peace" {
             self.confidence = 1.0;
             self.general_strike = 0.0;
             events.push(EraEvent::PlaySound(SoundKind::Good));
@@ -350,5 +441,70 @@ mod tests {
         }
         assert_eq!(ind.general_strike, 0.0);
         assert!(ind.confidence >= 0.8);
+    }
+
+    #[test]
+    fn test_industry_depression_failure() {
+        let mut ind = IndustryEra::new();
+        let brain = BrainInput::default();
+        ind.price = 11.5;
+        let events = ind.update(0.1, &brain);
+        assert!(ind.is_failed().is_some());
+        assert_eq!(
+            ind.is_failed().unwrap(),
+            "The Great Goat Depression. A goat is now worth less than its hat."
+        );
+        assert!(!ind.is_complete());
+        assert!(events.contains(&EraEvent::PlaySound(SoundKind::Crash)));
+    }
+
+    #[test]
+    fn test_industry_general_strike_failure() {
+        let mut ind = IndustryEra::new();
+        let panic_brain = BrainInput {
+            calm: 0.0,
+            stress: 1.0,
+            ..Default::default()
+        };
+        ind.general_strike = 8.1;
+        let events = ind.update(0.1, &panic_brain);
+        assert!(ind.is_failed().is_some());
+        assert_eq!(
+            ind.is_failed().unwrap(),
+            "General strike. The economy has stopped. The goats have unionised."
+        );
+        assert!(!ind.is_complete());
+        assert!(events.contains(&EraEvent::PlaySound(SoundKind::Bad)));
+    }
+
+    #[test]
+    fn test_industry_lightning_strike_interactions() {
+        let mut ind = IndustryEra::new();
+        assert_eq!(ind.strikes, 0);
+
+        // 1. Strike random empty space
+        let events = ind.on_blink(0.0, 0.0);
+        assert_eq!(ind.strikes, 1);
+        assert!(events.contains(&EraEvent::StatAddLightning));
+        assert!(events.contains(&EraEvent::PlaySound(SoundKind::Thunder)));
+
+        // 2. Strike factory site -> boosts GDP
+        let initial_gdp = ind.gdp;
+        let factory_events = ind.on_blink(76.0, 130.0);
+        assert_eq!(ind.strikes, 2);
+        assert!(ind.gdp > initial_gdp);
+        assert!(factory_events.contains(&EraEvent::PlaySound(SoundKind::Good)));
+
+        // 3. Strike picket line while on strike -> reduces strike
+        ind.general_strike = 4.0;
+        let picket_events = ind.on_blink(80.0, 128.0);
+        assert_eq!(ind.strikes, 3);
+        assert!(ind.general_strike < 4.0);
+        assert!(picket_events.contains(&EraEvent::PlaySound(SoundKind::Good)));
+
+        // 4. Fireball cast triggers lightning strike
+        let cast_events = ind.on_cast("fireball", 130.0, 95.0);
+        assert_eq!(ind.strikes, 4);
+        assert!(cast_events.contains(&EraEvent::StatAddLightning));
     }
 }
