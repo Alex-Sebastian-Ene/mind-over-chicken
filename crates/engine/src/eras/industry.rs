@@ -16,6 +16,7 @@ pub struct IndustryEra {
     pub general_strike: f32,
     pub ipo_progress: f32,
     pub ipo_done: bool,
+    pub strikes: u32,
     pub done: bool,
     pub failed: Option<String>,
 }
@@ -41,6 +42,7 @@ impl IndustryEra {
             general_strike: 0.0,
             ipo_progress: 0.0,
             ipo_done: false,
+            strikes: 0,
             done: false,
             failed: None,
         }
@@ -195,18 +197,67 @@ impl Era for IndustryEra {
         events
     }
 
-    fn on_blink(&mut self, _aim_x: f32, _aim_y: f32) -> Vec<EraEvent> {
+    fn on_blink(&mut self, aim_x: f32, aim_y: f32) -> Vec<EraEvent> {
         let mut events = Vec::new();
+        self.strikes += 1;
         events.push(EraEvent::PlaySound(SoundKind::Thunder));
+        events.push(EraEvent::StatAddLightning);
+
+        // Factory smokestacks / dynamos around (70.0, 126.0)
+        let df_factory = ((aim_x - 70.0).powi(2) + (aim_y - 126.0).powi(2)).sqrt();
+        if df_factory < 28.0 {
+            self.gdp = (self.gdp + 15.0).min(GDP_TARGET + 50.0);
+            events.push(EraEvent::AdvisorSay {
+                key: "factory-hit".to_string(),
+                text: "Direct strike on the smokestacks! The dynamos are supercharged!".to_string(),
+                mood: "happy".to_string(),
+                priority: 2,
+                cooldown: 15.0,
+            });
+        }
+
+        // Picket line around (79.0, 128.0)
+        let df_picket = ((aim_x - 79.0).powi(2) + (aim_y - 128.0).powi(2)).sqrt();
+        if df_picket < 24.0 && self.general_strike > 0.0 {
+            self.general_strike = (self.general_strike - 4.0).max(0.0);
+            events.push(EraEvent::AdvisorSay {
+                key: "picket-struck".to_string(),
+                text: "The picket line scattered before the divine thunderbolt! Back to work!".to_string(),
+                mood: "shocked".to_string(),
+                priority: 2,
+                cooldown: 20.0,
+            });
+        }
+
+        // Goat exchange around (134.0, 90.0)
+        let df_exchange = ((aim_x - 134.0).powi(2) + (aim_y - 90.0).powi(2)).sqrt();
+        if df_exchange < 22.0 {
+            self.price = (self.price * 1.08).clamp(10.0, 500.0);
+            self.momentum += 0.02;
+            events.push(EraEvent::AdvisorSay {
+                key: "exchange-hit".to_string(),
+                text: "Lightning struck the exchange bell! Bulls are running wild on the trading floor!".to_string(),
+                mood: "happy".to_string(),
+                priority: 2,
+                cooldown: 15.0,
+            });
+        }
+
         events
     }
 
-    fn on_cast(&mut self, spell: &str, _aim_x: f32, _aim_y: f32) -> Vec<EraEvent> {
+    fn on_cast(&mut self, spell: &str, aim_x: f32, aim_y: f32) -> Vec<EraEvent> {
         let mut events = Vec::new();
-        if spell == "peace" {
-            self.confidence = 1.0;
-            self.general_strike = 0.0;
-            events.push(EraEvent::PlaySound(SoundKind::Good));
+        match spell {
+            "peace" => {
+                self.confidence = 1.0;
+                self.general_strike = 0.0;
+                events.push(EraEvent::PlaySound(SoundKind::Good));
+            }
+            "fist" | "fireball" | "lightning" => {
+                return self.on_blink(aim_x, aim_y);
+            }
+            _ => {}
         }
         events
     }
@@ -350,5 +401,33 @@ mod tests {
         }
         assert_eq!(ind.general_strike, 0.0);
         assert!(ind.confidence >= 0.8);
+    }
+
+    #[test]
+    fn test_industry_lightning_on_blink_interactions() {
+        let mut ind = IndustryEra::new();
+        assert_eq!(ind.strikes, 0);
+
+        // Strike factory
+        let initial_gdp = ind.gdp;
+        let events = ind.on_blink(70.0, 126.0);
+        assert_eq!(ind.strikes, 1);
+        assert!(events.contains(&EraEvent::StatAddLightning));
+        assert!(events.contains(&EraEvent::PlaySound(SoundKind::Thunder)));
+        assert!(ind.gdp > initial_gdp);
+
+        // Strike picket line while on strike
+        ind.general_strike = 6.0;
+        let _ = ind.on_blink(79.0, 128.0);
+        assert!(ind.general_strike < 6.0);
+
+        // Strike goat exchange
+        let initial_price = ind.price;
+        let _ = ind.on_blink(134.0, 90.0);
+        assert!(ind.price > initial_price);
+
+        // on_cast with fireball or fist delegates to on_blink
+        let _ = ind.on_cast("fireball", 70.0, 126.0);
+        assert_eq!(ind.strikes, 4);
     }
 }
