@@ -272,7 +272,7 @@ export function initCamera({
     panel.hidden = !open;
     btn.setAttribute('aria-pressed', String(open));
     if (open) {
-      for (const [pId, bId] of [['eegPanel', 'eegBtn'], ['modelPanel', 'modelBtn'], ['settingsPanel', 'settingsBtn']]) {
+      for (const [pId, bId] of [['eegPanel', 'eegBtn'], ['modelPanel', 'modelBtn'], ['settingsPanel', 'settingsBtn'], ['dbgPanel', 'dbgBtn']]) {
         const p = document.getElementById(pId);
         const b = document.getElementById(bId);
         if (p && !p.hidden) {
