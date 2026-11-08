@@ -11,7 +11,7 @@ use crate::jobs::{has, info, Building, Job, Out, Role, Site};
 use crate::life;
 use crate::planet::{Dims, Paths};
 use crate::politics;
-use crate::terrain::{defence, speed_mul, Terrain, FOREST, GRASS, HILLS, MOUNTAIN, RIVER_SPEED};
+use crate::terrain::{defence, speed_mul, Terrain, DEEP, FOREST, GRASS, HILLS, MOUNTAIN, RIVER_SPEED, WATER};
 use crate::world::*;
 
 const DIRS: [(i32, i32); 8] = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)];
@@ -153,18 +153,139 @@ pub fn walk(a: &mut Agent, t: &Terrain, paths: &mut Paths, speed: f32, dt: f32, 
     false
 }
 
-/// Sail (or row) straight toward the goal over water and land alike. True on arrival.
-pub fn sail(a: &mut Agent, d: Dims, speed: f32, dt: f32) -> bool {
-    let (tx, ty) = (a.gx as f32 + 0.5, a.gy as f32 + 0.5);
+/// Open water a boat may cross: sea, lake or river (#197).
+#[inline]
+pub fn sailable(t: &Terrain, x: i32, y: i32) -> bool {
+    let i = t.d.idx(x, y);
+    matches!(t.kind[i], DEEP | WATER) || t.river[i]
+}
+
+/// Land a boat may cross beside its goal: the beach it lands on (coastal villages are within
+/// 3 tiles of the water).
+pub const DOCK: i32 = 3;
+/// Land a boat may cross to reach the water from where it set out.
+const LAUNCH: i32 = 3;
+
+/// The sea route's rule for a voyage to (gx, gy): water, the landing beach, and for a goal
+/// inland (a colonist's site) the goal's own landmass, which the colonist walks.
+fn sea_rule(t: &Terrain, gx: i32, gy: i32) -> impl Fn(i32, i32) -> bool + '_ {
+    let d = t.d;
+    let inland = t.walkable(gx, gy) && !t.near_water(gx, gy, DOCK);
+    let goal_land = t.land(gx, gy);
+    move |x: i32, y: i32| sailable(t, x, y) || d.cheb(x, y, gx, gy) <= DOCK || (inland && t.walkable(x, y) && t.land(x, y) == goal_land)
+}
+
+enum Voyage {
+    Step(i32, i32),
+    /// The sea route is not built yet (the per-step budget is spent): hold for a step.
+    Wait,
+    /// No way over water is known: straight there, as before #197.
+    Straight,
+}
+
+fn sea_step(a: &Agent, cx: i32, cy: i32, t: &Terrain, sea: &mut Paths) -> Voyage {
+    let d = t.d;
+    let (gx, gy) = (a.gx, a.gy);
+    let near = d.cheb(cx, cy, gx, gy) < sea.radius;
+    if near {
+        match sea.get_by(d, gx, gy, sea_rule(t, gx, gy)) {
+            Some(f) if f.reachable(cx, cy) => {
+                return f.next_step(cx, cy).map_or(Voyage::Straight, |(x, y)| Voyage::Step(x, y));
+            }
+            Some(f) => {
+                // Ashore (setting out): row for the nearest water on the route.
+                for r in 1..=LAUNCH {
+                    let mut best: Option<(i32, i32, i32)> = None;
+                    for oy in -r..=r {
+                        for ox in -r..=r {
+                            if ox.abs().max(oy.abs()) != r {
+                                continue;
+                            }
+                            let v = f.at(cx + ox, cy + oy);
+                            if v >= 0 && best.map_or(true, |b| v < b.0) {
+                                best = Some((v, ox, oy));
+                            }
+                        }
+                    }
+                    if let Some((_, ox, oy)) = best {
+                        return Voyage::Step(d.wrap_x(cx + ox.signum()), d.wrap_y(cy + oy.signum()));
+                    }
+                }
+                return Voyage::Straight;
+            }
+            None => {}
+        }
+    }
+    // Beyond the route's reach (or before it is built): steer over water toward the goal.
+    if a.stuck > STUCK_LIMIT {
+        return Voyage::Straight;
+    }
+    let (dx, dy) = (d.dxi(cx, gx), d.dyi(cy, gy));
+    let k = (((dy as f32).atan2(dx as f32) / (PI / 4.0)).round() as i32).rem_euclid(8);
+    for off in [0, 1, -1, 2, -2, 3, -3] {
+        let (ox, oy) = DIRS[(k + off).rem_euclid(8) as usize];
+        let (nx, ny) = (d.wrap_x(cx + ox), d.wrap_y(cy + oy));
+        if sailable(t, nx, ny) && !(nx == a.px && ny == a.py) {
+            return Voyage::Step(nx, ny);
+        }
+    }
+    if near {
+        Voyage::Wait
+    } else {
+        Voyage::Straight
+    }
+}
+
+/// Sail (or row) toward the goal, keeping to the water (#197): down a water-only route when
+/// the goal is within reach, steering over water beyond it, and straight only when no way by
+/// sea is known. Boats land on the beach by the goal. True on arrival.
+pub fn sail(a: &mut Agent, t: &Terrain, sea: &mut Paths, speed: f32, dt: f32) -> bool {
+    let d = t.d;
+    let step = speed * dt;
+    if a.nx == NO_TILE {
+        let (cx, cy) = tile(a, d);
+        let next = if cx == a.gx && cy == a.gy { Voyage::Step(cx, cy) } else { sea_step(a, cx, cy, t, sea) };
+        match next {
+            Voyage::Step(nx, ny) => {
+                a.px = cx;
+                a.py = cy;
+                a.nx = nx;
+                a.ny = ny;
+            }
+            Voyage::Wait => return false,
+            Voyage::Straight => {
+                let (tx, ty) = (a.gx as f32 + 0.5, a.gy as f32 + 0.5);
+                let ddx = d.dx(a.x, tx);
+                let ddy = d.dy(a.y, ty);
+                let len = (ddx * ddx + ddy * ddy).sqrt();
+                if len <= step.max(0.05) {
+                    a.x = d.wrap_xf(tx);
+                    a.y = ty;
+                    return true;
+                }
+                a.x = d.wrap_xf(a.x + ddx / len * step);
+                a.y = d.wrap_yf(a.y + ddy / len * step);
+                return false;
+            }
+        }
+    }
+    let (tx, ty) = (a.nx as f32 + 0.5, a.ny as f32 + 0.5);
     let ddx = d.dx(a.x, tx);
     let ddy = d.dy(a.y, ty);
     let len = (ddx * ddx + ddy * ddy).sqrt();
-    let step = speed * dt;
-    a.nx = NO_TILE;
-    if len <= step.max(0.05) {
+    if len <= step.max(1e-4) {
         a.x = d.wrap_xf(tx);
         a.y = ty;
-        return true;
+        let (nx, ny) = (a.nx, a.ny);
+        a.nx = NO_TILE;
+        let dg = d.cheb(nx, ny, a.gx, a.gy);
+        if dg < a.best {
+            a.best = dg;
+            a.stuck = 0;
+        } else {
+            a.stuck = a.stuck.saturating_add(1);
+        }
+        return dg == 0;
     }
     a.x = d.wrap_xf(a.x + ddx / len * step);
     a.y = d.wrap_yf(a.y + ddy / len * step);
@@ -224,7 +345,7 @@ pub fn update(w: &mut World, dt: f32) {
     let mut loot: Vec<(usize, u16, u8)> = Vec::new();
     let mut arrivals: Vec<Arrival> = Vec::new();
     {
-        let World { agents, terrain, paths, villages, factions, food, burning, rng, marches, owner, strifes, rel, busy, fight_level, .. } = w;
+        let World { agents, terrain, paths, sea, villages, factions, food, burning, rng, marches, owner, strifes, rel, busy, fight_level, .. } = w;
         for i in 0..agents.len() {
             let a = &mut agents[i];
             if !a.alive {
@@ -579,7 +700,7 @@ pub fn update(w: &mut World, dt: f32) {
                         }
                     }
                     State::Sail => {
-                        if sail(a, dm, SPEED_SAIL, dt) {
+                        if sail(a, terrain, sea, SPEED_SAIL, dt) {
                             if a.target != NO_V {
                                 arrivals.push(Arrival { agent: i, village: a.target });
                             }
@@ -592,7 +713,7 @@ pub fn update(w: &mut World, dt: f32) {
                     }
                     State::Wander if job == Job::Sailor => {
                         // The voyage home.
-                        if sail(a, dm, SPEED_SAIL, dt) {
+                        if sail(a, terrain, sea, SPEED_SAIL, dt) {
                             a.state = State::Idle;
                             a.timer = 1.0;
                         }
@@ -783,9 +904,17 @@ pub fn update(w: &mut World, dt: f32) {
                         }
                     }
                     State::Sail => {
-                        if sail(a, dm, SPEED_SAIL, dt) {
+                        if sail(a, terrain, sea, SPEED_SAIL, dt) {
                             a.state = State::ToSite;
                             settle.push(i);
+                        } else if a.nx == NO_TILE {
+                            // Landed on the far shore of the site's landmass: walk the rest (#197).
+                            let (cx, cy) = tile(a, dm);
+                            if terrain.walkable(cx, cy) && terrain.land(cx, cy) == terrain.land(a.gx, a.gy) && a.home != NO_V && terrain.land(cx, cy) != terrain.land(villages[a.home as usize].x, villages[a.home as usize].y) {
+                                a.state = State::ToSite;
+                                a.best = i32::MAX;
+                                a.stuck = 0;
+                            }
                         }
                     }
                     _ => {

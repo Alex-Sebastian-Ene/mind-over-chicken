@@ -772,6 +772,8 @@ pub struct World {
     pub cam: Cam,
     pub view: Framebuffer,
     pub paths: Paths,
+    /// Sea routes toward ports and landing sites (#197): boats keep to the water.
+    pub sea: Paths,
     pub grid: Grid,
     pub marches: Vec<Vec<March>>,
     pub hostile: Vec<bool>,
@@ -916,6 +918,7 @@ impl World {
             cam: Cam::centred_on(d, d.w as f32 / 2.0, d.h as f32 / 2.0),
             view: Framebuffer::default(),
             paths: Paths::new(),
+            sea: Paths::sea(),
             grid: Grid::new(d),
             marches: vec![Vec::new(); MAX_FACTIONS],
             hostile: vec![false; MAX_FACTIONS * MAX_FACTIONS],
@@ -1378,6 +1381,7 @@ impl World {
         self.night = 0.5 - 0.5 * (phase * std::f32::consts::TAU).cos();
         self.rain_t = (self.rain_t - dt).max(0.0);
         self.paths.refill(2);
+        self.sea.refill(1);
         self.update_fires(dt);
         self.update_effects(dt);
         #[cfg(not(target_arch = "wasm32"))]

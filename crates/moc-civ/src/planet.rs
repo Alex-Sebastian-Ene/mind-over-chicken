@@ -310,10 +310,17 @@ pub struct Paths {
     tick: u64,
     budget: u32,
     pub builds: u32,
+    /// Window half-size (tiles) of every field this cache builds.
+    pub radius: i32,
+    cap: usize,
 }
 
 pub const FIELD_RADIUS: i32 = 80;
 const FIELD_CAP: usize = 48;
+/// Sea routes (#197): voyages run up to ~110 tiles, so their fields reach further, and fewer
+/// are kept (each is bigger).
+pub const SEA_RADIUS: i32 = 120;
+const SEA_CAP: usize = 24;
 
 impl Default for Paths {
     fn default() -> Self {
@@ -323,7 +330,16 @@ impl Default for Paths {
 
 impl Paths {
     pub fn new() -> Paths {
-        Paths { fields: Vec::new(), tick: 0, budget: 0, builds: 0 }
+        Paths::with(FIELD_RADIUS, FIELD_CAP)
+    }
+
+    /// The sea-route cache (#197): water-only fields toward ports and landing sites.
+    pub fn sea() -> Paths {
+        Paths::with(SEA_RADIUS, SEA_CAP)
+    }
+
+    fn with(radius: i32, cap: usize) -> Paths {
+        Paths { fields: Vec::new(), tick: 0, budget: 0, builds: 0, radius, cap }
     }
 
     /// Allow `n` new fields this step.
@@ -334,6 +350,12 @@ impl Paths {
 
     /// The field toward (x, y): cached, or built now if this step's budget allows.
     pub fn get(&mut self, d: Dims, walk: &[bool], x: i32, y: i32) -> Option<&LocalField> {
+        self.get_by(d, x, y, |px, py| walk[py as usize * d.w + px as usize])
+    }
+
+    /// As [`Paths::get`], over the tiles `passable` allows (the same cache must always be
+    /// given the same rule: fields are keyed by their target alone).
+    pub fn get_by(&mut self, d: Dims, x: i32, y: i32, passable: impl Fn(i32, i32) -> bool) -> Option<&LocalField> {
         let (x, y) = (d.wrap_x(x), d.wrap_y(y));
         let tick = self.tick;
         if let Some(i) = self.fields.iter().position(|(f, _)| f.tx == x && f.ty == y) {
@@ -345,8 +367,8 @@ impl Paths {
         }
         self.budget -= 1;
         self.builds += 1;
-        let f = LocalField::build(d, x, y, FIELD_RADIUS, |px, py| walk[py as usize * d.w + px as usize]);
-        if self.fields.len() >= FIELD_CAP {
+        let f = LocalField::build(d, x, y, self.radius, passable);
+        if self.fields.len() >= self.cap {
             let oldest = self.fields.iter().enumerate().min_by_key(|(_, (_, t))| *t).map(|(i, _)| i).unwrap_or(0);
             self.fields.swap_remove(oldest);
         }
