@@ -10,6 +10,7 @@
 import { W, H, Particles, clamp, dist, rand, chance, gauss, floater, pick } from '../sim/util.js';
 import { walk, animate, villagerLook, sail } from '../sim/agents.js';
 import { drawPerson, drawGoat, drawChicken, drawBoat, drawReticle, makeBolt, drawBolt } from '../render/sprites.js';
+import { FireballFX } from '../render/fireball.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
 import { eraTuning } from '../game/options.js'; // difficulty (#220)
@@ -39,6 +40,7 @@ export class Industry {
     const w = G.world;
     this.layer = w.paint('industry');
     this.particles = new Particles();
+    this.fireballs = new FireballFX();
     this.t = 0;
     this.price = 100;
     this.value = 100;
@@ -153,6 +155,7 @@ export class Industry {
   update(dt) {
     const G = this.G, w = G.world, brain = G.brain;
     this.t += dt;
+    for (const hit of this.fireballs.update(dt)) this.impactFireball(hit);
     this.particles.update(dt);
     this.bolts = this.bolts.filter((b) => (b.life -= dt) > 0);
     this.flash = Math.max(0, this.flash - dt);
@@ -425,6 +428,7 @@ export class Industry {
   // On the map, in world units (repeated at the map's wrap copies, #129).
   drawOverlay(ctx) {
     const G = this.G;
+    this.fireballs.draw(ctx);
     this.particles.drawText(ctx);
     // IPO ring over the exchange (world-anchored)
     const ex = G.world.sites.exchange;
@@ -593,10 +597,17 @@ export class Industry {
     const G = this.G;
     if (!G || this.done) return;
     const { x, y } = G.world.aimPoint(aim);
-    G.shake = Math.max(G.shake || 0, 1.0);
+    this.fireballs.launch({ x, y }, { color, charge });
+    G.audio?.blip?.();
+  }
+
+  impactFireball({ x, y, color = '#ff9a2e', charge = 1 }) {
+    const G = this.G;
+    G.shake = Math.max(G.shake || 0, 1.3 + charge * 0.6);
     G.audio?.thunder?.();
-    this.particles.burst(12 + Math.round(charge * 16), () => ({ x, y, vx: rand(-32, 32), vy: rand(-42, 6), g: 50, life: rand(0.45, 0.8), maxLife: 0.8, size: 1, color }));
-    floater(this.particles, x, y - 8, `fireball ${Math.round(charge * 100)}%`, color, 7);
+    this.particles.burst(22 + Math.round(charge * 26), () => ({ x, y, vx: rand(-44, 44), vy: rand(-58, 4), g: 70, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color }));
+    this.particles.burst(8 + Math.round(charge * 8), () => ({ x: x + rand(-4, 4), y: y + rand(-1, 2), vx: rand(-18, 18), vy: rand(-16, -2), g: 24, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color: pick(['#c9c2b0', '#8a7a5a', '#5f5545']) }));
+    floater(this.particles, x, y - 8, `SLAM! ${Math.round(charge * 100)}%`, color, 7);
     for (const a of this.agents) if (dist(x, y, a.x, a.y) < 18 + charge * 12) a.fear = clamp(a.fear + 0.25);
   }
 

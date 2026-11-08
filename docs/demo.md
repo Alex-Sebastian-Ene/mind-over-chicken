@@ -10,22 +10,27 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 - [ ] **Display**: 1080p+ screen or projector connected. Browser at 100% zoom.
 - [ ] **Audio**: Volume at 65%. Browser tab unmuted. Click once anywhere on screen to unlock WebAudio context.
 - [ ] **Headset**:
-  - **Option A (Muse 2 hardware)**: Bluetooth paired. `python bridge/muse_bridge.py --board muse2` running in terminal, showing green stream.
-  - **Option B (Emulated Headset fallback)**: Title screen selected as **"Emulated headset (keyboard)"**.
-- [ ] **Webcam**: Camera positioned at eye level with even lighting. Click **"Camera"** on the top bar to open the sidebar, then **"Start Camera"** and allow the permission prompt (status turns green).
-- [ ] **Pinch calibration** (optional): Camera sidebar → **Pinch & Head Calibration** opens a pop-up. Follow the live camera + wireframe to the LEFT, RIGHT, UP and DOWN targets with each hand. It auto-advances, saves per-axis gains and closes when complete. Gains persist in the browser. Esc closes it.
+  - **Option A (Muse 2 hardware)**: Bluetooth paired. `python bridge/muse_bridge.py --board muse2` running in terminal, showing green stream. On the title screen, **Connect a real headset → Connect**. The run starts on the first EEG frame: the status reads *"Waiting for the first EEG from the headset…"* and gives up after 10 s with Retry or the emulated headset.
+  - **Option B (Emulated Headset fallback)**: Title screen button **"Play with the emulated headset"**.
+- [ ] **Settings**: **⚙ Settings** (top bar or title screen) holds reduce motion (no shake, softer lightning flashes, no camera sweeps), head-aim sensitivity and inversion, the calibration window, the keyboard controls and "camera on at start". Esc closes it. Everything is saved in the browser. Turn on reduce motion if anyone watching is sensitive to flashes.
+- [ ] **Webcam**: Camera positioned at eye level with even lighting. Press `C` (or **⚙ Settings → Advanced → Camera**) to open the sidebar, then **"Start Camera"** and allow the permission prompt. A **● Camera on** chip shows in the top bar while it runs.
+- [ ] **Mood without a webcam** (optional): in the Camera sidebar, clear **No emotion** and use the **Happy ↔ Mix ↔ Surprised** slider. Joy lifts morale; moving into Surprised sets off a sky flash and lightning once.
+- [ ] **Pinch calibration** (optional): Camera sidebar → **🎯 Pinch Movement Calibration** opens a pop-up. Follow the live camera + wireframe to the LEFT, RIGHT, UP and DOWN targets with each hand. It auto-advances, saves per-axis gains and closes when complete. Gains persist in the browser. Esc closes it. Head tilt is not calibrated.
 - [ ] **Hotkeys Reference Card**:
   - `Space`: Hold Calm (high alpha)
   - `F`: Hold Focus / Insight. Hold ~2 s (Rain or Calm) to summon rain and put out a forest fire
   - `Shift`: Spike Stress (drops calm)
   - `B`: Deliberate Blink. On a surface it throws lightning (a tree strike starts a forest fire); in the galaxy/globe it selects/lands like a left click
+  - `Space` / `Enter` / click during an era's opening camera move: skip it
   - `3`: Hold to charge the charged fireball, release to throw (or fist → pull back → thrust + open palm with the camera). Its colour follows joy (red) / surprise (blue)
+  - `I`: Toggle people invincibility in Stone Age (no hunger, starvation, lightning or trample deaths)
   - `T`: Toggle 3D Heightmap Terrain vs 2D Classic
-  - `Z` / `X`: Zoom Out (Galaxy) / Zoom In (Surface)
+  - `Z` / `X` (or scroll, or a trackpad pinch): one continuous zoom out to the globe and galaxy / back in to the surface. In 3D the zoom goes toward the cursor
+  - `Left` / `Right` (or `A` / `D`) in the galaxy: choose a world; `Enter` or zoom in to land on it. `N`: visit the next world
   - `M`: Toggle Personalized Brain Model & Judge Panel
   - `G`: Toggle PPO AI God Autopilot
-  - `E` / `C`: Toggle the EEG / Camera sidebars (`` ` `` still toggles Camera); `Shift+C`: re-centre the headset's head pose
-  - Hands: pinch + hand movement pans, pinch + head motion tilts the 3D view, two hands zoom. No hand gesture casts a spell (#261).
+  - `E` / `C`: Toggle the EEG / Camera sidebars; `` ` ``: the Debug panel; `Shift+C`: re-centre the headset's head pose
+  - Hands: pinch + hand movement pans, pinch + head motion tilts the 3D view, two hands zoom. The only hand cast is the charged fireball: fist, pull back, thrust and open the palm (#291); the old gesture spells are gone (#261).
 
 ---
 
@@ -49,9 +54,9 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 > *I am wearing an EEG headset. There are no invisible difficulty sliders: this entire civilization is compiled to Rust and WebAssembly, and its physics, markets, and survival are driven directly by my real-time brainwaves, head movement, and facial expressions."*
 
 #### Operator Actions
-- **0:00**: Title screen visible. Click **"Emulated headset"** (or **"Headset bridge"** if Muse is streaming).
-- **0:05**: The island loads in **3D WebGL mode** (orbiting pixel-art heightmap terrain with dynamic sunlight).
-- **0:12**: Show the top HUD power meters (`Calm`, `Focus`, `Stress`, `Blinks`). Point out that the 10-second calibration window is active, recording baseline alpha/beta rhythms.
+- **0:00**: Title screen visible. Click **"Play with the emulated headset"** (or **Connect a real headset → Connect** if the Muse is streaming).
+- **0:05**: The camera sweeps down onto the 640×360 home world in **3D WebGL mode** (3.2 s; pixel-art heightmap terrain, the sun crossing a 150-second day). There is no card to dismiss. Under reduced motion the sweep is dropped.
+- **0:12**: Show the power tiles (`Lightning`, `Rain or Calm`, `Markets`). Point out that the 10-second calibration window is active, recording baseline alpha/beta rhythms.
 
 ---
 
@@ -62,13 +67,14 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 > *Watch the reticle. When I perform a deliberate double-blink—[BLINK]—lightning strikes the fire pit, igniting civilization's first flame.*  
 > *Now I strike a giant chicken across the river—[BLINK]—barbecuing dinner for the hunters.*  
 > *Notice the fire fading! The game demands serenity. As I take a deep breath and enter calm hold... [HOLD 5s]... my alpha-to-beta wave ratio spikes above 60%, the fire roars back, and a baby is born.*  
-> *And with our camera vision, I pinch to pick up a villager and carry them to safety, and spread two pinched hands to zoom out over the world."*
+> *And if a stray bolt sets the forest alight, I focus for two seconds and call down the rain."*
 
 #### Operator Actions
 - **0:22**: Aim mouse/head at the fire pit. Press `B` (or physical blink). Lightning crashes, fire ignites, audio synth roars.
 - **0:30**: Aim at a giant chicken. Press `B`. A roast chicken appears, food count rises to 5+.
 - **0:36**: Fire heat drops under 50%; calm hold begins. Hold `Space` (or close eyes for EEG calm). Meter fills to 100%, advisor celebrates, tribe population grows.
-- **0:50**: Show the camera hands: pinch over a villager to carry them, then pinch with both hands and spread them to zoom. (Hands only move things; no gesture casts a spell, #261.)
+- **0:50**: Aim at a tree and press `B`: a forest fire starts and spreads. Hold `F` (Rain or Calm) for about 2 s: rain puts it out.
+- **0:50**: Show the camera hands: pinch over a villager to carry them, then pinch with both hands and spread them to zoom. Optional: hold `3` (or, on camera, make a fist, pull it back, then thrust and open the palm) to throw the charged fireball (#291).
 
 ---
 
@@ -81,7 +87,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 > *To fix it, the game tests my emotional regulation: I breathe, calm down, and hold composure through the IPO window until green bars return and industry flourishes."*
 
 #### Operator Actions
-- **1:05**: Era switches to Industry. The Goat Exchange chart appears in retro amber pixels.
+- **1:05**: The Farming · Kingdoms montage plays first: hold `F` and the scholars ink your thoughts (Writing, Law, Taxes) letter by letter, faster the harder you focus. There is no arithmetic. Press `Enter` to skip it if you are short of time. Then the era switches to Industry and the Goat Exchange chart appears in retro amber pixels.
 - **1:15**: Hold `Shift` (or tense up, or scowl at the camera) to spike stress: calm drops to 0 and the `Stress` meter fills.
 - **1:22**: Market drops sharply; recession alert triggers, siren sound plays, red crash banner appears.
 - **1:30**: Release `Shift`, hold `Space` (`Calm` meter > 80%). The market stabilizes, confidence rebounds, and the IPO completes.
@@ -98,8 +104,8 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 > *And right now, our on-device PPO reinforcement learning AI god—trained with neural networks in PyTorch and running in browser WebAssembly—is steering their autonomous trade and orbital colony ships in real time."*
 
 #### Operator Actions
-- **1:45**: Press `Z` twice (or scroll wheel back). Smooth transition from 3D surface → rotating pixel-art globe → galaxy star field with elliptical orbits.
-- **1:58**: Click on **Stillwater** or **Thrum** in the planet list. Point out the live telemetry: *"Growth +1.2%/s from calm; Market volatility steered by stress"*.
+- **1:45**: Press `Z` twice (or scroll out). One continuous zoom from the 3D surface → rotating pixel-art globe → galaxy star field with elliptical orbits.
+- **1:58**: Press `Left` / `Right` to choose **Stillwater** or **Thrum** (the hint reads *"◀ ▶ choose a world"*), then `Enter` or scroll in to land. Clicking a planet works too. Point out the live telemetry: *"Growth +1.2%/s from calm; Market volatility steered by stress"*.
 - **2:10**: Press `G` to demonstrate the PPO AI God autopilot steering simulated worlds.
 
 ---
@@ -130,7 +136,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 
 #### Operator Actions
 - **2:55**: Press `Z` to zoom back to the home planet.
-- **3:00**: Close presentation. Invite judges to try the headset or test the camera gestures themselves.
+- **3:00**: Close presentation. Invite judges to try the headset, or to pinch and pan the world with their hands in front of the camera.
 
 ---
 
@@ -139,7 +145,8 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 | Incident | Immediate Operator Action | Backup Pitch Line |
 |---|---|---|
 | **Bluetooth drops on Muse 2** | Click **"Emulated headset"** on the title screen (or reload with `?source=sim`). Use `Space` for calm, `F` for focus, `Shift` for stress, `B` for blink. | *"Our bridge supports hot-failover to an emulated biometric source so the simulation never stutters."* |
-| **Webcam lighting is too dark for gestures** | Use numeric keys `1` through `7` to cast the exact same spells directly from the keyboard. | *"Every camera gesture maps 1:1 to direct keyboard spells for accessibility and zero-light environments."* |
+| **Era pauses with a "poor contact" toast** | Re-seat the headband; the era resumes by itself once the signal recovers. Or switch to the emulated headset. | *"The game won't score you on a bad signal: it waits for a clean one."* |
+| **Webcam lighting is too dark for hand tracking** | Drag with the mouse to pan and scroll to zoom. For mood, clear **No emotion** in the Camera sidebar and use the Happy ↔ Surprised slider. | *"Hands only move the world, so a mouse does the same job, and the mood slider stands in for the face."* |
 | **Fire pit doesn't light on first blink** | Press `B` firmly; the reticle auto-aims toward the fire pit when within 14 pixels. | *"The tribe demands divine conviction—another lightning strike does the trick."* |
 | **Speaker runs ahead of time (finishes early)** | Press `T` to toggle 3D camera mode and right-drag to orbit around the terrain, or click a planet in the galaxy view. | *"Notice how the 3D raycaster projects screen coordinates directly onto the dynamic heightfield."* |
 | **Speaker runs behind time (running late)** | Skip the Time-skip cutscene immediately by pressing `Enter`. Jump straight to Industry. | *"Let's accelerate directly to the Industrial Era to see the market mechanics."* |

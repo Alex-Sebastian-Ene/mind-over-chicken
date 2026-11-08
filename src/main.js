@@ -63,6 +63,8 @@ import { mirrorHud } from './ui/hud-mirror.js';
 import { createRivals, playerState, applyRivalLine } from './civ/rivals.js'; // rivals on the home world (#212)
 import { readOptions, worldSizeOf, difficultyOf } from './game/options.js'; // world size and difficulty (#220)
 import { initNewGameOptions } from './ui/new-game.js';
+import { footprint3d } from './ui/minimap.js';   // the minimap's 3D window (release QA)
+import { AIM_VIEW, aimViewKind, clampHomeAim, clampScreenAim } from './input/visible-aim.js';
 import { listSaves, getSave, latestSave, saveRun, deleteSave, clearSaves, newRunId, nextRunNumber } from './game/saves.js'; // local saves
 import { buildCheckpoint, galaxySummary, restoreBrain } from './game/checkpoint.js';
 
@@ -247,6 +249,7 @@ cosmos.panSink = (dx, dy) => { if (G?.scene?.panBy) { G.scene.panBy(dx, dy); ret
 const galaxyHudScene = { label: 'Galaxy', powers: ['blink', 'calm', 'focus', 'stress'], objectives: () => cosmos.galaxy?.objectives() || [] };
 let hudScene = null;
 let G = null;
+let lastScreenAim = null;   // last pointer/head point in screen 0..1, for 3D re-projection (#294)
 let previewSource = null;
 let previewBrain = null;
 
@@ -416,7 +419,7 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null } = {})
     difficulty: difficultyOf(options.difficulty),
     brain, source, advisor, hud, audio, engine,
     calibration: new Calibration(Number.isFinite(calibSeed) ? { ...calibConfig, seed: calibSeed >>> 0 } : calibConfig), // calibration (#54)
-    scene: null, sceneIndex: startIndex, runTime: 0, shake: 0,
+    scene: null, sceneIndex: startIndex, runTime: 0, shake: 0, invincible: false,
     stats: { lightning: 0, smitten: 0, births: 0, deaths: 0, recessions: 0, restarts: 0 },
     eraTimes: [], eraStart: 0, finished: false,
     complete(delay = 2) {
@@ -439,14 +442,19 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null } = {})
     if (Array.isArray(resume.eraTimes)) G.eraTimes = resume.eraTimes.map((e) => ({ ...e }));
     restoreBrain(brain.model, resume.brain);
   }
-  // Headset aims are screen positions: map them through the home camera (#129), raycasting in 3D.
+  // Headset aims are screen positions: map them through the active view (#129, #294). The
+  // globe/galaxy, an AI world's surface and the civ sandbox are screen-space; the home campaign
+  // is world-space (camera in 2D, ground raycast in 3D).
   brain.screenToAim = (x, y) => {
-    if (cosmos.surfaceInView || !cosmos.view || cosmos.active) return { x, y };
+    if ((cosmos.z || 0) > 0.5 || cosmos.surfaceInView) return { x, y };
+    const scene = cosmos.viewScene(G);
+    if (scene instanceof CivSandbox || scene?.civ) return { x, y };
     if (in3dSurface()) {
       const r = screen.getBoundingClientRect();
       const hit = engine.screen_to_ground(x * r.width, y * r.height, r.width, r.height);
-      if (hit && hit[0] >= 0) return { x: hit[0] / cosmos.worldW, y: hit[1] / cosmos.worldH };
+      if (hit && hit[0] >= 0 && hit[1] >= 0) return { x: hit[0] / cosmos.worldW, y: hit[1] / cosmos.worldH };
     }
+    if (!cosmos.view) return { x, y };
     const p = cosmos.toWorld(x * W, y * H);
     return { x: p.x / cosmos.worldW, y: p.y / cosmos.worldH };
   };
@@ -458,16 +466,24 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null } = {})
       && document.getElementById('moveCalibModal')?.hidden !== false;
     if (!gameVisible) return;
     hud.flashBlink();
-    if (cosmos.z > 0.5) {
-      // Galaxy/globe: the reticle IS the pointer here. Select/land exactly like a left click.
-      if (cosmos.clickAt?.(aim.x * W, aim.y * H, G)) audio.blip();
+    const target = resolveBlinkAim(aim);
+    if (!target) return;
+    if (target.view === AIM_VIEW.COSMOS) {
+      // Galaxy/globe: the reticle IS the pointer here. Select/land exactly like a left click;
+      // never storm every off-screen planet from one blink (#294).
+      if (cosmos.clickAt?.(target.x * W, target.y * H, G)) audio.blip();
       return;
     }
-    if (engine) engine.game_on_blink(aim.x * cosmos.worldW, aim.y * cosmos.worldH);
-    cosmos.galaxy?.onBlink();   // storms on the blink world; a strike on the world you're zoomed into
-    if (cosmos.galaxy?.attended) audio.thunder();
-    const view = cosmos.viewScene(G); // planets (#68): another world's surface when you're on it
-    if (view?.onBlink) view.onBlink(aim);
+    if (target.view === AIM_VIEW.SURFACE || target.view === AIM_VIEW.CIV) {
+      const view = cosmos.viewScene(G); // planets (#68): another world's surface when you're on it
+      view?.onBlink?.(target);
+      return;
+    }
+    // Home campaign (2D camera or 3D ground): both the Rust era sim and the JS scene get the
+    // same clamped world point.
+    if (engine) engine.game_on_blink(target.x * cosmos.worldW, target.y * cosmos.worldH);
+    const view = cosmos.viewScene(G);
+    if (view?.onBlink) view.onBlink(target);
   });
   // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
   G.camera = cosmos;          // the eras ask it where the screen is (#129)
@@ -888,13 +904,32 @@ function drawMinimap(ctx, scene) {
   ctx.drawImage(miniCache.canvas, x0, y0);
   // The camera's window, cut at the seams like the view itself.
   const sx = MINI.w / (world.width || W), sy = MINI.h / (world.height || H);
-  const r = cosmos.view.blits();
+  drawMiniRivals(ctx, x0, y0, sx, sy, world);   // under the camera's window (#212)
   ctx.strokeStyle = '#ffe066';
   ctx.lineWidth = 0.6;
-  for (let i = 0; i < r.length; i += 6) ctx.strokeRect(x0 + r[i] * sx, y0 + r[i + 1] * sy, r[i + 2] * sx, r[i + 3] * sy);
+  // In 3D the window is the ground the zoomed, tilted camera sees, not the 2D 320×180 (release QA).
+  const fp = G.render3d && typeof engine?.screen_to_ground === 'function'
+    ? footprint3d((x, y) => engine.screen_to_ground(x, y, screen.width, screen.height), {
+      tx: engine.get_camera_target_x(), tz: engine.get_camera_target_z(),
+      ww: world.width || W, wh: world.height || H, sw: screen.width, sh: screen.height,
+    })
+    : null;
+  if (fp) {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x0, y0, MINI.w, MINI.h); ctx.clip();
+    for (const ox of [-MINI.w, 0, MINI.w]) for (const oy of [-MINI.h, 0, MINI.h]) {   // wrap copies
+      ctx.beginPath();
+      fp.forEach(([x, y], i) => (i ? ctx.lineTo(x0 + ox + x * sx, y0 + oy + y * sy) : ctx.moveTo(x0 + ox + x * sx, y0 + oy + y * sy)));
+      ctx.closePath();
+      ctx.stroke();
+    }
+    ctx.restore();
+  } else {
+    const r = cosmos.view.blits();
+    for (let i = 0; i < r.length; i += 6) ctx.strokeRect(x0 + r[i] * sx, y0 + r[i + 1] * sy, r[i + 2] * sx, r[i + 3] * sy);
+  }
   const v = world.sites?.village;
   if (v) { ctx.fillStyle = '#ff9a2e'; ctx.fillRect(x0 + v.x * sx - 0.75, y0 + v.y * sy - 0.75, 1.5, 1.5); }
-  drawMiniRivals(ctx, x0, y0, sx, sy, world);
   ctx.globalAlpha = 1;
 }
 // The rivals on the minimap (#212): their territory, refreshed each second, and their capitals.
@@ -1169,6 +1204,7 @@ function frame(ts) {
     } else fade = Math.max(0, fade - dt * 1.6);
     G.shake = Math.max(0, (G.shake || 0) - dt * 2);
     cosmos.update(dt, G);
+    updateAimTarget();   // #294: keep the cursor and every blink target inside the visible view
     advisor.update(dt);
     // planets (#68): the HUD names the world you're on: "your world" at home, "AI god" elsewhere.
     const wanted = cosmos.hudScene(G, galaxyHudScene);
@@ -1201,6 +1237,81 @@ function isEegLive() {
 // used to freeze the cursor, because a live headset turned the mouse aim off.
 function headAimLive() { return isEegLive() && !!G?.brain?.headTracking; }
 
+// ---------- visible aim (#294) ----------
+// One boundary for every blink/click: the active view decides whether aim is world-space (home
+// campaign) or screen-space (globe/galaxy, AI surface, civ sandbox), then the target is clamped
+// to the visible viewport. The reticle and the strike both read this target.
+function viewCameraParams() {
+  if (!viewCam || !cosmos.view) return null;
+  return {
+    left: viewCam.left(), top: viewCam.top(),
+    viewW: viewCam.view_w(), viewH: viewCam.view_h(),
+    worldW: cosmos.worldW, worldH: cosmos.worldH,
+  };
+}
+
+function currentAimView() {
+  const scene = cosmos.viewScene(G);
+  return aimViewKind({
+    hasScene: !!scene,
+    cosmos: (cosmos.z || 0) > 0.5,
+    surface: !!cosmos.surfaceInView,
+    civ: scene instanceof CivSandbox || !!scene?.civ,
+    is3d: in3dSurface(),
+  });
+}
+
+// The 3D surface: re-raycast the last screen point against the camera as it is now, so panning or
+// zooming cannot leave a stale world target behind the cursor.
+function raycastAim3d() {
+  if (!engine?.screen_to_ground) return null;
+  const s = headAimLive() ? G?.brain?.screenAim : lastScreenAim;
+  if (!s) return null;
+  const r = screen.getBoundingClientRect();
+  const hit = engine.screen_to_ground(s.x * r.width, s.y * r.height, r.width, r.height);
+  if (!hit || hit[0] < 0 || hit[1] < 0) return null;
+  return { x: clamp(hit[0] / cosmos.worldW), y: clamp(hit[1] / cosmos.worldH) };
+}
+
+function resolveBlinkAim(aim = G?.brain?.aim) {
+  if (!G || !aim) return null;
+  const view = currentAimView();
+  if (view === AIM_VIEW.NONE) return null;
+  if (view === AIM_VIEW.HOME_2D) {
+    const v = viewCameraParams();
+    const p = v ? clampHomeAim(aim, v) : { x: clamp(aim.x), y: clamp(aim.y), clamped: false };
+    return { ...p, view };
+  }
+  if (view === AIM_VIEW.HOME_3D) {
+    const p = raycastAim3d();
+    if (p) return { ...p, view };
+    // A screen point that misses the ground (sky/horizon) must not strike hidden terrain.
+    if (headAimLive() ? G.brain.screenAim : lastScreenAim) return null;
+    const v = viewCameraParams();
+    const fallback = v ? clampHomeAim(aim, v) : { x: clamp(aim.x), y: clamp(aim.y), clamped: false };
+    return { ...fallback, view };
+  }
+  return { ...clampScreenAim(aim, { width: W, height: H, inset: 6 }), view };
+}
+
+// Keep the shared cursor in the visible space before drawing and before any consumer reads it.
+function updateAimTarget() {
+  if (!G?.brain?.aim) return;
+  const view = currentAimView();
+  if (view === AIM_VIEW.HOME_2D) {
+    const v = viewCameraParams();
+    if (v) { const p = clampHomeAim(G.brain.aim, v); G.brain.aim.x = p.x; G.brain.aim.y = p.y; }
+  } else if (view === AIM_VIEW.HOME_3D) {
+    const p = raycastAim3d();
+    if (p) { G.brain.aim.x = p.x; G.brain.aim.y = p.y; }
+  } else if (view !== AIM_VIEW.NONE) {
+    const p = clampScreenAim(G.brain.aim, { width: W, height: H, inset: 6 });
+    G.brain.aim.x = p.x; G.brain.aim.y = p.y;
+  }
+  const s = sim();
+  if (s) s.setAim(G.brain.aim.x, G.brain.aim.y);
+}
+
 // #175: say once per run when the headset can't aim, and while its contact is unusable.
 function signalNotices() {
   const b = G?.brain;
@@ -1230,7 +1341,13 @@ function aimFromEvent(e) {
 function worldFromEvent(e) { const a = aimFromEvent(e); return { x: a.x * W, y: a.y * H }; }
 // Aim on the surface: in 3D mode, raycast from screen to terrain; in 2D, screen → map position.
 function surfaceAim(e) {
-  if (cosmos.active) return aimFromEvent(e);
+  const raw = aimFromEvent(e);
+  lastScreenAim = raw;
+  if ((cosmos.z || 0) > 0.5) return raw;   // globe/galaxy: screen pointer
+  const scene = cosmos.viewScene(G);
+  // Another world's surface and the civ sandbox are screen-space views; never raycast the home
+  // terrain under them just because 3D is on (#294).
+  if (cosmos.surfaceInView || scene instanceof CivSandbox || scene?.civ) return raw;
   if (engine && engine.is_3d_mode()) {
     const r = screen.getBoundingClientRect();
     const sx = e.clientX - r.left;
@@ -1241,9 +1358,8 @@ function surfaceAim(e) {
     }
   }
   // 2D: screen → world through the camera (#129). Aims are 0..1 of the world, like the brain's.
-  const a = aimFromEvent(e);
-  if (cosmos.surfaceInView || !cosmos.view) return a;
-  const p = cosmos.toWorld(a.x * W, a.y * H);
+  if (!cosmos.view) return raw;
+  const p = cosmos.toWorld(raw.x * W, raw.y * H);
   return { x: p.x / cosmos.worldW, y: p.y / cosmos.worldH };
 }
 
@@ -1353,7 +1469,8 @@ function zoom3dBy(f) {
 function zoomOutFromSurface() {
   const scene = cosmos?.viewScene?.(G) || G?.scene;
   if (scene instanceof CivSandbox || scene?.civ) {
-    scene.onWheel?.(100);
+    // In 3D the civ relief is the unzoomed view: zoom the 3D camera, as the wheel does (release QA).
+    if (in3dSurface()) { cam3dTween = null; zoom3dBy(1.25); } else scene.onWheel?.(100);
     return;
   }
   if (!in3dSurface()) { cosmos.zoomOut(G); return; }
@@ -1367,7 +1484,7 @@ function zoomOutFromSurface() {
 function zoomInOnSurface() {
   const scene = cosmos?.viewScene?.(G) || G?.scene;
   if (scene instanceof CivSandbox || scene?.civ) {
-    scene.onWheel?.(-100);
+    if (in3dSurface()) { cam3dTween = null; zoom3dBy(0.8); } else scene.onWheel?.(-100);
     return;
   }
   if (in3dSurface() && (cosmos?.z || 0) <= 0.01) {
@@ -1424,15 +1541,16 @@ screen.addEventListener('pointermove', (e) => {
 function triggerAimClick(e) {
   if (!G) return;
   const a = surfaceAim(e);
-  G.brain.aim.x = a.x;
-  G.brain.aim.y = a.y;
+  const target = resolveBlinkAim(a) || a;
+  G.brain.aim.x = target.x;
+  G.brain.aim.y = target.y;
   const s = sim();
   if (s) {
-    s.setAim(a.x, a.y);
+    s.setAim(target.x, target.y);
   }
   if (!isEegLive()) {
     G.brain.stats.blinks++;
-    G.brain.blinkListeners.forEach((fn) => fn(a));
+    G.brain.blinkListeners.forEach((fn) => fn(target));
   }
 }
 
@@ -1585,6 +1703,16 @@ window.addEventListener('keydown', (e) => {
   if (panelKey === 'eegCenter') { e.preventDefault(); eegPanel?.calibrateCenter(); return; }
   if (e.code === 'KeyT') { toggle3D(); return; }
   if (e.code === 'KeyG') { toggleAIGod(); return; }
+  if (G && e.code === 'KeyI' && !e.repeat) {
+    G.invincible = !G.invincible;
+    if (G.invincible && G.scene?.people) for (const p of G.scene.people) { p.hunger = 0; p.starve = 0; }
+    G.hud?.showCause?.(G.invincible ? '🛡️ People invincible: ON · hunger and death paused' : '🛡️ People invincible: OFF');
+    G.advisor?.say('invincible', G.invincible
+      ? 'The tribe is invincible. Hunger, lightning and trampling cannot touch them.'
+      : 'The tribe is mortal again. Try to keep them fed.', { priority: 2, cooldown: 2 });
+    e.preventDefault();
+    return;
+  }
   if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { zoomOutFromSurface(); return; }
   if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { zoomInOnSurface(); return; }
   // The galaxy picker (Alex): Left/Right or A/D move between planets; Enter lands on the chosen one.
@@ -1605,6 +1733,8 @@ window.addEventListener('keydown', (e) => {
   }
   if (!sim() && e.code.startsWith('Arrow') && G?.brain && !headAimLive()) {
     // A headset without head tracking: the arrows aim, as they do on the emulator (#175).
+    lastScreenAim = null;
+    G.brain.screenAim = null;
     const a = G.brain.aim, step = 0.04;
     if (e.code === 'ArrowLeft') a.x = clamp(a.x - step);
     if (e.code === 'ArrowRight') a.x = clamp(a.x + step);
@@ -1623,6 +1753,8 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyB' && !e.repeat) s.blink();
   const step = 0.04;
   if (e.code.startsWith('Arrow')) {
+    lastScreenAim = null;
+    G.brain.screenAim = null;
     const a = G.brain.aim;
     if (e.code === 'ArrowLeft') a.x = clamp(a.x - step);
     if (e.code === 'ArrowRight') a.x = clamp(a.x + step);

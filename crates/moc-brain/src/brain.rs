@@ -1,9 +1,10 @@
 //! Brain signal pipeline blending generic EEG rules with the personal model.
 //!
-//! Handles rolling feature windows, resting heart-rate estimation,
-//! blink debouncing, and trust-weighted score blending.
+//! Handles rolling feature windows, blink debouncing, and trust-weighted score blending.
+//! The headset input is EEG bands, blinks, head tilt, motion and contact quality only: heart
+//! rate is not an input (#99, #153).
 
-use crate::math::{clamp, median, round3, sigmoid, smooth};
+use crate::math::{clamp, median, sigmoid, smooth};
 use crate::model::{features_from_bands, Class, PersonalModel, Predictions, NUM_FEATURES};
 use crate::sim_source::BrainFrame;
 
@@ -34,7 +35,6 @@ pub struct BrainStats {
     pub blinks: u32,
     pub calm_seconds: f32,
     pub focus_seconds: f32,
-    pub peak_hr: f32,
     pub frames_seen: u32,
 }
 
@@ -57,9 +57,6 @@ pub struct Brain {
     pub ag_baseline: Option<f32>,
     pub ag_running: Option<f32>,
     pub stress: f32,
-    pub hr: Option<f32>,
-    hr_history: Vec<(f32, f32)>, // (time, hr) - legacy compatibility
-    pub rest_hr: Option<f32>,
     pub aim: (f32, f32),
     pub motion: f32,
     pub quality: f32,
@@ -98,9 +95,6 @@ impl Brain {
             ag_baseline: None,
             ag_running: None,
             stress: REST_STRESS,
-            hr: None,
-            hr_history: Vec::new(),
-            rest_hr: None,
             aim: (0.5, 0.55),
             motion: 0.0,
             quality: 1.0,
@@ -158,28 +152,6 @@ impl Brain {
             self.aim.1 = smooth(self.aim.1, clamp(0.5 + ty * 0.5, 0.0, 1.0), 10.0, 0.1);
         }
         self.motion = frame.motion;
-
-        if let Some(hr_val) = frame.hr {
-            self.hr = Some(hr_val);
-            self.hr_history.push((self.time, hr_val));
-
-            // Keep up to 3 minutes (180 s)
-            while !self.hr_history.is_empty() && self.time - self.hr_history[0].0 > 180.0 {
-                self.hr_history.remove(0);
-            }
-
-            if self.hr_history.len() > 20 {
-                // Resting pulse is approximately the 25th percentile of the last 3 minutes
-                let mut sorted: Vec<f32> = self.hr_history.iter().map(|&(_, h)| h).collect();
-                sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                let p25_idx = (sorted.len() as f32 * 0.25).floor() as usize;
-                self.rest_hr = Some(sorted[p25_idx]);
-            } else if self.rest_hr.is_none() {
-                self.rest_hr = Some(hr_val);
-            }
-
-            self.stats.peak_hr = self.stats.peak_hr.max(hr_val);
-        }
 
         // Handle blink artifact detection & debouncing (0.45 s lockout)
         if frame.blink {
@@ -293,14 +265,6 @@ impl Brain {
         let recent = &self.ag_history[start..];
         if recent.len() >= 10 {
             self.ag_baseline = Some(median(recent));
-        }
-    }
-
-    /// Heart rate delta above resting baseline (legacy compatibility)
-    pub fn hr_delta(&self) -> f32 {
-        match (self.hr, self.rest_hr) {
-            (Some(hr), Some(rest_hr)) => round3(hr - rest_hr),
-            _ => 0.0,
         }
     }
 }

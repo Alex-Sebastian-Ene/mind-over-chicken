@@ -8,6 +8,7 @@ import { walk, animate, villagerLook, sail } from '../sim/agents.js';
 import { forestFire, forestFireStep } from './forest-fire.js';
 import { eraTuning } from '../game/options.js'; // difficulty (#220)
 import { drawPerson, drawMammoth, drawFire, makeBolt, drawBolt, drawReticle, drawChicken, drawBoat } from '../render/sprites.js';
+import { FireballFX } from '../render/fireball.js';
 
 const POP_START = 10;
 const POP_TARGET = 15;
@@ -37,6 +38,7 @@ export class StoneAge {
     const w = G.world;
     this.layer = w.paint('stone');
     this.particles = new Particles();
+    this.fireballs = new FireballFX();
     this.t = 0;
     this.fire = { x: w.sites.fire.x, y: w.sites.fire.y, heat: 0, lit: false, everLit: false };
     this.forest = { fires: [], burned: 0, warned: false };
@@ -135,6 +137,11 @@ export class StoneAge {
       if (!p.alive) continue;
       const d = dist(x, y, p.x, p.y - 2);
       if (d < 12) {
+        if (G.invincible) {
+          p.fear = Math.min(1, p.fear + 0.5);
+          if (['idle', 'warm', 'dance', 'huddle', 'hunt'].includes(p.state)) { p.state = 'cower'; p.target = null; }
+          continue;
+        }
         p.alive = false;
         p.dead = true;
         p.deadT = 0;
@@ -275,6 +282,7 @@ export class StoneAge {
   update(dt) {
     const G = this.G, w = G.world, brain = G.brain;
     this.t += dt;
+    for (const hit of this.fireballs.update(dt)) this.impactFireball(hit);
     this.particles.update(dt);
     this.bolts = this.bolts.filter((b) => (b.life -= dt) > 0);
     this.flash = Math.max(0, this.flash - dt);
@@ -367,22 +375,27 @@ export class StoneAge {
       }
       animate(p, dt, 6);
       const dFire = dist(p.x, p.y, f.x, f.y);
-      const hungerRate = (this.G.assistMode ? 0.008 : 0.017) * eraTuning(this.G).hunger;
-      p.hunger = clamp(p.hunger + dt * (p.colony ? -0.01 : hungerRate));
+      if (G.invincible) {
+        p.hunger = 0;
+        p.starve = 0;
+      } else {
+        const hungerRate = (this.G.assistMode ? 0.008 : 0.017) * eraTuning(this.G).hunger;
+        p.hunger = clamp(p.hunger + dt * (p.colony ? -0.01 : hungerRate));
+        // 75-second initial starvation grace period so new players have time to learn (× difficulty)
+        const inGrace = this.t < 75 * eraTuning(this.G).starvationGrace;
+        if (p.hunger >= 1 && !inGrace) {
+          p.starve += dt;
+          if (p.starve > 8) {
+            this.kill(p);
+            floater(this.particles, p.x, p.y - 7, `${p.name} starved`, '#c9c2b0', 6);
+            G.advisor.say('starve', `${p.name} has starved. The tribe asks if you could be slightly more of a god.`, { mood: 'nervous', priority: 2, cooldown: 12 });
+            continue;
+          }
+        } else p.starve = 0;
+      }
       p.faith = clamp(p.faith - dt * 0.008);
       if ((f.lit && dFire < 24) || p.colony) p.fear = clamp(p.fear - dt * 0.22);
       else p.fear = clamp(p.fear + dt * 0.03 * (1 - 0.5 * p.faith));
-      // 75-second initial starvation grace period so new players have time to learn (× difficulty)
-      const inGrace = this.t < 75 * eraTuning(this.G).starvationGrace;
-      if (p.hunger >= 1 && !inGrace) {
-        p.starve += dt;
-        if (p.starve > 8) {
-          this.kill(p);
-          floater(this.particles, p.x, p.y - 7, `${p.name} starved`, '#c9c2b0', 6);
-          G.advisor.say('starve', `${p.name} has starved. The tribe asks if you could be slightly more of a god.`, { mood: 'nervous', priority: 2, cooldown: 12 });
-          continue;
-        }
-      } else p.starve = 0;
 
       if (p.colony || p.state === 'embark' || p.state === 'aboard') { this.actTraveller(p, dt); continue; }
       p.decide -= dt;
@@ -496,7 +509,10 @@ export class StoneAge {
     }
   }
 
-  kill(p) { p.alive = false; p.state = 'dead'; p.deadT = 0; this.G.stats.deaths++; }
+  kill(p) {
+    if (this.G?.invincible) { p.alive = true; p.state = 'idle'; p.starve = 0; return; }
+    p.alive = false; p.state = 'dead'; p.deadT = 0; this.G.stats.deaths++;
+  }
 
   decide(p) {
     const f = this.fire;
@@ -745,6 +761,7 @@ export class StoneAge {
         label(ctx, f.x, f.y - 20, `HOLD CALM  ${(this.holdSeconds() - this.hold.progress).toFixed(1)}s`, '#59d8c8', 7);
       }
     }
+    this.fireballs.draw(ctx);
     this.particles.drawText(ctx);
   }
 
@@ -812,20 +829,31 @@ export class StoneAge {
     floater(this.particles, safeLand.x, safeLand.y - 8, `placed ${entLabel}`, '#9be38a', 6);
   }
 
-  // Charged fireball (#291): independent of the removed spell dispatch.
+  // Charged fireball (#291): independent of the removed spell dispatch. The projectile lands
+  // before any impact effect fires (#315).
   onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
     const G = this.G;
     if (!G || this.done) return;
     const { x, y } = G.world.aimPoint(aim);
-    const n = 12 + Math.round(charge * 18);
-    this.flash = Math.max(this.flash, 0.3);
-    G.shake = Math.max(G.shake || 0, 1.2);
+    this.fireballs.launch({ x, y }, { color, charge });
+    G.audio?.blip?.();
+  }
+
+  impactFireball({ x, y, color = '#ff9a2e', charge = 1 }) {
+    const G = this.G;
+    const n = 22 + Math.round(charge * 28);
+    this.flash = Math.max(this.flash, 0.42);
+    G.shake = Math.max(G.shake || 0, 1.3 + charge * 0.6);
     G.audio?.thunder?.();
     this.particles.burst(n, () => ({
-      x, y, vx: rand(-36, 36), vy: rand(-46, 6), g: 60,
-      life: rand(0.45, 0.8), maxLife: 0.8, size: 1, color,
+      x, y, vx: rand(-46, 46), vy: rand(-62, 4), g: 75,
+      life: rand(0.5, 0.95), maxLife: 0.95, size: 1, color,
     }));
-    floater(this.particles, x, y - 10, `fireball ${Math.round(charge * 100)}%`, color, 7);
+    this.particles.burst(8 + Math.round(charge * 8), () => ({
+      x: x + rand(-4, 4), y: y + rand(-1, 2), vx: rand(-18, 18), vy: rand(-16, -2), g: 24,
+      life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color: pick(['#c9c2b0', '#8a7a5a', '#5f5545']),
+    }));
+    floater(this.particles, x, y - 10, `SLAM! ${Math.round(charge * 100)}%`, color, 7);
     for (const p of this.living()) if (dist(x, y, p.x, p.y) < 22 + charge * 14) p.fear = clamp(p.fear + 0.2 + charge * 0.2);
   }
 

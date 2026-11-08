@@ -626,9 +626,9 @@ export class EegPanel {
     if (lost) {
       const ctx = this.wiz.ctx, w = this.wiz.canvas.width, h = this.wiz.canvas.height;
       this.wiz.lastFrameNow = now;
-      ctx.fillStyle = 'rgba(8, 10, 24, 0.82)';
+      ctx.fillStyle = 'rgba(9, 30, 30, 0.82)';
       ctx.fillRect(0, 0, w, h);
-      ctx.fillStyle = '#ff9a2e';
+      ctx.fillStyle = '#ffd54a';
       ctx.textAlign = 'center';
       ctx.font = 'bold 20px "Pixelify Sans", monospace';
       ctx.fillText('Headset lost: calibration paused', w / 2, h / 2 - 8);

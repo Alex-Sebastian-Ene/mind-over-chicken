@@ -15,9 +15,11 @@
 // random (reproducible from ?seed=) in the default dummy run. The run seed also picks the
 // planet and the other three civilisations.
 
-import { W, H, clamp } from '../sim/util.js';
+import { W, H, clamp, Particles, rand, pick } from '../sim/util.js';
 import { makeBolt, drawBolt, drawReticle } from '../render/sprites.js';
+import { FireballFX } from '../render/fireball.js';
 import { createCiv, EVENT, CAST, TONE, SETUP } from './civ.js';
+import { seamSpans, fadeReliefRim } from './seams.js';
 import { calibrationTraits, calibrationLine } from './calibration-traits.js';
 
 const DAY = 80;            // seconds per day–night cycle (DAY_SECONDS in the Rust sim)
@@ -125,6 +127,8 @@ export class CivSandbox {
     this.error = null;
     this.t = 0;
     this.bolts = [];
+    this.particles = new Particles();
+    this.fireballs = new FireballFX();
     this.news = [];          // {text, t, kind}
     this.shown = null;       // {text, until}
     this.factions = [];
@@ -219,6 +223,8 @@ export class CivSandbox {
     if (!civ) return;
     const G = this.G, b = G.brain;
     this.t += dt;
+    for (const hit of this.fireballs.update(dt)) this.impactFireball(hit);
+    this.particles.update(dt);
     // Calibration → your civilisation (#190), once founding is over so it never fights the
     // 5 s seeding windows; the log says what was applied.
     if (!this.calibApplied && civ.setupPhase === SETUP.done && G.calibration?.done) {
@@ -325,7 +331,7 @@ export class CivSandbox {
 
   // ---------- the god's hand ----------
   aimPlanet(aim) {
-    return this.civ.toPlanet(aim.x * (W - 1), aim.y * (H - 1));
+    return this.toPlanet(aim.x * (W - 1), aim.y * (H - 1));
   }
 
   // Still founding the civilisations (#98)?
@@ -341,7 +347,7 @@ export class CivSandbox {
     // While founding, a click or blink chooses, places, or (seeding) makes the people wilder.
     if (this.setupActive()) { civ.setupClick(p.x, p.y); this.refresh(); return; }
     const killed = civ.lightning(p.x, p.y);
-    const s = civ.toScreen(p.x, p.y);
+    const s = this.toScreen(p.x, p.y);
     this.bolts.push({ x: p.x, y: p.y, pts: makeBolt(s.x, s.y), sx: s.x, sy: s.y, life: 0.35 });
     this.flash = 0.3;
     G.stats.lightning++;
@@ -379,16 +385,28 @@ export class CivSandbox {
     if (cancelled && this.civ) this.civ.moveAgent(g.agent, g.p0.x, g.p0.y);
   }
 
-  // Charged fireball (#291): a bright hit at the cursor.
+  // Charged fireball (#291): launch a visible slam, then impact at the aimed planet tile (#315).
   onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
     const G = this.G;
     if (!G) return;
     const p = this.aimPlanet(aim);
+    this.fireballs.launch(
+      { x: aim.x * (W - 1), y: aim.y * (H - 1) },
+      { color, charge, meta: { planet: p } },
+    );
+    G.audio?.blip?.();
+  }
+
+  impactFireball({ planet, color = '#ff9a2e', charge = 1 }) {
+    const G = this.G;
+    const p = planet || { x: W / 2, y: H / 2 };
+    const s = this.civ?.toScreen ? this.civ.toScreen(p.x, p.y) : p;
     this.flash = 0.4;
     G.audio?.thunder?.();
-    G.shake = Math.max(G.shake || 0, 1.2);
-    if (this.particles) this.particles.burst(16 + Math.round(charge * 16), () => ({ x: p.x, y: p.y, vx: rand(-30, 30), vy: rand(-40, 5), g: 50, life: rand(0.4, 0.7), maxLife: 0.7, size: 1, color }));
-    this.G.advisor?.say('civ-fireball', `A fireball! ${Math.round(charge * 100)}% charged and very visible.`, { mood: 'panic', priority: 2, cooldown: 8 });
+    G.shake = Math.max(G.shake || 0, 1.3 + charge * 0.6);
+    this.particles.burst(24 + Math.round(charge * 24), () => ({ x: s.x, y: s.y, vx: rand(-42, 42), vy: rand(-52, 4), g: 64, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color }));
+    this.particles.burst(8 + Math.round(charge * 8), () => ({ x: s.x + rand(-5, 5), y: s.y + rand(-1, 2), vx: rand(-16, 16), vy: rand(-14, -2), g: 22, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color: pick(['#c9c2b0', '#8a7a5a', '#5f5545']) }));
+    G.advisor?.say('civ-fireball', `A fireball! ${Math.round(charge * 100)}% charged and very visible.`, { mood: 'panic', priority: 2, cooldown: 8 });
   }
 
   // camera (#49): hand casts. aim is 0..1 like the brain's.
@@ -417,10 +435,23 @@ export class CivSandbox {
     this.zoom = clamp((this.zoom || 1.0) * Math.exp(-clamp(delta, -300, 300) * 0.0022), 0.6, 2.5);
   }
 
+  // The 2D zoom scales the view about its centre. The 3D relief is the unzoomed view, so 3D
+  // ignores it. Aims, labels, bolts, lights and the overview map's window all go through these,
+  // so they land where the zoomed view shows the planet (release QA).
+  viewZoom() { return this.G?.render3d ? 1 : (this.zoom || 1.0); }
+  toScreen(x, y) {
+    const s = this.civ.toScreen(x, y), z = this.viewZoom();
+    return z === 1 ? s : { x: W / 2 + (s.x - W / 2) * z, y: H / 2 + (s.y - H / 2) * z };
+  }
+  toPlanet(sx, sy) {
+    const z = this.viewZoom();
+    return this.civ.toPlanet(W / 2 + (sx - W / 2) / z, H / 2 + (sy - H / 2) / z);
+  }
+
   // A drag from main.js (world units, both axes): the content follows the pointer, so the camera
   // moves the other way. This planet is far bigger than the view, so north–south matters here.
   panBy(dx, dy) {
-    const z = this.zoom || 1.0;
+    const z = this.viewZoom();
     this.civ?.pan(-dx / z, -dy / z);
   }
 
@@ -479,7 +510,7 @@ export class CivSandbox {
                       h[y2 + x0] + h[y2 + x1] + h[y2 + x2]) * 0.111111;
       }
     }
-    return s;
+    return fadeReliefRim(s, W, H);
   }
 
   lights() {
@@ -523,7 +554,7 @@ export class CivSandbox {
       this.viewCanvas = Object.assign(document.createElement('canvas'), { width: W, height: H });
     }
     this.viewCanvas.getContext('2d').putImageData(civ.render(), 0, 0);
-    const z = this.zoom || 1.0;
+    const z = this.viewZoom();
     if (Math.abs(z - 1.0) < 0.01) {
       ctx.drawImage(this.viewCanvas, 0, 0);
     } else {
@@ -538,7 +569,7 @@ export class CivSandbox {
     this.perf.renderMs = ms;
     this.perf.sumRender += ms;
     for (const bolt of this.bolts) {
-      const s = civ.toScreen(bolt.x, bolt.y);
+      const s = this.toScreen(bolt.x, bolt.y);
       ctx.save();
       ctx.translate(Math.round(s.x - bolt.sx), Math.round(s.y - bolt.sy));
       drawBolt(ctx, bolt.pts, Math.min(1, bolt.life * 4));
@@ -556,10 +587,12 @@ export class CivSandbox {
       label(ctx, W / 2, H / 2, this.error ? 'The planet failed to form.' : 'Forming a planet…', this.error ? '#ff5a72' : '#ffe066', 8);
       return;
     }
+    this.fireballs.draw(ctx, { project: (x, y) => [x, y] });
+    this.particles.draw(ctx);
     // Names (and ages) at capitals.
     for (const f of this.factions) {
       if (!f.alive || !f.capital) continue;
-      const s = civ.toScreen(f.capital.x + 0.5, f.capital.y);
+      const s = this.toScreen(f.capital.x + 0.5, f.capital.y);
       if (s.x < -30 || s.x > W + 30 || s.y < 4 || s.y > H + 4) continue;
       label(ctx, s.x, s.y - 9, civ.capitalLabel(f.id), f.css, 5);
     }
@@ -572,12 +605,17 @@ export class CivSandbox {
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(this.miniCanvas, x0, y0, mw, mh);
       const kx = mw / civ.pw, ky = mh / civ.ph;
-      const cx = civ.camX * kx, cy = civ.camY * ky, cw = W * kx, ch = H * ky;
+      // Zoomed in, the view shows W/z × H/z planet px about its centre; zoomed out it shows
+      // all of the W × H view, smaller.
+      const z = Math.max(1, this.viewZoom()), vw = W / z, vh = H / z;
+      const wrap = (v, n) => ((v % n) + n) % n;
+      const cx = wrap(civ.camX + (W - vw) / 2, civ.pw) * kx, cy = wrap(civ.camY + (H - vh) / 2, civ.ph) * ky;
+      const cw = vw * kx, ch = vh * ky;
       ctx.strokeStyle = '#ffe066';
       ctx.lineWidth = 0.5;
       // The camera's window, split where it crosses either seam (the planet is a torus, #111).
-      for (const [rx, rw] of cx + cw > mw ? [[cx, mw - cx], [0, cx + cw - mw]] : [[cx, cw]]) {
-        for (const [ry, rh] of cy + ch > mh ? [[cy, mh - cy], [0, cy + ch - mh]] : [[cy, ch]]) ctx.strokeRect(x0 + rx, y0 + ry, rw, rh);
+      for (const [rx, rw] of seamSpans(cx, cw, mw)) {
+        for (const [ry, rh] of seamSpans(cy, ch, mh)) ctx.strokeRect(x0 + rx, y0 + ry, rw, rh);
       }
     }
     // Founding the civilisations (#98): the words come from Rust.
@@ -618,12 +656,12 @@ export class CivSandbox {
     if (!civ || this.darkness < 0.15) return [];
     const L = [];
     for (const v of this.villages) {
-      const s = civ.toScreen(v.x + 0.5, v.y);
+      const s = this.toScreen(v.x + 0.5, v.y);
       if (s.x < -10 || s.x > W + 10 || s.y < -10 || s.y > H + 10) continue;
       L.push({ x: s.x, y: s.y - 1, r: 9 + Math.min(14, v.pop) + Math.sin(this.t * 9 + v.id) * 0.8, pop: v.pop });
     }
     L.sort((p, q) => q.pop - p.pop);
-    for (const bolt of this.bolts) { const s = civ.toScreen(bolt.x, bolt.y); L.unshift({ x: s.x, y: s.y, r: 45 }); }
+    for (const bolt of this.bolts) { const s = this.toScreen(bolt.x, bolt.y); L.unshift({ x: s.x, y: s.y, r: 45 }); }
     return L.slice(0, 16);
   }
 
