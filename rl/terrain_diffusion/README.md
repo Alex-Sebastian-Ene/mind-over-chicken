@@ -54,7 +54,8 @@ MOCD_WEIGHTS=../td_smoke/relief.mocd cargo test -p moc-diffusion --test detail -
 python rl/terrain_diffusion/make_fixtures.py   # after changing model.py or diffusion.py
 ```
 
-Iridis (after approval of the download and the CUDA torch install):
+Iridis (approved on #110: the ETOPO download, and reusing the existing argus env's CUDA
+torch read-only, with only tifffile + imagecodecs installed in our own small venv):
 
 ```bash
 ssh iridis 'git clone -b feat/terrain-diffusion https://github.com/Alex-Sebastian-Ene/mind-over-chicken /scratch/ase1g23/moc_diffusion/repo'
@@ -68,4 +69,4 @@ Then copy `runs/relief_d4.mocd` to `crates/moc-diffusion/weights/relief.mocd`; t
 embeds it at build time when present.
 
 Everything lives under `/scratch/ase1g23/moc_diffusion` (`raw/`, `data/`, `runs/`, `logs/`,
-`venv/`). Jobs request `-N 1` and one L4; train and distil resume from their checkpoints.
+`venv/`); `/scratch/ase1g23/envs/argus` is only read. Jobs request `-N 1` and one L4; train and distil resume from their checkpoints.

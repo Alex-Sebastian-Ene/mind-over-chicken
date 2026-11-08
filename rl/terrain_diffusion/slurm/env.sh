@@ -13,7 +13,7 @@ export ETOPO_FILE="$TD_RAW/ETOPO_2022_v1_60s_N90W180_surface.tif"
 export ETOPO_BYTES=465969062
 
 module load python/3.12.6 >/dev/null 2>&1 || true
-# TD_PYTHON overrides the interpreter (e.g. an existing CUDA env); default is our venv.
+# Our venv sits on top of the read-only argus conda env (torch 2.9.1+cu128); see setup.sh.
 export TD_PYTHON="${TD_PYTHON:-$TD_VENV/bin/python}"
 export PYTHONUNBUFFERED=1
 mkdir -p "$TD_ROOT/logs" "$TD_RUNS"

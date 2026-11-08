@@ -1,6 +1,6 @@
 # Offline training tooling for #110 (never shipped). PyTorch is installed separately:
 #   CPU:  pip install torch --index-url https://download.pytorch.org/whl/cpu
-#   GPU:  pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cu128   (needs approval)
+#   Iridis: no install; torch 2.9.1+cu128 comes read-only from /scratch/ase1g23/envs/argus (setup.sh)
 numpy>=1.26
 tifffile>=2024.1      # reads the ETOPO GeoTIFF
 imagecodecs>=2024.1   # its DEFLATE/LZW + predictor codecs
