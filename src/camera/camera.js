@@ -1,7 +1,8 @@
 // camera (#33, #67, #116–#123): opt-in webcam input.
-//   Head:  SOLE cursor. Hands never overwrite G.brain.aim (#116, #120).
+//   Aim:   the webcam does NOT track the head (#189). G.brain.aim comes from the EEG headset's head
+//          pose while it streams, else the mouse (aim-source.js). Hands never overwrite it (#116, #120).
 //   Hands: MediaPipe Gesture Recognizer (numHands=2, #118) →
-//          1. One-hand pinch grabs & relocates living entities under the head cursor (#120)
+//          1. One-hand pinch grabs & relocates living entities under the cursor (#120)
 //          2. Two-hand pinch distance continuously zooms in/out & freezes on release (#119)
 //          3. Three core moves (#122): Pinch (1), Open Palm / Calm (2), Closed Fist / Strike (3)
 //   Face:  MediaPipe Face Landmarker blendshapes → Joy (continuous) + Surprise (debounced event) (#117).
@@ -27,6 +28,7 @@ import { FingerController, MultiHandTracker } from './fingers.js';
 import { initCoach } from './coach.js';
 import { FrameMeter } from './meter.js';
 import { drawHand } from './draw.js';
+import { aimSource } from './aim-source.js';
 
 const ADVISOR_GAP = 14;      // seconds between the advisor's mood remarks
 const PING_MS = 900;         // how long a cast marker stays on the map
@@ -50,7 +52,7 @@ const TEMPLATE = `
       <strong data-cam-state>Camera off</strong>
       <span class="eeg-qual" data-cam-mode>Idle</span>
     </div>
-    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam: head cursor aims; hands pinch-grab creatures, two-hand pinch-zoom, palm to calm, fist to strike. Frames never leave this device.</p>
+    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam for hands and face: pinch-grab creatures, two-hand pinch-zoom, palm to calm, fist to strike; your expression sets the mood. The webcam does not track your head: the cursor follows the EEG headset's head pose, or the mouse. Frames never leave this device.</p>
     <div class="eeg-url-row">
       <button type="button" class="btn btn-primary btn-small" data-cam-start>Start Camera</button>
       <button type="button" class="btn btn-small" data-cam-stop disabled>Stop &amp; Clear</button>
@@ -73,6 +75,9 @@ const TEMPLATE = `
           <div><span>Face Inference</span><b data-cam-rate-face>--</b></div>
         </div>
         <div class="eeg-imu-mini">
+          <span>Cursor: <b data-cam-aim>mouse</b></span>
+        </div>
+        <div class="eeg-imu-mini">
           <span>Hands: <b data-cam-gesture>--</b></span>
         </div>
         <div class="eeg-imu-mini">
@@ -87,7 +92,7 @@ const TEMPLATE = `
       <h3>Core Hand Moves (Keys 1–3)</h3>
       <span class="eeg-qual" data-cam-last>Ready</span>
     </div>
-    <p class="eeg-msg" data-cam-now>Head aims the cursor. Pinch=Grab (1), Palm=Calm (2), Fist=Strike (3).</p>
+    <p class="eeg-msg" data-cam-now>Aim with the headset or mouse. Pinch=Grab (1), Palm=Calm (2), Fist=Strike (3).</p>
     <div class="cam-spells" role="group" aria-label="Core moves, keys 1 to 3">
       ${SPELLS.map((s) => `<button type="button" class="cam-spell" data-spell="${s.id}" aria-label="${s.name} (key ${s.key})" title="${s.name} · key ${s.key}. ${s.hint}">
         <svg class="cam-ring" viewBox="0 0 36 36" aria-hidden="true"><circle class="cam-ring-track" cx="18" cy="18" r="16"/><circle class="cam-ring-hold" cx="18" cy="18" r="16" pathLength="100"/><circle class="cam-ring-cd" cx="18" cy="18" r="16" pathLength="100"/></svg>
@@ -95,7 +100,7 @@ const TEMPLATE = `
       </button>`).join('')}
     </div>
     <div class="eeg-imu-mini">
-      <span>Action State: <b data-cam-range>head cursor active</b></span>
+      <span>Action State: <b data-cam-range>ready</b></span>
     </div>
   </section>
 
@@ -167,6 +172,7 @@ export function initCamera({
     fps: $('[data-cam-fps]'),
     rateHands: $('[data-cam-rate-hands]'),
     rateFace: $('[data-cam-rate-face]'),
+    aim: $('[data-cam-aim]'),
     gesture: $('[data-cam-gesture]'),
     pinch: $('[data-cam-pinch]'),
     range: $('[data-cam-range]'),
@@ -241,12 +247,12 @@ export function initCamera({
     if (ui.stopBtn) ui.stopBtn.disabled = !live && next !== 'starting';
     ui.state.textContent = live ? (next === 'on' ? 'Camera on · tracking' : 'Camera on · loading') : next === 'error' ? 'Camera unavailable' : next === 'starting' ? 'Starting camera…' : 'Camera off';
     if (msg) setMsg(msg);
-    else if (live && next === 'on') setMsg('Tracking hands and facial mood locally. Head cursor is sole aim.');
+    else if (live && next === 'on') setMsg('Tracking hands and facial mood locally. The cursor comes from the headset or mouse, not the webcam.');
     onStatusChange?.({ status: next, live });
   }
   function setMsg(msg) {
     if (!ui.msg) return;
-    ui.msg.textContent = msg || 'Opt-in webcam: head cursor aims; hands grab, zoom, calm and strike.';
+    ui.msg.textContent = msg || 'Opt-in webcam for hands and face. The cursor follows the EEG headset or the mouse.';
   }
 
   function togglePanel(force) {
@@ -381,14 +387,14 @@ export function initCamera({
       const res = scene.onGrabStart(aim);
       if (res && res.ok) {
         grabbed = { label: res.label || 'creature', kind: res.kind || 'entity', at: now };
-        coach?.flash(`Picked up ${grabbed.label} · move head & release to drop`, 'ok', 2800);
-        G.hud?.showCause?.(`🤏 Grabbed ${grabbed.label} — move head cursor & release to place`);
+        coach?.flash(`Picked up ${grabbed.label} · move the cursor & release to drop`, 'ok', 2800);
+        G.hud?.showCause?.(`🤏 Grabbed ${grabbed.label} — move the cursor & release to place`);
         history.unshift({ id: 'pinch', via: 'pinch', at: now });
         history.length = Math.min(history.length, 5);
         lastCast = { id: 'pinch', at: now };
         return true;
       }
-      const why = res?.reason || 'Move head cursor over a living creature to grab';
+      const why = res?.reason || 'Move the cursor over a living creature to grab';
       coach?.flash(why, 'bad', 2000);
       return false;
     }
@@ -422,7 +428,7 @@ export function initCamera({
     const scene = G?.scene;
     if (!scene || !SPELL_BY_ID[id] || !canCast()) return false;
 
-    // Key 1 or Pinch button toggles living-entity grab at the head reticle (#120, #122)
+    // Key 1 or Pinch button toggles living-entity grab at the reticle (#120, #122)
     if (id === 'pinch') {
       if (grabbed) {
         return tryGrabEnd(G, now, false);
@@ -562,7 +568,7 @@ export function initCamera({
         onZoomDelta(multi.zoomDelta, multi.zoomFactor);
       }
 
-      // 2. One-hand pinch grab at head reticle (#120) & Globe/World movement
+      // 2. One-hand pinch grab at the reticle (#120) & Globe/World movement
       if (multi.grab.started) {
         tryGrabStart(G, now);
         if (!grabbed && onGrabMove) {
@@ -668,18 +674,19 @@ export function initCamera({
       return `👐 Two-hand zoom (${Math.round((multi.zoomFactor || 1) * 100)}%) · unpinch to freeze`;
     }
     if (grabbed) {
-      return `🤏 Holding ${grabbed.label} · move head cursor & release pinch to drop`;
+      return `🤏 Holding ${grabbed.label} · move the cursor & release pinch to drop`;
     }
     const recent = lastCast && now - lastCast.at < 1400 ? SPELL_BY_ID[lastCast.id] : null;
     if (recent) return `Move: ${fmt(recent)}!`;
-    if (!(stream && engine)) return 'Head aims cursor. Press 1 (Grab), 2 (Calm), or 3 (Strike).';
+    const aimBy = aimSource(getG(), now).short;
+    if (!(stream && engine)) return `Aim with the ${aimBy}. Press 1 (Grab), 2 (Calm), or 3 (Strike).`;
     const g = GESTURE_LABEL[gesture.name] || gesture.name;
     if (hold.held) {
       const s = SPELL_BY_ID[hold.held];
       const cd = casts.cooldownLeft(s.id, now);
       return cd > 0 ? `${g}: ${s.name} ready in ${(cd / 1000).toFixed(1)} s` : `${g}: hold for ${s.name}…`;
     }
-    return hand ? `Hand: ${g} · head cursor aims` : 'Show 1 hand to grab/calm/strike, or 2 hands to pinch-zoom.';
+    return hand ? `Hand: ${g} · ${aimBy} aims` : 'Show 1 hand to grab/calm/strike, or 2 hands to pinch-zoom.';
   }
 
   function fmtRate(r) {
@@ -743,8 +750,11 @@ export function initCamera({
         ui.pinch.textContent = '1H grab · 2H zoom';
       }
     }
+    const aim = aimSource(getG(), now);
+    if (ui.aim && ui.aim.textContent !== aim.label) ui.aim.textContent = aim.label;
+    panel.dataset.aim = aim.id;
     if (ui.range) {
-      ui.range.textContent = grabbed ? `carrying ${grabbed.label}` : multi?.bothPinched ? 'two-hand zoom active' : 'head cursor sole aim';
+      ui.range.textContent = grabbed ? `carrying ${grabbed.label}` : multi?.bothPinched ? 'two-hand zoom active' : 'ready';
     }
     if (ui.last) {
       const last = history[0];
