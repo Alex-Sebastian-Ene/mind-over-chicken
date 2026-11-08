@@ -32,6 +32,12 @@ export class Engine {
     draw_text_badge(cx: number, y: number, text: string, text_r: number, text_g: number, text_b: number, bg_r: number, bg_g: number, bg_b: number, bg_a: number): void;
     draw_text_centered(cx: number, y: number, text: string, r: number, g: number, b: number, a: number): void;
     end_frame(night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
+    /**
+     * Mirror the JS scene on screen into the HUD (#191): its objectives (`flags` bit 1 done,
+     * 2 bad, 4 plain) and run time. The Rust era sim then stands still and raises nothing of its
+     * own; see GameFlow::mirrored. Called by src/main.js every frame, before game_tick.
+     */
+    game_mirror(run_time: number, labels: string[], values: string[], flags: Uint8Array | number[]): void;
     game_on_blink(aim_x: number, aim_y: number): void;
     game_on_cast(spell: string, aim_x: number, aim_y: number): void;
     game_restart_era(): void;
@@ -41,6 +47,10 @@ export class Engine {
      * (EEG agitation or face anger, 0..1, about 0.15 at rest).
      */
     game_tick(dt: number, calm: number, focus: number, stress: number, blinks: number): void;
+    /**
+     * Back to the Rust era sim driving the HUD (the all-Rust app never mirrors).
+     */
+    game_unmirror(): void;
     /**
      * Standalone helper to generate a civ planet RGBA texture (#109).
      */
@@ -273,7 +283,9 @@ export class RustCalibration {
 }
 
 /**
- * Standalone WebAssembly Cast Controller for camera god powers (#33, #108)
+ * Standalone WebAssembly Cast Controller for camera god powers (#33, #108). The browser's
+ * src/camera/casts.js runs this: the three core moves, with the fist-to-open fireball (#150, #159).
+ * `update` returns [held, progress, cast, aiming, armed].
  */
 export class RustCastController {
     free(): void;
@@ -617,11 +629,13 @@ export interface InitOutput {
     readonly engine_draw_text_badge: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
     readonly engine_draw_text_centered: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly engine_end_frame: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+    readonly engine_game_mirror: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly engine_game_on_blink: (a: number, b: number, c: number) => void;
     readonly engine_game_on_cast: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly engine_game_restart_era: (a: number) => void;
     readonly engine_game_start_era: (a: number, b: number) => void;
     readonly engine_game_tick: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly engine_game_unmirror: (a: number) => void;
     readonly engine_generate_civ_terrain: (a: number, b: number, c: number) => [number, number];
     readonly engine_generate_terrain: (a: number, b: number, c: number, d: number) => [number, number];
     readonly engine_get_camera_distance: (a: number) => number;
@@ -898,10 +912,10 @@ export interface InitOutput {
     readonly moc_sim_free: (a: number) => void;
     readonly moc_sim_new: (a: number) => number;
     readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
-    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
-    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__281: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__282: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__283: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__284: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
@@ -910,6 +924,7 @@ export interface InitOutput {
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_destroy_closure: (a: number, b: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
+    readonly __externref_drop_slice: (a: number, b: number) => void;
     readonly __wbindgen_start: () => void;
 }
 

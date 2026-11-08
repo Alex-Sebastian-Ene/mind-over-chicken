@@ -304,6 +304,14 @@ export class Galaxy {
   // opts.anger: the camera mood's anger (0..1), which unsettles the world you're looking at.
   update(dt, brain, home, playDt = dt, opts = {}) {
     this.time += dt;
+    // Orbits spread over the room there is for however many worlds exist (#148, Alex: "orbit more
+    // nicely"): four worlds no longer crowd the four innermost of ten slots, and a new world eases
+    // the others outward instead of jumping.
+    const n = this.planets.length;
+    this.planets.forEach((p, i) => {
+      const want = n <= 1 ? ORBIT_FIRST : ORBIT_FIRST + (i / (n - 1)) * (ORBIT_MAX - ORBIT_FIRST);
+      p.orbit += (want - p.orbit) * Math.min(1, dt * 1.5);
+    });
     this.humanBrain = brain;
     this.recentBlinks = this.recentBlinks.filter((t) => this.time - t < 10);
     const fx = brainEffects({
@@ -330,6 +338,14 @@ export class Galaxy {
           this.note(p, `A new world emerged from your ${p.channel}: behold ${p.name}!`);
         }
         if (!p.home) {
+          // A colony ship from the Rust sim settled an empty world: wake it here too (#196).
+          if (!p.alive && !p.forming && typeof this.wasm.planet_is_alive === 'function' && this.wasm.planet_is_alive(i)) {
+            p.alive = true;
+            p.surface?.ensureTribe();
+            p.labels.push({ text: 'settled!', t: 3.5, color: '#9be38a' });
+            this.note(p, `Settlers landed on ${p.name}.`);
+            this.onEvent?.(p, 'settled', 'settled');
+          }
           p.pop = this.wasm.planet_pop(i);
           p.eraIndex = this.wasm.planet_era(i);
           p.progress = this.wasm.planet_progress(i);
@@ -356,10 +372,11 @@ export class Galaxy {
           }
         }
       }
-    } else {
-      this.sampleMind(playDt, brain, fx);
-      this.stepForming(dt);
     }
+    // The mind sample and world forming are not part of the double simulation (#196): they reveal
+    // the mind-worlds and generate their surfaces, which Rust does not do, so they always run.
+    this.sampleMind(playDt, brain, fx);
+    this.stepForming(dt);
 
     for (const p of this.planets) {
       p.labels = p.labels.filter((l) => (l.t -= dt) > 0);
@@ -568,10 +585,18 @@ export class Galaxy {
   drawOverlay(ctx, { alpha = 1, hover = null } = {}) {
     if (alpha < 0.05) return;
     ctx.globalAlpha = alpha;
-    for (const p of this.planets) {
+    // Readable labels (#148): the selected or hovered world first, then home, then the rest; a
+    // label block that would land on one already placed shows just the world's name.
+    const order = [...this.planets].sort((a, b) => (b === hover) - (a === hover) || (b.home === true) - (a.home === true));
+    const placed = [];
+    for (const p of order) {
       const q = this.pos(p);
       const ch = CHANNELS[p.channel];
+      const top = q.y + p.size + 3, block = { x: q.x, y0: top, y1: top + 16 };
+      const crowded = placed.some((r) => Math.abs(r.x - block.x) < 34 && block.y0 < r.y1 && r.y0 < block.y1);
+      placed.push(crowded ? { x: q.x, y0: top, y1: top + 6 } : block);
       label(ctx, q.x, q.y + p.size + 7, p.name, p === hover ? '#ffe066' : '#f2e8d5', 5);
+      if (crowded) continue;
       const sub = p.forming ? (p.mindSlot && !this.mind.done ? `reading your mind ${Math.max(0, Math.ceil(SIM.MIND_SECONDS - this.mind.t))}s`
         : p.formQueued ? 'waiting to form' : p.formPending ? `forming ${Math.max(1, Math.ceil(FORM_SECONDS - (p.formT || 0)))}s` : 'forming…')
         : p.pop > 0 ? `${ERA_LABEL[ERA_NAMES[p.eraIndex]]} · ${p.home && !p.autonomous ? `${p.pop} people` : fmtPop(p.pop)}` : 'barren';

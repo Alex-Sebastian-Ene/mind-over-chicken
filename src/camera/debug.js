@@ -1,13 +1,13 @@
 // camera debug (#67): the Debug tab. A small panel, opened from the top bar or with the backquote
 // key (` — an alias of C, which toggles the Camera sidebar, #211), that shows what the game reads from you:
 //   - the mirrored camera thumbnail with the 21 hand landmarks, the aiming fingertip, the pinch and the face box;
-//   - the recognised gesture and its confidence, hold progress, the pinch, the learned hand range and cooldowns;
+//   - the recognised gesture and its confidence, the pinch and the learned hand range;
 //   - live emotion bars and the dominant mood;
 //   - inference rate (Hz), model time and end-to-end latency (ms) for hands and face, and where they run;
 //   - the brain signals: calm, focus, stress (EEG agitation or face anger), blinks; and the game's frame rate.
-// Without a camera it still shows key casts, cooldowns, brain values and the frame rate.
+// Without a camera it still shows brain values and the frame rate.
 
-import { SPELL_BY_ID, GESTURE_LABEL } from './spells.js';
+import { GESTURE_LABEL } from './gestures.js';
 import { EMOTIONS } from './emotion.js';
 import { drawHand } from './draw.js';
 import { FrameMeter } from './meter.js';
@@ -34,11 +34,8 @@ const TEMPLATE = `
   </div>
   <section class="dbg-sec" aria-label="Hand">
     <p class="dbg-row"><span>Gesture</span><b data-dbg="gesture">–</b></p>
-    <p class="dbg-row"><span>Hold</span><span class="dbg-meter"><span data-dbg="hold"></span></span><b data-dbg="holdText">–</b></p>
     <p class="dbg-row"><span>Pinch</span><b data-dbg="pinch">–</b></p>
     <p class="dbg-row"><span>Range</span><b data-dbg="range">–</b></p>
-    <ul class="dbg-cds" data-dbg="cds" aria-label="Cooldowns"></ul>
-    <p class="dbg-row"><span>Last cast</span><b data-dbg="last">none yet · press 1–3</b></p>
   </section>
   <section class="dbg-sec" aria-label="Mood">
     <p class="dbg-row"><span>Mood</span><b data-dbg="mood">camera off</b></p>
@@ -55,7 +52,6 @@ const TEMPLATE = `
   </section>`;
 
 const pct = (v) => `${Math.round((v || 0) * 100)}%`;
-const secs = (ms) => `${(ms / 1000).toFixed(1)} s`;
 
 export function initDebug({ getG, camera }) {
   const btn = document.getElementById('dbgBtn');
@@ -63,7 +59,7 @@ export function initDebug({ getG, camera }) {
   if (!btn || !panel) return null;
   panel.innerHTML = TEMPLATE;
   const q = (k) => panel.querySelector(`[data-dbg="${k}"]`);
-  const el = Object.fromEntries(['mode', 'note', 'hands', 'face', 'game', 'gesture', 'hold', 'holdText', 'pinch', 'range', 'cds', 'last', 'mood', 'calm', 'focus', 'stress', 'blinks', 'source'].map((k) => [k, q(k)]));
+  const el = Object.fromEntries(['mode', 'note', 'hands', 'face', 'game', 'gesture', 'pinch', 'range', 'mood', 'calm', 'focus', 'stress', 'blinks', 'source'].map((k) => [k, q(k)]));
   const emo = Object.fromEntries(EMOTIONS.map((k) => {
     const row = panel.querySelector(`.dbg-emo[data-emotion="${k}"]`);
     return [k, { bar: row.querySelector('.dbg-meter > span'), num: row.querySelector('b') }];
@@ -71,20 +67,21 @@ export function initDebug({ getG, camera }) {
   const thumb = panel.querySelector('.dbg-thumb');
   const tctx = thumb.getContext('2d');
   const frames = new FrameMeter();
-  let open = false, textAt = 0, cdKey = '';
+  let open = false, textAt = 0;
 
   const set = (node, text) => { if (node.textContent !== text) node.textContent = text; };
 
-  function toggle(next = !open) {
-    if (camera?.togglePanel) {
-      camera.togglePanel(next);
-      open = !document.getElementById('camPanel')?.hidden;
-      return;
-    }
+  // Debug is its own panel (#187). It used to hand the toggle to the Camera panel, so the button
+  // (hidden anyway) and the ` key opened Camera and the debug panel never showed. Opening one of
+  // the two closes the other; the state is the panel's own `hidden`, as Camera can close it.
+  function toggle(next = panel.hidden) {
     open = next;
     panel.hidden = !open;
     btn.setAttribute('aria-pressed', String(open));
-    if (open) { frames.reset(); textAt = 0; }
+    if (open) {
+      camera?.togglePanel?.(false);
+      frames.reset(); textAt = 0;
+    }
   }
   btn.addEventListener('click', () => toggle());
   panel.querySelector('[data-dbg-close]').addEventListener('click', () => toggle(false));
@@ -108,7 +105,7 @@ export function initDebug({ getG, camera }) {
       tctx.font = '11px "Atkinson Hyperlegible", system-ui, sans-serif';
       tctx.textAlign = 'center';
       tctx.fillText(s?.status === 'starting' ? 'starting camera…' : 'no camera', w / 2, h / 2 - 4);
-      tctx.fillText('keys 1–3 still cast', w / 2, h / 2 + 12);
+      tctx.fillText('gestures move only', w / 2, h / 2 + 12);
       return;
     }
     // Mirrored, like the camera panel, so it moves the way you do.
@@ -127,17 +124,17 @@ export function initDebug({ getG, camera }) {
     if (s.hands && (s.hands.left || s.hands.right)) {
       if (s.hands.left?.visible) {
         drawHand(tctx, s.hands.left.landmarks, dw, dh, {
-          held: !!s.hold?.held, pinching: !!s.hands.left.pinching, side: 'left',
+          held: !!s.grabbed, pinching: !!s.hands.left.pinching, side: 'left',
         });
       }
       if (s.hands.right?.visible) {
         drawHand(tctx, s.hands.right.landmarks, dw, dh, {
-          held: !!s.hold?.held, pinching: !!s.hands.right.pinching, side: 'right',
+          held: !!s.grabbed, pinching: !!s.hands.right.pinching, side: 'right',
         });
       }
     } else {
       drawHand(tctx, s.hand, dw, dh, {
-        held: !!s.hold?.held, aiming: s.finger?.mode === 'point', pinching: !!s.finger?.pinching,
+        held: !!s.grabbed, pinching: !!s.finger?.pinching,
         nearPinch: s.finger?.ratio != null && s.finger.ratio < s.pinch.exit,
       });
     }
@@ -168,7 +165,7 @@ export function initDebug({ getG, camera }) {
     const note = s?.live && e?.note ? e.note : '';
     set(el.note, note);
     el.note.hidden = !note;
-    set(el.hands, s?.live && e && s.castsEnabled ? rate(e.gesture) : s?.castsEnabled === false ? 'casts off' : '–');
+    set(el.hands, s?.live && e ? rate(e.gesture) : '–');
     set(el.face, s?.live && e ? rate(e.face) : '–');
     set(el.game, `${Math.round(frames.fps(now))} fps · ${frames.long} long`);
     el.game.title = frames.long ? `Frames over 50 ms since the panel opened (worst ${Math.round(frames.worst)} ms)` : 'No frame over 50 ms since the panel opened';
@@ -196,11 +193,6 @@ export function initDebug({ getG, camera }) {
       }
     }
     set(el.gesture, handTxt);
-    const held = s?.hold?.held ? SPELL_BY_ID[s.hold.held] : null;
-    const heldCd = held ? s.cooldowns.find((c) => c.id === held.id) : null;
-    el.hold.style.width = pct(held ? s.hold.progress : 0);
-    set(el.holdText, held ? (heldCd.left > 0 ? `${held.glyph} ready in ${secs(heldCd.left)}` : `${held.glyph} ${held.name} ${pct(s.hold.progress)}`) : '–');
-    const armed = SPELL_BY_ID[s?.armed || 'fist'] || SPELL_BY_ID.fist;
     const pinchTxt = s?.hands?.bothPinched
       ? `2H zoom ×${(s.hands.zoomFactor || 1).toFixed(2)} (dist ${(s.hands.distance || 0).toFixed(2)})`
       : s?.grabbed
@@ -213,34 +205,6 @@ export function initDebug({ getG, camera }) {
     set(el.pinch, pinchTxt);
     const rg = s?.range;
     set(el.range, !rg ? '–' : `cursor: ${aimSource(getG()).label} · hand range ${rg.calibrated ? 'learned' : `learning ${pct(rg.progress)}`}`);
-
-    // Cooldowns: rebuild the chips only when the set of cooling spells changes; update widths always.
-    const cds = s?.cooldowns || [];
-    const key = cds.map((c) => `${c.id}${c.left > 0 ? 1 : 0}${c.id === s?.armed ? 'a' : ''}`).join();
-    if (key !== cdKey) {
-      cdKey = key;
-      el.cds.replaceChildren(...cds.map((c) => {
-        const li = document.createElement('li');
-        li.className = 'dbg-cd';
-        li.dataset.spell = c.id;
-        if (c.left > 0) li.classList.add('is-cooling');
-        if (c.id === s.armed) li.classList.add('is-armed');
-        li.title = `${c.name} · key ${c.key}${c.id === s.armed ? ' · armed for pinch' : ''}`;
-        const gl = document.createElement('span'); gl.textContent = c.glyph; gl.setAttribute('aria-hidden', 'true');
-        const t = document.createElement('b');
-        const bar = document.createElement('i');
-        li.append(gl, t, bar);
-        return li;
-      }));
-    }
-    for (const c of cds) {
-      const li = el.cds.querySelector(`[data-spell="${c.id}"]`);
-      if (!li) continue;
-      set(li.querySelector('b'), c.left > 0 ? (c.left / 1000).toFixed(1) : String(c.key));
-      li.querySelector('i').style.width = pct(c.frac);
-    }
-    const last = s?.history?.[0];
-    set(el.last, last ? `${SPELL_BY_ID[last.id].glyph} ${SPELL_BY_ID[last.id].name} · ${last.via} · ${secs(now - last.at)} ago` : 'none yet · press 1–3');
 
     // Mood
     const m = s?.mood;
@@ -274,7 +238,7 @@ export function initDebug({ getG, camera }) {
     if (now - lastAt < 8) return;
     lastAt = now;
     frames.frame(now);
-    if (open) {
+    if (!panel.hidden) {   // Camera may have closed it (#187)
       const s = camera?.debugState?.(now) || null;
       drawThumb(s);
       if (now - textAt >= TEXT_MS) { textAt = now; updateText(now, s, getG()); }
@@ -286,7 +250,7 @@ export function initDebug({ getG, camera }) {
 
   return {
     toggle,
-    get open() { return open; },
+    get open() { return !panel.hidden; },
     frames,
     // Game frame pacing over the panel's lifetime, for checking that inference drops no frames.
     frameStats(now = performance.now()) { return { fps: Math.round(frames.fps(now) * 10) / 10, long: frames.long, worst: Math.round(frames.worst) }; },

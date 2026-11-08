@@ -1,10 +1,10 @@
-// camera (#33, #67, #116–#123): opt-in webcam input.
+// camera (#33, #67, #116–#123, #261): opt-in webcam input.
 //   Aim:   the webcam does NOT track the head (#189). G.brain.aim comes from the EEG headset's head
 //          pose while it streams, else the mouse (aim-source.js). Hands never overwrite it (#116, #120).
-//   Hands: MediaPipe Gesture Recognizer (numHands=2, #118) →
+//   Hands: MediaPipe Gesture Recognizer (numHands=2, #118) → movement only:
 //          1. One-hand pinch grabs & relocates living entities under the cursor (#120)
 //          2. Two-hand pinch distance continuously zooms in/out & freezes on release (#119)
-//          3. Three core moves (#122): Pinch (1), Open Palm / Calm (2), Closed Fist / Strike (3)
+//          3. One deliberate cast (#291): fist → pull back → thrust + open palm = charged fireball.
 //   Face:  MediaPipe Face Landmarker blendshapes → Joy (continuous) + Surprise (debounced event) (#117).
 //   Coach: Collapsible bottom panel with procedural 21-landmark ghost hands (#123).
 //
@@ -14,17 +14,19 @@
 // uploaded: no frame, landmark or score leaves the device. Turning the camera off stops every
 // track. The only network traffic is the one-time download of the runtime and the two models.
 //
-// The player stays in control: casts and moods are an extra channel on top of the headset and
-// keyboard. They call scene hooks and move the aim the way the mouse does; they never change
-// the brain's calm or focus and never block another input. Face emotion does count toward
-// brain state and game reactions.
+// The player stays in control: hands never change the brain's calm or focus and never block
+// another input. Face emotion does count toward brain state and game reactions.
 
 import { clamp } from '../sim/util.js';
-import { SPELLS, SPELL_BY_ID, GESTURE_LABEL, spellForKeyCode, CAMERA_CASTS_ENABLED } from './spells.js';
-import { CastController } from './casts.js';
+import { GESTURE_LABEL } from './gestures.js';
+import { PinchMoveSmoother } from './pinch-move.js';
+import { initMovementCalibration, loadPinchCalibration, savePinchCalibration } from './movement-calibration.js';
+import { FireballController } from './fireball.js';
 import { EMOTIONS, EmotionTracker, neutralMood, blendshapeMap } from './emotion.js';
+import { manualMood, surpriseRisingEdge } from './manual-mood.js';
 import { loadVision } from './vision.js';
 import { loadEngine, workerPreference } from './engine.js';
+import { handsEnabled, setHandsEnabled } from './hands-pref.js';
 import { FingerController, MultiHandTracker } from './fingers.js';
 import { initCoach } from './coach.js';
 import { FrameMeter } from './meter.js';
@@ -32,8 +34,6 @@ import { drawHand } from './draw.js';
 import { aimSource } from './aim-source.js';
 
 const ADVISOR_GAP = 14;      // seconds between the advisor's mood remarks
-const PING_MS = 900;         // how long a cast marker stays on the map
-const MISS_MS = 1400;        // how long "ready in …" stays up after a cooling cast
 const GPU_GUARD = { ratio: 0.85, minFps: 30, graceMs: 4000, everyMs: 1000 };
 
 const MOOD_LINES = {
@@ -53,11 +53,12 @@ const TEMPLATE = `
       <strong data-cam-state>Camera off</strong>
       <span class="eeg-qual" data-cam-mode>Idle</span>
     </div>
-    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam for hands and face: pinch-grab creatures, two-hand pinch-zoom, palm to calm, fist to strike; your expression sets the mood. The webcam does not track your head: the cursor follows the EEG headset's head pose, or the mouse. Frames never leave this device.</p>
+    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam for your face: your expression sets the mood. Hand moves are off unless you tick them below (pinch to grab a creature, move your hand to pan, two hands to pinch-zoom). The webcam does not track your head: the cursor follows the EEG headset's head pose, or the mouse. Frames never leave this device.</p>
     <div class="eeg-url-row">
       <button type="button" class="btn btn-primary btn-small" data-cam-start>Start Camera</button>
       <button type="button" class="btn btn-small" data-cam-stop disabled>Stop &amp; Clear</button>
     </div>
+    <label class="cam-hands-toggle"><input type="checkbox" data-cam-hands> Hand moves (pinch to grab, two hands to zoom). Off by default: the face sets the mood either way.</label>
     <p class="cam-privacy" data-cam-optin>The webcam stays off until you click <b>Start Camera</b>; only then does the browser ask for permission. Frames never leave this device.</p>
   </section>
 
@@ -73,6 +74,7 @@ const TEMPLATE = `
       </div>
       <div class="eeg-cursor-controls">
         <div class="eeg-imu-xyz" style="grid-template-columns:1fr">
+          <div><span>Camera Frames</span><b data-cam-rate-video>--</b></div>
           <div><span>Hands Inference</span><b data-cam-rate-hands>--</b></div>
           <div><span>Face Inference</span><b data-cam-rate-face>--</b></div>
         </div>
@@ -85,25 +87,24 @@ const TEMPLATE = `
         <div class="eeg-imu-mini">
           <span>Pinch / Zoom: <b data-cam-pinch>--</b></span>
         </div>
+        <div class="eeg-url-row">
+          <button type="button" class="btn btn-primary btn-small" data-calib-open>🎯 Pinch Movement Calibration</button>
+        </div>
       </div>
     </div>
   </section>
 
-  <section class="eeg-sec">
+  <section class="eeg-sec" aria-label="Charged fireball">
     <div class="eeg-sec-head">
-      <h3>Core Hand Moves (Keys 1–3)</h3>
-      <span class="eeg-qual" data-cam-last>Ready</span>
+      <h3>Charged Fireball</h3>
+      <span class="eeg-qual" data-cam-fb-state>idle</span>
     </div>
-    <p class="eeg-msg" data-cam-now>Aim with the headset or mouse. Pinch=Grab (1), Palm=Calm (2), Fist=Strike (3).</p>
-    <div class="cam-spells" role="group" aria-label="Core moves, keys 1 to 3">
-      ${SPELLS.map((s) => `<button type="button" class="cam-spell" data-spell="${s.id}" aria-label="${s.name} (key ${s.key})" title="${s.name} · key ${s.key}. ${s.hint}">
-        <svg class="cam-ring" viewBox="0 0 36 36" aria-hidden="true"><circle class="cam-ring-track" cx="18" cy="18" r="16"/><circle class="cam-ring-hold" cx="18" cy="18" r="16" pathLength="100"/><circle class="cam-ring-cd" cx="18" cy="18" r="16" pathLength="100"/></svg>
-        <span class="cam-glyph" aria-hidden="true">${s.glyph}</span><kbd>${s.key}</kbd>
-      </button>`).join('')}
+    <div class="cam-fireball">
+      <span class="cam-fb-orb" data-cam-fb-orb></span>
+      <span class="cam-fb-meter"><i data-cam-fb-meter></i></span>
+      <b data-cam-fb-pct>0%</b>
     </div>
-    <div class="eeg-imu-mini">
-      <span>Action State: <b data-cam-range>ready</b></span>
-    </div>
+    <p class="eeg-msg">Hold a fist, pull it back, then thrust forward and open your palm. Or hold <kbd>3</kbd> and release.</p>
   </section>
 
   <section class="eeg-sec" aria-label="Mood read from your face">
@@ -119,19 +120,23 @@ const TEMPLATE = `
           <span class="eeg-band-val" data-emotion-val="${k}">0%</span>
         </div>`).join('')}
     </div>
+    <div class="cam-manual-mood" aria-label="Manual mood (no camera needed, #155)">
+      <label class="cam-manual-row"><input type="checkbox" data-cam-mood-off checked> No emotion</label>
+      <label class="cam-manual-row">Happy <input type="range" min="0" max="100" value="0" step="1" data-cam-mood-slider aria-label="Manual mood: Happy to Mix to Surprised" disabled> Surprised</label>
+      <span class="eeg-qual">Manual mood: <b data-cam-mood-manual>off</b> (overrides the camera while on)</span>
+    </div>
     <p class="cam-privacy">Frames never leave this device. Nothing is uploaded.</p>
   </section>`;
 
-function cameraError(err, castsEnabled) {
-  const fallback = castsEnabled ? ' Keys 1–3 still trigger every move.' : '';
+function cameraError(err) {
   const name = err?.name || '';
   if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError')
-    return `Camera permission was denied. Allow it in the address bar and click Start Camera again.${fallback}`;
+    return 'Camera permission was denied. Allow it in the address bar and click Start Camera again.';
   if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError')
-    return `No camera found.${fallback}`;
+    return 'No camera found.';
   if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError')
-    return `The camera is busy in another app. Close it and click Start Camera again.${fallback}`;
-  return `Camera unavailable (${name || err?.message || 'unknown error'}).${fallback}`;
+    return 'The camera is busy in another app. Close it and click Start Camera again.';
+  return `Camera unavailable (${name || err?.message || 'unknown error'}).`;
 }
 
 function stopTracks(stream) { stream?.getTracks().forEach((t) => t.stop()); }
@@ -140,7 +145,6 @@ export function initCamera({
   app = null,
   getG = () => window.__moc?.G,
   canCast = () => true,
-  castsEnabled = CAMERA_CASTS_ENABLED,
   mapX = (x) => x,
   screenX = (x) => x,
   screenY = (y) => y,   // the home world is bigger than the screen (#129): aims map back through the camera
@@ -155,12 +159,33 @@ export function initCamera({
   if (!btn || !panel) return null;
   panel.innerHTML = TEMPLATE;
   const $ = (sel) => panel.querySelector(sel);
-  const spellRow = $('.cam-spells');
-  if (!castsEnabled) {
-    spellRow.style.display = 'none';
-    panel.dataset.casts = 'off';
-    $('[data-cam-now]').textContent = 'Face mood is active. Hand casts are deferred.';
-  }
+  const calibModal = document.createElement('div');
+  calibModal.className = 'calib-wiz';
+  calibModal.id = 'moveCalibModal';
+  calibModal.hidden = true;
+  calibModal.setAttribute('role', 'dialog');
+  calibModal.setAttribute('aria-modal', 'true');
+  calibModal.setAttribute('aria-label', 'Pinch and head calibration');
+  calibModal.innerHTML = `
+    <div class="calib-wiz-top">
+      <div>
+        <span class="calib-wiz-step" data-calib-status>idle</span>
+        <h2>Pinch Movement Calibration</h2>
+        <p data-calib-msg>Reach left, right, up and down with each hand. The wizard advances when you hit a target.</p>
+      </div>
+      <div class="calib-wiz-actions">
+        <button type="button" class="btn btn-small" data-calib-close>Close <kbd>Esc</kbd></button>
+      </div>
+    </div>
+    <div class="calib-wiz-stage"><canvas class="calib-wiz-canvas" width="960" height="500"></canvas></div>
+    <div class="calib-wiz-bottom">
+      <div class="eeg-url-row">
+        <button type="button" class="btn btn-primary btn-small" data-calib-start>Calibrate</button>
+        <button type="button" class="btn btn-small" data-calib-skip disabled>Skip</button>
+        <button type="button" class="btn btn-small" data-calib-reset>Reset</button>
+      </div>
+    </div>`;
+  if (document.body?.appendChild) document.body.appendChild(calibModal);
   const video = $('.cam-video');
   const hands = $('.cam-hands');
   const handsCtx = hands.getContext('2d');
@@ -172,21 +197,24 @@ export function initCamera({
     startBtn: $('[data-cam-start]'),
     stopBtn: $('[data-cam-stop]'),
     fps: $('[data-cam-fps]'),
+    rateVideo: $('[data-cam-rate-video]'),
     rateHands: $('[data-cam-rate-hands]'),
+    handsToggle: $('[data-cam-hands]'),
     rateFace: $('[data-cam-rate-face]'),
     aim: $('[data-cam-aim]'),
     gesture: $('[data-cam-gesture]'),
     pinch: $('[data-cam-pinch]'),
     range: $('[data-cam-range]'),
-    last: $('[data-cam-last]'),
-    now: $('[data-cam-now]'),
+    fbState: $('[data-cam-fb-state]'),
+    fbOrb: $('[data-cam-fb-orb]'),
+    fbMeter: $('[data-cam-fb-meter]'),
+    fbPct: $('[data-cam-fb-pct]'),
     dominant: $('[data-cam-dominant]'),
     bars: Object.fromEntries(EMOTIONS.map((k) => [k, $(`[data-emotion="${k}"] .cam-bar > span`)])),
     vals: Object.fromEntries(EMOTIONS.map((k) => [k, $(`[data-emotion-val="${k}"]`)])),
-    spells: Object.fromEntries(SPELLS.map((s) => [s.id, panel.querySelector(`[data-spell="${s.id}"]`)])),
   };
 
-  // Overlay canvas for hold rings, grabbed entity tether, and cast pings.
+  // Overlay canvas for the grabbed-entity tether.
   const fx = document.createElement('canvas');
   fx.className = 'cam-fx';
   fx.setAttribute('aria-hidden', 'true');
@@ -194,12 +222,14 @@ export function initCamera({
   const fxCtx = fx.getContext('2d');
   let fxDirty = false;
 
-  const casts = new CastController();
   const tracker = new EmotionTracker();
   const fingers = new FingerController({ headCursorOnly: true });
   const multiHand = new MultiHandTracker();
-  const castFallback = castsEnabled ? ' Keys 1–3 still trigger every move.' : '';
-  let status = 'off';          // off | starting | on | error
+  const pinchSmoother = new PinchMoveSmoother();
+  const fireball = new FireballController();
+  let lastGestureAt = 0;
+  let status = 'off';
+  let pinchCal = loadPinchCalibration();
   let stream = null;
   let engine = null;
   let enginePending = null;
@@ -208,27 +238,56 @@ export function initCamera({
   let lastTick = 0;
   let lastFaceAt = 0;
   let gesture = { name: 'None', score: 0 };
-  let hold = { held: null, progress: 0, aiming: false };
+  let handsOn = handsEnabled();   // hand moves are opt-in (hands-pref.js)
+  let lastHeadAim = null;
   let hand = null, handAspect = 4 / 3, faceBox = null;
   let finger = null;
   let multi = null;
   let grabbed = null;          // { label, kind, at } when holding a living entity (#120)
-  let armed = 'fist';
   let mood = neutralMood();
   let moodScene = null, moodSent = null, strongPending = false, surprisePending = false;
+  // Manual mood (#155): off by default ("No emotion"); while on it replaces the camera's mood.
+  let manualOn = false, manualValue = 0, manualPrev = null;
   let advisorAt = -Infinity;
-  let lastCast = null;
-  let miss = null;
-  const history = [];
   let uiAt = 0;
-  const pings = [];
   const frames = new FrameMeter();
   let fpsBefore = 0;
   let guardAt = Infinity;
 
+  const movementCal = initMovementCalibration({
+    canvas: calibModal.querySelector('.calib-wiz-canvas'),
+    statusEl: calibModal.querySelector('[data-calib-status]'),
+    msgEl: calibModal.querySelector('[data-calib-msg]'),
+    startBtn: calibModal.querySelector('[data-calib-start]'),
+    skipBtn: calibModal.querySelector('[data-calib-skip]'),
+    resetBtn: calibModal.querySelector('[data-calib-reset]'),
+    getState: () => ({ live: !!stream && status === 'on', hands: multi, multi, grabbed, brain: getG()?.brain, video }),
+    onChange: (cal) => { pinchCal = cal; savePinchCalibration(cal); },
+    onComplete: () => {
+      clearTimeout(closeTimer);
+      closeTimer = setTimeout(() => {
+        if (!movementCal?.active) { calibModal.hidden = true; }
+      }, 2200);
+    },
+  });
+  let closeTimer = 0;
+  const openCalib = () => {
+    calibModal.hidden = false;
+    movementCal?.start?.();
+  };
+  const closeCalib = () => {
+    clearTimeout(closeTimer);
+    movementCal?.stop?.();
+    calibModal.hidden = true;
+  };
+  $('[data-calib-open]')?.addEventListener('click', openCalib);
+  calibModal.querySelector('[data-calib-close]')?.addEventListener('click', closeCalib);
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Escape' && !calibModal.hidden) { e.preventDefault(); closeCalib(); }
+  });
+
   const coach = initCoach({
     getContext,
-    onCastMove: (id) => cast(id, 'tap'),
   });
 
   // ---------- state & messages ----------
@@ -262,7 +321,7 @@ export function initCamera({
     panel.hidden = !open;
     btn.setAttribute('aria-pressed', String(open));
     if (open) {
-      for (const [pId, bId] of [['eegPanel', 'eegBtn'], ['modelPanel', 'modelBtn'], ['settingsPanel', 'settingsBtn']]) {
+      for (const [pId, bId] of [['eegPanel', 'eegBtn'], ['modelPanel', 'modelBtn'], ['settingsPanel', 'settingsBtn'], ['dbgPanel', 'dbgBtn']]) {
         const p = document.getElementById(pId);
         const b = document.getElementById(bId);
         if (p && !p.hidden) {
@@ -276,10 +335,10 @@ export function initCamera({
   // ---------- inference engine ----------
   async function ensureEngine(onStatus) {
     if (engine?.alive) return engine;
-    enginePending ??= loadEngine({ hands: castsEnabled, prefer, onStatus }).finally(() => { enginePending = null; });
+    enginePending ??= loadEngine({ hands: true, prefer, onStatus }).finally(() => { enginePending = null; });
     const e = await enginePending;
     engine = e;
-    e.on({ gesture: onGesture, face: onFace, warn: (m) => setMsg(m + castFallback), fail: onEngineFail });
+    e.on({ gesture: onGesture, face: onFace, warn: (m) => setMsg(m), fail: onEngineFail });
     return e;
   }
 
@@ -303,22 +362,22 @@ export function initCamera({
     setStatus('starting', 'Asking for the camera…');
     if (!navigator.mediaDevices?.getUserMedia) {
       setStatus('error', window.isSecureContext === false
-        ? `The camera needs https or localhost.${castFallback}`
-        : `This browser has no camera access.${castFallback}`);
+        ? 'The camera needs https or localhost.'
+        : 'This browser has no camera access.');
       return;
     }
     let s;
     try {
-      s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+      s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 } }, audio: false });   // 60 fps where the webcam can: hands track up to MAX_HZ
     } catch (err) {
-      if (id === run) setStatus('error', cameraError(err, castsEnabled));
+      if (id === run) setStatus('error', cameraError(err));
       return;
     }
     if (id !== run) { stopTracks(s); return; }
     stream = s;
     video.srcObject = stream;
     try { await video.play(); } catch { /* autoplay of a muted inline video is allowed */ }
-    setStatus('starting', castsEnabled ? 'Loading hand and face models…' : 'Loading face model…');
+    setStatus('starting', 'Loading hand and face models…');
     try {
       await ensureEngine((m) => { if (id === run) setMsg(m); });
     } catch (err) {
@@ -334,6 +393,23 @@ export function initCamera({
     setStatus('on');
   }
 
+  // Hand moves switched off: let go of anything held and forget the hands.
+  function dropHands() {
+    const G = getG();
+    if (grabbed && G?.scene?.onGrabEnd) {
+      try { G.scene.onGrabEnd({ x: G.brain?.aim?.x ?? 0.5, y: G.brain?.aim?.y ?? 0.5, cancelled: true }); } catch {}
+    }
+    grabbed = null;
+    fingers.reset();
+    multiHand.reset();
+    pinchSmoother.reset();
+    hand = null;
+    finger = null;
+    multi = null;
+    gesture = { name: 'None', score: 0 };
+    handsCtx.clearRect(0, 0, hands.width, hands.height);
+  }
+
   function teardown() {
     const G = getG();
     if (grabbed && G?.scene?.onGrabEnd) {
@@ -343,7 +419,6 @@ export function initCamera({
     stopTracks(stream);
     stream = null;
     video.srcObject = null;
-    casts.reset();
     tracker.reset();
     fingers.reset();
     multiHand.reset();
@@ -352,7 +427,12 @@ export function initCamera({
     multi = null;
     faceBox = null;
     gesture = { name: 'None', score: 0 };
-    hold = { held: null, progress: 0, aiming: false };
+    lastHeadAim = null;
+    lastGestureAt = 0;
+    pinchSmoother.reset();
+    fireball.reset();
+    movementCal?.stop?.();
+    if (calibModal) calibModal.hidden = true;
     mood = neutralMood();
     strongPending = false;
     surprisePending = false;
@@ -362,13 +442,20 @@ export function initCamera({
   function stop() {
     run++;
     teardown();
-    setStatus('off', 'Camera stopped and cleared. Keys 1–3 still trigger every move.');
+    setStatus('off', 'Camera stopped and cleared.');
   }
 
   // The toolbar button only opens and closes the sidebar (#183). getUserMedia runs from the
   // Start Camera button alone, so reading about the moves never triggers a permission prompt.
   btn.addEventListener('click', () => togglePanel());
   ui.startBtn?.addEventListener('click', () => start());
+  if (ui.handsToggle) {
+    ui.handsToggle.checked = handsOn;
+    ui.handsToggle.addEventListener('change', () => {
+      handsOn = setHandsEnabled(ui.handsToggle.checked);
+      if (!handsOn) dropHands();
+    });
+  }
   ui.stopBtn?.addEventListener('click', () => stop());
   $('[data-cam-close]').addEventListener('click', () => togglePanel(false));
   window.addEventListener('pagehide', () => { if (stream || status === 'starting') stop(); });
@@ -386,9 +473,6 @@ export function initCamera({
         grabbed = { label: res.label || 'creature', kind: res.kind || 'entity', at: now };
         coach?.flash(`Picked up ${grabbed.label} · move the cursor & release to drop`, 'ok', 2800);
         G.hud?.showCause?.(`🤏 Grabbed ${grabbed.label} — move the cursor & release to place`);
-        history.unshift({ id: 'pinch', via: 'pinch', at: now });
-        history.length = Math.min(history.length, 5);
-        lastCast = { id: 'pinch', at: now };
         return true;
       }
       const why = res?.reason || 'Move the cursor over a living creature to grab';
@@ -413,70 +497,32 @@ export function initCamera({
     if (!cancelled) {
       coach?.flash(`Dropped ${label}`, 'ok', 1600);
       G?.hud?.showCause?.(`🤏 Placed ${label}`);
-      if (G?.brain) pings.push({ x: G.brain.aim.x, y: G.brain.aim.y, at: now, glyph: '🤏' });
     }
     return true;
   }
 
-  // ---------- casting (#122) ----------
-  function cast(id, via, now = performance.now()) {
-    if (!castsEnabled) return false;
-    const G = getG();
-    const scene = G?.scene;
-    if (!scene || !SPELL_BY_ID[id] || !canCast()) return false;
-
-    // Key 1 or Pinch button toggles living-entity grab at the reticle (#120, #122)
-    if (id === 'pinch') {
-      if (grabbed) {
-        return tryGrabEnd(G, now, false);
-      }
-      if (tryGrabStart(G, now)) return true;
-      // Fallback if scene doesn't implement onGrabStart or nothing under cursor
-      if (via !== 'gesture' && !casts.trigger(id, now)) return false;
-      const aim = { x: G.brain.aim.x, y: G.brain.aim.y };
-      scene.onCast?.('pinch', aim);
-      return true;
-    }
-
-    if (via !== 'gesture' && !casts.trigger(id, now)) return false;
-    const aim = { x: G.brain.aim.x, y: G.brain.aim.y };
-    try {
-      if ((id === 'fist' || id === 'fireball') && scene.onBlink && !scene.onCast) {
-        G.hud?.flashBlink?.();
-        scene.onBlink(aim);
-      } else {
-        scene.onCast?.(id, aim);
-      }
-      if (G.engine?.game_on_cast) {
-        G.engine.game_on_cast(id, aim.x * 320, aim.y * 180);
-      }
-    } catch (err) { console.error('[camera] cast failed:', err); }
-    G.stats.casts = (G.stats.casts || 0) + 1;
-    if (SPELL_BY_ID[id].aimed) armed = id;
-    history.unshift({ id, via, at: now });
-    history.length = Math.min(history.length, 5);
-    lastCast = { id, at: now };
-    pings.push({ ...aim, at: now, glyph: SPELL_BY_ID[id].glyph });
-    coach?.flash(`${SPELL_BY_ID[id].glyph} ${SPELL_BY_ID[id].name}!`, 'ok', 1600);
-    if (id === 'palm') G.hud?.showCause?.('🖐️ Your open palm spread calm across the land');
-    else if (id === 'fist') G.hud?.showCause?.('✊ Your closed fist called down a strike');
-    return true;
+  // Manual mood controls (#155).
+  {
+    const off = panel.querySelector('[data-cam-mood-off]'), slider = panel.querySelector('[data-cam-mood-slider]');
+    const out = panel.querySelector('[data-cam-mood-manual]');
+    const show = () => {
+      if (slider) slider.disabled = !manualOn;
+      if (out) out.textContent = !manualOn ? 'off' : manualValue < 0.35 ? 'happy' : manualValue > 0.65 ? 'surprised' : 'mix';
+    };
+    off?.addEventListener('change', () => {
+      manualOn = !off.checked; manualPrev = null;
+      if (!manualOn) { mood = neutralMood(); surprisePending = false; }
+      show();
+    });
+    slider?.addEventListener('input', () => { manualValue = Number(slider.value) / 100; show(); });
+    show();
   }
-
-  window.addEventListener('keydown', (e) => {
-    if (!castsEnabled || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
-    const spell = spellForKeyCode(e.code);
-    if (!spell) return;
-    if (cast(spell.id, 'key')) e.preventDefault();
-  });
-  for (const s of SPELLS) ui.spells[s.id]?.addEventListener('click', () => cast(s.id, 'tap'));
 
   // ---------- mood (#117: Joy continuous + Surprise debounced event) ----------
   function syncMood(G) {
     const scene = G?.scene;
     if (!scene?.onMood || !canCast()) return;
-    if (!stream && scene !== moodScene) {
+    if (!stream && !manualOn && scene !== moodScene) {
       moodScene = scene;
       moodSent = 'neutral';
       strongPending = false;
@@ -500,10 +546,10 @@ export function initCamera({
       console.error('[camera] mood failed:', err);
     }
     if (wasSurprise) {
-      G.hud?.showCause?.('😮 Your surprised expression startled the sky!');
+      G.hud?.showCause?.(manualOn ? '😮 Manual mood: surprise startled the sky!' : '😮 Your surprised expression startled the sky!');
       advisorReact(G, 'surprise');
     } else if (reason === 'change' && changed && mood.dominant === 'joy') {
-      G.hud?.showCause?.('😊 Your smile boosted morale (+joy)');
+      G.hud?.showCause?.(manualOn ? '😊 Manual mood: joy boosted morale' : '😊 Your smile boosted morale (+joy)');
       advisorReact(G, 'joy');
     }
   }
@@ -517,9 +563,25 @@ export function initCamera({
   }
 
   // ---------- model results ----------
+  function castFireball(fb, G) {
+    const scene = G?.scene;
+    const aim = G?.brain?.aim;
+    if (!scene || !aim) return false;
+    if (typeof scene.onFireball !== 'function') return false;
+    try { scene.onFireball(aim, { color: fb.color, charge: fb.charge }); }
+    catch (err) { console.error('[camera] onFireball failed:', err); return false; }
+    G.stats.casts = (G.stats.casts || 0) + 1;
+    G.audio?.thunder?.();
+    coach?.flash(`🔥 Fireball ${Math.round(fb.charge * 100)}%`, 'ok', 1400);
+    G.hud?.showCause?.(`🔥 Charged fireball ${Math.round(fb.charge * 100)}% · ${fb.color}`, { tone: 'ok' });
+    return true;
+  }
+
   function onGesture(r) {
-    if (!stream || status !== 'on' || !castsEnabled) return;
+    if (!stream || status !== 'on' || !handsOn) return;
     const now = performance.now();
+    const gestureDt = Math.min(0.2, (now - (lastGestureAt || now)) / 1000) || 1 / 30;
+    lastGestureAt = now;
     hand = r.hand || null;
     handAspect = r.aspect || 4 / 3;
     gesture = { name: r.name || 'None', score: r.score || 0 };
@@ -529,6 +591,15 @@ export function initCamera({
 
     const G = getG();
     const live = canCast() && !!G?.brain;
+
+    // Aim movement while pinched (#270): it is head pose or mouse — never the webcam.
+    // Screen-space keeps the tilt independent of the world camera; screenX/Y map a world aim
+    // back to the screen when screenAim is absent.
+    const headNow = G?.brain?.screenAim
+      || (G?.brain?.aim ? { x: screenX(G.brain.aim.x), y: screenY(G.brain.aim.y) } : null);
+    const headDx = lastHeadAim && headNow ? headNow.x - lastHeadAim.x : 0;
+    const headDy = lastHeadAim && headNow ? headNow.y - lastHeadAim.y : 0;
+    lastHeadAim = headNow ? { x: headNow.x, y: headNow.y } : null;
 
     // Single-hand metrics preserved in headCursorOnly mode so hands NEVER move G.brain.aim (#116, #120)
     finger = fingers.update({
@@ -555,6 +626,22 @@ export function initCamera({
 
     // Multi-hand tracker: 2-hand continuous zoom (#118, #119), 1-hand grab (#120)
     multi = multiHand.update({ hands: rawHands, now, aspect: handAspect });
+    const fb = fireball.update({
+      hand,
+      gesture,
+      mood,
+      now,
+      aspect: handAspect,
+      pinching: !!(finger?.pinching || multi?.grab?.active),
+    });
+    if (fb.cast) castFireball(fb, G);
+    if (multi.grab.started) pinchSmoother.reset();
+    const pinchMove = pinchSmoother.filter({
+      handDx: multi.grab.dx,
+      handDy: multi.grab.dy,
+      headDx,
+      headDy,
+    }, gestureDt);
 
     if (live) {
       // 1. Two-hand continuous pinch zoom (#119)
@@ -569,28 +656,28 @@ export function initCamera({
       if (multi.grab.started) {
         tryGrabStart(G, now);
         if (!grabbed && onGrabMove) {
-          onGrabMove({ dx: 0, dy: 0, started: true, active: true, aim: G.brain.aim, grab: multi.grab });
+          onGrabMove({ dx: 0, dy: 0, headDx: 0, headDy: 0, started: true, active: true, aim: G.brain.aim, grab: multi.grab });
         }
       } else if (multi.grab.active) {
         if (grabbed) {
           G.scene?.onGrabMove?.({ x: G.brain.aim.x, y: G.brain.aim.y });
         } else if (onGrabMove) {
-          onGrabMove({ dx: multi.grab.dx, dy: multi.grab.dy, started: false, active: true, aim: G.brain.aim, grab: multi.grab });
+          const sideCal = multi.grab.side === 'left' ? pinchCal.left : multi.grab.side === 'right' ? pinchCal.right : null;
+          const hx = sideCal ? (sideCal.gainX ?? sideCal.gain ?? 1) : 1;
+          const hy = sideCal ? (sideCal.gainY ?? sideCal.gain ?? 1) : 1;
+          const headCal = pinchCal.head || {};
+          const tx = headCal.gainX ?? headCal.gain ?? 1;
+          const ty = headCal.gainY ?? headCal.gain ?? 1;
+          onGrabMove({ dx: pinchMove.handDx * hx, dy: pinchMove.handDy * hy, headDx: pinchMove.headDx * tx, headDy: pinchMove.headDy * ty, started: false, active: true, aim: G.brain.aim, grab: multi.grab });
         }
       } else if (multi.grab.released || multi.grab.cancelled) {
         if (grabbed) {
           tryGrabEnd(G, now, !!multi.grab.cancelled);
         } else if (onGrabMove) {
-          onGrabMove({ dx: 0, dy: 0, released: true, cancelled: !!multi.grab.cancelled, active: false, aim: G.brain.aim, grab: multi.grab });
+          pinchSmoother.reset();
+          onGrabMove({ dx: 0, dy: 0, headDx: 0, headDy: 0, released: true, cancelled: !!multi.grab.cancelled, active: false, aim: G.brain.aim, grab: multi.grab });
         }
       }
-
-      // 3. Palm (Calm) & Fist (Strike) gesture holds (#122) — suppressed while pinching or grabbing
-      const suppressCast = multi.suppressCasts || finger.suppress;
-      hold = suppressCast ? casts.update('None', 0, now) : casts.update(gesture.name, gesture.score, now);
-      if (hold.cast) cast(hold.cast, 'gesture', now);
-    } else {
-      hold = casts.update('None', 0, now);
     }
     drawHands();
   }
@@ -630,14 +717,13 @@ export function initCamera({
   }
 
   function drawHands() {
-    if (!castsEnabled) return;
     const w = video.videoWidth || 320, h = video.videoHeight || 240;
     if (hands.width !== w || hands.height !== h) { hands.width = w; hands.height = h; }
     handsCtx.clearRect(0, 0, w, h);
     if (multi && (multi.left || multi.right)) {
       if (multi.left?.visible) {
         drawHand(handsCtx, multi.left.landmarks, w, h, {
-          held: !!hold.held,
+          held: !!grabbed,
           pinching: !!multi.left.pinching,
           nearPinch: multi.left.ratio != null && multi.left.ratio < fingers.pinch.exit,
           side: 'left',
@@ -645,7 +731,7 @@ export function initCamera({
       }
       if (multi.right?.visible) {
         drawHand(handsCtx, multi.right.landmarks, w, h, {
-          held: !!hold.held,
+          held: !!grabbed,
           pinching: !!multi.right.pinching,
           nearPinch: multi.right.ratio != null && multi.right.ratio < fingers.pinch.exit,
           side: 'right',
@@ -653,7 +739,7 @@ export function initCamera({
       }
     } else if (hand) {
       drawHand(handsCtx, hand, w, h, {
-        held: !!hold.held,
+        held: !!grabbed,
         pinching: !!finger?.pinching,
         nearPinch: finger?.ratio != null && finger.ratio < fingers.pinch.exit,
       });
@@ -662,10 +748,8 @@ export function initCamera({
 
   // ---------- UI ----------
   function nowText(now) {
-    const fmt = (s) => `${s.glyph} ${s.name}`;
-    if (miss && now - miss.at < MISS_MS && (!lastCast || miss.at > lastCast.at)) {
-      const s = SPELL_BY_ID[miss.id];
-      return `${fmt(s)} ready in ${(casts.cooldownLeft(s.id, now) / 1000).toFixed(1)} s`;
+    if (fireball.state === 'charging' || fireball.state === 'primed') {
+      return `🔥 Fireball ${Math.round(fireball.charge * 100)}% · ${fireball.state === 'primed' ? 'open your palm!' : 'pull back, then thrust'}`;
     }
     if (multi?.bothPinched) {
       return `👐 Two-hand zoom (${Math.round((multi.zoomFactor || 1) * 100)}%) · unpinch to freeze`;
@@ -673,17 +757,13 @@ export function initCamera({
     if (grabbed) {
       return `🤏 Holding ${grabbed.label} · move the cursor & release pinch to drop`;
     }
-    const recent = lastCast && now - lastCast.at < 1400 ? SPELL_BY_ID[lastCast.id] : null;
-    if (recent) return `Move: ${fmt(recent)}!`;
-    const aimBy = aimSource(getG(), now).short;
-    if (!(stream && engine)) return `Aim with the ${aimBy}. Press 1 (Grab), 2 (Calm), or 3 (Strike).`;
-    const g = GESTURE_LABEL[gesture.name] || gesture.name;
-    if (hold.held) {
-      const s = SPELL_BY_ID[hold.held];
-      const cd = casts.cooldownLeft(s.id, now);
-      return cd > 0 ? `${g}: ${s.name} ready in ${(cd / 1000).toFixed(1)} s` : `${g}: hold for ${s.name}…`;
+    if (multi?.grab?.active) {
+      return 'Pinch: move your hand to pan · head motion tilts the 3D view';
     }
-    return hand ? `Hand: ${g} · ${aimBy} aims` : 'Show 1 hand to grab/calm/strike, or 2 hands to pinch-zoom.';
+    const aimBy = aimSource(getG(), now).short;
+    if (!(stream && engine)) return `Aim with the ${aimBy}.`;
+    const g = GESTURE_LABEL[gesture.name] || gesture.name;
+    return hand ? `Hand: ${g} · ${aimBy} aims` : 'Show 1 hand to grab/move, or 2 hands to pinch-zoom.';
   }
 
   function fmtRate(r) {
@@ -715,6 +795,7 @@ export function initCamera({
       }
     }
     if (ui.fps) ui.fps.textContent = `${Math.round(frames.fps(now))} fps`;
+    if (ui.rateVideo) ui.rateVideo.textContent = stream && snap?.video?.count ? `${Math.round(snap.video.hz)} fps` : '--';
     if (ui.rateHands) ui.rateHands.textContent = stream && snap ? fmtRate(snap.gesture) : '--';
     if (ui.rateFace) ui.rateFace.textContent = stream && snap ? fmtRate(snap.face) : '--';
 
@@ -753,33 +834,21 @@ export function initCamera({
     if (ui.range) {
       ui.range.textContent = grabbed ? `carrying ${grabbed.label}` : multi?.bothPinched ? 'two-hand zoom active' : 'ready';
     }
-    if (ui.last) {
-      const last = history[0];
-      ui.last.textContent = last && SPELL_BY_ID[last.id] ? `${SPELL_BY_ID[last.id].glyph} ${SPELL_BY_ID[last.id].name} (${((now - last.at) / 1000).toFixed(1)}s ago)` : 'Ready';
-    }
-
-    if (!castsEnabled) return;
-    const text = nowText(now);
-    if (ui.now.textContent !== text) ui.now.textContent = text;
-    for (const s of SPELLS) {
-      const el = ui.spells[s.id];
-      if (!el) continue;
-      const cd = casts.cooldownFrac(s.id, now);
-      const isHeld = hold.held === s.id || (s.id === 'pinch' && !!grabbed);
-      el.style.setProperty('--cd', cd.toFixed(3));
-      el.style.setProperty('--hold', (isHeld ? (grabbed ? 1 : hold.progress) : 0).toFixed(3));
-      el.classList.toggle('is-cooling', cd > 0);
-      el.classList.toggle('is-held', isHeld);
+    if (ui.fbState) {
+      ui.fbState.textContent = fireball.state;
+      ui.fbOrb.style.background = fireball.color;
+      ui.fbOrb.style.boxShadow = `0 0 10px ${fireball.color}`;
+      ui.fbMeter.style.width = `${Math.round(fireball.charge * 100)}%`;
+      ui.fbMeter.style.background = fireball.color;
+      ui.fbPct.textContent = `${Math.round(fireball.charge * 100)}%`;
     }
   }
 
   function drawFx(now) {
-    while (pings.length && now - pings[0].at > PING_MS) pings.shift();
     const G = getG();
-    const tracking = !!(stream && (hand || multi?.left || multi?.right) && G?.brain && canCast());
-    const holding = tracking && hold.held && hold.progress > 0;
     const carrying = !!grabbed && !!G?.brain;
-    if (!pings.length && !holding && !carrying) {
+    const charging = fireball.state === 'charging' || fireball.state === 'primed';
+    if (!carrying && !charging) {
       if (fxDirty) { fxCtx.clearRect(0, 0, fx.width, fx.height); fxDirty = false; }
       return;
     }
@@ -800,33 +869,16 @@ export function initCamera({
       fxCtx.textAlign = 'center';
       fxCtx.fillText(glyph, x, y);
     };
-    if ((holding || carrying) && G?.brain) {
-      const r = reticleOnScreen(G);
-      const x = r.x * cw, y = r.y * ch;
-      if (carrying) {
-        ring(x, y, 8 * u, 1, '#ff8a3d', 2 * u);
-        glyphAt('🤏', x, y - 11 * u, 8 * u);
-      }
-      if (holding) {
-        const s = SPELL_BY_ID[hold.held];
-        if (s) {
-          const cooling = casts.cooldownLeft(s.id, now) > 0;
-          ring(x, y, 11 * u, 1, 'rgba(242,232,213,0.25)');
-          ring(x, y, 11 * u, cooling ? 1 - casts.cooldownFrac(s.id, now) : hold.progress, cooling ? 'rgba(255,207,74,0.5)' : '#59d8c8', 2 * u);
-          fxCtx.globalAlpha = cooling ? 0.5 : 1;
-          glyphAt(s.glyph, x, y - 14 * u, 8 * u);
-          fxCtx.globalAlpha = 1;
-        }
-      }
+    const r = reticleOnScreen(G);
+    const x = r.x * cw, y = r.y * ch;
+    if (charging) {
+      ring(x, y, 12 * u, 1, 'rgba(242,232,213,0.2)');
+      ring(x, y, 12 * u, fireball.charge, fireball.color, 2.5 * u);
+      glyphAt('🔥', x, y - 16 * u, 9 * u);
     }
-    for (const p of pings) {
-      const k = (now - p.at) / PING_MS;
-      const x = screenX(p.x) * cw, y = screenY(p.y) * ch;
-      fxCtx.globalAlpha = 1 - k;
-      fxCtx.lineWidth = u;
-      fxCtx.strokeStyle = '#ffcf4a';
-      fxCtx.beginPath(); fxCtx.arc(x, y, (6 + 18 * k) * u, 0, Math.PI * 2); fxCtx.stroke();
-      glyphAt(p.glyph, x, y - (12 + 10 * k) * u, 10 * u);
+    if (carrying) {
+      ring(x, y, 8 * u, 1, '#ff8a3d', 2 * u);
+      glyphAt('🤏', x, y - 11 * u, 8 * u);
     }
     fxCtx.globalAlpha = 1;
   }
@@ -838,16 +890,25 @@ export function initCamera({
     lastTick = now;
     frames.frame(now);
     if (stream && engine?.alive && status === 'on' && video.readyState >= 2) {
-      engine.pump(video, now, { hands: castsEnabled, tracking: !!(hand || multi?.left || multi?.right) });
+      engine.pump(video, now, { hands: handsOn, tracking: !!(hand || multi?.left || multi?.right) });
       if (now >= guardAt) guardFrames(now);
     }
     const G = getG();
     if (G) {
-      G.mood = { ...(stream ? mood : neutralMood()), active: !!stream };
+      if (manualOn) {
+        mood = manualMood(manualValue);
+        if (surpriseRisingEdge(manualPrev, manualValue)) surprisePending = true;   // once per crossing
+        manualPrev = manualValue;
+      }
+      G.mood = { ...(manualOn || stream ? mood : neutralMood()), active: manualOn || !!stream, source: manualOn ? 'manual' : stream ? 'camera' : 'none' };
       if (grabbed && G.brain) {
         G.scene?.onGrabMove?.({ x: G.brain.aim.x, y: G.brain.aim.y });
       }
       syncMood(G);
+    }
+    if (fireball.keyboard) {
+      const fb = fireball.update({ mood, now, pinching: false });
+      if (fb.cast) castFireball(fb, getG());
     }
     if (!panel.hidden && now - uiAt > 60) { uiAt = now; updatePanel(now); }
     coach?.update(now, {
@@ -856,11 +917,11 @@ export function initCamera({
       rightVisible: !!multi?.right?.visible,
       bothPinched: !!multi?.bothPinched,
       grabActive: !!grabbed || !!multi?.grab?.active,
-      heldMove: hold.held,
-      holdProgress: hold.progress,
+      fireball: fireball.state,
       pinchStrength: finger?.pinching ? 1 : 0,
       statusText: nowText(now),
     });
+    if (!calibModal.hidden) movementCal?.update?.(now);
     drawFx(now);
   }
   function guardFrames(now) {
@@ -880,9 +941,9 @@ export function initCamera({
 
   function debugState(now = performance.now()) {
     return {
-      status, live: !!stream, castsEnabled, video,
+      status, live: !!stream, video,
       engine: engine ? engine.snapshot(now) : null,
-      gesture: { ...gesture }, hold: { ...hold }, hand, handAspect, faceBox,
+      gesture: { ...gesture }, hand, handAspect, faceBox,
       hands: {
         left: multi?.left || null,
         right: multi?.right || null,
@@ -896,9 +957,7 @@ export function initCamera({
       finger: finger && { mode: finger.mode, ratio: finger.ratio, reach: finger.reach, pinching: finger.pinching, progress: finger.progress, suppress: finger.suppress, tip: finger.tip },
       pinch: { enter: fingers.pinch.enter, exit: fingers.pinch.exit },
       range: fingers.range.snapshot(),
-      armed,
-      cooldowns: SPELLS.map((s) => ({ id: s.id, glyph: s.glyph, name: s.name, key: s.key, left: casts.cooldownLeft(s.id, now), frac: casts.cooldownFrac(s.id, now) })),
-      history: history.slice(),
+      fireball: { state: fireball.state, charge: fireball.charge, color: fireball.color, keyboard: fireball.keyboard },
       mood: { ...mood },
     };
   }
@@ -909,10 +968,14 @@ export function initCamera({
     get mood() { return mood; },
     get engine() { return engine; },
     get vision() { return engine?.vision || null; },
-    get armed() { return armed; },
     get grabbed() { return grabbed; },
-    start, stop, cast, togglePanel,
-    casts, tracker, fingers, multiHand, coach, video,
+    start, stop, togglePanel,
+    fireballKeyDown: () => fireball.keyboardDown(mood, performance.now()),
+    fireballKeyUp: () => {
+      const fb = fireball.keyboardUp(mood, performance.now());
+      if (fb.cast) castFireball(fb, getG());
+    },
+    tracker, fingers, multiHand, coach, video,
     debugState,
     simulate: { gesture: onGesture, face: onFace },
     async setInferenceMode(mode) {
@@ -923,6 +986,6 @@ export function initCamera({
       if (stream && status === 'on') { await ensureEngine(() => {}); engine.resetStats(); guardAt = performance.now() + GPU_GUARD.graceMs; }
       return engine?.snapshot().mode || null;
     },
-    async loadModels() { const v = await loadVision(undefined, { hands: castsEnabled }); return { timings: v.timings, delegates: v.delegates }; },
+    async loadModels() { const v = await loadVision(undefined, { hands: true }); return { timings: v.timings, delegates: v.delegates }; },
   };
 }

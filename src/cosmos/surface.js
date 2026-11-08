@@ -28,7 +28,29 @@ const FARMS = [0, 3, 6, 9];               // farm plots per settlement size from
 const WALKERS = [2, 4, 7, 10];            // villagers drawn per settlement size
 const MAX_LIGHTS = 16;                    // the WebGL engine's light budget
 
-const makeCanvas = (w, h) => Object.assign(document.createElement('canvas'), { width: w, height: h });
+const dummyCtx = () => new Proxy({
+  drawImage() {},
+  createImageData: (w = 1, h = 1) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+  putImageData() {},
+  fillRect() {},
+  clearRect() {},
+  save() {},
+  restore() {},
+  translate() {},
+  scale() {},
+  beginPath() {},
+  arc() {},
+  fill() {},
+  stroke() {},
+  fillText() {},
+  measureText: () => ({ width: 0 }),
+}, {
+  get: (target, prop) => (prop in target ? target[prop] : () => {}),
+});
+
+const makeCanvas = (w, h) => (typeof document !== 'undefined'
+  ? Object.assign(document.createElement('canvas'), { width: w, height: h })
+  : { width: w, height: h, getContext: dummyCtx });
 let blank = null;
 const blankLayer = () => (blank ||= makeCanvas(1, 1));
 export const fmtNum = (n) => (n < 1000 ? `${Math.round(n)}` : `${(n / 1000).toFixed(n < 10000 ? 1 : 0)}k`);
@@ -369,7 +391,7 @@ export class PlanetSurface {
     if (this.sim) {
       const sc = this.sim.scene;
       if (sc.fire?.lit) {
-        engine.add_3d_light(tx0 + sc.fire.x / 2, 10.0, ty0 + sc.fire.y / 2, 25.0 + sc.fire.heat * 30.0 + Math.sin(this.t * 13) * 1.5, 1.8);
+        engine.add_3d_light(tx0 + sc.fire.x / 2, 10.0, ty0 + sc.fire.y / 2, 20.0 + sc.fire.heat * 22.0 + Math.sin(this.t * 13) * 1.2, 0.9);
       }
       if (sc.bolts) {
         for (const b of sc.bolts) {
@@ -478,24 +500,89 @@ export class PlanetSurface {
   }
 
   drawOverlay(ctx) {
-    const sx = this.sx, sy = this.sy, p = this.p;
+    const is3d = Boolean(ctx.__project3d || globalThis.__moc_render3d);
+    if (is3d) {
+      if (ctx.__project3d) {
+        // 1. Settlements: project 3D terrain coordinates (s.x / 2, s.y / 2) to screen
+        for (const s of this.plan) {
+          if (s.size < 1 && !s.capital) continue;
+          const pr = ctx.__project3d(s.x / 2, s.y / 2);
+          if (!pr) continue;
+          const px = pr[0];
+          const py = pr[1] - 8 - s.size * 2;
+          if (px > W - 4 || px < 4 || py < 12 || py > H) continue;
+          const name = s.capital ? `capital ${TIERS[s.size].name.toLowerCase()}` : TIERS[s.size].name.toLowerCase();
+          tag(ctx, px, py, s.rebel ? `${name} · rebels` : name, s.rebel ? '#ff8a9c' : '#f2e8d5', 4.5, 'center');
+        }
+        // 2. Planet surface floating text particles
+        for (const pt of this.particles.list) {
+          if (pt.shape !== 'text') continue;
+          const pr = ctx.__project3d(pt.x / 2, pt.y / 2);
+          if (!pr) continue;
+          const t = clamp(pt.life / pt.maxLife);
+          ctx.globalAlpha = t;
+          ctx.font = `${pt.size}px "Pixelify Sans", monospace`;
+          ctx.textAlign = 'center';
+          ctx.fillStyle = 'rgba(10,10,20,0.85)';
+          ctx.fillText(pt.text, pr[0] + 0.5, pr[1] + 0.5);
+          ctx.fillStyle = pt.color;
+          ctx.fillText(pt.text, pr[0], pr[1]);
+          ctx.globalAlpha = 1;
+        }
+        // 3. Capital tribe floating text particles
+        if (this.sim && this.tribeVisible) {
+          const tx0 = (this.v?.tile?.x ?? 0) / 2, ty0 = (this.v?.tile?.y ?? 90) / 2;
+          const pts = this.sim.scene?.particles?.list || [];
+          for (const pt of pts) {
+            if (pt.shape !== 'text') continue;
+            const pr = ctx.__project3d(tx0 + pt.x / 2, ty0 + pt.y / 2);
+            if (!pr) continue;
+            const t = clamp(pt.life / pt.maxLife);
+            ctx.globalAlpha = t;
+            ctx.font = `${pt.size}px "Pixelify Sans", monospace`;
+            ctx.textAlign = 'center';
+            ctx.fillStyle = 'rgba(10,10,20,0.85)';
+            ctx.fillText(pt.text, pr[0] + 0.5, pr[1] + 0.5);
+            ctx.fillStyle = pt.color;
+            ctx.fillText(pt.text, pr[0], pr[1]);
+            ctx.globalAlpha = 1;
+          }
+        }
+      }
+      return;
+    }
+
+    const sx = this.sx, sy = this.sy;
     if (this.sim && this.tribeVisible) {
-      for (const o of this.tileOffsets(sx, sy)) { ctx.save(); ctx.translate(o.x, o.y); this.sim.scene.drawOverlay(ctx); ctx.restore(); }
+      for (const o of this.tileOffsets(sx, sy)) {
+        ctx.save();
+        ctx.translate(o.x, o.y);
+        this.sim.scene.drawOverlay(ctx);
+        ctx.restore();
+      }
     }
     for (const s of this.plan) {
       if (s.size < 1 && !s.capital) continue;
       const q = this.screenOf(s.x, s.y);
       if (q.x > W - 4 || q.x < 4 || q.y < 18 || q.y > H) continue;
       const name = s.capital ? `capital ${TIERS[s.size].name.toLowerCase()}` : TIERS[s.size].name.toLowerCase();
-      label(ctx, q.x, q.y - 12 - s.size * 2, s.rebel ? `${name} · rebels` : name, s.rebel ? '#ff8a9c' : '#f2e8d5', 4.5);
+      tag(ctx, q.x, q.y - 12 - s.size * 2, s.rebel ? `${name} · rebels` : name, s.rebel ? '#ff8a9c' : '#f2e8d5', 4.5, 'center');
     }
-    for (const ox of this.worldOffsets(sx)) { ctx.save(); ctx.translate(ox, -sy); this.particles.drawText(ctx); ctx.restore(); }
-    // Which world, and who runs it.
+    for (const ox of this.worldOffsets(sx)) {
+      ctx.save();
+      ctx.translate(ox, -sy);
+      this.particles.drawText(ctx);
+      ctx.restore();
+    }
+  }
+
+  drawScreenOverlay(ctx) {
+    const p = this.p;
     const god = this.sim?.god;
-    tag(ctx, 4, 7, `${p.name} · ${this.sim ? 'AI god' : 'unsettled'}`, '#ffcf4a', 6);
+    tag(ctx, 4, 7, `${p.name} · ${this.sim ? 'AI god' : 'unsettled'}`, '#ffcf4a', 6, 'left');
     const strife = p.conflict ? ` · ${CONFLICT[p.conflict].name.toLowerCase()}` : p.factions ? ' · two factions' : '';
-    tag(ctx, 4, 13, `${god ? god.status() : 'waiting for settlers'} · ${tierName(p).toLowerCase()}${strife}`, '#a3a6c4', 4.5);
-    label(ctx, W / 2, H - 4, 'right-drag or A/D · W/S to explore · scroll or Z to leave', '#a3a6c4', 4.5);
+    tag(ctx, 4, 13, `${god ? god.status() : 'waiting for settlers'} · ${tierName(p).toLowerCase()}${strife}`, '#a3a6c4', 4.5, 'left');
+    tag(ctx, W / 2, H - 4, 'right-drag or A/D · W/S to explore · scroll or Z to leave', '#a3a6c4', 4.5, 'center');
   }
 
   objectives() {
@@ -534,6 +621,19 @@ export class PlanetSurface {
     if (hit) floater(this.particles, w.x, w.y - 8, `lightning on the ${TIERS[hit.size].name.toLowerCase()}!`, '#ffe066', 6);
   }
 
+  // Charged fireball (#291): same impact as the old fireball cast, coloured by mood.
+  onFireball(aim, opts = {}) {
+    const w = this.screenToWorld(aim);
+    const t = this.toTile(w.x, w.y);
+    const r = castPlanet(this.p, 'fireball');
+    const color = opts.color || '#ff9a2e';
+    this.particles.burst(18 + Math.round((opts.charge || 1) * 16), () => ({ x: w.x + rand(-20, 20), y: w.y + rand(-12, 12), vx: rand(-3, 3), vy: rand(-14, -4), life: rand(0.4, 0.8), maxLife: 0.8, size: 1, color }));
+    if (r) floater(this.particles, w.x, w.y - 10, r.text, r.good ? '#9be38a' : '#ff8a9c', 7);
+    else floater(this.particles, w.x, w.y - 10, `fireball ${Math.round((opts.charge || 1) * 100)}%`, color, 7);
+    const scene = this.sim?.scene;
+    if (t && scene?.onFireball) scene.onFireball(t, opts);
+  }
+
   // A camera cast at a screen aim: the whole world feels it; inside the capital the tribe does too.
   onCast(spell, aim) {
     if (spell === 'point') return;
@@ -561,10 +661,10 @@ export class PlanetSurface {
   onMood(mood) { this.sim?.scene?.onMood?.(mood); }
 }
 
-// Left-aligned crisp text in world units.
-function tag(ctx, x, y, text, color, size) {
+// Crisp text in low-res units.
+function tag(ctx, x, y, text, color, size, align = 'left') {
   ctx.font = `${size}px "Pixelify Sans", monospace`;
-  ctx.textAlign = 'left';
+  ctx.textAlign = align;
   ctx.fillStyle = 'rgba(8,10,24,0.85)';
   ctx.fillText(text, x + 0.6, y + 0.6);
   ctx.fillStyle = color;
