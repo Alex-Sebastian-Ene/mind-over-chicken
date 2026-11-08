@@ -304,6 +304,14 @@ export class Galaxy {
   // opts.anger: the camera mood's anger (0..1), which unsettles the world you're looking at.
   update(dt, brain, home, playDt = dt, opts = {}) {
     this.time += dt;
+    // Orbits spread over the room there is for however many worlds exist (#148, Alex: "orbit more
+    // nicely"): four worlds no longer crowd the four innermost of ten slots, and a new world eases
+    // the others outward instead of jumping.
+    const n = this.planets.length;
+    this.planets.forEach((p, i) => {
+      const want = n <= 1 ? ORBIT_FIRST : ORBIT_FIRST + (i / (n - 1)) * (ORBIT_MAX - ORBIT_FIRST);
+      p.orbit += (want - p.orbit) * Math.min(1, dt * 1.5);
+    });
     this.humanBrain = brain;
     this.recentBlinks = this.recentBlinks.filter((t) => this.time - t < 10);
     const fx = brainEffects({

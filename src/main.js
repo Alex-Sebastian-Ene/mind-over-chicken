@@ -1342,6 +1342,12 @@ screen.addEventListener('wheel', (e) => {
   // Horizontal scroll (or Shift+scroll) pans the surface; in 3D the camera follows the pan.
   const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey;
   if (horizontal && !cosmos.active) { cosmos.pan(-(e.shiftKey ? e.deltaY : e.deltaX) * 0.15); return; }
+  // In the galaxy a sideways scroll moves the picker between planets (Alex).
+  if (horizontal && cosmos.inGalaxy) {
+    galaxyScroll += e.shiftKey ? e.deltaY : e.deltaX;
+    if (Math.abs(galaxyScroll) > 80) { if (cosmos.selectSide(Math.sign(galaxyScroll), G)) audio.blip(); galaxyScroll = 0; }
+    return;
+  }
   if (in3dSurface() && (cosmos?.z || 0) <= 0.01) {
     cam3dTween = null;
     const scene = cosmos?.viewScene?.(G) || G?.scene;
@@ -1368,6 +1374,7 @@ screen.addEventListener('wheel', (e) => {
 }, { passive: false });
 // How far one wheel event zooms, in pixel-like units: a mouse notch is about 100, a trackpad
 // pinch (sent as Ctrl+wheel with small deltas) counts triple, line-mode wheels are scaled up.
+let galaxyScroll = 0;   // sideways scroll gathered towards the next planet pick
 function wheelAmount(e) {
   const lines = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 400 : 1;
   return clamp(e.deltaY * lines * (e.ctrlKey ? 3 : 1), -300, 300);
@@ -1415,12 +1422,19 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyG') { toggleAIGod(); return; }
   if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { zoomOutFromSurface(); return; }
   if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { zoomInOnSurface(); return; }
+  // The galaxy picker (Alex): Left/Right or A/D move between planets; Enter lands on the chosen one.
+  if (G && cosmos.inGalaxy && ['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD'].includes(e.code)) {
+    e.preventDefault();
+    if (!e.repeat && cosmos.selectSide(e.code === 'ArrowLeft' || e.code === 'KeyA' ? -1 : 1, G)) audio.blip();
+    return;
+  }
   if (G && !cosmos.active && (e.code === 'KeyA' || e.code === 'KeyD')) { cosmos.panVel = e.code === 'KeyA' ? 140 : -140; return; }
   if (G && !cosmos.active && (e.code === 'KeyW' || e.code === 'KeyS')) { cosmos.panVelY = e.code === 'KeyW' ? 110 : -110; return; } // planets (#68); home pans north–south too (#129)
   if (G && e.code === 'KeyN' && !e.repeat) { cam3dBase = null; cam3dTween = null; if (cosmos.visitNextWorld(G)) audio.blip(); return; } // planets (#68, #43): visit the next AI world (G is the AI God toggle)
   if (e.code === 'Enter') {
     if (banner) dismissBanner();
     else if (!$('failScreen').hidden) retryEra();
+    else if (G && cosmos.z > 0.5) cosmos.zoomIn(G);   // galaxy → the chosen world's globe → its surface
     else G?.scene?.skip?.();
     return;
   }
