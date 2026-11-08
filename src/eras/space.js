@@ -15,6 +15,8 @@ import { STRESSED } from '../brain/brain.js';
 import { eraTuning } from '../game/options.js'; // difficulty (#220)
 import { joyBuff, surpriseFires, surpriseEffect, sparkleCount, JOY_COLORS } from '../camera/mood-actions.js'; // #152
 import { reducedMotion } from '../ui/motion.js';
+import { Skyfall, skyfallInput, skyfallObjective } from '../game/skyfall.js'; // skyfall (#160)
+import { drawSkyfallHud } from '../ui/skyfall-hud.js'; // skyfall (#160)
 
 const ENGINEERS = 10;
 const CITIZENS = 28;
@@ -71,6 +73,8 @@ export class SpaceAge {
     this.boardTimer = 0;
     this.stars = Array.from({ length: 140 }, (_, i) => { const r = mulberry32(i * 31 + 7); return { x: r() * W, y: r() * H, b: r() }; });
     this.newWorld = makePlanetTexture(G.world.seed + 99);
+    // skyfall (#160): a seeded solar-flare event per scene; only while the pad is still active.
+    this.skyfall = new Skyfall({ era: this.era, seed: G.world?.seed ?? 1, tutorial: !G.skyfallTutorialSeen });
     G.brain.setCue(null);
     G.advisor.say('intro', 'My lord, we have built a rocket. Well, the bottom of one. Focus speeds the engineers. Stress makes them drop things.', { mood: 'nervous', priority: 3, cooldown: 999 });
   }
@@ -86,6 +90,8 @@ export class SpaceAge {
     this.particles.update(dt);
     this.flash = Math.max(0, (this.flash || 0) - dt);   // #152: a surprise's flash (main.js caps it)
     this.joyStep(dt);
+    this.updateSkyfall(dt);   // skyfall (#160): a flare threat on the launch pad
+    if (this.phase !== 'build' && this.phase !== 'countdown') this.skyfall?.cancel();
     const pad = this.pad, hangar = w.sites.hangar;
 
     if (this.phase === 'build' || this.phase === 'countdown') {
@@ -191,12 +197,74 @@ export class SpaceAge {
     }
   }
 
+  // ---- skyfall (#160): the pure event lives in game/skyfall.js; this scene renders/applies it ----
+  updateSkyfall(dt) {
+    const G = this.G;
+    if (!this.skyfall) return null;
+    const ev = this.skyfall.update(dt, skyfallInput(G, this.skyfall.config, {
+      eligible: !this.done && !G.finished && !G.signalPaused && (this.phase === 'build' || this.phase === 'countdown'),
+    }));
+    if (ev.started) this.skyfallStarted(ev);
+    if (ev.averted) this.skyfallAverted(ev);
+    if (ev.failed) this.skyfallStruck(ev);
+    this.skyfallState = ev;
+    return ev;
+  }
+
+  skyfallStarted(ev) {
+    const G = this.G, cfg = this.skyfall.config;
+    G.audio?.bell?.();
+    G.audio?.rumble?.(1.2);
+    G.advisor?.say('skyfall-warn', cfg.warning, { mood: 'panic', priority: 5, cooldown: 0 });
+    if (ev.tutorial) {
+      G.skyfallTutorialSeen = true;
+      G.advisor?.say('skyfall-coach', cfg.tutorial, { mood: 'nervous', priority: 4, cooldown: 0 });
+    }
+    if (this.phase !== 'countdown') G.brain?.setCue?.('focus');
+    G.hud?.showCause?.('Skyfall: hold Focus above the threshold', { ms: 3200, tone: 'wait' });
+  }
+
+  skyfallAverted() {
+    const G = this.G, cfg = this.skyfall.config, pad = this.pad;
+    G.audio?.good?.();
+    this.flash = Math.max(this.flash || 0, 0.2);
+    this.progress = Math.min(1, this.progress + 0.03);
+    for (const c of this.citizens) if (c.state !== 'aboard') c.courage = clamp(c.courage + 0.2);
+    this.particles.burst(34, () => ({
+      x: pad.x + rand(-18, 18), y: pad.y - rand(2, 28), vx: rand(-8, 8), vy: rand(-32, -10), g: 16,
+      life: rand(0.6, 1.4), maxLife: 1.4, size: 1, color: pick(['#59c9ff', '#9ec9ff', '#d7e8ff', '#ffffff']),
+    }));
+    floater(this.particles, pad.x, pad.y - 32, 'SKYFALL AVERTED', '#59c9ff', 9);
+    G.advisor?.say('skyfall-averted', cfg.averted, { mood: 'happy', priority: 5, cooldown: 0 });
+    if (this.phase !== 'countdown') G.brain?.setCue?.('rest');
+  }
+
+  skyfallStruck() {
+    const G = this.G, cfg = this.skyfall.config, pad = this.pad;
+    G.audio?.thunder?.();
+    G.audio?.bad?.();
+    this.flash = Math.max(this.flash || 0, 0.6);
+    G.shake = Math.max(G.shake || 0, 2);
+    this.drops = (this.drops || 0) + 1;
+    this.progress = Math.max(0, this.progress - cfg.damage.progress);
+    if (this.phase === 'countdown') this.count = Math.min(COUNT_FROM, this.count + cfg.damage.count);
+    for (const c of this.citizens) if (c.state !== 'aboard') c.courage = clamp(c.courage - cfg.damage.courage);
+    this.particles.burst(40, () => ({
+      x: pad.x + rand(-22, 22), y: pad.y - rand(0, 20), vx: rand(-26, 26), vy: rand(-38, 2), g: 60,
+      life: rand(0.5, 1.1), maxLife: 1.1, size: 1, color: pick(['#ffcf4a', '#ff5a72', '#fff4c2', '#5f5545']),
+    }));
+    floater(this.particles, pad.x, pad.y - 34, 'FLARE IMPACT', '#ff5a72', 9);
+    G.advisor?.say('skyfall-failed', cfg.failed, { mood: 'panic', priority: 5, cooldown: 0 });
+    if (this.phase !== 'countdown') G.brain?.setCue?.('rest');
+  }
+
   objectives() {
     if (this.phase === 'voyage') return [{ label: 'Destination', value: 'a new world', done: this.voyageT > 7 }];
     return [
       { label: 'Rocket', value: `${Math.floor(this.progress * 100)}%`, done: this.progress >= 1 },
       { label: 'Passengers', value: `${this.passengers}/${MIN_PASSENGERS}+`, done: this.passengers >= MIN_PASSENGERS },
       { label: 'Countdown', value: this.phase === 'countdown' ? `T−${Math.max(0, Math.ceil(this.count))}` : this.phase === 'launch' ? 'liftoff' : 'not started', done: this.phase === 'launch' },
+      ...skyfallObjective(this.skyfall),
     ];
   }
 
@@ -353,6 +421,7 @@ export class SpaceAge {
     if (this.phase === 'voyage') {
       label(ctx, W / 2, 24, this.voyageT < 3.5 ? 'Leaving home.' : 'A new world.', '#f2e8d5', 12);
     }
+    drawSkyfallHud(ctx, this.skyfall?.snapshot(), { y: 84 });   // skyfall (#160): below the launch countdown
   }
 
   // ---- camera (#33): hand casts and face mood. Extra inputs on top of the brain, never instead of it. ----

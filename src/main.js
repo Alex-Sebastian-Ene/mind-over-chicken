@@ -428,6 +428,8 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null } = {})
     brain, source, advisor, hud, audio, engine,
     calibration: new Calibration(Number.isFinite(calibSeed) ? { ...calibConfig, seed: calibSeed >>> 0 } : calibConfig), // calibration (#54)
     scene: null, sceneIndex: startIndex, runTime: 0, shake: 0, invincible: false,
+    // skyfall (#160): the showcase event's coach prompt appears once per run, not every era.
+    skyfallTutorialSeen: !!resume?.skyfallTutorialSeen,
     stats: { lightning: 0, smitten: 0, births: 0, deaths: 0, recessions: 0, restarts: 0 },
     eraTimes: [], eraStart: 0, finished: false,
     complete(delay = 2) {

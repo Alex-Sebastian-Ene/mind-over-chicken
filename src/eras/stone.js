@@ -11,6 +11,8 @@ import { drawPerson, drawMammoth, drawFire, makeBolt, drawBolt, drawReticle, dra
 import { FireballFX } from '../render/fireball.js';
 import { joyBuff, surpriseFires, surpriseEffect, sparkleCount, JOY_COLORS } from '../camera/mood-actions.js'; // #152
 import { reducedMotion } from '../ui/motion.js';
+import { Skyfall, skyfallInput, skyfallObjective } from '../game/skyfall.js'; // skyfall (#160)
+import { drawSkyfallHud } from '../ui/skyfall-hud.js'; // skyfall (#160)
 
 // Rain is a camera spell: an open palm held to the camera plus Insight/Focus. There is no
 // keyboard fallback. `hand.at` is a performance.now() timestamp.
@@ -55,6 +57,8 @@ export class StoneAge {
     this.fire = { x: w.sites.fire.x, y: w.sites.fire.y, heat: 0, lit: false, everLit: false };
     this.forest = { fires: [], burned: 0, warned: false };
     this.rainHold = { progress: 0, active: 0, cooldown: 0, hintAt: -99 };
+    // skyfall (#160): a seeded event per scene; the campaign's first one teaches the focus hold.
+    this.skyfall = new Skyfall({ era: this.era, seed: G.world?.seed ?? 1, tutorial: !G.skyfallTutorialSeen });
     this.food = 0;
     this.hold = { active: false, progress: 0, successes: 0, broke: 0 };
     this.bolts = [];
@@ -308,6 +312,7 @@ export class StoneAge {
     this.bolts = this.bolts.filter((b) => (b.life -= dt) > 0);
     this.flash = Math.max(0, this.flash - dt);
     this.joyStep(dt);   // #152: the joy buff, every frame while you smile
+    this.updateSkyfall(dt);   // skyfall (#160) before the fire's own cue can change
 
     // ---- Fire and the focus/insight challenge ----
     const f = this.fire;
@@ -537,6 +542,78 @@ export class StoneAge {
     }
   }
 
+  // ---- skyfall (#160): the pure event lives in game/skyfall.js; this scene renders and applies it ----
+  updateSkyfall(dt) {
+    const G = this.G;
+    if (!this.skyfall) return null;
+    const ev = this.skyfall.update(dt, skyfallInput(G, this.skyfall.config, {
+      eligible: !this.done && !G.finished && !G.signalPaused,
+    }));
+    if (ev.started) this.skyfallStarted(ev);
+    if (ev.averted) this.skyfallAverted(ev);
+    if (ev.failed) this.skyfallStruck(ev);
+    this.skyfallState = ev;
+    return ev;
+  }
+
+  skyfallStarted(ev) {
+    const G = this.G, cfg = this.skyfall.config;
+    G.audio?.bell?.();
+    G.audio?.rumble?.(1.1);
+    G.advisor?.say('skyfall-warn', cfg.warning, { mood: 'panic', priority: 5, cooldown: 0 });
+    if (ev.tutorial) {
+      G.skyfallTutorialSeen = true;
+      G.advisor?.say('skyfall-coach', cfg.tutorial, { mood: 'nervous', priority: 4, cooldown: 0 });
+    }
+    // Train the focus cue unless the fire hold is already using it.
+    if (!this.hold.active) G.brain?.setCue?.('focus');
+    G.hud?.showCause?.('Skyfall: hold Focus above the threshold', { ms: 3200, tone: 'wait' });
+  }
+
+  skyfallAverted() {
+    const G = this.G, cfg = this.skyfall.config, f = this.fire;
+    G.audio?.good?.();
+    this.flash = Math.max(this.flash, 0.22);
+    this.particles.burst(34, () => ({
+      x: f.x + rand(-18, 18), y: f.y - rand(2, 26), vx: rand(-8, 8), vy: rand(-34, -12), g: 18,
+      life: rand(0.6, 1.4), maxLife: 1.4, size: 1, color: pick(['#9ec9ff', '#d7f5e0', '#ffffff', '#ffd166']),
+    }));
+    for (const p of this.living()) {
+      p.faith = clamp(p.faith + 0.25);
+      p.fear = clamp(p.fear - 0.3);
+      if (['idle', 'warm', 'huddle'].includes(p.state)) p.state2 = 'dance';
+    }
+    floater(this.particles, f.x, f.y - 20, 'SKYFALL AVERTED', '#9be38a', 9);
+    G.advisor?.say('skyfall-averted', cfg.averted, { mood: 'happy', priority: 5, cooldown: 0 });
+    if (!this.hold.active) G.brain?.setCue?.('rest');
+  }
+
+  skyfallStruck() {
+    const G = this.G, cfg = this.skyfall.config, f = this.fire;
+    G.audio?.thunder?.();
+    G.audio?.bad?.();
+    this.flash = Math.max(this.flash, 0.72);
+    G.shake = Math.max(G.shake || 0, 2.4);
+    this.bolts.push({ pts: makeBolt(f.x + rand(-10, 10), f.y + rand(-4, 4)), life: 0.45 });
+    this.particles.burst(46, () => ({
+      x: f.x + rand(-22, 22), y: f.y - rand(0, 16), vx: rand(-34, 34), vy: rand(-48, 4), g: 72,
+      life: rand(0.5, 1.1), maxLife: 1.1, size: 1, color: pick(['#ff9a2e', '#e8452c', '#ffd166', '#5f5545']),
+    }));
+    floater(this.particles, f.x, f.y - 22, 'METEOR IMPACT', '#ff5a72', 10);
+    // A real loss, capped so the tribe can always recover and the era can never soft-lock.
+    const living = this.living().filter((p) => !p.colony && p.state !== 'aboard');
+    const hurt = Math.max(0, Math.min(cfg.damage.people, living.length - 4));
+    for (const p of living.slice(0, hurt)) {
+      this.kill(p);
+      floater(this.particles, p.x, p.y - 8, `${p.name} lost`, '#ff8a9c', 6);
+    }
+    this.food = Math.max(0, this.food - cfg.damage.food);
+    if (this.fire.lit) this.fire.heat = Math.max(0.05, this.fire.heat - 0.35);
+    for (const p of this.living()) { p.fear = clamp(p.fear + cfg.damage.fear); p.faith = clamp(p.faith - 0.12); }
+    G.advisor?.say('skyfall-failed', cfg.failed, { mood: 'panic', priority: 5, cooldown: 0 });
+    if (!this.hold.active) G.brain?.setCue?.('rest');
+  }
+
   kill(p) {
     if (this.G?.invincible) { p.alive = true; p.state = 'idle'; p.starve = 0; return; }
     p.alive = false; p.state = 'dead'; p.deadT = 0; this.G.stats.deaths++;
@@ -661,6 +738,7 @@ export class StoneAge {
       { label: 'Focus holds', value: `${this.hold.successes}/${focusTarget}`, done: this.hold.successes >= focusTarget },
       { label: 'Food', value: foodHint, done: this.food >= 3, plain: this.food >= 1 },
       { label: 'Continents', value: `${1 + Object.keys(this.colonies).length}/${this.G.world.continents.length}`, plain: true },
+      ...skyfallObjective(this.skyfall),
     ];
   }
 
@@ -785,6 +863,11 @@ export class StoneAge {
     }
     this.fireballs.draw(ctx);
     this.particles.drawText(ctx);
+  }
+
+  // skyfall (#160): the warning and live focus/threshold/hold, fixed to the screen.
+  drawScreenOverlay(ctx) {
+    drawSkyfallHud(ctx, this.skyfall?.snapshot());
   }
 
   // ---- camera (#33): hand casts and face mood. Extra inputs on top of the brain, never instead of it. ----

@@ -17,6 +17,8 @@ import { STRESSED } from '../brain/brain.js';
 import { eraTuning } from '../game/options.js'; // difficulty (#220)
 import { joyBuff, surpriseFires, surpriseEffect, sparkleCount, JOY_COLORS } from '../camera/mood-actions.js'; // #152
 import { reducedMotion } from '../ui/motion.js';
+import { Skyfall, skyfallInput, skyfallObjective } from '../game/skyfall.js'; // skyfall (#160)
+import { drawSkyfallHud } from '../ui/skyfall-hud.js'; // skyfall (#160)
 
 const N = 38;
 const GDP_TARGET = 620;
@@ -57,6 +59,8 @@ export class Industry {
     this.tick = 0;
     this.crashCooldown = 0;
     this.recessions = 0;
+    // skyfall (#160): a seeded storm event per scene; its own config names the market threat.
+    this.skyfall = new Skyfall({ era: this.era, seed: G.world?.seed ?? 1, tutorial: !G.skyfallTutorialSeen });
     // The chicken market's headlines go on the game's one news ticker (#220), with the rivals' news.
     const opening = ['CHICKEN EXCHANGE OPENS FOR BUSINESS', 'ANALYSTS: "CHICKEN FUTURES ARE THE FUTURE"'];
     this.headlines = G.news ? G.news.channel('market', opening, 'market') : opening;
@@ -165,6 +169,7 @@ export class Industry {
     this.bolts = this.bolts.filter((b) => (b.life -= dt) > 0);
     this.flash = Math.max(0, this.flash - dt);
     this.joyStep(dt);   // #152: the joy buff, every frame while you smile
+    this.updateSkyfall(dt);   // skyfall (#160): the storm and its market consequences
     this.tick += dt;
     while (this.tick >= TICK) { this.tick -= TICK; this.marketTick(); }
     const ar = this.arousal();
@@ -298,6 +303,76 @@ export class Industry {
     }
   }
 
+  // ---- skyfall (#160): the pure event lives in game/skyfall.js; this scene renders/applies it ----
+  updateSkyfall(dt) {
+    const G = this.G;
+    if (!this.skyfall) return null;
+    const ev = this.skyfall.update(dt, skyfallInput(G, this.skyfall.config, {
+      eligible: !this.done && !G.finished && !G.signalPaused,
+    }));
+    if (ev.started) this.skyfallStarted(ev);
+    if (ev.averted) this.skyfallAverted(ev);
+    if (ev.failed) this.skyfallStruck(ev);
+    this.skyfallState = ev;
+    return ev;
+  }
+
+  skyfallStarted(ev) {
+    const G = this.G, cfg = this.skyfall.config;
+    G.audio?.bell?.();
+    G.audio?.rumble?.(1.1);
+    G.source?.addStartle?.(0.12);
+    G.advisor?.say('skyfall-warn', cfg.warning, { mood: 'panic', priority: 5, cooldown: 0 });
+    if (ev.tutorial) {
+      G.skyfallTutorialSeen = true;
+      G.advisor?.say('skyfall-coach', cfg.tutorial, { mood: 'nervous', priority: 4, cooldown: 0 });
+    }
+    if (this.ipo?.state !== 'active') G.brain?.setCue?.('focus');
+    G.hud?.showCause?.('Skyfall: hold Focus above the threshold', { ms: 3200, tone: 'wait' });
+  }
+
+  skyfallAverted() {
+    const G = this.G, cfg = this.skyfall.config, ex = G.world.sites.exchange;
+    G.audio?.good?.();
+    this.flash = Math.max(this.flash, 0.2);
+    this.confidence = clamp(this.confidence + 0.25, 0.5, 1.6);
+    this.price *= 1.04;
+    this.momentum += 0.01;
+    for (const a of this.agents) { a.fear = clamp(a.fear - 0.25); a.unrest = clamp(a.unrest - 0.12); }
+    this.particles.burst(34, () => ({
+      x: ex.x + rand(-18, 18), y: ex.y - rand(2, 22), vx: rand(-8, 8), vy: rand(-30, -10), g: 16,
+      life: rand(0.6, 1.3), maxLife: 1.3, size: 1, color: pick(['#59d8c8', '#9ec9ff', '#d7f5e0', '#ffffff']),
+    }));
+    floater(this.particles, ex.x, ex.y - 20, 'SKYFALL AVERTED', '#59d8c8', 9);
+    this.headlines.push('STORM AVERTED BY DIVINE FOCUS; MARKET STEADIES');
+    G.advisor?.say('skyfall-averted', cfg.averted, { mood: 'happy', priority: 5, cooldown: 0 });
+    if (this.ipo?.state !== 'active') G.brain?.setCue?.('rest');
+  }
+
+  skyfallStruck() {
+    const G = this.G, cfg = this.skyfall.config, ex = G.world.sites.exchange;
+    G.audio?.crash?.();
+    G.source?.addStartle?.(0.3);
+    this.flash = Math.max(this.flash, 0.62);
+    G.shake = Math.max(G.shake || 0, 2);
+    this.bolts.push({ pts: makeBolt(ex.x + rand(-8, 8), ex.y + rand(-4, 4)), life: 0.4 });
+    this.castRain(ex.x, ex.y);
+    // A real market loss that still leaves the era recoverable: the price floor stays above the
+    // Great Chicken Depression fail line.
+    this.price = Math.max(13, this.price * (1 - cfg.damage.price));
+    this.confidence = Math.max(0.5, this.confidence - cfg.damage.confidence);
+    this.momentum -= 0.03;
+    for (const a of this.agents) { a.fear = clamp(a.fear + cfg.damage.fear); a.unrest = clamp(a.unrest + cfg.damage.unrest); }
+    this.particles.burst(40, () => ({
+      x: ex.x + rand(-22, 22), y: ex.y - rand(0, 18), vx: rand(-28, 28), vy: rand(-40, 2), g: 65,
+      life: rand(0.5, 1.1), maxLife: 1.1, size: 1, color: pick(['#7fb2ff', '#4358a8', '#ff5a72', '#d7e8ff']),
+    }));
+    floater(this.particles, ex.x, ex.y - 22, 'STORM HITS THE EXCHANGE', '#ff5a72', 9);
+    this.headlines.push('UNNATURAL STORM HITS EXCHANGE; CHICKEN INDEX PANICS');
+    G.advisor?.say('skyfall-failed', cfg.failed, { mood: 'panic', priority: 5, cooldown: 0 });
+    if (this.ipo?.state !== 'active') G.brain?.setCue?.('rest');
+  }
+
   move(a, dt, w, fx, ex, picket) {
     a.timer -= dt;
     switch (a.state) {
@@ -333,6 +408,7 @@ export class Industry {
       { label: 'Chicken IPO', value: st === 'done' ? 'priced' : st === 'active' ? `${ipoProgress}/${IPO_SECONDS}s` : 'soon', done: st === 'done' },
       { label: 'Chicken index', value: this.price.toFixed(1), plain: true, bad: this.price < this.peak * eraTuning(this.G).crashThreshold },
       { label: 'Striking', value: `${this.agents.filter((a) => a.state === 'strike' || a.state === 'riot').length}`, plain: true },
+      ...skyfallObjective(this.skyfall),
     ];
   }
 
@@ -501,6 +577,7 @@ export class Industry {
     }
 
     // Ticker tape across the screen bottom: main.js draws the shared one (src/ui/news.js).
+    drawSkyfallHud(ctx, this.skyfall?.snapshot());   // skyfall (#160)
     if (G.news) return;
     ctx.fillStyle = 'rgba(14, 15, 26, 0.88)';
     ctx.fillRect(0, H - 8, W, 8);
