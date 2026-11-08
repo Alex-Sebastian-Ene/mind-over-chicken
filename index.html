@@ -19,6 +19,8 @@
     <ul class="objectives" id="objectives" aria-label="Objectives"></ul>
     <div class="bar-tools">
       <span class="source" id="sourceStatus" data-ok="0">No headset</span>
+      <!-- #85: how far to trust the headset right now (src/ui/hud.js signalSummary) -->
+      <span class="signal" id="signalChip" data-level="good" role="status" hidden></span>
       <span class="clock" id="clock" aria-label="Run time">0:00</span>
       <button type="button" class="tool eeg-btn" id="eegBtn" aria-pressed="false" aria-controls="eegPanel" title="Connect or disconnect EEG headset and view live signals (E)">EEG <kbd>E</kbd></button>
       <!-- #89: Camera, Model and Debug live in Settings › Advanced; this shows while the webcam runs -->
