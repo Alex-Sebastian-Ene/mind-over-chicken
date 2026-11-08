@@ -338,13 +338,43 @@ export class Galaxy {
           this.note(p, `A new world emerged from your ${p.channel}: behold ${p.name}!`);
         }
         if (!p.home) {
+          // A colony ship from the Rust sim settled an empty world: wake it here too (#196).
+          if (!p.alive && !p.forming && typeof this.wasm.planet_is_alive === 'function' && this.wasm.planet_is_alive(i)) {
+            p.alive = true;
+            p.surface?.ensureTribe();
+            p.labels.push({ text: 'settled!', t: 3.5, color: '#9be38a' });
+            this.note(p, `Settlers landed on ${p.name}.`);
+            this.onEvent?.(p, 'settled', 'settled');
+          }
           p.pop = this.wasm.planet_pop(i);
           p.eraIndex = this.wasm.planet_era(i);
           p.progress = this.wasm.planet_progress(i);
           p.market = this.wasm.planet_market(i);
         }
       }
+
+      // Synchronize colony ships from Rust simulation
+      if (typeof this.wasm.ship_count === 'function') {
+        const sc = this.wasm.ship_count();
+        this.ships = [];
+        for (let i = 0; i < sc; i++) {
+          const fromIdx = this.wasm.ship_from(i);
+          const toIdx = this.wasm.ship_to(i);
+          const t = this.wasm.ship_t(i);
+          if (fromIdx < this.planets.length && toIdx < this.planets.length) {
+            this.ships.push({
+              from: this.planets[fromIdx],
+              to: this.planets[toIdx],
+              t,
+              dur: 1,
+              bend: 0.1,
+            });
+          }
+        }
+      }
     }
+    // The mind sample and world forming are not part of the double simulation (#196): they reveal
+    // the mind-worlds and generate their surfaces, which Rust does not do, so they always run.
     this.sampleMind(playDt, brain, fx);
     this.stepForming(dt);
 
@@ -365,26 +395,46 @@ export class Galaxy {
         continue;
       }
       if (!p.alive || p.pop <= 0) { p.effect = p.forming ? 'Forming…' : 'Waiting for settlers'; continue; }
-      this.simulate(p, dt, fx);
+      if (this.wasm) {
+        if (p.simPlanet) {
+          if (p === this.attended && this.humanBrain) {
+            p.simPlanet.attachHuman(this.humanBrain);
+          } else {
+            p.simPlanet.attachHuman(null);
+          }
+          p.simPlanet.update(dt);
+        }
+        p.effect = {
+          calm: `Calm ${pct(fx.calm)} → growth`,
+          focus: `Focus ${pct(fx.focus)} → research`,
+          stress: `Stress ${pct(fx.stress)} → goat index ${p.market?.toFixed(0) || 100}`,
+          blink: `Blinks ${(fx.blinksLast10s || 0)}/10s`,
+          mixed: `Calm & focus blend`,
+        }[p.channel || 'mixed'];
+      } else {
+        this.simulate(p, dt, fx);
+      }
     }
     this.tickSurfaces(dt, brain);
 
-    for (const s of this.ships) {
-      s.t += dt / s.dur;
-      if (s.t >= 1 && !s.done) {
-        s.done = true;
-        const to = s.to;
-        if (arriveShip(to) === 'settled') {
-          to.surface?.ensureTribe();
-          to.labels.push({ text: 'settled!', t: 3.5, color: '#9be38a' });
-          this.note(to, `Settlers from ${s.from.name} landed on ${to.name}.`);
-          this.onEvent?.(to, 'settled', 'settled');
-        } else {
-          to.labels.push({ text: '+ colonists', t: 2.5, color: '#9be38a' });
+    if (!this.wasm) {
+      for (const s of this.ships) {
+        s.t += dt / s.dur;
+        if (s.t >= 1 && !s.done) {
+          s.done = true;
+          const to = s.to;
+          if (arriveShip(to) === 'settled') {
+            to.surface?.ensureTribe();
+            to.labels.push({ text: 'settled!', t: 3.5, color: '#9be38a' });
+            this.note(to, `Settlers from ${s.from.name} landed on ${to.name}.`);
+            this.onEvent?.(to, 'settled', 'settled');
+          } else {
+            to.labels.push({ text: '+ colonists', t: 2.5, color: '#9be38a' });
+          }
         }
       }
+      this.ships = this.ships.filter((s) => !s.done);
     }
-    this.ships = this.ships.filter((s) => !s.done);
   }
 
   // The first ten seconds of play decide what the three mind-worlds become.
