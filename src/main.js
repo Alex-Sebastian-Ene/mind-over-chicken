@@ -1823,7 +1823,7 @@ window.__moc.camera = initCamera({
         const a = engine?.screen_to_ground(w / 2, h / 2, w, h);
         const b = engine?.screen_to_ground(w / 2 + move.panX * w, h / 2 + move.panY * h, w, h);
         if (a && b && a[0] >= 0 && b[0] >= 0) {
-          cosmos.pan(-(b[0] - a[0]), -(b[1] - a[1]));
+          cosmos.pan(b[0] - a[0], b[1] - a[1]);
           cam3dBase = null;
         } else {
           panMap(move.panX * W * 1.5, move.panY * H * 1.5);

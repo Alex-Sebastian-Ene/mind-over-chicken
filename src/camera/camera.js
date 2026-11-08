@@ -236,7 +236,7 @@ export function initCamera({
     startBtn: calibModal.querySelector('[data-calib-start]'),
     skipBtn: calibModal.querySelector('[data-calib-skip]'),
     resetBtn: calibModal.querySelector('[data-calib-reset]'),
-    getState: () => ({ live: !!stream && status === 'on', hands: multi, multi, grabbed, brain: getG()?.brain }),
+    getState: () => ({ live: !!stream && status === 'on', hands: multi, multi, grabbed, brain: getG()?.brain, video }),
     onChange: (cal) => { pinchCal = cal; savePinchCalibration(cal); },
   });
   const openCalib = () => {
@@ -581,9 +581,13 @@ export function initCamera({
         if (grabbed) {
           G.scene?.onGrabMove?.({ x: G.brain.aim.x, y: G.brain.aim.y });
         } else if (onGrabMove) {
-          const handGain = multi.grab.side === 'left' ? pinchCal.left.gain : multi.grab.side === 'right' ? pinchCal.right.gain : 1;
-          const headGain = pinchCal.head.gain;
-          onGrabMove({ dx: pinchMove.handDx * handGain, dy: pinchMove.handDy * handGain, headDx: pinchMove.headDx * headGain, headDy: pinchMove.headDy * headGain, started: false, active: true, aim: G.brain.aim, grab: multi.grab });
+          const sideCal = multi.grab.side === 'left' ? pinchCal.left : multi.grab.side === 'right' ? pinchCal.right : null;
+          const hx = sideCal ? (sideCal.gainX ?? sideCal.gain ?? 1) : 1;
+          const hy = sideCal ? (sideCal.gainY ?? sideCal.gain ?? 1) : 1;
+          const headCal = pinchCal.head || {};
+          const tx = headCal.gainX ?? headCal.gain ?? 1;
+          const ty = headCal.gainY ?? headCal.gain ?? 1;
+          onGrabMove({ dx: pinchMove.handDx * hx, dy: pinchMove.handDy * hy, headDx: pinchMove.headDx * tx, headDy: pinchMove.headDy * ty, started: false, active: true, aim: G.brain.aim, grab: multi.grab });
         }
       } else if (multi.grab.released || multi.grab.cancelled) {
         if (grabbed) {
