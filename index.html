@@ -118,53 +118,59 @@
 </div>
 
 <section class="overlay title-screen" id="titleScreen" aria-labelledby="titleHeading">
-  <div class="title-inner">
-    <p class="eyebrow">A god game you play with your brain</p>
+  <div class="title-inner title-menu">
     <h1 id="titleHeading">Mind <span>over</span> Chicken</h1>
-    <p class="lede">You are the god of one small tribe. Keep it alive through the ages with calm, focus and blinks, until it builds a rocket and leaves for a new world.</p>
+    <p class="tagline">A god game you play with your brain</p>
 
-    <ol class="eras">
-      <li><b>Stone Age</b><span>Blink to throw lightning. Stay calm to keep the fire alive.</span></li>
-      <li class="skip"><b>Farming · Kingdoms</b><span>Ten thousand years in a montage. Concentrate, and the scholars write down your thoughts.</span></li>
-      <li><b>Industry</b><span>Your stress moves the goat market. Stay calm or it crashes.</span></li>
-      <li><b>Space Age</b><span>Hold focus through a ten-second countdown.</span></li>
-    </ol>
+    <nav class="title-view" data-title-view="main" aria-label="Main menu">
+      <button type="button" class="btn btn-primary title-item" data-title-menu="continue" hidden>Continue<span class="title-sub" data-title-continue-sub></span></button>
+      <button type="button" class="btn title-item" id="playSim" data-title-menu="new">New Game</button>
+      <button type="button" class="btn title-item" data-title-menu="load" data-title-open="load" hidden>Load</button>
+      <button type="button" class="btn title-item" data-title-menu="sections" data-title-open="sections">Sections</button>
+      <button type="button" class="btn title-item" data-title-menu="calibrate" data-title-open="calibrate">Calibrate</button>
+      <button type="button" class="btn title-item" id="titleSettings" data-title-menu="options">Options</button>
+    </nav>
 
-    <div class="start">
-      <div class="start-main">
-        <button type="button" class="btn btn-primary" id="playSim">Play with the emulated headset</button>
-        <p class="hint"><b>No headset or camera needed.</b> Lightning flashes the screen: turn on <i>Reduce motion</i> in Settings to soften flashes and stop the shaking. Placeholder for the Muse: it sends the same signals, driven by your keyboard.
-          <kbd>Space</kbd> calm · <kbd>F</kbd> focus · <kbd>Shift</kbd> stress · <kbd>B</kbd> or click to blink · drag to pan the planet · mouse is head tilt. <kbd>E</kbd> EEG and <kbd>C</kbd> Camera sidebars (<kbd>Shift</kbd>+<kbd>C</kbd> re-centres the headset). Scroll, pinch or <kbd>Z</kbd> / <kbd>X</kbd> to zoom out to the planet and the galaxy; zoom into any world to land on it, or press <kbd>N</kbd> to visit the next one <!-- planets (#68) -->. On a phone, hold the power tiles and tap the map.</p>
-      </div>
-      <div class="start-sandbox">
-        <button type="button" class="btn" id="playSandbox">Galaxy sandbox</button>
-        <p class="hint">Skip the story: make planets and let their civilisations run on their own. Your calm, focus and stress still steer all of them.</p>
-      </div>
-      <!-- civ (#50) -->
-      <div class="start-sandbox">
-        <button type="button" class="btn" id="playCiv">Sandbox: a crowded planet</button>
-        <div class="size-pick" id="planetSizePick" role="radiogroup" aria-label="Planet size">
-          <span class="size-pick-label">Planet</span>
+    <div class="title-view" data-title-view="load" role="group" aria-labelledby="titleLoadHeading" hidden>
+      <h2 class="title-view-head" id="titleLoadHeading">Load</h2>
+      <ul class="save-list" data-save-list></ul>
+      <button type="button" class="btn title-back" data-title-back>Back <kbd>Esc</kbd></button>
+    </div>
+
+    <div class="title-view" data-title-view="sections" role="group" aria-labelledby="titleSectionsHeading" hidden>
+      <h2 class="title-view-head" id="titleSectionsHeading">Sections</h2>
+      <div class="section-grid">
+        <button type="button" class="btn title-item" data-section="0">Stone Age</button>
+        <button type="button" class="btn title-item" data-section="1">Farming → Kingdoms</button>
+        <button type="button" class="btn title-item" data-section="2">Industry</button>
+        <button type="button" class="btn title-item" data-section="3">Information Age</button>
+        <button type="button" class="btn title-item" data-section="4">Space Age</button>
+        <button type="button" class="btn title-item" id="playSandbox" data-section="galaxy">Galaxy</button>
+        <!-- civ (#50) -->
+        <button type="button" class="btn title-item section-wide" id="playCiv" data-section="crowded">Crowded planet</button>
+        <div class="size-pick section-wide" id="planetSizePick" role="radiogroup" aria-label="Planet size">
+          <span class="size-pick-label">Size</span>
           <button type="button" role="radio" data-size="random">Random</button>
           <button type="button" role="radio" data-size="small" title="1280×640, 8 peoples">Small</button>
           <button type="button" role="radio" data-size="medium" title="1920×960, 12 peoples">Medium</button>
           <button type="button" role="radio" data-size="large" title="2560×1280, 16 peoples">Large</button>
           <button type="button" role="radio" data-size="huge" title="3072×1536, 20 peoples">Huge</button>
         </div>
-        <p class="hint">Your four peoples and their rivals grow, trade, ally, fight for land and rebel. Pick the planet size (more peoples on a bigger planet), or leave it random. Calm makes peace; stress and anger make war.</p>
       </div>
-      <details class="start-real">
-        <summary>Connect a real headset</summary>
-        <p class="hint">Run <code>python bridge/muse_bridge.py --board muse2</code> on this computer, then connect.</p>
-        <div class="row">
-          <label for="bridgeUrl">Bridge address</label>
-          <input id="bridgeUrl" type="text" value="ws://localhost:8765" spellcheck="false" autocomplete="off">
-          <button type="button" class="btn" id="playBridge">Connect</button>
-        </div>
-        <p class="hint" id="bridgeStatus" aria-live="polite"></p>
-      </details>
+      <button type="button" class="btn title-back" data-title-back>Back <kbd>Esc</kbd></button>
     </div>
-    <p class="judges">Judges: press <kbd>M</kbd> at any time to see the model the game is quietly training on your brain. <button type="button" class="btn btn-small" id="titleSettings">⚙ Settings</button></p>
+
+    <div class="title-view" data-title-view="calibrate" role="group" aria-labelledby="titleCalibrateHeading" hidden>
+      <h2 class="title-view-head" id="titleCalibrateHeading">Calibrate</h2>
+      <p class="title-status" id="bridgeStatus" aria-live="polite">No headset connected.</p>
+      <div class="row">
+        <label for="bridgeUrl">Bridge</label>
+        <input id="bridgeUrl" type="text" value="ws://localhost:8765" spellcheck="false" autocomplete="off">
+        <button type="button" class="btn" id="playBridge">Connect</button>
+      </div>
+      <button type="button" class="btn btn-primary title-item" data-title-calibrate disabled>Start calibration</button>
+      <button type="button" class="btn title-back" data-title-back>Back <kbd>Esc</kbd></button>
+    </div>
   </div>
 </section>
 
@@ -243,7 +249,7 @@
   </section>
   <section class="set-group" aria-labelledby="setKeysH">
     <h3 id="setKeysH">No headset or camera? (#90)</h3>
-    <p class="set-keys">The whole game plays on the keyboard and mouse: <kbd>Space</kbd> calm · <kbd>F</kbd> focus · <kbd>Shift</kbd> stress · <kbd>B</kbd> or click to blink · the mouse or arrow keys aim · <kbd>Z</kbd>/<kbd>X</kbd> zoom. On a phone, hold the power tiles and tap the map. The camera is optional.</p>
+    <p class="set-keys">The whole game plays on the keyboard and mouse: <kbd>Space</kbd> calm · <kbd>F</kbd> focus · <kbd>Shift</kbd> stress · <kbd>B</kbd> or click to blink · the mouse or arrow keys aim · <kbd>Z</kbd>/<kbd>X</kbd> zoom · <kbd>E</kbd> EEG · <kbd>C</kbd> Camera (<kbd>Shift</kbd>+<kbd>C</kbd> re-centres the headset). On a phone, hold the power tiles and tap the map. The camera is optional.</p>
   </section>
   <section class="set-group" aria-labelledby="setCamH">
     <h3 id="setCamH">Camera</h3>

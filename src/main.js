@@ -45,6 +45,7 @@ import { setRustAgentHelpers } from './sim/agents.js';
 import { initDebug } from './camera/debug.js'; // camera debug (#67)
 import { Calibration, readCalibrationConfig, saveCalibrationConfig, CALIBRATION_DEFAULTS, setRustCalibration } from './brain/calibration.js';
 import { initSettings, syncCameraIndicator } from './ui/settings.js';
+import { initTitle } from './ui/title.js';   // the title menu: Continue, New Game, Load, Sections, Calibrate, Options
 import { reducedMotion, flashAlpha, shakeAmount as shakeFor } from './ui/motion.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
 import { CivSandbox, initPlanetSizePicker } from './civ/sandbox.js'; // civ (#50)
@@ -1746,6 +1747,7 @@ $('galaxyBtn').addEventListener('click', () => {
 // back to the emulator without one; newGame() disconnects whatever it isn't given (#185).
 function playSource() { return liveBridge(G?.source, previewSource) || new SimSource(); }
 let settingsUi = null;   // the Settings panel (#186), wired after the camera and debug panels
+// startIndex: Sections start a fresh run at any era.
 function begin(source, { startIndex = 0, mode = 'story', resume = null } = {}) {
   audio.unlock();
   $('titleScreen').hidden = true;
@@ -1782,8 +1784,9 @@ function startCivSandbox(source, resume = null) {
   autosave({ civSeed: scene.seed, planet: scene.planetSize?.name ?? null });
 }
 $('playCiv').addEventListener('click', () => startCivSandbox(playSource()));
-// Connect a real headset (#174): the run starts on its first EEG frame, not when the socket
-// opens. While it waits the button cancels; after a failure it retries.
+// Calibrate › Connect (#174): the headset counts as connected on its first EEG frame, not when
+// the socket opens. It stays on the title so the player can calibrate; New Game then plays on it.
+// While it waits the button cancels; after a failure it retries.
 let bridgeWait = null;
 $('playBridge').addEventListener('click', async () => {
   const btn = $('playBridge');
@@ -1804,23 +1807,35 @@ $('playBridge').addEventListener('click', async () => {
   try {
     await src.connect();
     if (bridgeWait !== src) return;
-    status.textContent = 'Bridge connected. Waiting for the first EEG from the headset…';
+    status.textContent = 'Bridge connected. Waiting for EEG…';
     await src.waitForFrame(10000);
     if (bridgeWait !== src) return;
     bridgeWait = null;
     btn.textContent = 'Connect';
-    status.textContent = src.status;
-    begin(src);
+    setGameSource(src);
+    status.textContent = 'Muse connected.';
   } catch (err) {
     if (bridgeWait !== src) return;   // cancelled
     bridgeWait = null;
     src.disconnect();
     btn.textContent = 'Retry';
     status.textContent = src.connected || /EEG/.test(err.message)
-      ? `${err.message}. Is the Muse on, charged and paired with the bridge? Retry, or play with the emulated headset.`
-      : `${err.message}. Start the bridge with: python bridge/muse_bridge.py --board muse2 (or --board synthetic to test).`;
+      ? `${err.message}. Is the Muse on and paired?`
+      : `${err.message}. Run python bridge/muse_bridge.py --board muse2`;
   }
 });
+// Continue and Load resume a save (src/game/saves.js) through __moc.continueRun, set below.
+try {
+  initTitle(document, {
+    onContinue: (save) => window.__moc?.continueRun?.(save),
+    onSection: (i) => begin(playSource(), { startIndex: i }),
+    onCalibrate: () => eegPanel?.startWizard('both'),
+    headsetLive: () => !!liveBridge(G?.source, previewSource)?.streaming,
+    isBusy: () => !!(settingsUi?.isOpen() || eegPanel?.wiz?.active || $('moveCalibModal')?.hidden === false),
+  });
+} catch (err) {
+  console.error('Title menu failed to start; its buttons still work:', err);
+}
 
 // Debug handle for the console (and for automated playtests).
 window.__moc = {
