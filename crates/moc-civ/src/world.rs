@@ -1078,6 +1078,48 @@ impl World {
         self.news_of(&e);
     }
 
+    /// The living person nearest (x, y) within `r` tiles (#188: a pinch picks people up).
+    pub fn agent_near(&self, x: f32, y: f32, r: f32) -> Option<usize> {
+        let mut best = None;
+        let mut bd = r * r;
+        for (i, a) in self.agents.iter().enumerate() {
+            if !a.alive {
+                continue;
+            }
+            let (dx, dy) = (self.d.dx(x, a.x), self.d.dy(y, a.y));
+            let d = dx * dx + dy * dy;
+            if d < bd {
+                bd = d;
+                best = Some(i);
+            }
+        }
+        best
+    }
+
+    /// Set a living person down at (x, y) if it is walkable land; they drop what they were doing
+    /// and carry on from there (#188). Returns whether they moved.
+    pub fn move_agent(&mut self, i: usize, x: f32, y: f32) -> bool {
+        let (tx, ty) = (x.floor() as i32, y.floor() as i32);
+        if i >= self.agents.len() || !self.agents[i].alive || !self.terrain.walkable(tx, ty) {
+            return false;
+        }
+        let (wx, wy) = (self.d.wrap_xf(x), self.d.wrap_yf(y));
+        let (cx, cy) = (self.d.wrap_x(tx), self.d.wrap_y(ty));
+        let a = &mut self.agents[i];
+        a.x = wx;
+        a.y = wy;
+        a.nx = NO_TILE;
+        a.ny = NO_TILE;
+        a.px = cx;
+        a.py = cy;
+        a.gx = cx;
+        a.gy = cy;
+        a.stuck = 0;
+        a.state = State::Idle;
+        a.timer = 0.5;
+        true
+    }
+
     pub fn alive_factions(&self) -> impl Iterator<Item = &Faction> {
         self.factions.iter().filter(|f| f.alive)
     }
