@@ -1,25 +1,28 @@
 // Time-skip cutscenes. The 24-hour scope builds three eras properly and fakes the rest.
 //
-// FarmingToKingdoms: farms and goat trading appear, then the Kingdom's scholars pose
-// three mental-arithmetic problems. Those seconds are labelled `focus`, which is how
-// the focus classifier gets trained on this player before the finale needs it.
+// FarmingToKingdoms: farms and goat trading appear, then the Kingdom's scholars write down
+// three inventions while the player concentrates (#223: no arithmetic, it read as a calculator).
+// Those seconds are labelled `focus`, which is how the focus classifier gets trained on this
+// player before the finale needs it; the scroll's ink runs faster the harder they focus.
 //
 // InfoAge: a short bridge into the Space Age.
 
-import { W, H, Particles, rand, randInt, pick, floater, clamp } from '../sim/util.js';
+import { W, H, Particles, rand, pick, floater, clamp } from '../sim/util.js';
 import { walk, animate, villagerLook } from '../sim/agents.js';
 import { drawPerson, drawGoat, drawChicken } from '../render/sprites.js';
 import { label } from './stone.js';
 
-function makeProblems() {
-  const a = randInt(13, 19), b = randInt(3, 7);
-  const c = randInt(6, 12), d = c * randInt(8, 12), e = randInt(5, 19);
-  const f = randInt(21, 29), g = randInt(3, 4), h = randInt(6, 15);
-  return [
-    { q: `${a} × ${b}`, a: a * b, invent: 'The scholars invent writing.' },
-    { q: `${d} ÷ ${c} + ${e}`, a: d / c + e, invent: 'The scholars invent law.' },
-    { q: `${f} × ${g} − ${h}`, a: f * g - h, invent: 'Too much focus. The scholars invent taxes.' },
-  ];
+// What the scholars write down, one focus window each.
+export const INVENTIONS = [
+  { name: 'Writing', invent: 'The scholars invent writing.' },
+  { name: 'Law', invent: 'The scholars invent law.' },
+  { name: 'Taxes', invent: 'Too much focus. The scholars invent taxes.' },
+];
+// How much of an invention's name is inked: time alone writes half of it over the window, and
+// focus writes faster (the full name is revealed when the window ends either way).
+export function inkedLetters(name, t, ink, window) {
+  const share = Math.max(Math.min(1, t / window) * 0.5, Math.min(1, ink));
+  return name.slice(0, Math.ceil(name.length * share));
 }
 
 export class FarmingToKingdoms {
@@ -39,7 +42,8 @@ export class FarmingToKingdoms {
     this.particles = new Particles();
     this.t = 0;
     this.phase = 'farming';
-    this.problems = makeProblems();
+    this.problems = INVENTIONS;
+    this.ink = 0;
     this.pi = -1;
     this.pt = 0;
     this.reveal = false;
@@ -67,9 +71,9 @@ export class FarmingToKingdoms {
   startKingdoms() {
     const G = this.G;
     this.phase = 'kingdoms';
-    this.pi = 0; this.pt = 0; this.reveal = false;
+    this.pi = 0; this.pt = 0; this.reveal = false; this.ink = 0;
     G.advisor.setEra('kingdoms');
-    G.advisor.say('scholars', 'The Kingdom\'s scholars beg for your wisdom. Work out each sum in your head. They will write down whatever you think.', { priority: 3, cooldown: 999 });
+    G.advisor.say('scholars', 'The Kingdom\'s scholars will write down whatever you think, my lord. Concentrate, and the ink runs faster.', { priority: 3, cooldown: 999 });
     G.brain.setCue('focus');
     G.audio.bell();
   }
@@ -97,12 +101,14 @@ export class FarmingToKingdoms {
     if (this.phase === 'kingdoms') {
       this.pt += dt;
       const PROBLEM = 4.4, REVEAL = 1.3;
+      // Focus fills the scroll (#223): half the name by time alone, the rest by focusing.
+      if (!this.reveal) this.ink += (dt / PROBLEM) * (0.4 + 1.6 * clamp(G.brain.focus || 0));
       if (!this.reveal && this.pt > PROBLEM) {
         this.reveal = true; this.pt = 0;
         G.brain.setCue('rest');
         G.audio.good();
       } else if (this.reveal && this.pt > REVEAL) {
-        this.reveal = false; this.pt = 0; this.pi++;
+        this.reveal = false; this.pt = 0; this.pi++; this.ink = 0;
         if (this.pi >= this.problems.length) {
           this.phase = 'done';
           G.brain.setCue(null);
@@ -123,7 +129,7 @@ export class FarmingToKingdoms {
   objectives() {
     if (this.phase === 'farming') return [{ label: 'Years passing', value: `${Math.floor(clamp(this.t / 5.5) * 8000)}`, plain: true }];
     const done = Math.max(0, this.pi + (this.reveal ? 1 : 0));
-    return [{ label: 'Scholars’ sums', value: `${Math.min(3, done)}/3`, done: this.phase === 'done' }];
+    return [{ label: 'Scholars’ scrolls', value: `${Math.min(3, done)}/3`, done: this.phase === 'done' }];
   }
 
   lights() { return []; }
@@ -178,17 +184,17 @@ export class FarmingToKingdoms {
       ctx.fillStyle = '#c9b88e'; ctx.fillRect(x0 - 4, y0 - 3, w + 8, 4); ctx.fillRect(x0 - 4, y0 + h - 1, w + 8, 4);
       ctx.textAlign = 'center';
       ctx.fillStyle = '#6b4f2a'; ctx.font = '6px "Pixelify Sans", monospace';
-      ctx.fillText(`THE SCHOLARS ASK · ${this.pi + 1} of 3`, W / 2, y0 + 12);
+      ctx.fillText(`THE SCHOLARS LISTEN · ${this.pi + 1} of 3`, W / 2, y0 + 12);
       ctx.fillStyle = '#2b1d14'; ctx.font = '20px "Pixelify Sans", monospace';
-      ctx.fillText(this.reveal ? `= ${pr.a}` : pr.q, W / 2, y0 + 40);
+      ctx.fillText(this.reveal ? pr.name : inkedLetters(pr.name, this.pt, this.ink, 4.4), W / 2, y0 + 40);
       ctx.font = '6px "Pixelify Sans", monospace'; ctx.fillStyle = '#6b4f2a';
       if (this.reveal) ctx.fillText(pr.invent, W / 2, y0 + 58);
       else {
-        ctx.fillText('Solve it in your head', W / 2, y0 + 56);
+        ctx.fillText('Concentrate: the ink runs faster', W / 2, y0 + 56);
         const left = clamp(1 - this.pt / 4.4);
         ctx.fillStyle = '#b5543a'; ctx.fillRect(x0 + 16, y0 + 62, (w - 32) * left, 2);
       }
-      if (this.G.source.kind === 'sim' && !this.reveal) label(ctx, W / 2, y0 + h + 14, 'Emulated headset: hold F (or the Inspire tile) while you work it out', '#ffcf4a', 5);
+      if (this.G.source.kind === 'sim' && !this.reveal) label(ctx, W / 2, y0 + h + 14, 'Emulated headset: hold F to concentrate', '#ffcf4a', 5);
     }
     if (this.phase === 'done') {
       label(ctx, W / 2, 70, 'Writing. Law. Taxes.', '#f2e8d5', 12);

@@ -59,7 +59,8 @@ impl Era for IndustryEra {
     }
 
     fn powers(&self) -> &[&str] {
-        &["stress", "calm"]
+        // Blink strikes the factory, the picket line or the exchange (on_blink), so its tile is on (#178).
+        &["blink", "stress", "calm"]
     }
 
     fn darkness(&self) -> f32 {

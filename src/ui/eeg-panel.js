@@ -57,7 +57,7 @@ const TEMPLATE = `
       <h3>Head Cursor &amp; Motion Calibration</h3>
       <div class="eeg-btn-group">
         <button type="button" class="btn btn-small" data-eeg-dot-calib disabled title="Calibrate 9 separate dots at the full edges & corners of the screen (Up/Down/Left/Right)">⚪ 9-Dot Edge Calib</button>
-        <button type="button" class="btn btn-primary btn-small" data-eeg-recenter title="Look at the center of the screen and click (or press C) to zero Pitch/Yaw and recalibrate gyro drift" disabled>Center <kbd>C</kbd></button>
+        <button type="button" class="btn btn-primary btn-small" data-eeg-recenter title="Look at the center of the screen and click (or press Shift+C) to zero Pitch/Yaw and recalibrate gyro drift" disabled>Center <kbd>Shift+C</kbd></button>
       </div>
     </div>
     <div class="eeg-calib-row">
@@ -181,6 +181,42 @@ const TEMPLATE = `
   </section>
 `;
 
+// The calibration wizard's clock (#176): real time minus the time the headset wasn't streaming,
+// so a phase can't run out, record or finish on a dead stream. tick(live) once per frame.
+export class PausableClock {
+  constructor(realNow = () => performance.now()) {
+    this.realNow = realNow;
+    this.pausedMs = 0;
+    this.last = realNow();
+  }
+  tick(live) {
+    const r = this.realNow();
+    if (!live) this.pausedMs += r - this.last;
+    this.last = r;
+    return r - this.pausedMs;
+  }
+  now() { return this.realNow() - this.pausedMs; }
+}
+
+// Head-aim settings (sensitivity, yaw and pitch inversion) survive a reload (#186), under
+// localStorage "moc.aimPrefs". Bad or missing values fall back to the defaults.
+export const AIM_PREFS_KEY = 'moc.aimPrefs';
+const AIM_DEFAULTS = { sensitivity: 1.0, invertYaw: false, invertPitch: false };
+function prefsStorage() { try { return globalThis.localStorage ?? null; } catch { return null; } }
+export function loadAimPrefs(storage = prefsStorage()) {
+  let saved = {};
+  try { saved = JSON.parse(storage?.getItem(AIM_PREFS_KEY) || '{}') || {}; } catch { saved = {}; }
+  const s = Number(saved.sensitivity);
+  return {
+    sensitivity: Number.isFinite(s) ? Math.min(2.5, Math.max(0.5, s)) : AIM_DEFAULTS.sensitivity,
+    invertYaw: saved.invertYaw === true,
+    invertPitch: saved.invertPitch === true,
+  };
+}
+export function saveAimPrefs(prefs, storage = prefsStorage()) {
+  try { storage?.setItem(AIM_PREFS_KEY, JSON.stringify({ sensitivity: prefs.sensitivity, invertYaw: !!prefs.invertYaw, invertPitch: !!prefs.invertPitch })); } catch {}
+}
+
 export class EegPanel {
   constructor(doc, { getSource, getBrain, onConnectBridge, onDisconnectBridge }) {
     this.doc = doc;
@@ -260,7 +296,12 @@ export class EegPanel {
     this.accelCtx = this.ui.accelScope.getContext('2d');
     this.gyroCtx = this.ui.gyroScope.getContext('2d');
     this.connecting = false;
-    this.prefs = { sensitivity: 1.0, invertYaw: false, invertPitch: false };
+    this.prefs = loadAimPrefs();   // saved by the controls below (#186)
+    this.prefsSource = null;       // the source they were last applied to
+    this.ui.sensInput.value = String(this.prefs.sensitivity);
+    this.ui.sensVal.textContent = `${this.prefs.sensitivity.toFixed(1)}×`;
+    this.ui.invYaw.checked = this.prefs.invertYaw;
+    this.ui.invPitch.checked = this.prefs.invertPitch;
     this.logs = [];
     this.lastLoggedBlinkCount = 0;
     this.lastLoggedSampleCount = 0;
@@ -292,17 +333,35 @@ export class EegPanel {
       this.ui.sensVal.textContent = `${v.toFixed(1)}×`;
       const src = this.getSource();
       if (src) src.sensitivity = v;
+      saveAimPrefs(this.prefs);
     });
     this.ui.invYaw.addEventListener('change', () => {
       this.prefs.invertYaw = this.ui.invYaw.checked;
       const src = this.getSource();
       if (src) src.invertYaw = this.prefs.invertYaw;
+      saveAimPrefs(this.prefs);
     });
     this.ui.invPitch.addEventListener('change', () => {
       this.prefs.invertPitch = this.ui.invPitch.checked;
       const src = this.getSource();
       if (src) src.invertPitch = this.prefs.invertPitch;
+      saveAimPrefs(this.prefs);
     });
+  }
+
+  // Set, save and apply the head-aim settings from elsewhere (the Settings panel, #186), keeping
+  // this panel's controls in step.
+  setAimPrefs(p) {
+    this.prefs = { sensitivity: Number(p.sensitivity) || 1, invertYaw: !!p.invertYaw, invertPitch: !!p.invertPitch };
+    if (this.ui) {
+      this.ui.sensInput.value = String(this.prefs.sensitivity);
+      this.ui.sensVal.textContent = `${this.prefs.sensitivity.toFixed(1)}×`;
+      this.ui.invYaw.checked = this.prefs.invertYaw;
+      this.ui.invPitch.checked = this.prefs.invertPitch;
+    }
+    saveAimPrefs(this.prefs);
+    const src = this.getSource?.();
+    if (src?.kind === 'bridge') this.applyPrefsToSource(src);
   }
 
   applyPrefsToSource(src) {
@@ -430,7 +489,7 @@ export class EegPanel {
   advanceToNextDot() {
     if (!this.wiz) return;
     this.wiz.dotIdx += 1;
-    this.wiz.dotEnteredAt = performance.now();
+    this.wiz.dotEnteredAt = this.wiz.clock ? this.wiz.clock.now() : performance.now();
     this.wiz.dotHoldSec = 0;
     this.wiz.dotSamplesTaken = 0;
     if (this.wiz.dotIdx >= this.wiz.dots.length) {
@@ -443,6 +502,8 @@ export class EegPanel {
     const src = this.getSource();
     const b = this.getBrain();
     this.wiz.active = true;
+    this.wiz.clock = new PausableClock();
+    this.wiz.lost = false;
     this.wiz.mode = mode;
     this.wiz.modal.hidden = false;
     this.wiz.lastBlinkCount = b?.stats?.blinks ?? 0;
@@ -460,7 +521,7 @@ export class EegPanel {
   enterWizardPhase(phase) {
     if (!this.wiz) return;
     const src = this.getSource();
-    const now = performance.now();
+    const now = this.wiz.clock ? this.wiz.clock.now() : performance.now();
     this.wiz.phase = phase;
     this.wiz.t0 = now;
     this.wiz.lastFrameNow = now;
@@ -511,6 +572,7 @@ export class EegPanel {
 
   advanceWizardPhase() {
     if (!this.wiz || !this.wiz.active) return;
+    if (this.wiz.lost && this.wiz.phase !== 'sandbox') return;   // never finish a step on a dead stream (#176)
     const src = this.getSource();
     if (this.wiz.phase === 'motion') {
       if (src?.finishMotionCalibration) {
@@ -552,7 +614,29 @@ export class EegPanel {
     const src = this.getSource();
     const b = this.getBrain();
     const aim = screenAimOf(b);
-    const now = performance.now();
+    // #176: no live frames, no calibration. The wizard clock stands still, nothing is recorded,
+    // no step can finish, and the wizard says so; it carries on where it was once frames return.
+    const now = this.wiz.clock ? this.wiz.clock.tick(hasRealStream) : performance.now();
+    const lost = !hasRealStream && this.wiz.phase !== 'sandbox';
+    if (lost !== this.wiz.lost) {
+      this.wiz.lost = lost;
+      if (this.wiz.skipBtn) this.wiz.skipBtn.disabled = lost;
+      this.addLog(lost ? 'Headset lost: calibration paused until the stream is back.' : 'Headset back: calibration resumes.');
+    }
+    if (lost) {
+      const ctx = this.wiz.ctx, w = this.wiz.canvas.width, h = this.wiz.canvas.height;
+      this.wiz.lastFrameNow = now;
+      ctx.fillStyle = 'rgba(8, 10, 24, 0.82)';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#ff9a2e';
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 20px "Pixelify Sans", monospace';
+      ctx.fillText('Headset lost: calibration paused', w / 2, h / 2 - 8);
+      ctx.fillStyle = '#f2e8d5';
+      ctx.font = '14px "Atkinson Hyperlegible", sans-serif';
+      ctx.fillText('It resumes when the Muse streams again. Close (Esc) to stop.', w / 2, h / 2 + 18);
+      return;
+    }
     const frameDt = Math.max(0.008, Math.min(0.25, (now - (this.wiz.lastFrameNow || now)) / 1000));
     this.wiz.lastFrameNow = now;
     const elapsed = (now - this.wiz.t0) / 1000;
@@ -1046,6 +1130,11 @@ export class EegPanel {
         modP.hidden = true;
         modB?.setAttribute('aria-pressed', 'false');
       }
+      const setP = this.doc.getElementById('settingsPanel');   // one side panel at a time (#186)
+      if (setP && !setP.hidden) {
+        setP.hidden = true;
+        this.doc.getElementById('settingsBtn')?.setAttribute('aria-pressed', 'false');
+      }
     }
   }
 
@@ -1108,6 +1197,12 @@ export class EegPanel {
   update() {
     const src = this.getSource();
     const b = this.getBrain();
+    // Every headset gets the saved aim settings, however it was connected (title screen, this
+    // panel, auto-connect at boot), not only one connected from this panel (#186).
+    if (src !== this.prefsSource) {
+      this.prefsSource = src;
+      if (src?.kind === 'bridge') this.applyPrefsToSource(src);
+    }
     const isBridge = src?.kind === 'bridge';
     const wsConnected = isBridge && src.connected;
     const hasRealStream = wsConnected && src.streaming && src.lastFrameAt > 0 && (performance.now() - src.lastFrameAt < 3000);

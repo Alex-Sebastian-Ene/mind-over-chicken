@@ -21,12 +21,12 @@
       <span class="source" id="sourceStatus" data-ok="0">No headset</span>
       <span class="clock" id="clock" aria-label="Run time">0:00</span>
       <button type="button" class="tool eeg-btn" id="eegBtn" aria-pressed="false" aria-controls="eegPanel" title="Connect or disconnect EEG headset and view live signals (E)">EEG <kbd>E</kbd></button>
-      <!-- camera (#33) --><button type="button" class="tool cam-btn" id="camBtn" aria-pressed="false" aria-controls="camPanel" title="Open Camera &amp; Hand Gesture Casts sidebar (` key)">Camera <kbd>`</kbd></button>
-      <!-- camera debug (#67) --><button type="button" class="tool dbg-btn" id="dbgBtn" hidden aria-pressed="false" aria-controls="dbgPanel" title="Debug: what the camera and headset read (` key)">Debug <kbd>`</kbd></button>
+      <!-- #89: Camera, Model and Debug live in Settings › Advanced; this shows while the webcam runs -->
+      <button type="button" class="tool cam-live" id="camLive" hidden title="The camera is on: open the Camera panel (C)">● Camera on</button>
       <button type="button" class="tool" id="mode3dBtn" aria-pressed="false" title="Toggle 3D world (T)">3D</button>
       <button type="button" class="tool" id="aiGodBtn" aria-pressed="false" title="Toggle AI God autopilot (G)">AI God <kbd>G</kbd></button>
-      <button type="button" class="tool" id="modelBtn" aria-pressed="false" title="Show the model of your brain (M)">Model <kbd>M</kbd></button>
       <button type="button" class="tool" id="soundBtn" aria-pressed="true">Sound on</button>
+      <button type="button" class="tool" id="settingsBtn" aria-pressed="false" aria-controls="settingsPanel" title="Settings: comfort, head aim, calibration, camera, advanced">⚙ Settings</button>
     </div>
   </header>
 
@@ -44,6 +44,8 @@
         </div>
       </div>
       <div class="loading-pill" id="loadingPill" role="status" aria-live="polite" hidden></div>
+      <!-- #177: what a camera action just did (src/ui/hud.js showCause) -->
+      <p class="cause-toast" id="causeToast" role="status" aria-live="polite" hidden></p>
 
       <div class="zoom" role="group" aria-label="Zoom">
         <button type="button" class="zbtn" id="zoomOut" aria-label="Zoom out (Z)" title="Zoom out (Z or scroll)">−</button>
@@ -82,8 +84,8 @@
       </div>
     </aside>
 
-    <!-- camera (#33): webcam preview, casts and mood. Filled by src/camera/camera.js. -->
-    <aside class="eeg-panel cam-panel" id="camPanel" hidden aria-label="Camera casts and mood"></aside>
+    <!-- camera (#33): webcam preview, hand grab/zoom and mood. Filled by src/camera/camera.js. -->
+    <aside class="eeg-panel cam-panel" id="camPanel" hidden aria-label="Camera hand moves and mood"></aside>
     <!-- camera debug (#67): camera, gestures, inference rates and brain signals. Filled by src/camera/debug.js. -->
     <aside class="dbg-panel" id="dbgPanel" hidden aria-label="Debug"></aside>
 
@@ -98,17 +100,10 @@
       <span class="power-sub">Blink <kbd>B</kbd> or click the map</span>
       <span class="power-value">0</span>
     </button>
-    <button type="button" class="power" data-power="calm">
-      <canvas class="power-icon" width="8" height="8" aria-hidden="true"></canvas>
-      <span class="power-name">Kindle</span>
-      <span class="power-sub">Calm · hold <kbd>Space</kbd></span>
-      <span class="power-value">0%</span>
-      <span class="meter"><span></span></span>
-    </button>
     <button type="button" class="power" data-power="focus">
       <canvas class="power-icon" width="8" height="8" aria-hidden="true"></canvas>
-      <span class="power-name">Inspire</span>
-      <span class="power-sub">Focus · hold <kbd>F</kbd></span>
+      <span class="power-name">Rain or Calm</span>
+      <span class="power-sub">Focus / Insight · hold <kbd>F</kbd></span>
       <span class="power-value">0%</span>
       <span class="meter"><span></span></span>
     </button>
@@ -130,7 +125,7 @@
 
     <ol class="eras">
       <li><b>Stone Age</b><span>Blink to throw lightning. Stay calm to keep the fire alive.</span></li>
-      <li class="skip"><b>Farming · Kingdoms</b><span>Ten thousand years in a montage. The scholars ask you some sums.</span></li>
+      <li class="skip"><b>Farming · Kingdoms</b><span>Ten thousand years in a montage. Concentrate, and the scholars write down your thoughts.</span></li>
       <li><b>Industry</b><span>Your stress moves the goat market. Stay calm or it crashes.</span></li>
       <li><b>Space Age</b><span>Hold focus through a ten-second countdown.</span></li>
     </ol>
@@ -139,7 +134,7 @@
       <div class="start-main">
         <button type="button" class="btn btn-primary" id="playSim">Play with the emulated headset</button>
         <p class="hint">Placeholder for the Muse: it sends the same signals, driven by your keyboard.
-          <kbd>Space</kbd> calm · <kbd>F</kbd> focus · <kbd>Shift</kbd> stress · <kbd>B</kbd> or click to blink · drag to pan the planet · mouse is head tilt. Scroll, pinch or <kbd>Z</kbd> / <kbd>X</kbd> to zoom out to the planet and the galaxy; zoom into any world to land on it, or press <kbd>N</kbd> to visit the next one <!-- planets (#68) -->. On a phone, hold the power tiles and tap the map.</p>
+          <kbd>Space</kbd> calm · <kbd>F</kbd> focus · <kbd>Shift</kbd> stress · <kbd>B</kbd> or click to blink · drag to pan the planet · mouse is head tilt. <kbd>E</kbd> EEG and <kbd>C</kbd> Camera sidebars (<kbd>Shift</kbd>+<kbd>C</kbd> re-centres the headset). Scroll, pinch or <kbd>Z</kbd> / <kbd>X</kbd> to zoom out to the planet and the galaxy; zoom into any world to land on it, or press <kbd>N</kbd> to visit the next one <!-- planets (#68) -->. On a phone, hold the power tiles and tap the map.</p>
       </div>
       <div class="start-sandbox">
         <button type="button" class="btn" id="playSandbox">Galaxy sandbox</button>
@@ -169,7 +164,7 @@
         <p class="hint" id="bridgeStatus" aria-live="polite"></p>
       </details>
     </div>
-    <p class="judges">Judges: press <kbd>M</kbd> at any time to see the model the game is quietly training on your brain.</p>
+    <p class="judges">Judges: press <kbd>M</kbd> at any time to see the model the game is quietly training on your brain. <button type="button" class="btn btn-small" id="titleSettings">⚙ Settings</button></p>
   </div>
 </section>
 
@@ -222,6 +217,43 @@
     <button type="button" class="tool" id="modelClose">Close <kbd>M</kbd></button>
   </header>
   <div id="modelBody"></div>
+</aside>
+
+<!-- Settings (#186, #89): src/ui/settings.js -->
+<aside class="settings-panel" id="settingsPanel" hidden aria-labelledby="settingsHeading">
+  <header>
+    <h2 id="settingsHeading">Settings</h2>
+    <button type="button" class="tool" id="settingsClose">Close <kbd>Esc</kbd></button>
+  </header>
+  <section class="set-group" aria-labelledby="setComfortH">
+    <h3 id="setComfortH">Comfort</h3>
+    <label class="set-row"><input type="checkbox" id="setReducedMotion"> <span>Reduce motion <small>No screen shake, softer lightning flashes, no camera sweeps. Starts from your system setting.</small></span></label>
+  </section>
+  <section class="set-group" aria-labelledby="setAimH">
+    <h3 id="setAimH">Head aim (Muse)</h3>
+    <label class="set-row set-range"><span>Sensitivity</span> <input type="range" id="setAimSens" min="0.5" max="2.5" step="0.1" value="1.0"> <output id="setAimSensVal">1.0×</output></label>
+    <label class="set-row"><input type="checkbox" id="setInvYaw"> <span>Invert left / right</span></label>
+    <label class="set-row"><input type="checkbox" id="setInvPitch"> <span>Invert up / down</span></label>
+  </section>
+  <section class="set-group" aria-labelledby="setCalibH">
+    <h3 id="setCalibH">Calibration</h3>
+    <label class="set-row set-range"><span>Seconds of play that seed your civilisation</span> <input type="number" id="setCalibSeconds" min="1" max="120" step="1" value="10"></label>
+    <label class="set-row set-range"><span>Seed from</span> <select id="setCalibMode"><option value="random">a random roll (demo)</option><option value="sensor">your signals</option></select></label>
+    <p class="set-note">Applies from the next run.</p>
+  </section>
+  <section class="set-group" aria-labelledby="setCamH">
+    <h3 id="setCamH">Camera</h3>
+    <label class="set-row"><input type="checkbox" id="setCameraOnStart"> <span>Turn the camera on when a game starts <small>Off by default. Frames never leave this device.</small></span></label>
+  </section>
+  <section class="set-group" aria-labelledby="setAdvH" data-set-advanced>
+    <h3 id="setAdvH">Advanced</h3>
+    <div class="set-tools">
+      <!-- camera (#33) --><button type="button" class="tool cam-btn" id="camBtn" aria-pressed="false" aria-controls="camPanel" title="Open or close the Camera sidebar (C)">Camera <kbd>C</kbd></button>
+      <button type="button" class="tool" id="modelBtn" aria-pressed="false" title="Show the model of your brain (M)">Model <kbd>M</kbd></button>
+      <!-- camera debug (#67) --><button type="button" class="tool dbg-btn" id="dbgBtn" aria-pressed="false" aria-controls="dbgPanel" title="Debug: what the camera and headset read (` key)">Debug <kbd>`</kbd></button>
+    </div>
+  </section>
+  <footer><button type="button" class="btn btn-small" id="settingsReset">Reset to defaults</button></footer>
 </aside>
 
 <script type="module" src="src/main.js"></script>

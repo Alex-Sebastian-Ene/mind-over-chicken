@@ -14,6 +14,7 @@ import { label } from '../eras/stone.js';
 import { ZoomState } from './zoom.js';
 import { tierName } from './planet-sim.js';
 import { drawReticle } from '../render/sprites.js';
+import { sideNeighbour } from './select.js';
 
 const CENTER = { x: W / 2, y: H / 2 };
 const BIG_R = 74;
@@ -25,7 +26,7 @@ const smoothstep = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x *
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 // Continuous zoom input (#143): levels per wheel delta unit, and per e-fold of pinch spread.
-const WHEEL_LEVELS = 0.0025;
+const WHEEL_LEVELS = 0.004;   // a mouse notch is 0.4 of a level (Alex: easier zoom)
 const PINCH_LEVELS = 3;
 
 export class Cosmos extends ZoomState {
@@ -263,7 +264,7 @@ export class Cosmos extends ZoomState {
       const t = z - 1, e = ease(t);
       const gal = this.galaxy;
       const fp = look.planet || gal.home;
-      gal.draw(ctx, this.globe, G.scene?.layer || G.world.layers.stone, G.world.structures, { alpha: smoothstep(0.15, 0.9, t), skip: fp, hover: this.hover });
+      gal.draw(ctx, this.globe, G.scene?.layer || G.world.layers.stone, G.world.structures, { alpha: smoothstep(0.15, 0.9, t), skip: fp, hover: this.hover || this.selectedPlanet() });
       const q = gal.pos(fp);
       const toStar = [160 - q.x, 92 - q.y, 26];
       const n = Math.hypot(...toStar);
@@ -377,7 +378,11 @@ export class Cosmos extends ZoomState {
       label(ctx, CENTER.x, H - 6, this.canLand() ? 'drag to spin · scroll or X to land · Z for the galaxy' : 'drag to spin · scroll or Z to see the galaxy', '#a3a6c4', 5);
       ctx.globalAlpha = 1;
     }
-    if (this.galaxy && z > 1.2) this.galaxy.drawOverlay(ctx, { alpha: smoothstep(1.3, 1.9, z), hover: this.hover });
+    if (this.galaxy && z > 1.2) this.galaxy.drawOverlay(ctx, { alpha: smoothstep(1.3, 1.9, z), hover: this.hover || this.selectedPlanet() });
+    if (this.galaxy && z > 1.6) {
+      const sp = this.selectedPlanet();
+      label(ctx, W / 2, H - 6, `◀ ▶ choose a world${sp ? ` (${sp.name})` : ''} · scroll in or Enter to land`, '#a3a6c4', 5);
+    }
     if (this.toast) { ctx.globalAlpha = Math.min(1, this.toast.t); label(ctx, CENTER.x, 30, this.toast.text, '#ffd166', 6); ctx.globalAlpha = 1; }
     if (G?.brain?.aim) {
       drawReticle(ctx, G.brain.aim.x * (W - 1), G.brain.aim.y * (H - 1), this.time, '#ffe066');
@@ -410,7 +415,7 @@ export class Cosmos extends ZoomState {
       const dx = x - this.drag.x;
       this.drag.moved += Math.abs(dx) + Math.abs(y - this.drag.y);
       this.drag.x = x; this.drag.y = y;
-      if (this.z > 0.5 && this.z < 1.5) { this.rot -= dx / BIG_R; this.spinVel = -dx / BIG_R / 0.033; }
+      this.dragRotate(dx);
     }
     if (this.galaxy && this.z > 1.5) this.hover = this.galaxy.hit(x, y);
   }
@@ -421,6 +426,11 @@ export class Cosmos extends ZoomState {
     const d = this.drag;
     this.drag = null;
     if (!d || d.moved > 4) return null;
+    return this.clickAt(x, y, G);
+  }
+
+  // A left click in the world (#284): select a planet in the galaxy or land on the globe.
+  clickAt(x, y, G) {
     if (this.galaxy && this.z > 1.5) {
       const p = this.galaxy.hit(x, y);
       if (p && p.forming) { this.say(p.mindSlot && !this.galaxy.mindReady ? 'Still reading your mind. Keep playing.' : 'Still forming. Give it a second.'); return null; }
@@ -434,16 +444,40 @@ export class Cosmos extends ZoomState {
     return null;
   }
 
+  // Pointer drag and pinch drag share this so a rotated planet follows the hand the same way (#284).
+  dragRotate(dxPixels) {
+    if (!(this.z > 0.5 && this.z < 1.5)) return false;
+    this.rot -= dxPixels / BIG_R;
+    this.spinVel = -dxPixels / BIG_R / 0.033;
+    return true;
+  }
+
+  // The galaxy's picker (Alex): Left/Right select the next planet to that side on screen; the
+  // selected one is highlighted and is the world a zoom-in (wheel, X, pinch, Enter) lands on.
+  selectSide(dir, G) {
+    const gal = this.galaxy;
+    if (!gal || !this.inGalaxy) return null;
+    const items = gal.planets.map((p) => ({ p, x: gal.pos(p).x }));
+    const p = sideNeighbour(items, this.selectedPlanet(), dir);
+    if (!p) return null;
+    this.selected = p;
+    this.focus = this.isCampaign(p) ? null : p;
+    return p;
+  }
+  // The planet the galaxy view is "hovering": the last one picked, else the one in focus, else home.
+  selectedPlanet() { return this.selected || this.focus || this.galaxy?.home || null; }
+
   focusPlanet(p, G) {
+    this.selected = p;
     const r = super.focusPlanet(p);
     if (r.refused) { this.say(r.refused); return; }
     this.rot = this.galaxy ? this.galaxy.time * p.spin + p.phase : this.rot;
   }
 
-  // Continuous (#143): every wheel delta moves the zoom (a mouse notch of 100 is a quarter level;
+  // Continuous (#143): every wheel delta moves the zoom (a mouse notch of 100 is 0.4 of a level;
   // a trackpad's small deltas glide), with no 320 ms gate. The two-hand pinch comes through here too.
   wheel(deltaY, G) {
-    this.nudgeZoom(clamp(deltaY, -240, 240) * WHEEL_LEVELS, G);
+    this.nudgeZoom(clamp(deltaY, -300, 300) * WHEEL_LEVELS, G);
   }
 
   nudgeZoom(dz, G) {

@@ -13,16 +13,18 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
   - **Option A (Muse 2 hardware)**: Bluetooth paired. `python bridge/muse_bridge.py --board muse2` running in terminal, showing green stream.
   - **Option B (Emulated Headset fallback)**: Title screen selected as **"Emulated headset (keyboard)"**.
 - [ ] **Webcam**: Camera positioned at eye level with even lighting. Click **"Camera"** on the top bar to open the sidebar, then **"Start Camera"** and allow the permission prompt (status turns green).
+- [ ] **Pinch calibration** (optional): Camera sidebar → **Pinch & Head Calibration** opens a pop-up. Follow the live camera + wireframe to the LEFT, RIGHT, UP and DOWN targets with each hand. It auto-advances, saves per-axis gains and closes when complete. Gains persist in the browser. Esc closes it.
 - [ ] **Hotkeys Reference Card**:
   - `Space`: Hold Calm (high alpha)
-  - `F`: Hold Focus (beta / mental effort)
+  - `F`: Hold Focus / Insight. Hold ~2 s (Rain or Calm) to summon rain and put out a forest fire
   - `Shift`: Spike Stress (drops calm)
-  - `B`: Deliberate Blink (lightning bolt)
-  - `T` or `3`: Toggle 3D Heightmap Terrain vs 2D Classic
+  - `B`: Deliberate Blink. On a surface it throws lightning (a tree strike starts a forest fire); in the galaxy/globe it selects/lands like a left click
+  - `T`: Toggle 3D Heightmap Terrain vs 2D Classic
   - `Z` / `X`: Zoom Out (Galaxy) / Zoom In (Surface)
   - `M`: Toggle Personalized Brain Model & Judge Panel
   - `G`: Toggle PPO AI God Autopilot
-  - `1`–`7`: Keyboard gesture spell casts (fireball, rain, harvest, earthquake, etc.)
+  - `E` / `C`: Toggle the EEG / Camera sidebars (`` ` `` still toggles Camera); `Shift+C`: re-centre the headset's head pose
+  - Hands: pinch + hand movement pans, pinch + head motion tilts the 3D view, two hands zoom. No hand gesture casts a spell (#261).
 
 ---
 

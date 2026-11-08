@@ -55,7 +55,7 @@ export function walk(a, tx, ty, speed, dt, world) {
   const d = Math.hypot(dx, dy);
   if (d < 1.2) return true;
   // Target sits on rock or water and we're pressed up against it: close enough.
-  if (d < 6 && (a.stuck || 0) > 0.8) { a.stuck = 0; return true; }
+  if ((d < 6 && (a.stuck || 0) > 0.8) || (a.stuck || 0) > 2.0) { a.stuck = 0; return true; }
   const step = Math.min(d, speed * dt);
   if (d > 7 && world && world.field) {
     const f = world.field(wrap(tx, MW), wrap(ty, MH));

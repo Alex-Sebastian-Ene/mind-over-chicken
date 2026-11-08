@@ -74,6 +74,28 @@ import { planetSize, planetChoice } from './planet-size.js';
 
 const smoothstep = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
 
+// The overview map's size on screen (#88).
+const MINIMAP_SCALE = 0.6;
+
+// The 5 s mind read while a civilisation is founded (#88): a visible bar and what to do.
+export function seedingCardText(progress, seconds = 5) {
+  const t = Math.min(seconds, Math.max(0, progress) * seconds);
+  return `Reading your mind: ${t.toFixed(1)} / ${seconds} s. Relax, blink, look around.`;
+}
+function drawSeedingCard(ctx, progress) {
+  const w = 150, h = 16, x = Math.round((W - w) / 2), y = H - 34;
+  ctx.fillStyle = 'rgba(8,10,24,0.82)';
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = 'rgba(89,216,200,0.6)';
+  ctx.lineWidth = 0.5;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  label(ctx, x + w / 2, y + 6, seedingCardText(progress), '#e8e4d8', 4.5);
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fillRect(x + 6, y + 10, w - 12, 3);
+  ctx.fillStyle = '#59d8c8';
+  ctx.fillRect(x + 6, y + 10, Math.round((w - 12) * Math.min(1, Math.max(0, progress))), 3);
+}
+
 export class CivSandbox {
   constructor({ cosmos = null, seed = null } = {}) {
     this.id = 'civ';
@@ -318,40 +340,31 @@ export class CivSandbox {
   }
 
   // Living-entity pinch grab (#120)
+  // Pinch-grab (#120, #188): pick up a living person and set them down elsewhere. The Rust sim
+  // owns everyone's position, so the move goes through it (villages stay where they were built).
   onGrabStart(aim) {
     const civ = this.civ;
     if (!civ) return null;
     const p = this.aimPlanet(aim);
-    // Find closest village within 12 world units
-    let best = null, bestDist = 12;
-    for (const v of this.villages) {
-      const d = Math.hypot(p.x - v.x, p.y - v.y);
-      if (d < bestDist) { bestDist = d; best = v; }
-    }
-    if (best) {
-      const fac = this.byId.get(best.factionId);
-      const name = fac ? `${fac.name} village` : 'Village';
-      this.grabbedEntity = { village: best, p0: { x: best.x, y: best.y }, label: name };
-      return { ok: true, label: name, kind: 'village' };
-    }
-    return { ok: false, reason: 'Pinch over a village or tribe to grab' };
+    const i = civ.agentNear(p.x, p.y, 6);
+    if (i < 0) return { ok: false, reason: 'Pinch over a person to pick them up' };
+    const p0 = civ.agentPos(i);
+    this.grabbedEntity = { agent: i, p0, label: 'Villager' };
+    return { ok: true, label: 'Villager', kind: 'person' };
   }
 
   onGrabMove(aim) {
-    if (!this.grabbedEntity) return;
+    const g = this.grabbedEntity;
+    if (!g || !this.civ) return;
     const p = this.aimPlanet(aim);
-    this.grabbedEntity.village.x = p.x;
-    this.grabbedEntity.village.y = p.y;
+    this.civ.moveAgent(g.agent, p.x, p.y);   // they ride along under the hand (only over land)
   }
 
-  onGrabEnd({ x: aimX, y: aimY, cancelled = false }) {
-    if (!this.grabbedEntity) return;
-    const { village, p0 } = this.grabbedEntity;
+  onGrabEnd({ cancelled = false } = {}) {
+    const g = this.grabbedEntity;
+    if (!g) return;
     this.grabbedEntity = null;
-    if (cancelled) {
-      village.x = p0.x;
-      village.y = p0.y;
-    }
+    if (cancelled && this.civ) this.civ.moveAgent(g.agent, g.p0.x, g.p0.y);
   }
 
   // camera (#49): hand casts. aim is 0..1 like the brain's.
@@ -362,7 +375,7 @@ export class CivSandbox {
     const p = this.aimPlanet(aim);
     const n = civ.cast(kind, p.x, p.y);
     const say = G.advisor.say.bind(G.advisor);
-    if (spell === 'fist' || spell === 'fireball') { this.flash = 0.4; G.audio?.thunder?.(); G.shake = Math.max(G.shake || 0, 1.2); }
+    if (spell === 'fireball') { this.flash = 0.4; G.audio?.thunder?.(); G.shake = Math.max(G.shake || 0, 1.2); }
     if (spell === 'palm' || spell === 'peace') { G.audio?.good?.(); say('civ-cast-peace', n ? `Peace! ${n} war${n === 1 ? '' : 's'} ended near your hand.` : 'Peace descends. Nobody was fighting there, but they appreciate it.', { mood: 'happy', priority: 2, cooldown: 15 }); }
     if (spell === 'disaster') { this.flash = 0.5; G.audio?.thunder?.(); G.shake = Math.max(G.shake || 0, 2); say('civ-cast-storm', 'A storm! That will settle a few arguments. And a few villages.', { mood: 'panic', priority: 2, cooldown: 15 }); }
     if (spell === 'spawn') { G.audio?.coin?.(); say('civ-cast-food', 'Food from the sky. Nobody will ask questions.', { mood: 'happy', priority: 1, cooldown: 15 }); }
@@ -375,8 +388,9 @@ export class CivSandbox {
     this.mood = mood;
   }
 
+  // In proportion to the scroll: a mouse notch zooms about ×1.25, a trackpad glides (Alex: easier zoom).
   onWheel(delta) {
-    this.zoom = clamp((this.zoom || 1.0) * (delta > 0 ? 0.9 : 1.11), 0.6, 2.5);
+    this.zoom = clamp((this.zoom || 1.0) * Math.exp(-clamp(delta, -300, 300) * 0.0022), 0.6, 2.5);
   }
 
   // A drag from main.js (world units, both axes): the content follows the pointer, so the camera
@@ -527,11 +541,12 @@ export class CivSandbox {
     }
     // Overview map with the camera's window.
     if (this.miniCanvas) {
-      const mw = civ.miniW, mh = civ.miniH, x0 = W - mw - 3, y0 = 3;
+      // Smaller by default (#88): an overview, not a second map.
+      const mw = Math.round(civ.miniW * MINIMAP_SCALE), mh = Math.round(civ.miniH * MINIMAP_SCALE), x0 = W - mw - 3, y0 = 3;
       ctx.fillStyle = 'rgba(8,10,24,0.75)';
       ctx.fillRect(x0 - 1, y0 - 1, mw + 2, mh + 2);
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(this.miniCanvas, x0, y0);
+      ctx.drawImage(this.miniCanvas, x0, y0, mw, mh);
       const kx = mw / civ.pw, ky = mh / civ.ph;
       const cx = civ.camX * kx, cy = civ.camY * ky, cw = W * kx, ch = H * ky;
       ctx.strokeStyle = '#ffe066';
@@ -545,6 +560,7 @@ export class CivSandbox {
     if (this.setupActive()) {
       let y = 9;
       for (const [i, line] of civ.setupLines().entries()) y = wrapLabel(ctx, 4, y, line, i === 0 ? '#59d8c8' : '#e8e4d8', 5, W - 80) + 1;
+      if (civ.setupPhase === SETUP.seed) drawSeedingCard(ctx, civ.setupProgress);
     } else {
       // The age and conflict log: the last few age-ups, Dark Ages and escalations.
       let y = 9;
