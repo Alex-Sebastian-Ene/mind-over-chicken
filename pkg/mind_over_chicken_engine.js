@@ -315,6 +315,33 @@ export class Engine {
         wasm.engine_end_frame(this.__wbg_ptr, night, flash, fade, shake_x, shake_y, canvas_w, canvas_h);
     }
     /**
+     * Mirror the JS scene on screen into the HUD (#191): its objectives (`flags` bit 1 done,
+     * 2 bad, 4 plain) and run time. The Rust era sim then stands still and raises nothing of its
+     * own; see GameFlow::mirrored. Called by src/main.js every frame, before game_tick.
+     * @param {number} run_time
+     * @param {string[]} labels
+     * @param {string[]} values
+     * @param {Uint8Array | number[]} flags
+     */
+    game_mirror(run_time, labels, values, flags) {
+        const val4 = +run_time;
+        let ptr0, len0, ptr1, len1, ptr2, len2;
+        try {
+            ptr0 = passArrayJsValueToWasm0(labels, wasm.__wbindgen_malloc);
+            len0 = WASM_VECTOR_LEN;
+            ptr1 = passArrayJsValueToWasm0(values, wasm.__wbindgen_malloc);
+            len1 = WASM_VECTOR_LEN;
+            ptr2 = passArray8ToWasm0(flags, wasm.__wbindgen_malloc);
+            len2 = WASM_VECTOR_LEN;
+        } catch (e) {
+            if (ptr2) { wasm.__wbindgen_free(ptr2, len2 * 1, 1); }
+            if (ptr1) { wasm.__externref_drop_slice(ptr1, len1); wasm.__wbindgen_free(ptr1, len1 * 4, 4); }
+            if (ptr0) { wasm.__externref_drop_slice(ptr0, len0); wasm.__wbindgen_free(ptr0, len0 * 4, 4); }
+            throw e;
+        }
+        wasm.engine_game_mirror(this.__wbg_ptr, val4, ptr0, len0, ptr1, len1, ptr2, len2);
+    }
+    /**
      * @param {number} aim_x
      * @param {number} aim_y
      */
@@ -353,6 +380,12 @@ export class Engine {
      */
     game_tick(dt, calm, focus, stress, blinks) {
         wasm.engine_game_tick(this.__wbg_ptr, dt, calm, focus, stress, blinks);
+    }
+    /**
+     * Back to the Rust era sim driving the HUD (the all-Rust app never mirrors).
+     */
+    game_unmirror() {
+        wasm.engine_game_unmirror(this.__wbg_ptr);
     }
     /**
      * Standalone helper to generate a civ planet RGBA texture (#109).
@@ -1537,7 +1570,9 @@ export class RustCalibration {
 if (Symbol.dispose) RustCalibration.prototype[Symbol.dispose] = RustCalibration.prototype.free;
 
 /**
- * Standalone WebAssembly Cast Controller for camera god powers (#33, #108)
+ * Standalone WebAssembly Cast Controller for camera god powers (#33, #108). The browser's
+ * src/camera/casts.js runs this: the three core moves, with the fist-to-open fireball (#150, #159).
+ * `update` returns [held, progress, cast, aiming, armed].
  */
 export class RustCastController {
     __destroy_into_raw() {
@@ -2782,6 +2817,14 @@ function __wbg_get_imports() {
             const ret = arg0 === undefined;
             return ret;
         },
+        __wbg___wbindgen_string_get_7ce8eee7fd327545: function(arg0, arg1) {
+            const obj = arg1;
+            const ret = typeof(obj) === 'string' ? obj : undefined;
+            var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            var len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32((arg0 >>> 0) + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32((arg0 >>> 0) + 4 * 0, ptr1, true);
+        },
         __wbg___wbindgen_throw_4c88d8bf264fd984: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
@@ -3297,22 +3340,22 @@ function __wbg_get_imports() {
         },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [F64], shim_idx: 12, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_);
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 8, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_);
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000003: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("PointerEvent")], shim_idx: 8, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__277);
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__279);
             return ret;
         },
         __wbindgen_generic_0000000000000004: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 8, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__278);
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__280);
             return ret;
         },
         __wbindgen_generic_0000000000000005: function(arg0) {
@@ -3351,20 +3394,20 @@ function __wbg_get_imports() {
 }
 
 const lAudioContext = (typeof AudioContext !== 'undefined' ? AudioContext : (typeof webkitAudioContext !== 'undefined' ? webkitAudioContext : undefined));
-function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_(arg0, arg1, arg2);
+function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_(arg0, arg1, arg2);
 }
 
-function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__277(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__277(arg0, arg1, arg2);
+function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__279(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__279(arg0, arg1, arg2);
 }
 
-function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__278(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__278(arg0, arg1, arg2);
+function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__280(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__280(arg0, arg1, arg2);
 }
 
-function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_(arg0, arg1, arg2);
+function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_(arg0, arg1, arg2);
 }
 
 
@@ -3618,6 +3661,16 @@ function passArrayF64ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 8, 8) >>> 0;
     getFloat64ArrayMemory0().set(arg, ptr / 8);
     WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passArrayJsValueToWasm0(array, malloc) {
+    const ptr = malloc(array.length * 4, 4) >>> 0;
+    for (let i = 0; i < array.length; i++) {
+        const add = addToExternrefTable0(array[i]);
+        getDataViewMemory0().setUint32(ptr + 4 * i, add, true);
+    }
+    WASM_VECTOR_LEN = array.length;
     return ptr;
 }
 

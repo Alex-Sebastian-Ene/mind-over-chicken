@@ -71,16 +71,17 @@ export function initDebug({ getG, camera }) {
 
   const set = (node, text) => { if (node.textContent !== text) node.textContent = text; };
 
-  function toggle(next = !open) {
-    if (camera?.togglePanel) {
-      camera.togglePanel(next);
-      open = !document.getElementById('camPanel')?.hidden;
-      return;
-    }
+  // Debug is its own panel (#187). It used to hand the toggle to the Camera panel, so the button
+  // (hidden anyway) and the ` key opened Camera and the debug panel never showed. Opening one of
+  // the two closes the other; the state is the panel's own `hidden`, as Camera can close it.
+  function toggle(next = panel.hidden) {
     open = next;
     panel.hidden = !open;
     btn.setAttribute('aria-pressed', String(open));
-    if (open) { frames.reset(); textAt = 0; }
+    if (open) {
+      camera?.togglePanel?.(false);
+      frames.reset(); textAt = 0;
+    }
   }
   btn.addEventListener('click', () => toggle());
   panel.querySelector('[data-dbg-close]').addEventListener('click', () => toggle(false));
@@ -237,7 +238,7 @@ export function initDebug({ getG, camera }) {
     if (now - lastAt < 8) return;
     lastAt = now;
     frames.frame(now);
-    if (open) {
+    if (!panel.hidden) {   // Camera may have closed it (#187)
       const s = camera?.debugState?.(now) || null;
       drawThumb(s);
       if (now - textAt >= TEXT_MS) { textAt = now; updateText(now, s, getG()); }
@@ -249,7 +250,7 @@ export function initDebug({ getG, camera }) {
 
   return {
     toggle,
-    get open() { return open; },
+    get open() { return !panel.hidden; },
     frames,
     // Game frame pacing over the panel's lifetime, for checking that inference drops no frames.
     frameStats(now = performance.now()) { return { fps: Math.round(frames.fps(now) * 10) / 10, long: frames.long, worst: Math.round(frames.worst) }; },

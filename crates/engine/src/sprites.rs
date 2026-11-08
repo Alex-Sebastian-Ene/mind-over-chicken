@@ -544,7 +544,9 @@ pub fn get_sprite_atlas_entry(sprite_id: u32, facing: i32, frame: u32, variant: 
         SPRITE_SHADOW => match variant {
             0 => (6, 3, 8.0, 5.0),
             1 => (7, 3, 16.0, 8.0),
-            _ => (4, 4, 24.0, 12.0),
+            2 => (4, 4, 24.0, 12.0),
+            3 => (5, 4, 5.0, 3.5),
+            _ => (6, 3, 8.0, 5.0),
         },
         _ => (0, 0, 8.0, 8.0),
     };
@@ -716,7 +718,7 @@ pub fn create_sprite_atlas() -> Vec<u8> {
     draw_tree_oak(&mut temp, cx, cy);
     copy_cell(&mut atlas, &temp, 5, 3, 32);
 
-    // Shadows in Row 3 (cols 6, 7) & Row 4 (col 4)
+    // Shadows in Row 3 (cols 6, 7) & Row 4 (cols 4, 5)
     temp.fill(0);
     draw_shadow(&mut temp, cx, cy, 6, 3);
     copy_cell(&mut atlas, &temp, 6, 3, 16);
@@ -728,6 +730,10 @@ pub fn create_sprite_atlas() -> Vec<u8> {
     temp.fill(0);
     draw_shadow(&mut temp, cx, cy, 14, 7);
     copy_cell(&mut atlas, &temp, 4, 4, 16);
+
+    temp.fill(0);
+    draw_shadow(&mut temp, cx, cy, 5, 3);
+    copy_cell(&mut atlas, &temp, 5, 4, 16);
 
     // Unlit Firewood pile in Row 4 (col 0)
     temp.fill(0);
@@ -759,6 +765,11 @@ mod tests {
         let shadow_entry = get_sprite_atlas_entry(SPRITE_SHADOW, 1, 0, 0);
         assert!(shadow_entry.u1 > shadow_entry.u0);
         assert!(shadow_entry.world_w > 0.0);
+
+        let tree_shadow_entry = get_sprite_atlas_entry(SPRITE_SHADOW, 1, 0, 3);
+        assert!(tree_shadow_entry.u1 > tree_shadow_entry.u0);
+        assert_eq!(tree_shadow_entry.world_w, 5.0);
+        assert_eq!(tree_shadow_entry.world_h, 3.5);
 
         // Test newly added sprites
         let mut buf = vec![0u8; W * H * 4];

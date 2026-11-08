@@ -340,40 +340,31 @@ export class CivSandbox {
   }
 
   // Living-entity pinch grab (#120)
+  // Pinch-grab (#120, #188): pick up a living person and set them down elsewhere. The Rust sim
+  // owns everyone's position, so the move goes through it (villages stay where they were built).
   onGrabStart(aim) {
     const civ = this.civ;
     if (!civ) return null;
     const p = this.aimPlanet(aim);
-    // Find closest village within 12 world units
-    let best = null, bestDist = 12;
-    for (const v of this.villages) {
-      const d = Math.hypot(p.x - v.x, p.y - v.y);
-      if (d < bestDist) { bestDist = d; best = v; }
-    }
-    if (best) {
-      const fac = this.byId.get(best.factionId);
-      const name = fac ? `${fac.name} village` : 'Village';
-      this.grabbedEntity = { village: best, p0: { x: best.x, y: best.y }, label: name };
-      return { ok: true, label: name, kind: 'village' };
-    }
-    return { ok: false, reason: 'Pinch over a village or tribe to grab' };
+    const i = civ.agentNear(p.x, p.y, 6);
+    if (i < 0) return { ok: false, reason: 'Pinch over a person to pick them up' };
+    const p0 = civ.agentPos(i);
+    this.grabbedEntity = { agent: i, p0, label: 'Villager' };
+    return { ok: true, label: 'Villager', kind: 'person' };
   }
 
   onGrabMove(aim) {
-    if (!this.grabbedEntity) return;
+    const g = this.grabbedEntity;
+    if (!g || !this.civ) return;
     const p = this.aimPlanet(aim);
-    this.grabbedEntity.village.x = p.x;
-    this.grabbedEntity.village.y = p.y;
+    this.civ.moveAgent(g.agent, p.x, p.y);   // they ride along under the hand (only over land)
   }
 
-  onGrabEnd({ x: aimX, y: aimY, cancelled = false }) {
-    if (!this.grabbedEntity) return;
-    const { village, p0 } = this.grabbedEntity;
+  onGrabEnd({ cancelled = false } = {}) {
+    const g = this.grabbedEntity;
+    if (!g) return;
     this.grabbedEntity = null;
-    if (cancelled) {
-      village.x = p0.x;
-      village.y = p0.y;
-    }
+    if (cancelled && this.civ) this.civ.moveAgent(g.agent, g.p0.x, g.p0.y);
   }
 
   // camera (#49): hand casts. aim is 0..1 like the brain's.
@@ -384,7 +375,7 @@ export class CivSandbox {
     const p = this.aimPlanet(aim);
     const n = civ.cast(kind, p.x, p.y);
     const say = G.advisor.say.bind(G.advisor);
-    if (spell === 'fist' || spell === 'fireball') { this.flash = 0.4; G.audio?.thunder?.(); G.shake = Math.max(G.shake || 0, 1.2); }
+    if (spell === 'fireball') { this.flash = 0.4; G.audio?.thunder?.(); G.shake = Math.max(G.shake || 0, 1.2); }
     if (spell === 'palm' || spell === 'peace') { G.audio?.good?.(); say('civ-cast-peace', n ? `Peace! ${n} war${n === 1 ? '' : 's'} ended near your hand.` : 'Peace descends. Nobody was fighting there, but they appreciate it.', { mood: 'happy', priority: 2, cooldown: 15 }); }
     if (spell === 'disaster') { this.flash = 0.5; G.audio?.thunder?.(); G.shake = Math.max(G.shake || 0, 2); say('civ-cast-storm', 'A storm! That will settle a few arguments. And a few villages.', { mood: 'panic', priority: 2, cooldown: 15 }); }
     if (spell === 'spawn') { G.audio?.coin?.(); say('civ-cast-food', 'Food from the sky. Nobody will ask questions.', { mood: 'happy', priority: 1, cooldown: 15 }); }
@@ -397,8 +388,9 @@ export class CivSandbox {
     this.mood = mood;
   }
 
+  // In proportion to the scroll: a mouse notch zooms about ×1.25, a trackpad glides (Alex: easier zoom).
   onWheel(delta) {
-    this.zoom = clamp((this.zoom || 1.0) * (delta > 0 ? 0.9 : 1.11), 0.6, 2.5);
+    this.zoom = clamp((this.zoom || 1.0) * Math.exp(-clamp(delta, -300, 300) * 0.0022), 0.6, 2.5);
   }
 
   // A drag from main.js (world units, both axes): the content follows the pointer, so the camera

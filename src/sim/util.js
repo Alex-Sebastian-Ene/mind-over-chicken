@@ -112,7 +112,8 @@ export class Particles {
       let x = p.x, y = p.y;
       if (ctx.__project3d) {
         const pr = ctx.__project3d(x, y);
-        if (pr) { x = pr[0]; y = pr[1]; }
+        if (!pr) continue;
+        x = pr[0]; y = pr[1];
       }
       ctx.fillStyle = 'rgba(10,10,20,0.85)';
       ctx.fillText(p.text, x + 0.5, y + 0.5);

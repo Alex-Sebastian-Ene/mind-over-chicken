@@ -58,6 +58,8 @@ export class Hud {
       stress: doc.querySelector('[data-power="stress"]'),
     };
     this.source = doc.getElementById('sourceStatus');
+    this.cause = doc.getElementById('causeToast');   // #177: what your hands and face just did
+    this.causeLeft = 0;
     this.modelPanel = doc.getElementById('modelPanel');
     this.modelBody = doc.getElementById('modelBody');
     this.lastObj = '';
@@ -77,9 +79,35 @@ export class Hud {
     }
   }
 
+  // A short line over the map saying what a camera action did (grab, drop, palm, fireball, a
+  // smile or surprise), or when a cooling cast will be ready (#177). The camera called this
+  // optionally and it didn't exist, so every one of those calls did nothing.
+  showCause(text, { ms = 2600, tone = 'ok' } = {}) {
+    if (!this.cause || !text) return;
+    this.cause.textContent = text;
+    this.cause.dataset.tone = tone;
+    this.cause.hidden = false;
+    this.causeLeft = ms / 1000;
+  }
+
   flashBlink() { this.blinkFlash = 0.3; this.powers.blink.classList.add('is-firing'); }
 
+  // The headset chip in the top bar. The Rust shell never writes it, so both builds do it here:
+  // under the Rust HUD update() used to return first, and a connected Muse still read "No headset".
+  showSource(src) {
+    if (!this.source || !src) return;
+    const text = String(src.status ?? '');
+    const ok = src.connected ? '1' : '0';
+    if (this.source.textContent !== text) this.source.textContent = text;
+    if (this.source.dataset.ok !== ok) this.source.dataset.ok = ok;
+  }
+
   update(dt, G) {
+    if (this.causeLeft > 0) {
+      this.causeLeft -= dt;
+      if (this.causeLeft <= 0 && this.cause) this.cause.hidden = true;
+    }
+    this.showSource(G.source);
     if (rustEngine) {
       if (this.blinkFlash > 0) {
         this.blinkFlash -= dt;
@@ -139,8 +167,6 @@ export class Hud {
     if (this.blinkFlash > 0) { this.blinkFlash -= dt; if (this.blinkFlash <= 0) this.powers.blink.classList.remove('is-firing'); }
     this.powers.blink.querySelector('.power-value').textContent = `${b.stats.blinks}`;
 
-    this.source.textContent = G.source.status;
-    this.source.dataset.ok = G.source.connected ? '1' : '0';
 
     if (!this.modelPanel.hidden) this.renderModel(b, G);
   }
@@ -153,7 +179,7 @@ export class Hud {
     const weights = m.weights();
     const wRows = weights.map(({ c, w }) => `<tr><th>${c}</th>${w.map((x) => `<td class="${x >= 0 ? 'pos' : 'neg'}">${x.toFixed(1)}</td>`).join('')}</tr>`).join('');
     this.modelBody.innerHTML = `
-      <p class="model-lede">Trained silently on the moments the game asked you to relax, look around and do sums. There was no calibration screen.</p>
+      <p class="model-lede">Trained silently on the moments the game asked you to relax, look around and concentrate. There was no calibration screen.</p>
       <dl class="model-stats">
         <div><dt>Rest windows</dt><dd>${m.count('rest')}</dd></div>
         <div><dt>Calm windows</dt><dd>${m.count('calm')}</dd></div>

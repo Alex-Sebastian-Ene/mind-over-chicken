@@ -119,7 +119,7 @@ const TEMPLATE = `
           <div class="coach-card-head">
             <span class="coach-card-glyph" aria-hidden="true">${m.glyph}</span>
             <span class="coach-card-title">${m.title}</span>
-            ${m.key ? `<kbd>${m.key}</kbd>` : ''}
+            <kbd>${m.key}</kbd>
           </div>
           <canvas class="coach-canvas" width="220" height="110" data-coach-canvas="${m.id}" role="img" aria-label="Animated demonstration of ${m.title}"></canvas>
           <p class="coach-instr">${m.instruction}</p>
@@ -128,7 +128,7 @@ const TEMPLATE = `
   </div>
 `;
 
-export function initCoach({ getContext = () => 'surface' } = {}) {
+export function initCoach({ getContext = () => 'surface', onCastMove = null } = {}) {
   const panel = document.getElementById('coachPanel');
   if (!panel) return null;
   panel.innerHTML = TEMPLATE;
@@ -230,7 +230,7 @@ export function initCoach({ getContext = () => 'surface' } = {}) {
     if (move.id === 'two_hand_zoom') {
       ctx.fillText('←  PINCH & SPREAD  →', w / 2, 16);
     } else if (move.id === 'pinch_grab') {
-      ctx.fillText('PINCH · MOVE CURSOR · DROP', w / 2, 16);
+      ctx.fillText('PINCH · HAND PANS · HEAD TILTS', w / 2, 16);
     }
   }
 

@@ -1160,6 +1160,15 @@ body[data-era="title"] .coach-panel { display: none !important; }
 .ls-step.is-run::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--focus); animation: ls-blink 0.9s steps(2) infinite; }
 .ls-hint { margin: 0; min-height: 1.2em; font-size: 12px; color: var(--muted); text-align: center; }
 @keyframes ls-blink { to { opacity: 0.2; } }
+/* #177: what a camera action just did, top centre of the map. */
+.cause-toast {
+  position: absolute; left: 50%; top: 8px; z-index: 22; transform: translateX(-50%);
+  max-width: min(80%, 520px); margin: 0; padding: 4px 12px;
+  background: rgba(14, 16, 30, 0.9); border: 1px solid var(--line); border-radius: 12px;
+  font: 13px var(--pixel); color: var(--bone); text-align: center; pointer-events: none;
+}
+.cause-toast[data-tone="wait"] { color: var(--focus); }
+.cause-toast[hidden] { display: none; }
 .loading-pill {
   position: absolute; right: 8px; bottom: 8px; z-index: 30;
   max-width: 70%; padding: 4px 10px;

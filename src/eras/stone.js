@@ -66,7 +66,7 @@ export class StoneAge {
 
   spawnMammoth() {
     const w = this.G.world, v = w.sites.village;
-    const p = w.randomLand(v.x, v.y, 40, 85, (x, y) => w.get(x, y) === 3 && w.reachable(x, y));
+    const p = w.randomLand(v.x, v.y, 40, 85, (x, y) => w.walkable(x, y) && w.reachable(x, y));
     this.mammoths.push({ x: p.x, y: p.y, tx: p.x, ty: p.y, alive: true, frame: 0, ft: 0, facing: 1, hunt: 0, lone: 0, side: 1, pause: 0 });
   }
 
@@ -150,8 +150,11 @@ export class StoneAge {
         }
       }
     }
-    if (smoteSomeone && this.living().length === 0) {
-      this.fail('Your divine lightning smote every single member of the tribe.');
+    // The scene has no fail() of its own: it fails through G, like the starvation check in
+    // update(), so this works for the campaign and for an AI god's SimPlanet alike.
+    if (smoteSomeone && this.living().length === 0 && !this.done) {
+      this.done = true;
+      G.fail?.('Your divine lightning smote every single member of the tribe.');
     }
     if (this.strikes > 6 && this.t < 20) G.advisor.say('spam', 'With respect, my lord, lightning is not a fidget toy.', { priority: 1, cooldown: 30 });
   }
@@ -203,12 +206,14 @@ export class StoneAge {
       if (w.isWater && (w.isWater(m.x, m.y) || !w.walkable(m.x, m.y))) {
         const safe = w.nearestWalkable(m.x, m.y);
         m.x = safe.x; m.y = safe.y;
+        m.tx = safe.x; m.ty = safe.y;
       }
       animate(m, dt, 3);
       m.pause -= dt;
-      if (m.pause <= 0 && walk(m, m.tx, m.ty, 4, dt, w)) {
-        const v = w.sites.village;
-        const p = w.randomLand(m.x, m.y, 6, 22, (x, y) => dist(x, y, v.x, v.y) > 32 && w.walkable(x, y) && w.reachable(x, y));
+      const arrived = walk(m, m.tx, m.ty, 4, dt, w);
+      if (m.pause <= 0 && (arrived || (m.stuck || 0) > 1.5)) {
+        m.stuck = 0;
+        const p = w.randomLand(m.x, m.y, 8, 26, (x, y) => w.walkable(x, y) && w.reachable(x, y));
         m.tx = p.x; m.ty = p.y; m.pause = rand(0.5, 2.5);
       }
       const hunters = this.people.filter((p) => p.alive && p.target === m && dist(p.x, p.y, m.x, m.y) < 6).length;
@@ -594,26 +599,28 @@ export class StoneAge {
   }
 
   drawOverlay(ctx) {
-    const f = this.fire;
-    ctx.textAlign = 'center';
-    if (!f.lit && !this.done) {
-      const bob = Math.sin(this.t * 5) * 1.5;
-      label(ctx, f.x, f.y - 12 + bob, 'blink here to light the fire', '#ffd166', 6);
-    } else if (f.lit && this.food < 1 && !this.meat.length && !this.done) {
-      const nearby = this.mammoths.find((m) => m.alive && dist(m.x, m.y, f.x, f.y) < 70);
-      if (nearby) {
+    if (!this.G?.simulated && !this.simulated) {
+      const f = this.fire;
+      ctx.textAlign = 'center';
+      if (!f.lit && !this.done) {
         const bob = Math.sin(this.t * 5) * 1.5;
-        label(ctx, nearby.x, nearby.y - 14 + bob, 'blink chicken for food', '#ffd166', 5.5);
+        label(ctx, f.x, f.y - 12 + bob, 'blink here to light the fire', '#ffd166', 6);
+      } else if (f.lit && this.food < 1 && !this.meat.length && !this.done) {
+        const nearby = this.mammoths.find((m) => m.alive && dist(m.x, m.y, f.x, f.y) < 70);
+        if (nearby) {
+          const bob = Math.sin(this.t * 5) * 1.5;
+          label(ctx, nearby.x, nearby.y - 14 + bob, 'blink chicken for food', '#ffd166', 5.5);
+        }
       }
-    }
-    if (this.hold.active) {
-      const p = this.hold.progress / HOLD_SECONDS;
-      ctx.lineWidth = 1.4;
-      ctx.strokeStyle = 'rgba(10,12,30,0.7)';
-      ctx.beginPath(); ctx.arc(f.x, f.y - 3, 13, 0, Math.PI * 2); ctx.stroke();
-      ctx.strokeStyle = '#59d8c8';
-      ctx.beginPath(); ctx.arc(f.x, f.y - 3, 13, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2); ctx.stroke();
-      label(ctx, f.x, f.y - 20, `HOLD CALM  ${(HOLD_SECONDS - this.hold.progress).toFixed(1)}s`, '#59d8c8', 7);
+      if (this.hold.active) {
+        const p = this.hold.progress / HOLD_SECONDS;
+        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = 'rgba(10,12,30,0.7)';
+        ctx.beginPath(); ctx.arc(f.x, f.y - 3, 13, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = '#59d8c8';
+        ctx.beginPath(); ctx.arc(f.x, f.y - 3, 13, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2); ctx.stroke();
+        label(ctx, f.x, f.y - 20, `HOLD CALM  ${(HOLD_SECONDS - this.hold.progress).toFixed(1)}s`, '#59d8c8', 7);
+      }
     }
     this.particles.drawText(ctx);
   }
@@ -673,7 +680,7 @@ export class StoneAge {
     const { x: targetX, y: targetY } = w.aimPoint({ x: aimX, y: aimY });
     const safeLand = w.walkable(targetX, targetY) && w.reachable(targetX, targetY)
       ? { x: targetX, y: targetY }
-      : w.randomLand(targetX, targetY, 1, 8);
+      : w.randomLand(w.sites.village.x, w.sites.village.y, 10, 30, (x, y) => w.walkable(x, y) && w.reachable(x, y));
     entity.x = safeLand.x;
     entity.y = safeLand.y;
     entity.tx = safeLand.x;
@@ -700,7 +707,6 @@ export class StoneAge {
         G.advisor.say('cast-palm', 'Your open palm calms the tribe and soothes the fire.', { mood: 'happy', priority: 1, cooldown: 20 });
         break;
       }
-      case 'fist':
       case 'fireball': this.onBlink(aim); break;
       case 'spawn': {
         // Open palm: a cooked haunch drops where you aim and the tribe carries it to the fire.
@@ -802,7 +808,8 @@ export class StoneAge {
 export function label(ctx, x, y, text, color, size = 6) {
   if (ctx.__project3d) {
     const pr = ctx.__project3d(x, y);
-    if (pr) { x = pr[0]; y = pr[1]; }
+    if (!pr) return;
+    x = pr[0]; y = pr[1];
   }
   ctx.font = `${size}px "Pixelify Sans", monospace`;
   ctx.textAlign = 'center';

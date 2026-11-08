@@ -22,7 +22,7 @@
       <span class="clock" id="clock" aria-label="Run time">0:00</span>
       <button type="button" class="tool eeg-btn" id="eegBtn" aria-pressed="false" aria-controls="eegPanel" title="Connect or disconnect EEG headset and view live signals (E)">EEG <kbd>E</kbd></button>
       <!-- camera (#33) --><button type="button" class="tool cam-btn" id="camBtn" aria-pressed="false" aria-controls="camPanel" title="Open or close the Camera &amp; Hand Moves sidebar (C)">Camera <kbd>C</kbd></button>
-      <!-- camera debug (#67) --><button type="button" class="tool dbg-btn" id="dbgBtn" hidden aria-pressed="false" aria-controls="dbgPanel" title="Debug: what the camera and headset read (` key)">Debug <kbd>`</kbd></button>
+      <!-- camera debug (#67) --><button type="button" class="tool dbg-btn" id="dbgBtn" aria-pressed="false" aria-controls="dbgPanel" title="Debug: what the camera and headset read (` key)">Debug <kbd>`</kbd></button>
       <button type="button" class="tool" id="mode3dBtn" aria-pressed="false" title="Toggle 3D world (T)">3D</button>
       <button type="button" class="tool" id="aiGodBtn" aria-pressed="false" title="Toggle AI God autopilot (G)">AI God <kbd>G</kbd></button>
       <button type="button" class="tool" id="modelBtn" aria-pressed="false" title="Show the model of your brain (M)">Model <kbd>M</kbd></button>
@@ -44,6 +44,8 @@
         </div>
       </div>
       <div class="loading-pill" id="loadingPill" role="status" aria-live="polite" hidden></div>
+      <!-- #177: what a camera action just did (src/ui/hud.js showCause) -->
+      <p class="cause-toast" id="causeToast" role="status" aria-live="polite" hidden></p>
 
       <div class="zoom" role="group" aria-label="Zoom">
         <button type="button" class="zbtn" id="zoomOut" aria-label="Zoom out (Z)" title="Zoom out (Z or scroll)">−</button>
@@ -130,7 +132,7 @@
 
     <ol class="eras">
       <li><b>Stone Age</b><span>Blink to throw lightning. Stay calm to keep the fire alive.</span></li>
-      <li class="skip"><b>Farming · Kingdoms</b><span>Ten thousand years in a montage. The scholars ask you some sums.</span></li>
+      <li class="skip"><b>Farming · Kingdoms</b><span>Ten thousand years in a montage. Concentrate, and the scholars write down your thoughts.</span></li>
       <li><b>Industry</b><span>Your stress moves the goat market. Stay calm or it crashes.</span></li>
       <li><b>Space Age</b><span>Hold focus through a ten-second countdown.</span></li>
     </ol>
