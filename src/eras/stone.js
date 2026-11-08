@@ -850,7 +850,6 @@ export class StoneAge {
       x: x + rand(-4, 4), y: y + rand(-1, 2), vx: rand(-18, 18), vy: rand(-16, -2), g: 24,
       life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color: pick(['#c9c2b0', '#8a7a5a', '#5f5545']),
     }));
-    floater(this.particles, x, y - 10, `SLAM! ${Math.round(charge * 100)}%`, color, 7);
     for (const p of this.living()) if (dist(x, y, p.x, p.y) < 22 + charge * 14) p.fear = clamp(p.fear + 0.2 + charge * 0.2);
   }
 

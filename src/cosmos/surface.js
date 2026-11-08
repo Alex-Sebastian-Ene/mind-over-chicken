@@ -646,7 +646,6 @@ export class PlanetSurface {
     this.particles.burst(28 + Math.round(charge * 26), () => ({ x: w.x + rand(-22, 22), y: w.y + rand(-12, 12), vx: rand(-6, 6), vy: rand(-20, -3), life: rand(0.45, 0.95), maxLife: 0.95, size: 1, color }));
     this.particles.burst(10 + Math.round(charge * 8), () => ({ x: w.x + rand(-10, 10), y: w.y + rand(-2, 3), vx: rand(-8, 8), vy: rand(-12, -2), g: 20, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color: pick(['#c9c2b0', '#8a7a5a', '#5f5545']) }));
     if (r) floater(this.particles, w.x, w.y - 10, r.text, r.good ? '#9be38a' : '#ff8a9c', 7);
-    else floater(this.particles, w.x, w.y - 10, `SLAM! ${Math.round(charge * 100)}%`, color, 7);
     this.ownFlash = Math.max(this.ownFlash, 0.38);
   }
 

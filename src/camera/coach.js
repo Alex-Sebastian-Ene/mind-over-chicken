@@ -150,6 +150,14 @@ const TEMPLATE = `
   </div>
 `;
 
+// The hand-gesture cards stay hidden until the player opens them (Alex: "the hand gestures dont
+// appear unless you click"). Only a click on the bar or H opens them, and only that choice is
+// remembered, under a new key: the old one also held the first-run auto-open.
+export const COACH_OPEN_KEY = 'moc.coachOpen.v2';
+export function coachStartsOpen(store = globalThis.localStorage) {
+  try { return store?.getItem(COACH_OPEN_KEY) === '1'; } catch { return false; }
+}
+
 export function initCoach({ getContext = () => 'surface' } = {}) {
   const panel = document.getElementById('coachPanel');
   if (!panel) return null;
@@ -182,25 +190,19 @@ export function initCoach({ getContext = () => 'surface' } = {}) {
     try { localStorage.setItem('moc.coachDemonstrated', JSON.stringify([...demonstratedMoves])); } catch {}
   }
 
-  let open = false;
-  try {
-    const stored = localStorage.getItem('moc.coachOpen');
-    // If moves have already been demonstrated, prefer collapsed/minimal state by default (#204)
-    if (stored !== null) open = stored === '1';
-    else open = demonstratedMoves.size === 0;
-  } catch {}
+  let open = coachStartsOpen();
 
   let activeMoveId = COACH_CARDS[0].id;
   let flashState = null; // { text, kind: 'ok' | 'bad', until }
 
-  function setOpen(next = !open) {
+  function setOpen(next = !open, { remember = true } = {}) {
     open = !!next;
-    try { localStorage.setItem('moc.coachOpen', open ? '1' : '0'); } catch {}
+    if (remember) try { localStorage.setItem(COACH_OPEN_KEY, open ? '1' : '0'); } catch {}
     body.hidden = !open;
     panel.classList.toggle('is-collapsed', !open);
     toggleBtn.setAttribute('aria-expanded', String(open));
   }
-  setOpen(open);
+  setOpen(open, { remember: false });
 
   function selectMove(id) {
     if (!COACH_MOVE_BY_ID[id] || !cardEls.has(id)) return;
