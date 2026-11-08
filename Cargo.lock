@@ -253,6 +253,7 @@ name = "moc-civ"
 version = "0.1.0"
 dependencies = [
  "moc-planet",
+ "moc-terrain",
  "serde_json",
 ]
 
