@@ -150,7 +150,9 @@ export class StoneAge {
       }
     }
     if (smoteSomeone && this.living().length === 0) {
-      this.fail('Your divine lightning smote every single member of the tribe.');
+      // (There is no this.fail: the run's G.fail ends it, or an AI world's surface's own.)
+      this.done = true;
+      G.fail('Your divine lightning smote every single member of the tribe.');
     }
     if (this.strikes > 6 && this.t < 20) G.advisor.say('spam', 'With respect, my lord, lightning is not a fidget toy.', { priority: 1, cooldown: 30 });
   }
