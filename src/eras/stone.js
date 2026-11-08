@@ -17,6 +17,7 @@ export class StoneAge {
   constructor() {
     this.id = 'stone';
     this.era = 'stone';
+    this.rustEra = 0;   // the Rust era sim under this scene (crates/engine/src/eras, #194)
     this.label = 'Era I · Stone Age';
     this.intro = {
       title: 'Stone Age',

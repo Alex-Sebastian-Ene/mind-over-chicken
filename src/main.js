@@ -54,6 +54,7 @@ import { observe, decodeAction, scriptedAction, BOLT_COOLDOWN } from './ai/obser
 import { loading } from './ui/loading.js'; // loading screen
 import { engineFailToShow } from './ui/fail.js';
 import { frameLoop } from './ui/loop.js';
+import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
 // mind read uses the same window.
@@ -416,8 +417,7 @@ function newGame(source, startIndex = 0) {
     // Around the 3D map: this world's deep sea, so the edges read as open ocean.
     const deep = G.world.palette?.[0]?.[0];
     if (deep && engine.set_backdrop) engine.set_backdrop(deep[0], deep[1], deep[2]);
-    engine.set_era(startIndex);
-    engine.game_start_era(Math.min(2, Math.floor(startIndex / 2)));
+    engine.set_era(startIndex);   // startScene() starts the scene's Rust era sim, if it has one (#194)
   }
   startScene(startIndex);
   try { window.claude?.hot?.snapshot?.(() => ({ sceneIndex: G?.sceneIndex ?? 0, kind: G?.source?.kind })); } catch {}
@@ -436,7 +436,8 @@ function startScene(i) {
   G.scene = scene;
   if (engine) {
     engine.set_era(i);
-    engine.game_start_era(Math.min(2, Math.floor(i / 2)));
+    // Only the playable eras have a Rust sim; a time skip must not restart the last one (#194).
+    if (rustEraOf(scene) !== null) engine.game_start_era(rustEraOf(scene));
   }
   advisor.setEra(scene.era);
   scene.enter(G);
@@ -466,7 +467,7 @@ function restartScene() {
   G.scene = scene;
   if (engine) {
     engine.set_era(i);
-    engine.game_restart_era();
+    if (rustEraOf(scene) !== null) engine.game_restart_era();
   }
   advisor.setEra(scene.era);
   scene.enter(G);
@@ -963,7 +964,8 @@ function frame(ts) {
   lastTs = ts;
   if (G) {
     G.brain.update(dt, G.mood);   // the camera's face anger counts toward brain.stress
-    if (engine) {
+    // The scene's Rust era sim ticks only in a playable era, and not during its intro (#194).
+    if (engine && rustEraTicks(G.scene, intro.active)) {
       const b = G.brain;
       engine.game_tick(dt, b.calm || 0, b.focus || 0, b.stress ?? 0, b.stats?.blinks || 0);
       if (engine.is_game_era_complete?.() && !pendingScene && !G.finished && G.sceneIndex < SCENES.length - 1 && G.scene?.era !== 'space') {
