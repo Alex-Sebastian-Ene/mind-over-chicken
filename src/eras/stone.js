@@ -66,7 +66,7 @@ export class StoneAge {
 
   spawnMammoth() {
     const w = this.G.world, v = w.sites.village;
-    const p = w.randomLand(v.x, v.y, 40, 85, (x, y) => w.get(x, y) === 3 && w.reachable(x, y));
+    const p = w.randomLand(v.x, v.y, 40, 85, (x, y) => w.walkable(x, y) && w.reachable(x, y));
     this.mammoths.push({ x: p.x, y: p.y, tx: p.x, ty: p.y, alive: true, frame: 0, ft: 0, facing: 1, hunt: 0, lone: 0, side: 1, pause: 0 });
   }
 
@@ -206,12 +206,14 @@ export class StoneAge {
       if (w.isWater && (w.isWater(m.x, m.y) || !w.walkable(m.x, m.y))) {
         const safe = w.nearestWalkable(m.x, m.y);
         m.x = safe.x; m.y = safe.y;
+        m.tx = safe.x; m.ty = safe.y;
       }
       animate(m, dt, 3);
       m.pause -= dt;
-      if (m.pause <= 0 && walk(m, m.tx, m.ty, 4, dt, w)) {
-        const v = w.sites.village;
-        const p = w.randomLand(m.x, m.y, 6, 22, (x, y) => dist(x, y, v.x, v.y) > 32 && w.walkable(x, y) && w.reachable(x, y));
+      const arrived = walk(m, m.tx, m.ty, 4, dt, w);
+      if (m.pause <= 0 && (arrived || (m.stuck || 0) > 1.5)) {
+        m.stuck = 0;
+        const p = w.randomLand(m.x, m.y, 8, 26, (x, y) => w.walkable(x, y) && w.reachable(x, y));
         m.tx = p.x; m.ty = p.y; m.pause = rand(0.5, 2.5);
       }
       const hunters = this.people.filter((p) => p.alive && p.target === m && dist(p.x, p.y, m.x, m.y) < 6).length;
@@ -678,7 +680,7 @@ export class StoneAge {
     const { x: targetX, y: targetY } = w.aimPoint({ x: aimX, y: aimY });
     const safeLand = w.walkable(targetX, targetY) && w.reachable(targetX, targetY)
       ? { x: targetX, y: targetY }
-      : w.randomLand(targetX, targetY, 1, 8);
+      : w.randomLand(w.sites.village.x, w.sites.village.y, 10, 30, (x, y) => w.walkable(x, y) && w.reachable(x, y));
     entity.x = safeLand.x;
     entity.y = safeLand.y;
     entity.tx = safeLand.x;

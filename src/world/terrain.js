@@ -156,7 +156,12 @@ export class World {
       const px = this.wrapX(Math.round(x + Math.cos(a) * r)), py = this.wrapY(Math.round(y + Math.sin(a) * r));
       if (this.walkable(px, py) && (!pred || pred(px, py))) return { x: px, y: py };
     }
-    return this.nearestWalkable(x, y);
+    const near = this.nearestWalkable(x, y);
+    if (!pred || pred(near.x, near.y)) return near;
+    if (this.sites?.village && (!pred || pred(this.sites.village.x, this.sites.village.y))) {
+      return { ...this.sites.village };
+    }
+    return near;
   }
 
   // Era-specific land use. Called once per era before painting.
