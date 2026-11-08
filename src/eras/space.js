@@ -22,6 +22,7 @@ export class SpaceAge {
   constructor() {
     this.id = 'space';
     this.era = 'space';
+    this.rustEra = 2;   // the Rust era sim under this scene (crates/engine/src/eras, #194)
     this.label = 'Era III · Space Age';
     this.intro = {
       title: 'Space Age',

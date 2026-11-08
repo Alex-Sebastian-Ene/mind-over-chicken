@@ -22,6 +22,7 @@ export class Industry {
   constructor() {
     this.id = 'industry';
     this.era = 'industry';
+    this.rustEra = 1;   // the Rust era sim under this scene (crates/engine/src/eras, #194)
     this.label = 'Era II · Industry';
     this.intro = {
       title: 'Industry',
