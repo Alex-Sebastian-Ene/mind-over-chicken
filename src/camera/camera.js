@@ -26,6 +26,7 @@ import { EMOTIONS, EmotionTracker, neutralMood, blendshapeMap } from './emotion.
 import { manualMood, surpriseRisingEdge } from './manual-mood.js';
 import { loadVision } from './vision.js';
 import { loadEngine, workerPreference } from './engine.js';
+import { handsEnabled, setHandsEnabled } from './hands-pref.js';
 import { FingerController, MultiHandTracker } from './fingers.js';
 import { initCoach } from './coach.js';
 import { FrameMeter } from './meter.js';
@@ -52,11 +53,12 @@ const TEMPLATE = `
       <strong data-cam-state>Camera off</strong>
       <span class="eeg-qual" data-cam-mode>Idle</span>
     </div>
-    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam for hands and face: pinch to grab a creature, move your hand to pan the map, head motion tilts the 3D view, two hands to pinch-zoom; your expression sets the mood. The webcam does not track your head: the cursor follows the EEG headset's head pose, or the mouse. Frames never leave this device.</p>
+    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam for your face: your expression sets the mood. Hand moves are off unless you tick them below (pinch to grab a creature, move your hand to pan, two hands to pinch-zoom). The webcam does not track your head: the cursor follows the EEG headset's head pose, or the mouse. Frames never leave this device.</p>
     <div class="eeg-url-row">
       <button type="button" class="btn btn-primary btn-small" data-cam-start>Start Camera</button>
       <button type="button" class="btn btn-small" data-cam-stop disabled>Stop &amp; Clear</button>
     </div>
+    <label class="cam-hands-toggle"><input type="checkbox" data-cam-hands> Hand moves (pinch to grab, two hands to zoom). Off by default: the face sets the mood either way.</label>
     <p class="cam-privacy" data-cam-optin>The webcam stays off until you click <b>Start Camera</b>; only then does the browser ask for permission. Frames never leave this device.</p>
   </section>
 
@@ -197,6 +199,7 @@ export function initCamera({
     fps: $('[data-cam-fps]'),
     rateVideo: $('[data-cam-rate-video]'),
     rateHands: $('[data-cam-rate-hands]'),
+    handsToggle: $('[data-cam-hands]'),
     rateFace: $('[data-cam-rate-face]'),
     aim: $('[data-cam-aim]'),
     gesture: $('[data-cam-gesture]'),
@@ -235,6 +238,7 @@ export function initCamera({
   let lastTick = 0;
   let lastFaceAt = 0;
   let gesture = { name: 'None', score: 0 };
+  let handsOn = handsEnabled();   // hand moves are opt-in (hands-pref.js)
   let lastHeadAim = null;
   let hand = null, handAspect = 4 / 3, faceBox = null;
   let finger = null;
@@ -389,6 +393,23 @@ export function initCamera({
     setStatus('on');
   }
 
+  // Hand moves switched off: let go of anything held and forget the hands.
+  function dropHands() {
+    const G = getG();
+    if (grabbed && G?.scene?.onGrabEnd) {
+      try { G.scene.onGrabEnd({ x: G.brain?.aim?.x ?? 0.5, y: G.brain?.aim?.y ?? 0.5, cancelled: true }); } catch {}
+    }
+    grabbed = null;
+    fingers.reset();
+    multiHand.reset();
+    pinchSmoother.reset();
+    hand = null;
+    finger = null;
+    multi = null;
+    gesture = { name: 'None', score: 0 };
+    handsCtx.clearRect(0, 0, hands.width, hands.height);
+  }
+
   function teardown() {
     const G = getG();
     if (grabbed && G?.scene?.onGrabEnd) {
@@ -428,6 +449,13 @@ export function initCamera({
   // Start Camera button alone, so reading about the moves never triggers a permission prompt.
   btn.addEventListener('click', () => togglePanel());
   ui.startBtn?.addEventListener('click', () => start());
+  if (ui.handsToggle) {
+    ui.handsToggle.checked = handsOn;
+    ui.handsToggle.addEventListener('change', () => {
+      handsOn = setHandsEnabled(ui.handsToggle.checked);
+      if (!handsOn) dropHands();
+    });
+  }
   ui.stopBtn?.addEventListener('click', () => stop());
   $('[data-cam-close]').addEventListener('click', () => togglePanel(false));
   window.addEventListener('pagehide', () => { if (stream || status === 'starting') stop(); });
@@ -550,7 +578,7 @@ export function initCamera({
   }
 
   function onGesture(r) {
-    if (!stream || status !== 'on') return;
+    if (!stream || status !== 'on' || !handsOn) return;
     const now = performance.now();
     const gestureDt = Math.min(0.2, (now - (lastGestureAt || now)) / 1000) || 1 / 30;
     lastGestureAt = now;
@@ -862,7 +890,7 @@ export function initCamera({
     lastTick = now;
     frames.frame(now);
     if (stream && engine?.alive && status === 'on' && video.readyState >= 2) {
-      engine.pump(video, now, { hands: true, tracking: !!(hand || multi?.left || multi?.right) });
+      engine.pump(video, now, { hands: handsOn, tracking: !!(hand || multi?.left || multi?.right) });
       if (now >= guardAt) guardFrames(now);
     }
     const G = getG();

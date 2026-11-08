@@ -709,6 +709,7 @@ body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
 .cam-panel[data-mood="sadness"] [data-emotion="sadness"] { color: var(--bone); font-weight: 700; }
 .cam-now { margin: 0; font: 12px/1.3 var(--pixel); min-height: 1.3em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cam-privacy { margin: 0; font-size: 11px; color: var(--muted); }
+.cam-hands-toggle { display: flex; gap: 6px; align-items: center; margin: 6px 0 2px; font-size: 12px; }
 .cam-fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 
 @media (max-width: 760px) {
