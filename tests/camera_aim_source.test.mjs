@@ -23,9 +23,9 @@ test('aim source follows the brain source, not the webcam (#189)', () => {
   assert.equal(aimSource({ source: { ...bridge, lastFrameAt: 0 } }, now).id, 'mouse');
 });
 
-test('camera, coach and spell copy never claim webcam head tracking (#189)', () => {
+test('camera and coach copy never claim webcam head tracking (#189)', () => {
   const claims = /head cursor|head aims|move (your )?head|MOVE HEAD|sole aim/i;
-  for (const f of ['camera.js', 'coach.js', 'spells.js', 'debug.js']) {
+  for (const f of ['camera.js', 'coach.js', 'gestures.js', 'debug.js']) {
     const src = readFileSync(new URL(`../src/camera/${f}`, import.meta.url), 'utf8');
     const hit = src.split('\n').find((line) => claims.test(line));
     assert.equal(hit, undefined, `${f} still claims head tracking: ${hit?.trim()}`);
