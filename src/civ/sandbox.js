@@ -397,8 +397,9 @@ export class CivSandbox {
     this.mood = mood;
   }
 
+  // In proportion to the scroll: a mouse notch zooms about ×1.25, a trackpad glides (Alex: easier zoom).
   onWheel(delta) {
-    this.zoom = clamp((this.zoom || 1.0) * (delta > 0 ? 0.9 : 1.11), 0.6, 2.5);
+    this.zoom = clamp((this.zoom || 1.0) * Math.exp(-clamp(delta, -300, 300) * 0.0022), 0.6, 2.5);
   }
 
   // A drag from main.js (world units, both axes): the content follows the pointer, so the camera
