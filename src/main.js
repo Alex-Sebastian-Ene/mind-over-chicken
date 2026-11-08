@@ -43,7 +43,8 @@ import { setRustEmotionTracker } from './camera/emotion.js';
 import { setRustAiPolicy } from './ai/policy.js';
 import { setRustAgentHelpers } from './sim/agents.js';
 import { initDebug } from './camera/debug.js'; // camera debug (#67)
-import { Calibration, readCalibrationConfig, setRustCalibration } from './brain/calibration.js'; // calibration (#54)
+import { Calibration, readCalibrationConfig, saveCalibrationConfig, CALIBRATION_DEFAULTS, setRustCalibration } from './brain/calibration.js';
+import { initSettings, syncCameraIndicator } from './ui/settings.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
 import { CivSandbox, initPlanetSizePicker } from './civ/sandbox.js'; // civ (#50)
 import { worldMeta, renderWorldDetail } from './cosmos/panel.js'; // planets (#68)
@@ -1065,6 +1066,7 @@ function frame(ts) {
     $('sourceStatus').dataset.ok = previewSource.connected ? '1' : '0';
   }
   eegPanel?.update();
+  syncCameraIndicator(document);   // "● Camera on" in the top bar while the webcam runs (#89)
   render();
   const fms = performance.now() - ts;
   perfSample.frames++; perfSample.frameMs += fms; perfSample.maxFrameMs = Math.max(perfSample.maxFrameMs, fms);
@@ -1429,8 +1431,9 @@ screen.addEventListener('contextmenu', (e) => e.preventDefault());
 // Shift is the Stress demo key: full agitation on the emulated headset (input.panic).
 const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'panic' };
 window.addEventListener('keydown', (e) => {
-  if (e.target?.closest?.('input')) return;
+  if (e.target?.closest?.('input, select, textarea')) return;
   if (document.getElementById('moveCalibModal')?.hidden === false) return;
+  if (e.code === 'Escape' && settingsUi?.isOpen()) { e.preventDefault(); settingsUi.close(); return; }
   if (!$('failScreen').hidden) {
     if (e.code === 'Enter') { e.preventDefault(); retryEra(); return; }
     if (e.code === 'KeyA') { e.preventDefault(); toggleAssistMode(); return; }
@@ -1539,6 +1542,7 @@ function toggleModel() {
   if (!p.hidden) {
     eegPanel?.toggle(false);
     window.__moc?.camera?.togglePanel?.(false);
+    settingsUi?.close();
   }
 }
 $('modelBtn').addEventListener('click', toggleModel);
@@ -1687,10 +1691,14 @@ $('galaxyBtn').addEventListener('click', () => {
 // Every entry point (Play, both sandboxes, Play again) keeps a connected headset and only falls
 // back to the emulator without one; newGame() disconnects whatever it isn't given (#185).
 function playSource() { return liveBridge(G?.source, previewSource) || new SimSource(); }
+let settingsUi = null;   // the Settings panel (#186), wired after the camera and debug panels
 function begin(source) {
   audio.unlock();
   $('titleScreen').hidden = true;
+  settingsUi?.close();
   newGame(source);
+  // Settings › Camera: the player asked for the webcam with every game (#186).
+  if (settingsUi?.settings.cameraOnStart) window.__moc?.camera?.start?.();
 }
 $('playSim').addEventListener('click', () => begin(playSource()));
 $('playSandbox').addEventListener('click', () => {
@@ -1840,6 +1848,20 @@ window.__moc.camera = initCamera({
 });
 // camera debug (#67): Debug tab (button in the top bar, ` key; D pans the planet).
 window.__moc.debug = initDebug({ getG: () => G, camera: window.__moc.camera });
+// Settings (#186): comfort, head aim, calibration window, camera, and the Advanced buttons (#89).
+try {
+  settingsUi = initSettings(document, {
+    eegPanel,
+    calibration: {
+      read: () => ({ seconds: calibConfig.seconds, mode: calibConfig.mode }),
+      write: (c) => { saveCalibrationConfig(c); Object.assign(calibConfig, c); SIM.MIND_SECONDS = c.seconds; },
+    },
+    defaults: { aim: { sensitivity: 1, invertYaw: false, invertPitch: false }, calibration: { seconds: CALIBRATION_DEFAULTS.seconds, mode: CALIBRATION_DEFAULTS.mode } },
+  });
+} catch (err) {
+  console.error('Settings panel failed to start; the game runs without it:', err);
+}
+$('camLive')?.addEventListener('click', () => window.__moc?.camera?.togglePanel?.(true));
 
 // ---------- boot ----------
 async function autoConnectBridge() {
