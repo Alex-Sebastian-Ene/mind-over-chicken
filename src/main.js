@@ -297,6 +297,7 @@ function resetAIGod() {
   const btn = $('aiGodBtn');
   if (btn) {
     btn.textContent = 'AI God: OFF';
+    btn.title = 'Toggle AI God autopilot (G)';
     btn.setAttribute('aria-pressed', 'false');
   }
 }
@@ -306,11 +307,24 @@ function toggleAIGod() {
     resetAIGod();
     advisor.say('ai-off', 'AI god disengaged. You have full command.', { mood: 'happy', priority: 2, cooldown: 1 });
   } else {
-    aiGod = new AIGod();
+    // The trained (PPO) policy loads in the background; if it can't, the player is told that a
+    // scripted god is steering, on the button and by the advisor (#181).
+    const god = new AIGod({
+      onStatus: (mode, err) => {
+        if (aiGod !== god) return;   // toggled off meanwhile
+        const b = $('aiGodBtn');
+        if (b) {
+          b.textContent = mode === 'ppo' ? 'AI God: ON' : 'AI God: ON (scripted)';
+          b.title = mode === 'ppo' ? 'AI God: the trained PPO policy is steering (G)' : `AI God: the trained policy did not load (${err?.message || err}), a scripted god is steering (G)`;
+        }
+        if (mode === 'scripted') advisor.say('ai-scripted', 'The trained AI god would not load, my lord. A simple scripted god is steering instead.', { mood: 'panic', priority: 3, cooldown: 1 });
+      },
+    });
+    aiGod = god;
     aiGodTimer = 0;
     const btn = $('aiGodBtn');
     if (btn) {
-      btn.textContent = 'AI God: ON';
+      btn.textContent = god.mode === 'scripted' ? 'AI God: ON (scripted)' : 'AI God: ON';
       btn.setAttribute('aria-pressed', 'true');
     }
     advisor.say('ai-on', 'AI god engaged! The PPO autopilot is steering this world. Stay calm to help it.', { mood: 'nervous', priority: 2, cooldown: 1 });
