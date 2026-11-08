@@ -23,7 +23,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
   - `M`: Toggle Personalized Brain Model & Judge Panel
   - `G`: Toggle PPO AI God Autopilot
   - `E` / `C`: Toggle the EEG / Camera sidebars (`` ` `` still toggles Camera); `Shift+C`: re-centre the headset's head pose
-  - Hands: pinch to grab/move, two hands to zoom. No hand gesture casts a spell (#261).
+  - Hands: pinch + hand movement pans, pinch + head motion tilts the 3D view, two hands zoom. No hand gesture casts a spell (#261).
 
 ---
 

@@ -59,7 +59,7 @@ Continuously maps live EEG activity and facial expressions into global world var
 
 * Target design: hand gestures select and activate spells and target locations in the world.
 * Target design: head tracking (accelerometer plus gyroscope), facial focus, and hand gestures navigate the UI.
-* **Current milestone:** head tracking and facial/biometric signals are required; hand input is movement only (pinch grab/move and two-hand zoom), and gesture-driven UI navigation is **deferred**.
+* **Current milestone:** head tracking and facial/biometric signals are required; hand input is movement only (pinch + hand pans, pinch + head motion tilts the 3D view; two-hand zoom), and gesture-driven UI navigation is **deferred**.
 
 ---
 

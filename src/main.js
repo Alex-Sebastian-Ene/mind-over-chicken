@@ -36,6 +36,7 @@ import initEngine, {
 import { Cosmos } from './cosmos/cosmos.js';
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel, setRustGalaxy } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
+import { pinchMove } from './camera/pinch-move.js'; // one-hand pinch movement (#270)
 import { initCameraAdapter } from './camera/adapter.js';
 import { setRustFingerController } from './camera/fingers.js';
 import { setRustEmotionTracker } from './camera/emotion.js';
@@ -1787,23 +1788,28 @@ window.__moc.camera = initCamera({
     // Cosmos zoom (surface <-> globe <-> galaxy): wheel negative zooms in, positive zooms out
     cosmos.wheel(-delta * 750, G);
   },
-  onGrabMove: ({ dx, dy, active, started, released, aim }) => {
-    // One-hand pinch grab & move the globe or world view
+  onGrabMove: ({ dx, dy, headDx = 0, headDy = 0, active, started, released, aim }) => {
+    // One-hand pinch (#270): hand translation pans the map in cardinal directions in 2D and 3D;
+    // aim movement orbits the 3D camera like Alt+drag. Two-hand zoom and entity grab stay separate.
     if (!G) return;
+    const move = pinchMove({ handDx: dx, handDy: dy, headDx, headDy });
     if (cosmos.active || (cosmos?.z || 0) > 0.05) {
       if (active) {
         // In normalized hand space (-1..1). Moving hand right rotates globe right.
-        const spin = -dx * 3.5;
+        const spin = -move.panX * 3.5;
         cosmos.rot += spin;
         cosmos.spinVel = spin / 0.033;
       }
       return;
     }
-    // On the surface, 2D or 3D, a one-hand pinch drags the map (#156): it used to orbit the 3D
-    // camera, which felt like the world tilting away. Orbiting stays on right-drag.
-    if (active && (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001)) {
+    // On the surface, 2D or 3D, a one-hand pinch drags the map (#156).
+    if (active && (move.panX || move.panY)) {
       if (in3dSurface()) cam3dBase = null;
-      panMap(-dx * W * 1.5, -dy * H * 1.5);
+      panMap(-move.panX * W * 1.5, -move.panY * H * 1.5);
+    }
+    if (active && in3dSurface() && (move.tiltX || move.tiltY)) {
+      engine.orbit_camera(move.tiltX * W * 0.008, move.tiltY * H * 0.008);
+      cam3dBase = null;
     }
   },
 });
