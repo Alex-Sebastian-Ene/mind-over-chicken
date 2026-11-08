@@ -1,6 +1,6 @@
 // Time-skip cutscenes. The 24-hour scope builds three eras properly and fakes the rest.
 //
-// FarmingToKingdoms: farms and goat trading appear, then the Kingdom's scholars write down
+// FarmingToKingdoms: farms and chicken trading appear, then the Kingdom's scholars write down
 // three inventions while the player concentrates (#223: no arithmetic, it read as a calculator).
 // Those seconds are labelled `focus`, which is how the focus classifier gets trained on this
 // player before the finale needs it; the scroll's ink runs faster the harder they focus.
@@ -9,7 +9,7 @@
 
 import { W, H, Particles, rand, pick, floater, clamp } from '../sim/util.js';
 import { walk, animate, villagerLook } from '../sim/agents.js';
-import { drawPerson, drawGoat, drawChicken } from '../render/sprites.js';
+import { drawPerson, drawHen, drawChicken } from '../render/sprites.js';
 import { FireballFX } from '../render/fireball.js';
 import { label } from './stone.js';
 import { joyBuff, surpriseFires, surpriseEffect, sparkleCount, JOY_COLORS } from '../camera/mood-actions.js'; // #152
@@ -65,7 +65,7 @@ export class FarmingToKingdoms {
     this.chicken = { x: v.x + 4, y: v.y + 3, frame: 0, ft: 0, facing: 1, side: 1 };
     G.brain.setCue(null);
     G.advisor.setEra('farming');
-    G.advisor.say('farm', 'Eight thousand years later. Calm skies, fat harvests. And for reasons no one can explain, everyone now trades goats.', { mood: 'happy', priority: 3, cooldown: 999 });
+    G.advisor.say('farm', 'Eight thousand years later. Calm skies, fat harvests. And for reasons no one can explain, everyone now trades chickens. I am trying not to take it personally.', { mood: 'happy', priority: 3, cooldown: 999 });
   }
 
   skip() {
@@ -96,7 +96,7 @@ export class FarmingToKingdoms {
       p.trade -= dt;
       if (p.trade <= 0 && this.phase === 'farming') {
         p.trade = rand(2, 5);
-        floater(this.particles, p.x, p.y - 6, pick(['goat ⇄ grain', '2 goats ⇄ pot', 'goat ⇄ goat?', 'IOU 1 goat']), '#f2e8d5', 5);
+        floater(this.particles, p.x, p.y - 6, pick(['hen ⇄ grain', '2 hens ⇄ pot', 'egg ⇄ hen?', 'IOU 1 egg']), '#f2e8d5', 5);
       }
     }
     for (const g of this.goats) { animate(g, dt, 3); if (!g.spot || walk(g, g.spot.x, g.spot.y, 4, dt, w)) g.spot = w.randomLand(g.x, g.y, 3, 14); }
@@ -161,7 +161,7 @@ export class FarmingToKingdoms {
       return;
     }
     const actors = [];
-    for (const g of this.goats) actors.push({ y: g.y, d: () => drawGoat(ctx, g.x, g.y, g) });
+    for (const g of this.goats) actors.push({ y: g.y, d: () => drawHen(ctx, g.x, g.y, g) });
     for (const p of this.people) actors.push({ y: p.y, d: () => drawPerson(ctx, p.x, p.y, p) });
     actors.push({ y: this.chicken.y, d: () => drawChicken(ctx, this.chicken.x, this.chicken.y, this.chicken) });
     actors.sort((a, b) => a.y - b.y).forEach((a) => a.d());
@@ -180,7 +180,7 @@ export class FarmingToKingdoms {
     if (this.phase === 'farming') {
       const yrs = Math.floor(clamp(this.t / 5.5) * 8000);
       label(ctx, W / 2, 26, `${yrs.toLocaleString('en-GB')} years later`, '#f2e8d5', 13);
-      label(ctx, W / 2, 38, this.t < 2.8 ? 'Farming. Calm skies, fat harvests.' : 'Villagers start trading goats. A market forms.', '#ffd166', 7);
+      label(ctx, W / 2, 38, this.t < 2.8 ? 'Farming. Calm skies, fat harvests.' : 'Villagers start trading chickens. A market forms.', '#ffd166', 7);
       return;
     }
     if (this.phase === 'kingdoms' && this.pi >= 0 && this.pi < this.problems.length) {
@@ -249,7 +249,7 @@ export class InfoAge {
     this.fireballs = new FireballFX();
     G.brain.setCue('rest');
     G.advisor.setEra('space');
-    G.advisor.say('info', 'Three hundred years later. The goats went digital. Then everyone looked up.', { mood: 'nervous', priority: 3, cooldown: 999 });
+    G.advisor.say('info', 'Three hundred years later. The chickens went digital. Then everyone looked up.', { mood: 'nervous', priority: 3, cooldown: 999 });
   }
 
   skip() { if (this.t > 1) this.t = 99; }
@@ -276,7 +276,7 @@ export class InfoAge {
   // Captions fixed to the screen (#129).
   drawScreenOverlay(ctx) {
     label(ctx, W / 2, 26, `${Math.floor(clamp(this.t / 6) * 300)} years later`, '#f2e8d5', 13);
-    label(ctx, W / 2, 38, this.t < 3 ? 'The goats went digital.' : 'Everyone looks up.', '#9ec9ff', 7);
+    label(ctx, W / 2, 38, this.t < 3 ? 'The chickens went digital.' : 'Everyone looks up.', '#9ec9ff', 7);
   }
 
   drawOverlay(ctx) {

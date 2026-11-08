@@ -3,7 +3,7 @@
 //
 // A world hears ONE brain channel loudly (weight 1) and the others softly (OFF_CHANNEL):
 //   calm  → growth and harvests      focus → research and era progress
-//   stress → goat-market volatility  blink → storms (each blink)
+//   stress → chicken-market volatility  blink → storms (each blink)
 // The world the player is zoomed into ("attended") hears EVERY channel at weight 1, and a blink
 // strikes it directly. The player's brain always applies; an optional AI god (p.god) only chooses
 // the civilisation's effort split and never touches the player's input.
@@ -15,9 +15,9 @@
 //   - Settlement tier (camp → village → town → city) rises when the next tier's entry conditions
 //     (people, food, wood, stone, goats and stability) have all held for TIER_HOLD seconds.
 //     Building spends the wood and stone. Each tier houses more people.
-//   - Resources: food (gathered/farmed, plus milk from goats) is eaten every second; wood is
-//     gathered and burned; stone is quarried; goats breed when people are fed. Stocks are capped
-//     by storage, which grows with housing.
+//   - Resources: food (gathered/farmed, plus eggs from the chickens, whose key is still `goats`)
+//     is eaten every second; wood is gathered and burned; stone is quarried; chickens breed when
+//     people are fed. Stocks are capped by storage, which grows with housing.
 //   - Stability drifts toward a target that rises with the effort put into order and with calm,
 //     and falls with hunger, overcrowding, internal conflict, the player's anger (camera mood)
 //     and stress.
@@ -210,9 +210,9 @@ export function easeSplit(split, action, dt, rate = 0.5) {
 
 const FLAVOUR = [
   ['invented the spear', 'worships a rock', 'met a giant chicken'],
-  ['domesticated goats', 'invented cheese', 'elected a chicken'],
-  ['opened a goat exchange', 'invented the strike', 'built a mill'],
-  ['launched a satellite', 'found water on a moon', 'built a goat in orbit'],
+  ['domesticated chickens', 'invented the omelette', 'elected a chicken'],
+  ['opened a chicken exchange', 'invented the strike', 'built a mill'],
+  ['launched a satellite', 'found water on a moon', 'put a chicken in orbit'],
 ];
 
 // Milestones: recorded once per world, in the order reached.
@@ -220,7 +220,7 @@ export const MILESTONES = {
   village: 'First village', town: 'First town', city: 'First city',
   farming: 'Reached Farming', industry: 'Reached Industry', space: 'Reached the Space Age',
   pop100: '100 people', pop1000: '1,000 people', pop10000: '10,000 people',
-  goats100: 'A hundred goats', rebuilt: 'Rebuilt after a collapse', weathered: 'Weathered hard times',
+  goats100: 'A hundred chickens', rebuilt: 'Rebuilt after a collapse', weathered: 'Weathered hard times',
   launch: 'First ship launched', tribe: 'The tribe kept its fire', reunited: 'Reunited after a civil war',
 };
 
@@ -630,12 +630,12 @@ export function stepPlanet(p, dt, fx, rng = Math.random, attended = false) {
       p.pop = Math.max(SIM.MIN_POP, p.pop * (1 - (1 - SIM.CRASH_POP) * steady));
       p.progress = Math.max(0, p.progress - SIM.CRASH_PROGRESS * steady);
       p.goats *= SIM.CRASH_GOATS;
-      events.push({ kind: 'bad', text: 'goat crash', cause: `your stress at ${Math.round(fx.stress * 100)}%` });
+      events.push({ kind: 'bad', text: 'chicken crash', cause: `your stress at ${Math.round(fx.stress * 100)}%` });
     } else if (!p.boomed && p.market > SIM.BOOM_LEVEL) {
       p.boomed = true;
       p.progress = Math.min(1, p.progress + SIM.BOOM_PROGRESS);
       p.goats = Math.min(storage(p), p.goats * SIM.BOOM_GOATS);
-      events.push({ kind: 'good', text: 'goat boom', cause: 'a lively mind' });
+      events.push({ kind: 'good', text: 'chicken boom', cause: 'a lively mind' });
     }
     if (p.market > p.marketPeak * SIM.CRASH_RESET) p.crashed = false;
     if (p.market < SIM.BOOM_RESET) p.boomed = false;

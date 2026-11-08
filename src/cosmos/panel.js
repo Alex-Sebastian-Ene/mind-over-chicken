@@ -34,7 +34,7 @@ export function renderWorldDetail(root, p) {
   } else if (p.pop > 0) {
     const next = TIERS[(p.tier ?? 0) + 1];
     parts.push(el('p', 'wd-line', `${tierName(p)} · ${ERA_LABEL[ERA_NAMES[p.eraIndex]]} · ${fmtPop(p.pop)} people${next ? ` · next: ${next.name.toLowerCase()} at ${fmtNum(next.enter.all.population)}` : ''}`));
-    parts.push(el('p', 'wd-line wd-stock', `food ${fmtNum(p.food)} · wood ${fmtNum(p.wood)} · stone ${fmtNum(p.stone)} · goats ${fmtNum(p.goats)}`));
+    parts.push(el('p', 'wd-line wd-stock', `food ${fmtNum(p.food)} · wood ${fmtNum(p.wood)} · stone ${fmtNum(p.stone)} · chickens ${fmtNum(p.goats)}`));
     const stab = el('p', 'wd-line wd-stab');
     const bar = el('span', 'wd-bar'); bar.style.setProperty('--p', `${Math.round((p.stability ?? 0) * 100)}%`);
     if ((p.stability ?? 0) < 0.3) bar.classList.add('is-low');

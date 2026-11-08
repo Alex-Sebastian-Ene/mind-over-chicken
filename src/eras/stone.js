@@ -266,7 +266,7 @@ export class StoneAge {
     G.audio?.good?.();
     G.advisor.say('rain-summoned', hadForest
       ? 'Rain spell! The forest fire is out. The tribe is damp, alive and quietly impressed.'
-      : 'Rain falls over the tribe. No fire to put out, but the goats seem pleased.', { mood: 'happy', priority: 3, cooldown: 10 });
+      : 'Rain falls over the tribe. No fire to put out, but the chickens seem pleased.', { mood: 'happy', priority: 3, cooldown: 10 });
   }
 
   updateRain(dt) {
