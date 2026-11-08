@@ -20,7 +20,7 @@
 import { clamp } from '../sim/util.js';
 import { SPELLS, SPELL_BY_ID, GESTURE_LABEL, spellForKeyCode, CAMERA_CASTS_ENABLED } from './spells.js';
 import { CastController } from './casts.js';
-import { EMOTIONS, EmotionTracker, neutralMood } from './emotion.js';
+import { EMOTIONS, EmotionTracker, neutralMood, blendshapeMap } from './emotion.js';
 import { loadVision } from './vision.js';
 import { loadEngine, workerPreference } from './engine.js';
 import { FingerController, MultiHandTracker } from './fingers.js';
@@ -130,7 +130,8 @@ function cameraError(err, castsEnabled) {
 function stopTracks(stream) { stream?.getTracks().forEach((t) => t.stop()); }
 
 export function initCamera({
-  getG,
+  app = null,
+  getG = () => window.__moc?.G,
   canCast = () => true,
   castsEnabled = CAMERA_CASTS_ENABLED,
   mapX = (x) => x,
@@ -534,6 +535,20 @@ export function initCamera({
       aspect: handAspect,
     });
 
+    if (app && hand && hand.length >= 21) {
+      try {
+        const coords = new Float64Array(63);
+        for (let i = 0; i < 21; i++) {
+          coords[i * 3] = hand[i].x;
+          coords[i * 3 + 1] = hand[i].y;
+          coords[i * 3 + 2] = hand[i].z || 0;
+        }
+        app.on_hand_landmarks(coords, handAspect, now);
+      } catch (err) {
+        console.warn('RustApp on_hand_landmarks failed:', err);
+      }
+    }
+
     // Multi-hand tracker: 2-hand continuous zoom (#118, #119), 1-hand grab (#120)
     multi = multiHand.update({ hands: rawHands, now, aspect: handAspect });
 
@@ -586,6 +601,28 @@ export function initCamera({
     faceBox = r.box || null;
     if (out.event === 'strong') strongPending = true;
     if (out.surpriseTriggered) surprisePending = true;
+
+    if (app && r.blendshapes) {
+      try {
+        const b = blendshapeMap(r.blendshapes);
+        app.on_face_blendshapes(
+          true,
+          b.mouthSmileLeft || 0,
+          b.mouthSmileRight || 0,
+          b.browDownLeft || 0,
+          b.browDownRight || 0,
+          b.browInnerUp || 0,
+          b.eyeWideLeft || 0,
+          b.eyeWideRight || 0,
+          b.jawOpen || 0,
+          b.mouthFrownLeft || 0,
+          b.mouthFrownRight || 0,
+          dt
+        );
+      } catch (err) {
+        console.warn('RustApp on_face_blendshapes failed:', err);
+      }
+    }
   }
 
   function drawHands() {

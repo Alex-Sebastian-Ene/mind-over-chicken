@@ -1,0 +1,8 @@
+# Offline training tooling for #100 (never shipped in the game). Pinned to the versions the
+# local run used. CPU torch is enough for 64x64 MLPs:
+#   pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
+gymnasium==1.4.0
+stable-baselines3==2.9.2
+sb3-contrib==2.9.0
+numpy==2.5.4
+torch==2.15.0

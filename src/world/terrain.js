@@ -85,7 +85,7 @@ export class World {
     const g = Gen().planet(w.seed, w.biome);
     w.fill(g);
     const s = JSON.parse(g.surface_json());
-    w.vast = { w: g.surface_width(), h: g.surface_height(), tile: s.tile, type: g.surface_types(), continents: s.continents, spots: s.spots, rgba: g.surface_rgba(), stats: JSON.parse(g.surface_stats_json()) };
+    w.vast = { w: g.surface_width(), h: g.surface_height(), tile: s.tile, type: g.surface_types(), height: g.surface_heights(), continents: s.continents, spots: s.spots, rgba: g.surface_rgba(), stats: JSON.parse(g.surface_stats_json()) };
     g.free();
     return w;
   }

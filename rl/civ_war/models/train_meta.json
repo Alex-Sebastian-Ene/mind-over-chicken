@@ -1,0 +1,16 @@
+{
+ "config": "local",
+ "minutes_this_session": 60.2,
+ "stages": [
+  "c1_duel_small",
+  "c2_four",
+  "c3_eight",
+  "k1_commander"
+ ],
+ "elapsed": {
+  "c1_duel_small": 12.000660792986551,
+  "c2_four": 20.009294513861338,
+  "c3_eight": 12.003164966901144,
+  "k1_commander": 16.049538020292918
+ }
+}
