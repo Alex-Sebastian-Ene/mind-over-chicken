@@ -140,6 +140,12 @@ export async function startRustApp() {
   window.__moc = { app };
   return app;
 }
+if (typeof window !== 'undefined') {
+  window.startRustApp = startRustApp;
+  if (window.location && window.location.search && window.location.search.includes('rust=1')) {
+    startRustApp().catch((err) => console.error('Failed to auto-start RustApp:', err));
+  }
+}
 // Without WebGL, fall back to a plain 2D upscale so the game still shows.
 const fallback2d = engine ? null : screen.getContext('2d');
 
