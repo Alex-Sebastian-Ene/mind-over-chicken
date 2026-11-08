@@ -256,12 +256,7 @@ export class SpaceAge {
       engine.add_billboard(3, this.chicken.x, this.chicken.y, this.chicken.facing || 1, this.chicken.frame || 0, 1);
     }
 
-    // Aim reticle (SPRITE_RETICLE = 13)
-    const aim = this.G.brain?.aim;
-    if (aim) {
-      const p = this.G.world.aimPoint(aim);
-      engine.add_billboard(13, p.x, p.y, 1, 0, 0);
-    }
+    // The aim reticle is drawn once, on top, by main.js (#301).
   }
 
   draw(ctx) {
@@ -331,9 +326,7 @@ export class SpaceAge {
       ctx.fillStyle = '#ffcf4a'; ctx.fillRect(pad.x - bw / 2, pad.y - 34, bw * this.progress, 3);
       label(ctx, pad.x, pad.y - 37, `rocket ${Math.floor(this.progress * 100)}%`, '#f2e8d5', 5);
     }
-    // The aim reticle, on the map at the world point aimed at (3D stands it up as a sprite).
-    const aim = G.brain?.aim;
-    if (aim && !ctx.__project3d) { const p = G.world.aimPoint(aim); drawReticle(ctx, p.x, p.y, this.t, '#ffe066'); }
+    // The aim reticle is drawn once, on top, by main.js (#301).
   }
 
   // Captions and the countdown, fixed to the screen (#129: the map pans under them).

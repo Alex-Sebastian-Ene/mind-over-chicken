@@ -165,6 +165,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
   touch-action: none;
   cursor: crosshair;
 }
+body[data-reticle="1"] #screen { cursor: none; }   /* one cursor: the in-game reticle (#301) */
 
 /* era intro card */
 .banner {
