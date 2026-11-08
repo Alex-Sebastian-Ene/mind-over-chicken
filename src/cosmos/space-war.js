@@ -105,7 +105,7 @@ export class SpaceWarView {
       p.progress = Math.max(0, (p.progress || 0) - progLoss);
       for (const k of ['food', 'wood', 'stone', 'goats']) if (typeof p[k] === 'number') p[k] *= stockMul;
       if (by >= 0) {
-        p.ruler = this.powerName(by);
+        p.ruler = by === this.w.war_player() ? 'you' : this.powerName(by);
         g.pushLabel(p, { text: `taken by ${p.ruler}`, t: 4, color: '#d58cff' });
       }
       p.flash = Math.max(p.flash || 0, 0.4);
@@ -209,8 +209,13 @@ export class SpaceWarView {
         const sp = curve(g.pos(from), g.pos(to), Math.max(0, F[o + 2] - k * 0.012), F[o + 6]);
         ctx.globalAlpha = alpha * (k === 0 ? 1 : 0.9 - k * 0.08);
         ctx.fillStyle = k === 0 ? this.colour(F[o + 4]) : TRAIL[F[o + 3]] || '#ffffff';
-        const z = k === 0 ? s : 1;
-        ctx.fillRect(Math.round(sp.x - (z - 1) / 2), Math.round(sp.y - (z - 1) / 2), z, z);
+        const z = k === 0 ? s : 1, x = Math.round(sp.x - (z - 1) / 2), y = Math.round(sp.y - (z - 1) / 2);
+        if (k === 0) {   // a dark rim so the ship reads against the star and the planets
+          ctx.fillStyle = 'rgba(8,10,24,0.85)';
+          ctx.fillRect(x - 1, y - 1, z + 2, z + 2);
+          ctx.fillStyle = this.colour(F[o + 4]);
+        }
+        ctx.fillRect(x, y, z, z);
       }
     }
     // Battles: a flash, a ring and sparks at the planet.
@@ -241,8 +246,9 @@ export class SpaceWarView {
     for (let o = 0; o + FLEET <= F.length; o += FLEET) {
       const from = g.planets[F[o]], to = g.planets[F[o + 1]];
       if (!from || !to) continue;
+      if (F[o + 2] < 0.15 || F[o + 2] > 0.85) continue;   // no labels piling up on the planets
       const sp = curve(g.pos(from), g.pos(to), F[o + 2], F[o + 6]);
-      label(ctx, sp.x, sp.y - 3, `${GLYPH[F[o + 3]]}${Math.round(F[o + 5])}`, TRAIL[F[o + 3]], 4);
+      label(ctx, sp.x, sp.y - 4, `${GLYPH[F[o + 3]]}${Math.round(F[o + 5])}`, TRAIL[F[o + 3]], 4);
     }
     ctx.globalAlpha = 1;
   }

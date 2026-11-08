@@ -126,7 +126,7 @@ Tracked in #55.
 
 ## 7. Current build status
 
-The Rust/Wasm engine and WebGL renderer are landing under #17; the JavaScript game shell remains playable while the port reaches parity. The current build has three entry points: the five-scene campaign, the galaxy sandbox (home world plus three brain-seeded worlds), and the four-civilisation sandbox on one planet (`src/civ/`). The four-civ sandbox implements the canonical world model; the campaign is still the default button. Camera face mood and hand-gesture casts are active; gyroscope fusion and the configurable calibration seed are in. Treat the build as a reference implementation, not as the specification.
+The Rust/Wasm engine and WebGL renderer are landing under #17; the JavaScript game shell remains playable while the port reaches parity. The current build has three entry points: the five-scene campaign, the galaxy sandbox (home world plus three brain-seeded worlds), and the four-civilisation sandbox on one planet (`src/civ/`). The four-civ sandbox implements the canonical world model; the campaign is still the default button. Camera face mood and hand-gesture casts are active; gyroscope fusion and the configurable calibration seed are in. Space-capable worlds fight between planets (#166, `crates/moc-cosmos/src/war.rs`): the campaign's Space era can raid, bombard or invade AI worlds from the galaxy panel, AI worlds fight each other and the player, and civ-sandbox civilisations at age 19+ fly fleets too (`crates/moc-civ/src/space.rs`); after the last age, endgame tiers, coalitions against the leader and galactic dominance keep the late game going. Treat the build as a reference implementation, not as the specification.
 
 ---
 

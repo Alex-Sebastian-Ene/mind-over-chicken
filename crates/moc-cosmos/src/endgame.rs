@@ -262,7 +262,7 @@ fn dominance(w: &mut SpaceWar, dt: f32) {
         w.dominance_t = 0.0;
         return;
     };
-    if w.powers[l as usize].dominance >= DOMINANCE_AT {
+    if w.powers[l as usize].dominance >= DOMINANCE_AT && rules_enough(w, l) {
         w.dominance_t += dt;
     } else {
         w.dominance_t = (w.dominance_t - 2.0 * dt).max(0.0);
@@ -277,6 +277,18 @@ fn dominance(w: &mut SpaceWar, dt: f32) {
         };
         w.say(if player { TONE_GOOD } else { TONE_WARN }, true, text);
     }
+}
+
+/// Worlds power `p` rules, and how many dominance asks for: half the galaxy's inhabited
+/// worlds (at least two), so a galaxy can't be dominated before there is anything to rule.
+pub fn worlds_goal(w: &SpaceWar, p: u16) -> (u32, u32) {
+    let inhabited = w.bodies.iter().filter(|b| b.inhabited()).count() as u32;
+    (w.powers[p as usize].worlds, inhabited.div_ceil(2).max(2))
+}
+
+fn rules_enough(w: &SpaceWar, p: u16) -> bool {
+    let (held, need) = worlds_goal(w, p);
+    held >= need
 }
 
 fn who(w: &SpaceWar, p: u16) -> String {
@@ -316,10 +328,11 @@ pub fn hud_rows(w: &SpaceWar, p: u16) -> String {
     }
     if w.dominant == Some(p) {
         s.push_str("Goal\tgalactic dominance ✓\t0\n");
-    } else if w.leader == Some(p) && pw.dominance >= DOMINANCE_AT {
+    } else if w.leader == Some(p) && pw.dominance >= DOMINANCE_AT && rules_enough(w, p) {
         s.push_str(&format!("Goal\tdominance held {:.0}/{:.0} s\t0\n", w.dominance_t, DOMINANCE_HOLD));
     } else {
-        s.push_str(&format!("Goal\tdominance {:.0}/{:.0}%\t0\n", pw.dominance * 100.0, DOMINANCE_AT * 100.0));
+        let (held, need) = worlds_goal(w, p);
+        s.push_str(&format!("Goal\trule {held}/{need} worlds · {:.0}/{:.0}%\t0\n", pw.dominance * 100.0, DOMINANCE_AT * 100.0));
     }
     match w.coalition_against {
         Some(t) if t == p => s.push_str("Coalition\tagainst you!\t1\n"),

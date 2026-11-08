@@ -185,7 +185,8 @@ fn the_player_sees_its_tier_goal_and_coalition() {
     }
     quiet(&mut w, 3);
     let rows = w.hud_rows();
-    assert!(rows.contains("Fleet\t") && rows.contains("Tier\tSpacefaring") && rows.contains("Goal\tdominance"), "{rows}");
+    // Dominance asks for half the inhabited worlds (5 here: 3), not just the biggest share.
+    assert!(rows.contains("Fleet\t") && rows.contains("Tier\tSpacefaring") && rows.contains("Goal\trule 1/3 worlds"), "{rows}");
     // The player conquers two worlds and becomes the one everyone fears.
     for t in [3, 4] {
         w.powers[0].fleet = 500.0;
