@@ -96,11 +96,11 @@ The Rust/Wasm simulation loop and world rules.
 * **Calm / focus / stress:** EEG bands (and the keyboard fallback) drive the era mechanics.
 * **Pinch grab & two-hand zoom:** hand input moves living entities and the camera. In the crowded-planet sandbox a pinch picks up the nearest person and sets them down on land (#272). The Camera sidebar has a guided pinch movement calibration with the live camera and hand wireframe: left, right, up and down targets for each hand, auto-advancing and auto-closing when complete. Per-axis gains persist per browser; head tilt is not calibrated because it already works.
 * **Charged fireball (#291):** hold a fist, pull it back, then thrust forward and open the palm; or hold `3` and release. Colour follows mood: joy red, surprise blue, neutral ember. This is the one deliberate hand cast.
-* **Rain spell:** an open palm plus the Insight/focus signal held for ~2 s summons rain, putting out forest fires and the Stone campfire. Without the camera, hold `F`; the fire challenge itself is also focus-driven now, so calm no longer rekindles it.
+* **Rain spell:** hold an open palm to the camera while the Insight/focus signal stays high for ~2 s to summon rain, putting out forest fires and the Stone campfire. It is camera-only: no webcam or no visible palm means no Rain. The fire challenge itself is focus-driven too, so calm no longer rekindles it.
 * **Forest fires:** lightning aimed at a tree starts a fire that spreads to nearby trees and dies down in about half a minute; lighting the campfire never sets the forest alight.
 * **Manual mood:** joy lifts morale (in the Stone Age the tribe dances); surprise sets off a sky flash and lightning once each time the slider crosses into the surprised side (#155).
 
-**Status:** the old hand-gesture and keyboard spell set (bounty, rain, bless, disaster, peace, point) was removed in #261. The single deliberate charged fireball is the exception (#291).
+**Status:** the old hand-gesture and keyboard spell set (bounty, rain, bless, disaster, peace, point) was removed in #261. The deliberate hand casts are the charged fireball (#291) and the camera-only Rain spell (#330, #340).
 
 ---
 
@@ -147,7 +147,7 @@ Tracked in #55.
 The Rust/Wasm engine and WebGL renderer are landing under #17; the JavaScript game shell remains playable while the port reaches parity. The current build has three entry points: the five-scene campaign, the galaxy sandbox (home world plus three brain-seeded worlds), and the crowded-planet sandbox (`src/civ/`). The crowded-planet sandbox implements the canonical world model; the campaign is still the default button. Camera face mood, the manual mood slider, hand grab/pan/zoom and the charged fireball are active; gyroscope fusion and the configurable calibration seed are in. Treat the build as a reference implementation, not as the specification.
 
 * **Campaign:** Stone Age (light the fire, feed the tribe with a giant chicken, keep the flame with Insight) → Farming · Kingdoms montage (the scholars ink your thoughts letter by letter, faster the harder you focus; no arithmetic, #223) → Industry (stress moves the goat market) → a short Information Age time skip → Space Age (hold focus through a ten-second countdown).
-* **Keys (emulated headset):** **Space** calm, **F** focus / Rain spell, **Shift** stress, **B** or click to blink, hold and release **3** for the charged fireball, mouse or arrows to aim, drag to pan, **E** / **C** the EEG / Camera sidebars, **M** the model panel, **`** the Debug panel, **G** the AI God, **N** the next world. The demo's full hotkey card is in [docs/demo.md](docs/demo.md).
+* **Keys (emulated headset):** **Space** calm, **F** focus / fire hold, **Shift** stress, **B** or click to blink, hold and release **3** for the charged fireball, mouse or arrows to aim, drag to pan, **E** / **C** the EEG / Camera sidebars, **M** the model panel, **`** the Debug panel, **G** the AI God, **N** the next world. The demo's full hotkey card is in [docs/demo.md](docs/demo.md).
 
 ---
 

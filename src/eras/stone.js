@@ -10,11 +10,10 @@ import { eraTuning } from '../game/options.js'; // difficulty (#220)
 import { drawPerson, drawMammoth, drawFire, makeBolt, drawBolt, drawReticle, drawChicken, drawBoat } from '../render/sprites.js';
 import { FireballFX } from '../render/fireball.js';
 
-// Rain is a hand spell while the camera is on: an open palm plus Insight/Focus. Without the
-// camera, holding F is the fallback. `hand.at` is a performance.now() timestamp.
+// Rain is a camera spell: an open palm held to the camera plus Insight/Focus. There is no
+// keyboard fallback. `hand.at` is a performance.now() timestamp.
 export function rainHandReady(hand, now = performance.now()) {
-  if (!hand?.active) return true;
-  return !!hand.palm && now - (Number(hand.at) || 0) <= 350;
+  return !!hand?.active && !!hand.palm && now - (Number(hand.at) || 0) <= 350;
 }
 
 const POP_START = 10;
@@ -34,7 +33,7 @@ export class StoneAge {
     this.intro = {
       title: 'Stone Age',
       goal: `Grow the tribe to ${POP_TARGET} and keep the fire alive with ${FOCUS_TARGET} focus holds.`,
-      how: [['Blink', 'Throw lightning where you look. Strike the fire pit to light it, strike a giant chicken for dinner, or strike a tree to start a forest fire.'], ['Focus', 'When the flame fades, hold Insight for 5 seconds.'], ['Rain', 'A forest fire needs rain: open your palm and hold Insight for two seconds (or hold F without the camera).']],
+      how: [['Blink', 'Throw lightning where you look. Strike the fire pit to light it, strike a giant chicken for dinner, or strike a tree to start a forest fire.'], ['Focus', 'When the flame fades, hold Insight for 5 seconds.'], ['Rain', 'A forest fire needs rain: hold an open palm to the camera and hold Insight for two seconds.']],
     };
     this.powers = ['blink', 'focus'];
     this.darkness = 0.6;
@@ -208,7 +207,7 @@ export class StoneAge {
     this.G.audio?.thunder?.();
     if (!this.forest.warned) {
       this.forest.warned = true;
-      this.G.advisor.say('forest-fire', 'The forest is on fire! Hold F / Insight for two seconds to summon rain and put it out!', { mood: 'panic', priority: 3, cooldown: 999 });
+      this.G.advisor.say('forest-fire', 'The forest is on fire! Hold an open palm to the camera and Insight for two seconds to summon rain and put it out!', { mood: 'panic', priority: 3, cooldown: 999 });
     }
     return true;
   }
@@ -282,11 +281,11 @@ export class StoneAge {
     const held = this.G.source?.input?.focus ? 1 : 0;
     const level = Math.max(brain.focus ?? 0, held);
     const thr = brain.threshold ? brain.threshold('focus', 0.5) : 0.5;
-    // Camera on: rain needs a deliberate open palm + Insight. Camera off: F is the fallback.
+    // Rain is a camera spell: a held open palm is required every frame, plus Insight.
     if (!rainHandReady(this.G.handInput, performance.now())) {
-      if (level >= thr && r.progress > 0.15 && this.t - r.hintAt > 6) {
+      if (level >= thr && this.t - r.hintAt > 8) {
         r.hintAt = this.t;
-        this.G.advisor?.say('rain-palm', 'Rain is a hand spell now, my lord: open your palm and hold Insight together.', { priority: 2, cooldown: 8 });
+        this.G.advisor?.say('rain-palm', 'Rain is a camera spell, my lord: hold an open palm to the camera with Insight.', { priority: 2, cooldown: 8 });
       }
       r.progress = Math.max(0, r.progress - dt * 2);
       return;
