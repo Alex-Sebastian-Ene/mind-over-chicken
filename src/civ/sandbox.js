@@ -18,6 +18,8 @@
 import { W, H, clamp, Particles, rand, pick } from '../sim/util.js';
 import { makeBolt, drawBolt, drawReticle } from '../render/sprites.js';
 import { FireballFX } from '../render/fireball.js';
+import { joyBuff, surpriseFires, surpriseEffect, sparkleCount, JOY_COLORS } from '../camera/mood-actions.js'; // #152
+import { reducedMotion } from '../ui/motion.js';
 import { createCiv, EVENT, CAST, TONE, SETUP } from './civ.js';
 import { CivSpaceLink } from './space-link.js'; // space age (#166): fleets in the galaxy
 import { seamSpans, fadeReliefRim } from './seams.js';
@@ -219,6 +221,17 @@ export class CivSandbox {
   name(i) { return this.byId.get(i)?.name ?? 'someone'; }
   player() { return this.factions.find((f) => f.isPlayer && f.alive) || null; }
 
+  // #297: your civilisation wiped out (EVENT.WIPED on the player's faction) sends the camera home,
+  // once. It only counts after it was founded and alive: before that it isn't alive either.
+  checkPlayerWiped() {
+    if (this.playerLost) return;
+    const mine = this.factions.find((f) => f.isPlayer);
+    if (mine?.alive) { this.playerSeen = true; return; }
+    if (!mine || !this.playerSeen) return;
+    this.playerLost = true;
+    this.G.returnHome?.({ reason: 'civ-wiped' });   // the news line already names who did it
+  }
+
   // ---------- simulation ----------
   update(dt) {
     const civ = this.civ;
@@ -249,6 +262,7 @@ export class CivSandbox {
     const stress = stressOf(b, calm, anger);
     civ.setInputs(calm, focus, stress, anger);
     civ.setJoy(G.mood && G.mood.active !== false ? (G.mood.joy || 0) : (this.mood?.joy || 0));
+    this.joyStep(dt);   // #152: what that joy looks like
     if (this.speedBtn) this.speedBtn.hidden = !playing();
     // Founding (#98): the aim shows where the civilisation being placed may begin.
     if (civ.setupPhase === SETUP.place) { const p = this.aimPlanet(b.aim); civ.setupHover(p.x, p.y); }
@@ -277,6 +291,7 @@ export class CivSandbox {
     if (events.length) { this.refresh(); this.readNews(); }
     this.infoTimer -= dt;
     if (this.infoTimer <= 0) { this.infoTimer = 0.25; this.refresh(); }
+    this.checkPlayerWiped();
     this.miniTimer -= dt;
     if (this.miniTimer <= 0 && this.miniCanvas) {
       this.miniTimer = 0.5;
@@ -428,9 +443,35 @@ export class CivSandbox {
     if (spell === 'rain') say('civ-cast-rain', 'Rain! The fires go out and the fields drink.', { mood: 'happy', priority: 1, cooldown: 15 });
   }
 
+  // #152: the civ's joy (civ.setJoy above) brings festivals in the Rust world; this makes the buff
+  // visible on screen too: gold and pink sparkles rise across the view while you smile.
+  joyStep(dt) {
+    const joy = joyBuff(this.G?.mood);
+    this.joy = joy;
+    for (let n = sparkleCount(joy, dt, 18); n > 0; n--) {
+      this.particles.add({ x: rand(16, W - 16), y: rand(H * 0.25, H - 12), vx: rand(-3, 3), vy: rand(-16, -8), life: 1, maxLife: 1, size: 1, color: pick(JOY_COLORS) });
+    }
+  }
+
+  // #152: a surprise is a one-shot: a thunderclap over the world, a few bolts on screen, a capped
+  // flash and a short shake (none under reduced motion). It startles; it does not smite.
+  surpriseStrike() {
+    const G = this.G, fx = surpriseEffect(reducedMotion());
+    if (!G || !this.civ) return;
+    this.flash = Math.max(this.flash, fx.flash);
+    G.shake = Math.max(G.shake || 0, fx.shake);
+    G.audio?.thunder?.();
+    for (let i = 0; i < fx.bolts; i++) {
+      const sx = W / 2 + rand(-W * 0.3, W * 0.3), sy = H / 2 + rand(-H * 0.25, H * 0.25);
+      const p = this.toPlanet(sx, sy);
+      this.bolts.push({ x: p.x, y: p.y, pts: makeBolt(sx, sy), sx, sy, life: 0.3 + i * 0.12 });
+    }
+  }
+
   // camera (#49): face mood. G.mood carries it every frame; this keeps a copy and reacts.
   onMood(mood) {
     this.mood = mood;
+    if (surpriseFires(mood)) this.surpriseStrike();
   }
 
   // In proportion to the scroll: a mouse notch zooms about ×1.25, a trackpad glides (Alex: easier zoom).

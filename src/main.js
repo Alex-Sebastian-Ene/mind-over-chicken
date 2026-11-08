@@ -34,6 +34,7 @@ import initEngine, {
   rust_animate_agent,
 } from '../pkg/mind_over_chicken_engine.js';
 import { Cosmos } from './cosmos/cosmos.js';
+import { ReturnHome } from './cosmos/return-home.js'; // death returns the camera home (#297)
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel, setRustGalaxy } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
 import { pinchMove } from './camera/pinch-move.js'; // one-hand pinch movement (#270)
@@ -435,6 +436,7 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null } = {})
       pendingTimer = delay;
     },
     fail(reason) { showFail(reason); },
+    returnHome(opts) { returnHome(opts); },   // the civ sandbox reports its wipe-out here (#297)
     finish(extra) { G.finished = true; G.extra = extra; patchSave({ finished: true }); setTimeout(showEnd, 2200); },
     // The intro transition for the scene in play (#137), e.g. a new stage inside one scene.
     startTransition(caption) { startTransition(G.scene, caption); },
@@ -747,6 +749,29 @@ function dismissBanner() {
   if (G.scene.id === 'stone' || G.scene.id === 'industry') G.brain.setCue(G.scene.hold?.active || G.scene.ipo?.state === 'active' ? 'calm' : 'rest');
 }
 
+// ---------- death returns the camera home (#297, src/cosmos/return-home.js) ----------
+// Every death path calls returnHome({ reason, level }): a home era failing (behind the fail
+// screen), an AI world's capital tribe dying while you watch, the civ sandbox wiping you out.
+const homeward = new ReturnHome(cosmos, {
+  cause: (text) => hud.showCause(text, { ms: 2400, tone: 'bad' }),
+  say: (text) => cosmos.say(text),
+  advise: (text) => advisor.say('return-home', text, { mood: 'nervous', priority: 2, cooldown: 10 }),
+  reduced: () => reducedMotion(),
+});
+const homewardCtx = () => ({
+  screen: !$('titleScreen').hidden ? 'title' : !$('endScreen').hidden ? 'end' : null,
+  finished: !!G?.finished, intro: intro.active, navigating: !!cam3dTween, G,
+});
+function returnHome(ask) { return G ? homeward.request(ask, homewardCtx()) : null; }
+// Retry lands home: back down from the home globe onto the era's stage.
+function landHome() {
+  homeward.cancel();
+  const home = cosmos.homePlanet();
+  if (cosmos.focus && home) cosmos.focusPlanet(home, G);
+  cosmos.zoomTo(0, G);
+  if (reducedMotion()) { cosmos.z = cosmos.target; cosmos.vz = 0; }
+}
+
 let failTimer = null;
 function showFail(reason) {
   if (G) {
@@ -797,6 +822,7 @@ function showFail(reason) {
   audio.bad();
   clearTimeout(failTimer);
   failTimer = null; // No silent auto-retry (#86)
+  returnHome({ reason: 'home-fail' });   // the camera eases to the home globe behind the card (#297)
 }
 
 function updateAssistUI() {
@@ -844,6 +870,7 @@ function toggleInvincible() {
 function quitToTitle() {
   clearTimeout(failTimer);
   failTimer = null;
+  homeward.cancel();
   $('failScreen').hidden = true;
   $('banner').hidden = true;
   $('endScreen').hidden = true;
@@ -867,6 +894,7 @@ function retryEra() {
   if ($('failScreen').hidden) return;
   $('failScreen').hidden = true;
   restartScene();
+  landHome();
 }
 
 function showEnd() {
@@ -1277,6 +1305,7 @@ function frame(ts) {
     } else fade = Math.max(0, fade - dt * 1.6);
     G.shake = Math.max(0, (G.shake || 0) - dt * 2);
     cosmos.update(dt, G);
+    homeward.update(dt, homewardCtx());   // #297
     updateAimTarget();   // #294: keep the cursor and every blink target inside the visible view
     advisor.update(dt);
     G.news?.update(dt);
@@ -1920,6 +1949,7 @@ $('endModelBtn').addEventListener('click', toggleModel);
 // ---------- zoom + galaxy UI ----------
 let revealed = 0;
 cosmos.onEvent = (p, text, kind, tone) => {
+  if (kind === 'tribe-lost') { returnHome({ reason: 'ai-tribe', planet: p, world: p.name, cause: text }); return; }   // #297
   if (kind === 'born') patchSave({ galaxy: galaxySummary(cosmos.galaxy) });   // the save names the worlds born
   if (kind === 'born' && p.mindSlot) {
     revealed++;

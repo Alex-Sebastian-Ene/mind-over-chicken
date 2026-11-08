@@ -14,6 +14,8 @@ import { FireballFX } from '../render/fireball.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
 import { eraTuning } from '../game/options.js'; // difficulty (#220)
+import { joyBuff, surpriseFires, surpriseEffect, sparkleCount, JOY_COLORS } from '../camera/mood-actions.js'; // #152
+import { reducedMotion } from '../ui/motion.js';
 
 const N = 38;
 const GDP_TARGET = 620;
@@ -161,6 +163,7 @@ export class Industry {
     this.particles.update(dt);
     this.bolts = this.bolts.filter((b) => (b.life -= dt) > 0);
     this.flash = Math.max(0, this.flash - dt);
+    this.joyStep(dt);   // #152: the joy buff, every frame while you smile
     this.tick += dt;
     while (this.tick >= TICK) { this.tick -= TICK; this.marketTick(); }
     const ar = this.arousal();
@@ -680,8 +683,38 @@ export class Industry {
     this.particles.burst(60, () => ({ x: cx + rand(-60, 60), y: cy + rand(-100, 26), vx: -4, vy: rand(70, 100), life: rand(0.5, 1), maxLife: 1, size: 1, color: 'rgba(158,201,255,0.75)' }));
   }
 
-  // Face mood. Joy calms the markets, anger adds volatility and unrest, surprise brings
-  // lightning, sadness darkens the sky.
+  // #152: joy is a continuous buff while you smile: workers lose fear, business confidence
+  // climbs, the goat index steadies, and sparkles rise over the exchange.
+  joyStep(dt) {
+    const joy = this.done ? 0 : joyBuff(this.G.mood);
+    this.joy = joy;
+    if (!joy) return;
+    for (const a of this.agents) a.fear = clamp(a.fear - dt * 0.1 * joy);
+    this.confidence = clamp(this.confidence + dt * 0.03 * joy, 0.5, 1.6);
+    this.momentum *= 1 - Math.min(1, dt * 0.6 * joy);
+    const ex = this.G.world.sites.exchange;
+    for (let n = sparkleCount(joy, dt, 12); n > 0; n--) {
+      this.particles.add({ x: ex.x + rand(-24, 24), y: ex.y - rand(4, 18), vx: rand(-3, 3), vy: rand(-14, -8), life: 1, maxLife: 1, size: 1, color: pick(JOY_COLORS) });
+    }
+  }
+
+  // #152: a surprise is a one-shot: lightning hits the mill (a capped flash, a short shake, none
+  // under reduced motion), the goat market lurches and nearby workers jump.
+  surpriseStrike() {
+    const G = this.G, fx = surpriseEffect(reducedMotion()), mill = G.world.sites.factory;
+    G.audio?.thunder?.();
+    G.shake = Math.max(G.shake || 0, fx.shake);
+    this.flash = Math.max(this.flash, fx.flash);
+    for (let i = 0; i < fx.bolts; i++) this.bolts.push({ pts: makeBolt(mill.x + rand(-14, 14), mill.y - 6), life: 0.3 + i * 0.12 });
+    this.particles.burst(18, () => ({ x: mill.x + rand(-6, 6), y: mill.y - 14 - rand(0, 40), vx: 0, vy: 0, life: 0.3, maxLife: 0.3, size: 1, color: '#ffffff' }));
+    this.momentum += 0.015;
+    for (const a of this.agents) if (dist(a.x, a.y, mill.x, mill.y) < 40) a.fear = clamp(a.fear + 0.15);
+    floater(this.particles, mill.x, mill.y - 26, 'SURPRISE!', '#ffe066', 10);
+    this.headlines.push('LIGHTNING OVER THE MILL; NOBODY SAW IT COMING');
+  }
+
+  // Face mood. Joy is the continuous buff above (its onset makes a headline). Surprise fires once
+  // per event (mood.surpriseTriggered). Anger adds volatility and unrest, sadness darkens the sky.
   onMood(mood) {
     const G = this.G;
     if (!G) return;
@@ -689,21 +722,17 @@ export class Industry {
     this.darkness = clamp(this.baseDarkness + (mood.dominant === 'sadness' ? 0.3 : 0), 0, 0.9);
     if (this.done) return;
     const first = mood.reason === 'change';
+    if (surpriseFires(mood)) this.surpriseStrike();
     if (mood.dominant === 'joy') {
-      for (const a of this.agents) a.fear = clamp(a.fear - 0.12);
-      this.momentum *= 0.5;
-      this.confidence = clamp(this.confidence + 0.04, 0.5, 1.6);
-      if (first) this.headlines.push('GOD SMILES; GOAT INDEX STEADIES');
+      if (first && joyBuff(mood) > 0) {
+        const ex = G.world.sites.exchange;
+        this.headlines.push('GOD SMILES; GOAT INDEX STEADIES');
+        floater(this.particles, ex.x, ex.y - 20, 'markets steady', '#9be38a', 7);
+      }
     } else if (mood.dominant === 'anger') {
       this.momentum += gauss() * 0.012;
       for (const a of this.agents) { a.unrest = clamp(a.unrest + 0.1); a.fear = clamp(a.fear + 0.06); }
       if (first) this.headlines.push('GOD SCOWLS; TRADERS SWEAT, WORKERS GRUMBLE');
-    } else if (mood.dominant === 'surprise') {
-      const fx = G.world.sites.factory;
-      G.audio.thunder();
-      G.shake = Math.max(G.shake || 0, 1);
-      this.particles.burst(18, () => ({ x: fx.x + rand(-6, 6), y: fx.y - 14 - rand(0, 40), vx: 0, vy: 0, life: 0.3, maxLife: 0.3, size: 1, color: '#ffffff' }));
-      if (first) this.headlines.push('LIGHTNING OVER THE MILL; NOBODY SAW IT COMING');
     } else if (mood.dominant === 'sadness' && first) {
       this.headlines.push('OVERCAST SKIES; ANALYSTS BLAME THE GOD\'S MOOD');
     }

@@ -16,12 +16,18 @@ import { SimPlanet } from '../ai/planet.js';
 import { AIGod } from '../ai/autopilot.js';
 import { drawHut, drawHouse, drawTower, drawFactory, drawPad, drawPerson, drawBolt, makeBolt, drawReticle } from '../render/sprites.js';
 import { FireballFX } from '../render/fireball.js';
+import { surpriseFires, surpriseEffect } from '../camera/mood-actions.js'; // #152
+import { reducedMotion } from '../ui/motion.js';
 import { villagerLook, animate } from '../sim/agents.js';
 import { VW, VH, wrapX, wrapDx, wrapY, wrapDy, typeAt, walkableAt, settlementPlan } from './vast.js';
 import { TIERS, CONFLICT, castPlanet, tribeOutcome, easeSplit, tierName } from './planet-sim.js';
 
 const ERA_KEYS = ['stone', 'farming', 'industry', 'space'];
 const RESTART_AFTER = 3;                  // seconds the tribe dances (or lies still) before a new one gathers
+// While the player watches a dead tribe, a new one doesn't gather in front of them (#297): the
+// camera goes home after a short beat and the restart happens off-screen. This is the cap if
+// they stay (they turned the return down by moving the camera).
+const RESTART_IN_VIEW = 8;
 const DARKNESS = [0.42, 0.36, 0.3, 0.26];  // night shading by era (lights carry the settlements)
 const ROOFS = { farming: ['#8e3b2a', '#a4402f'], industry: ['#a4402f', '#8e3b2a', '#b5543a', '#6f4a3a'], space: ['#5a6b8c', '#7f8fa8', '#a4402f', '#4d5d7a'] };
 const BUILDINGS = [3, 7, 14, 24];         // buildings per settlement size (camp … city)
@@ -133,8 +139,10 @@ export class PlanetSurface {
     if (sp?.G) sp.G.handInput = this.handInput;   // Rain spell: the capital tribe needs the palm state
     if (sp) {
       if (sp.outcome) {
+        // #297: say so the moment the tribe dies, so main.js can take the camera home.
+        if (this.restartT === 0 && sp.outcome === 'lose') events.push({ kind: 'lost', text: 'the capital tribe fell', detail: sp.failReason || null });
         sp.advance(dt);   // the tribe keeps living (dancing, or not) for a moment
-        if ((this.restartT += dt) >= RESTART_AFTER) {
+        if ((this.restartT += dt) >= (inView && sp.outcome === 'lose' ? RESTART_IN_VIEW : RESTART_AFTER)) {
           events.push(...tribeOutcome(this.p, sp.outcome));
           this.lastOutcome = sp.outcome;
           sp.restart();
@@ -683,7 +691,22 @@ export class PlanetSurface {
     }
   }
 
-  onMood(mood) { this.sim?.scene?.onMood?.(mood); }
+  // #152: the capital's tribe gets the mood (its joy buff reads G.mood every frame, so the
+  // tribe dances while you smile); a surprise is this surface's own one-shot: bolts on screen, a
+  // capped flash and a caption (the tribe's copy skips it, so it doesn't strike twice).
+  onMood(mood) {
+    const sc = this.sim?.scene;
+    if (sc?.G) sc.G.mood = { ...mood, surpriseTriggered: false };
+    sc?.onMood?.({ ...mood, surpriseTriggered: false });
+    if (!surpriseFires(mood)) return;
+    const fx = surpriseEffect(reducedMotion());
+    this.ownFlash = Math.max(this.ownFlash, fx.flash);
+    for (let i = 0; i < fx.bolts; i++) {
+      const pts = makeBolt(clamp(W / 2 + rand(-W * 0.3, W * 0.3), 2, W - 3), clamp(H / 2 + rand(-H * 0.2, H * 0.2), 4, H - 3)).map((q) => ({ x: q.x + this.camX, y: q.y + this.camY }));
+      this.bolts.push({ pts, life: 0.3 + i * 0.12 });
+    }
+    floater(this.particles, this.camX + W / 2, this.camY + H / 2 - 30, 'SURPRISE!', '#ffe066', 10);
+  }
 }
 
 // Crisp text in low-res units.

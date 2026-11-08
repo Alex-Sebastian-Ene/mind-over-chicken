@@ -30,6 +30,9 @@ pub const SPAWN_EVERY: f32 = 2.0;
 pub const SETTLER_COST: f32 = 5.0;
 /// Agent food (0..1) eaten per second; a full belly lasts 50 s.
 pub const EAT_RATE: f32 = 1.0 / 50.0;
+/// Health (0..1) an agent with an empty belly loses per second: 40 s from empty to dead, so a
+/// full belly and no food last 90 s (#298; was 0.1, 10 s).
+pub const STARVE_HP_RATE: f32 = 1.0 / 40.0;
 pub const GATHER_TIME: f32 = 1.8;
 pub const CARRY_MAX: f32 = 0.6;
 /// Tile food regrowth per second, as a fraction of the tile's maximum.
@@ -253,6 +256,18 @@ pub struct Metrics {
 
 /// Seconds in a day (the sandbox's day–night cycle).
 pub const DAY_SECONDS: f32 = 80.0;
+
+/// How long people live (#298), in world seconds; ages are seconds too (`Agent::age`).
+pub mod lifespan {
+    use super::DAY_SECONDS;
+    /// Each newborn draws its lifespan from `MIN..MAX`: 3–5 days (was 75–115 s, about one).
+    pub const MIN: f32 = 3.0 * DAY_SECONDS;
+    pub const MAX: f32 = 5.0 * DAY_SECONDS;
+    /// Founders start as adults of `0..START_AGE_MAX` s (`setup`, `gym`).
+    pub const START_AGE_MAX: f32 = 20.0;
+    /// Past this share of its own lifespan an agent is old: plague hits it twice as hard.
+    pub const OLD_FRAC: f32 = 0.6;
+}
 /// Night above which agents (from the Hearth Clans on) sleep: about a quarter of each day.
 pub const SLEEP_NIGHT: f32 = 0.82;
 /// The longest single step `World::advance` takes when the speed control runs it faster.
@@ -988,7 +1003,7 @@ impl World {
                 let job = if k % 2 == 0 { Job::Forage } else { Job::Hunt };
                 if let Some(a) = self.spawn_agent(f, v, job, x, y) {
                     // The founders are adults of mixed ages.
-                    let age = self.rng.range(0.0, 20.0);
+                    let age = self.rng.range(0.0, lifespan::START_AGE_MAX);
                     self.agents[a].age = age;
                     self.agents[a].clan = (k / 2) as u8;
                 }
@@ -1271,7 +1286,7 @@ impl World {
         if self.agents.len() >= self.cap_agents {
             return None;
         }
-        let life = self.rng.range(75.0, 115.0);
+        let life = self.rng.range(lifespan::MIN, lifespan::MAX);
         let timer = self.rng.range(0.0, 0.6);
         let x = self.d.wrap_x(x);
         let y = self.d.wrap_y(y);

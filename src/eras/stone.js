@@ -9,6 +9,8 @@ import { forestFire, forestFireStep } from './forest-fire.js';
 import { eraTuning } from '../game/options.js'; // difficulty (#220)
 import { drawPerson, drawMammoth, drawFire, makeBolt, drawBolt, drawReticle, drawChicken, drawBoat } from '../render/sprites.js';
 import { FireballFX } from '../render/fireball.js';
+import { joyBuff, surpriseFires, surpriseEffect, sparkleCount, JOY_COLORS } from '../camera/mood-actions.js'; // #152
+import { reducedMotion } from '../ui/motion.js';
 
 // Rain is a camera spell: an open palm held to the camera plus Insight/Focus. There is no
 // keyboard fallback. `hand.at` is a performance.now() timestamp.
@@ -22,6 +24,10 @@ const FOCUS_TARGET = 2;
 // 3D firelight strength at the pit (was 1.8, which read as a white glare around the fire).
 const FIRE_GLOW = 0.9;
 const HOLD_SECONDS = 5;
+// The tribe's hunger clock (#298), before the difficulty's `hunger` and `starvationGrace`:
+// hunger per second (0 → 1 takes ~110 s; assist mode ~200 s), the opening grace in which nobody
+// starves, and how long someone at full hunger holds on before dying. Was 0.017 / 0.008, 75 s, 8 s.
+export const STONE_HUNGER = Object.freeze({ rate: 0.009, assistRate: 0.005, grace: 120, starve: 12 });
 const NAMES = ['Grug', 'Ugg-a', 'Thak', 'Mo', 'Brakka', 'Nub', 'Ila', 'Krog', 'Zuz', 'Hap', 'Wenna', 'Dorf', 'Yip', 'Ooma'];
 
 export class StoneAge {
@@ -301,6 +307,7 @@ export class StoneAge {
     this.particles.update(dt);
     this.bolts = this.bolts.filter((b) => (b.life -= dt) > 0);
     this.flash = Math.max(0, this.flash - dt);
+    this.joyStep(dt);   // #152: the joy buff, every frame while you smile
 
     // ---- Fire and the focus/insight challenge ----
     const f = this.fire;
@@ -400,13 +407,13 @@ export class StoneAge {
         p.hunger = 0;
         p.starve = 0;
       } else {
-        const hungerRate = (this.G.assistMode ? 0.008 : 0.017) * eraTuning(this.G).hunger;
+        const hungerRate = (this.G.assistMode ? STONE_HUNGER.assistRate : STONE_HUNGER.rate) * eraTuning(this.G).hunger;
         p.hunger = clamp(p.hunger + dt * (p.colony ? -0.01 : hungerRate));
-        // 75-second initial starvation grace period so new players have time to learn (× difficulty)
-        const inGrace = this.t < 75 * eraTuning(this.G).starvationGrace;
+        // An opening starvation grace so new players have time to learn (× difficulty)
+        const inGrace = this.t < STONE_HUNGER.grace * eraTuning(this.G).starvationGrace;
         if (p.hunger >= 1 && !inGrace) {
           p.starve += dt;
-          if (p.starve > 8) {
+          if (p.starve > STONE_HUNGER.starve) {
             this.kill(p);
             floater(this.particles, p.x, p.y - 7, `${p.name} starved`, '#c9c2b0', 6);
             G.advisor.say('starve', `${p.name} has starved. The tribe asks if you could be slightly more of a god.`, { mood: 'nervous', priority: 2, cooldown: 12 });
@@ -425,7 +432,7 @@ export class StoneAge {
     }
 
     // ---- Births ----
-    this.birthTimer += dt;
+    this.birthTimer += dt * (1 + 0.6 * (this.joy || 0));   // #152: joy brings babies sooner
     if (this.birthTimer > 2.2) {
       this.birthTimer = 0;
       const alive = this.living();
@@ -960,32 +967,62 @@ export class StoneAge {
     this.particles.burst(60, () => ({ x: cx + rand(-60, 60), y: cy + rand(-100, 26), vx: -4, vy: rand(70, 100), life: rand(0.5, 1), maxLife: 1, size: 1, color: 'rgba(158,201,255,0.75)' }));
   }
 
-  // Face mood. Joy: the tribe dances and believes. Anger: it gets restless. Surprise: the sky
-  // flashes. Sadness: the night gets darker. Sent on every change of dominant mood (including
-  // back to neutral) and again every few seconds while a mood stays strong.
+  // The tribe at home (not settlers or sailors): who the face's mood reaches.
+  homeTribe() { return this.living().filter((p) => !p.colony && p.state !== 'embark' && p.state !== 'aboard'); }
+
+  // #152: joy is a continuous buff while the face smiles (or the slider says Happy): the tribe at
+  // home dances, gains faith, loses fear and has babies sooner, and sparkles rise from the dancers.
+  // It stops the moment the smile does (src/camera/mood-actions.js joyBuff).
+  joyStep(dt) {
+    const joy = this.done ? 0 : joyBuff(this.G.mood);
+    this.joy = joy;
+    const home = this.homeTribe();
+    const dancers = [];
+    for (const p of home) {
+      const free = joy > 0 && ['idle', 'warm', 'huddle', 'dance', 'cower'].includes(p.state);
+      if (free) { p.state2 = 'dance'; p.moodDance = true; dancers.push(p); }
+      else if (p.moodDance) { p.moodDance = false; p.state2 = null; }
+      if (joy > 0) { p.faith = clamp(p.faith + dt * 0.06 * joy); p.fear = clamp(p.fear - dt * 0.1 * joy); }
+    }
+    for (let n = sparkleCount(joy, dt, 14); n > 0 && dancers.length; n--) {
+      const p = pick(dancers);
+      this.particles.add({ x: p.x + rand(-2, 2), y: p.y - 8, vx: rand(-3, 3), vy: rand(-16, -9), life: 0.9, maxLife: 0.9, size: 1, color: pick(JOY_COLORS) });
+    }
+  }
+
+  // #152: a surprise is a one-shot: lightning cracks on screen, a capped flash and a short shake
+  // (none under reduced motion), thunder, and the tribe jumps.
+  surpriseStrike() {
+    const G = this.G, fx = surpriseEffect(reducedMotion());
+    this.flash = Math.max(this.flash, fx.flash);
+    G.shake = Math.max(G.shake || 0, fx.shake);
+    const c = G.camera?.viewCenter?.() || this.fire;   // somewhere on screen
+    for (let i = 0; i < fx.bolts; i++) this.bolts.push({ pts: makeBolt(c.x + rand(-140, 140), c.y + rand(-60, 70)), life: 0.3 + i * 0.12 });
+    G.audio?.thunder?.();
+    for (const p of this.homeTribe()) p.fear = clamp(p.fear + 0.15);
+    floater(this.particles, c.x, c.y - 40, 'SURPRISE!', '#ffe066', 10);
+  }
+
+  // Face mood. Joy is the continuous buff above (its onset gets a floater and a faith boost).
+  // Surprise fires once per event (mood.surpriseTriggered), not while a face just stays surprised.
+  // Anger: the tribe gets restless. Sadness: the night gets darker. Sent on every change of
+  // dominant mood (including back to neutral), on a surprise, and every few seconds while strong.
   onMood(mood) {
     const G = this.G;
     if (!G) return;
     this.baseDarkness ??= this.darkness;
     this.darkness = clamp(this.baseDarkness + (mood.dominant === 'sadness' ? 0.25 : 0), 0, 0.9);
-    const home = this.living().filter((p) => !p.colony && p.state !== 'embark' && p.state !== 'aboard');
-    if (mood.dominant !== 'joy') for (const p of home) if (p.moodDance) { p.moodDance = false; p.state2 = null; }
     if (this.done) return;
+    if (surpriseFires(mood)) this.surpriseStrike();
+    const home = this.homeTribe();
     if (mood.dominant === 'joy') {
-      for (const p of home) {
-        p.faith = clamp(p.faith + 0.12);
-        p.fear = clamp(p.fear - 0.15);
-        if (['idle', 'warm', 'huddle', 'dance', 'cower'].includes(p.state)) { p.state2 = 'dance'; p.moodDance = true; }
+      if (mood.reason === 'change' && joyBuff(mood) > 0) {
+        for (const p of home) p.faith = clamp(p.faith + 0.12);
+        floater(this.particles, this.fire.x, this.fire.y - 18, 'the tribe dances!', '#ffe066', 7);
       }
     } else if (mood.dominant === 'anger') {
       for (const p of home) { p.fear = clamp(p.fear + 0.1); p.faith = clamp(p.faith - 0.05); }
       if (mood.reason === 'change') floater(this.particles, this.fire.x, this.fire.y - 16, 'grumbling', '#ff8a9c', 6);
-    } else if (mood.dominant === 'surprise') {
-      this.flash = Math.max(this.flash, 0.3);
-      const c = G.camera?.viewCenter?.() || this.fire;   // somewhere on screen
-      this.bolts.push({ pts: makeBolt(c.x + rand(-140, 140), c.y + rand(-60, 70)), life: 0.3 });
-      G.audio.thunder();
-      for (const p of home) p.fear = clamp(p.fear + 0.05);
     }
   }
 }

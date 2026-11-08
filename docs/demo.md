@@ -135,7 +135,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 > *To conquer the stars, you don't need faster fingers. You need to master your own mind. Thank you!"*
 
 #### Operator Actions
-- **2:55**: Press `Z` to zoom back to the home planet.
+- **2:55**: Press `Z` to zoom back to the home planet. (A death does this by itself: the camera returns to the home globe, #297.)
 - **3:00**: Close presentation. Invite judges to try the headset, or to pinch and pan the world with their hands in front of the camera.
 
 ---
