@@ -385,6 +385,9 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
   min-width: 0;
 }
 .power.is-active { opacity: 1; }
+/* #178: a tile that does nothing in this era is disabled; one the campaign hasn't reached is hidden. */
+.power[hidden] { display: none; }
+.power:disabled { opacity: 0.25; cursor: not-allowed; }
 .power[data-power="blink"] { --tint: var(--focus); }
 .power[data-power="calm"] { --tint: var(--calm); }
 .power[data-power="focus"] { --tint: var(--focus); }
@@ -556,6 +559,38 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
   padding: 12px 14px;
   box-shadow: 0 20px 60px -10px rgba(0, 0, 0, 0.9);
 }
+/* #90: reduced motion (Settings, or the system setting) stops CSS animations and transitions. */
+body[data-reduced-motion="1"] *, body[data-reduced-motion="1"] *::before, body[data-reduced-motion="1"] *::after {
+  animation-duration: 0.001ms !important; animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important; scroll-behavior: auto !important;
+}
+.set-keys { margin: 0 0 4px; font-size: 12px; line-height: 1.6; }
+/* ---------- settings panel (#186, #89): above every overlay, it can open from the title ---------- */
+.settings-panel {
+  position: fixed; z-index: 56;
+  top: 8px; right: max(8px, env(safe-area-inset-right, 0px));
+  width: min(380px, calc(100vw - 16px)); max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  background: rgba(14, 16, 30, 0.98);
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 12px 14px;
+  box-shadow: 0 20px 60px -10px rgba(0, 0, 0, 0.9);
+}
+.settings-panel header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+.settings-panel h2 { margin: 0; font: 700 20px var(--pixel); }
+.set-group { border-top: 1px solid var(--line); padding: 8px 0 4px; }
+.set-group h3 { margin: 0 0 6px; font: 600 14px var(--pixel); color: var(--muted); }
+.set-row { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 6px; font-size: 13px; cursor: pointer; }
+.set-row small { display: block; color: var(--muted); font-size: 11px; }
+.set-range { align-items: center; justify-content: space-between; }
+.set-range input[type="range"] { flex: 1; }
+.set-range input[type="number"] { width: 64px; }
+.set-note { margin: 0 0 4px; font-size: 11px; color: var(--muted); }
+.set-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.settings-panel footer { border-top: 1px solid var(--line); padding-top: 8px; }
+.cam-live { color: var(--alarm); border-color: color-mix(in srgb, var(--alarm) 55%, var(--line)); }
+/* "See the model of you" on the end screen (z 50) opens it above that overlay, not behind it (#173). */
+body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
 .model-panel header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
 .model-panel h2 { margin: 0; font: 700 20px var(--pixel); }
 .model-lede { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
@@ -586,6 +621,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
   .frame { width: 100%; }
   .advisor { position: static; margin-top: 8px; max-width: none; }
   .galaxy-panel { position: static; width: auto; max-height: none; margin-top: 8px; }
+  .coach-panel { position: static; width: auto; max-width: none; margin-top: 8px; }
   .planet-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .zbtn { width: 26px; height: 26px; }
   .zlabel { min-width: 56px; font-size: 11px; }
@@ -946,15 +982,21 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 .calib-wiz-top h2 { margin: 2px 0 4px; font: 700 24px var(--pixel); color: var(--bone); }
 .calib-wiz-top p { margin: 0; font-size: 13px; color: var(--muted); }
 .calib-wiz-actions { display: flex; gap: 8px; align-items: center; }
+/* The canvas scales down to the stage on both axes (#221): it used to keep its 500 px height on
+   short screens and cover the stats line (Head Aim) and the log. Absolutely placed so the
+   percentages resolve against the stage, and the bitmap keeps its 960:500 ratio. */
 .calib-wiz-stage {
-  display: grid;
-  place-items: center;
+  position: relative;
   min-height: 0;
 }
 .calib-wiz-canvas {
-  width: min(960px, 100%);
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: auto;
+  height: auto;
+  max-width: min(960px, 100%);
   max-height: 100%;
-  aspect-ratio: 960 / 500;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -984,13 +1026,14 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
   white-space: pre-wrap;
 }
 
-/* Coach Panel (#123) */
+/* Coach Panel (#123, #204) */
 body[data-era="title"] .coach-panel { display: none !important; }
 .coach-panel {
   position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 8px;
+  right: max(12px, calc((100cqw - min(100cqw, calc(100cqh * 16 / 9))) / 2 + 12px));
+  bottom: max(8px, calc((100cqh - min(100cqh, calc(100cqw * 9 / 16))) / 2 + 14px));
+  left: auto;
+  max-width: min(500px, 46cqw);
   z-index: 25;
   background: rgba(14, 17, 34, 0.94);
   border: 1px solid var(--line);
@@ -1001,25 +1044,28 @@ body[data-era="title"] .coach-panel { display: none !important; }
   backdrop-filter: blur(8px);
   transition: all 0.2s ease;
 }
+.coach-panel.is-collapsed {
+  max-width: fit-content;
+}
 .coach-panel.is-collapsed .coach-body { display: none; }
 .coach-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 6px 10px;
+  gap: 10px;
+  padding: 5px 8px;
   border-bottom: 1px solid rgba(44, 49, 82, 0.6);
 }
 .coach-panel.is-collapsed .coach-bar { border-bottom: none; }
 .coach-toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   background: transparent;
   border: none;
   color: var(--bone);
-  font: 700 13px var(--pixel);
+  font: 700 12px var(--pixel);
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 2px 4px;
 }
 .coach-dot {
   width: 8px;
@@ -1035,28 +1081,31 @@ body[data-era="title"] .coach-panel { display: none !important; }
   font-weight: normal;
 }
 .coach-feedback {
-  font: 600 12px var(--pixel);
+  font: 600 11px var(--pixel);
   color: var(--focus);
-  padding: 0 8px;
+  padding: 0 6px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
 }
 .coach-feedback[data-tone="ok"] { color: var(--good); }
 .coach-feedback[data-tone="bad"] { color: var(--heart); }
 .coach-body {
-  padding: 8px 12px 10px;
+  padding: 6px 10px 8px;
 }
 .coach-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 200px));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   justify-content: start;
-  gap: 8px;
+  gap: 6px;
 }
 .coach-card {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
-  padding: 7px 8px 8px;
+  padding: 6px 7px 7px;
   border: 1px solid var(--line);
   border-radius: 5px;
   background: rgba(11, 12, 22, 0.55);
@@ -1069,19 +1118,19 @@ body[data-era="title"] .coach-panel { display: none !important; }
 .coach-card-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
-.coach-card-glyph { font-size: 14px; line-height: 1; }
+.coach-card-glyph { font-size: 13px; line-height: 1; }
 .coach-card-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font: 600 12px var(--body);
+  font: 600 11px var(--body);
   color: var(--bone);
 }
-.coach-card-head kbd { margin-left: auto; flex: none; }
+.coach-card-head kbd { margin-left: auto; flex: none; font-size: 10px; padding: 1px 4px; }
 .coach-canvas {
   display: block;
   width: 100%;
@@ -1093,7 +1142,7 @@ body[data-era="title"] .coach-panel { display: none !important; }
 }
 .coach-meter {
   flex: none;
-  width: 120px;
+  width: 80px;
   height: 4px;
   background: rgba(255, 255, 255, 0.1);
   border-radius: 2px;
@@ -1108,9 +1157,18 @@ body[data-era="title"] .coach-panel { display: none !important; }
 }
 .coach-instr {
   margin: 0;
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: 10px;
+  line-height: 1.3;
   color: var(--muted);
+}
+
+@container (max-width: 840px) {
+  .coach-panel {
+    /* Offset above bottom when container is narrow so advisor below remains completely visible (#204) */
+    bottom: max(84px, calc((100cqh - min(100cqh, calc(100cqw * 9 / 16))) / 2 + 90px));
+    right: max(12px, calc((100cqw - min(100cqw, calc(100cqh * 16 / 9))) / 2 + 12px));
+    max-width: min(420px, calc(100cqw - 24px));
+  }
 }
 
 /* ---------- loading screen (src/ui/loading.js) ---------- */
@@ -1132,6 +1190,15 @@ body[data-era="title"] .coach-panel { display: none !important; }
 .ls-step.is-run::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--focus); animation: ls-blink 0.9s steps(2) infinite; }
 .ls-hint { margin: 0; min-height: 1.2em; font-size: 12px; color: var(--muted); text-align: center; }
 @keyframes ls-blink { to { opacity: 0.2; } }
+/* #177: what a camera action just did, top centre of the map. */
+.cause-toast {
+  position: absolute; left: 50%; top: 8px; z-index: 22; transform: translateX(-50%);
+  max-width: min(80%, 520px); margin: 0; padding: 4px 12px;
+  background: rgba(14, 16, 30, 0.9); border: 1px solid var(--line); border-radius: 12px;
+  font: 13px var(--pixel); color: var(--bone); text-align: center; pointer-events: none;
+}
+.cause-toast[data-tone="wait"] { color: var(--focus); }
+.cause-toast[hidden] { display: none; }
 .loading-pill {
   position: absolute; right: 8px; bottom: 8px; z-index: 30;
   max-width: 70%; padding: 4px 10px;

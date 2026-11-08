@@ -406,12 +406,12 @@ impl Engine {
         let shadow_variant = if y < 15.0 {
             match sprite_id {
                 sprites::SPRITE_VILLAGER | sprites::SPRITE_CHICKEN | sprites::SPRITE_GOAT => Some(0),
+                sprites::SPRITE_TREE => Some(3), // Dedicated small tree shadow (#200)
                 sprites::SPRITE_MAMMOTH
                 | sprites::SPRITE_HUT
                 | sprites::SPRITE_HOUSE
                 | sprites::SPRITE_TOWER
-                | sprites::SPRITE_ROCKET
-                | sprites::SPRITE_TREE => Some(1),
+                | sprites::SPRITE_ROCKET => Some(1),
                 sprites::SPRITE_FACTORY
                 | sprites::SPRITE_EXCHANGE
                 | sprites::SPRITE_HANGAR
@@ -426,24 +426,26 @@ impl Engine {
             let s_entry = sprites::get_sprite_atlas_entry(sprites::SPRITE_SHADOW, 1, 0, sv);
             let shw = s_entry.world_w * 0.5;
             let shd = s_entry.world_h * 0.5;
+            // Jitter elevation slightly (0.015..0.025) across world coordinates to prevent Z-fighting between overlapping shadows (#200)
+            let shadow_bias = 0.015 + ((wx * 17.3 + wz * 31.7).sin().abs() * 0.01);
             let s_tl = BillboardVertex {
                 center: ground_center,
-                offset: [-shw, 0.02, -shd],
+                offset: [-shw, shadow_bias, -shd],
                 uv: [s_entry.u0, s_entry.v0],
             };
             let s_bl = BillboardVertex {
                 center: ground_center,
-                offset: [-shw, 0.02, shd],
+                offset: [-shw, shadow_bias, shd],
                 uv: [s_entry.u0, s_entry.v1],
             };
             let s_tr = BillboardVertex {
                 center: ground_center,
-                offset: [shw, 0.02, -shd],
+                offset: [shw, shadow_bias, -shd],
                 uv: [s_entry.u1, s_entry.v0],
             };
             let s_br = BillboardVertex {
                 center: ground_center,
-                offset: [shw, 0.02, shd],
+                offset: [shw, shadow_bias, shd],
                 uv: [s_entry.u1, s_entry.v1],
             };
             self.billboards_3d
@@ -1110,7 +1112,26 @@ impl Engine {
         self.advisor.update(dt);
         self.hud.update_clock(self.game.stats.runtime);
         self.hud.update_meters(calm, None, focus, None, stress, blinks);
-        self.hud.update_objectives(&self.game.era.objectives());
+        self.hud.update_objectives(&self.game.objectives());
+    }
+
+    /// Mirror the JS scene on screen into the HUD (#191): its objectives (`flags` bit 1 done,
+    /// 2 bad, 4 plain) and run time. The Rust era sim then stands still and raises nothing of its
+    /// own; see GameFlow::mirrored. Called by src/main.js every frame, before game_tick.
+    pub fn game_mirror(
+        &mut self,
+        run_time: f32,
+        labels: Vec<String>,
+        values: Vec<String>,
+        flags: Vec<u8>,
+    ) {
+        self.game
+            .mirror(run_time, eras::objectives_from_rows(labels, values, &flags));
+    }
+
+    /// Back to the Rust era sim driving the HUD (the all-Rust app never mirrors).
+    pub fn game_unmirror(&mut self) {
+        self.game.unmirror();
     }
 
     pub fn game_on_blink(&mut self, aim_x: f32, aim_y: f32) {
@@ -1197,7 +1218,7 @@ impl Engine {
     }
 
     pub fn is_game_failed(&self) -> Option<String> {
-        self.game.era.is_failed()
+        self.game.era_failed()
     }
 
     pub fn get_game_runtime(&self) -> f32 {
@@ -1232,43 +1253,12 @@ impl Engine {
         self.game.era.darkness()
     }
 
-    /// Computes the dynamic diurnal sun direction vector and night darkness factor
-    /// from elapsed time (in seconds) and baseline era darkness.
-    /// Returns [sun_x, sun_y, sun_z, total_night].
-    pub fn compute_day_night(&self, time: f32, era_darkness: f32) -> Vec<f32> {
-        let (sun, total_night) = Self::day_night_state(time, era_darkness);
-        vec![sun.x, sun.y, sun.z, total_night]
-    }
-
     pub fn is_game_era_complete(&self) -> bool {
-        self.game.era.is_complete()
+        self.game.era_complete()
     }
 
     pub fn is_game_era_failed(&self) -> Option<String> {
-        self.game.era.is_failed()
-    }
-}
-
-// Rust-internal Engine helpers not exported across WASM
-impl Engine {
-    /// Computes the dynamic diurnal sun direction vector and night darkness factor
-    /// from elapsed time (in seconds) and baseline era darkness.
-    /// Returns (Vec3, total_night).
-    pub fn day_night_state(time: f32, era_darkness: f32) -> (Vec3, f32) {
-        // Initial offset 1.05 rad places world in bright morning at T=0
-        let phase = 1.05 + time * 0.0785; // ~80 second diurnal cycle
-        let sun_x = phase.cos();
-        let sun_y = phase.sin();
-        let sun_z = (phase * 0.7).cos() * 0.35;
-
-        // Twilight transitions as sun approaches and crosses the horizon
-        // sun_y >= 0.15: day (diurnal = 0.0)
-        // -0.15 < sun_y < 0.15: sunset / sunrise twilight transition
-        // sun_y <= -0.15: night (diurnal = 1.0)
-        let diurnal_night = ((0.15 - sun_y) / 0.30).clamp(0.0, 1.0);
-        let total_night = era_darkness.max(diurnal_night).clamp(0.0, 1.0);
-
-        (Vec3::new(sun_x, sun_y, sun_z), total_night)
+        self.game.era_failed()
     }
 }
 
@@ -1291,17 +1281,6 @@ pub fn rust_animate_agent(clock: f32, dt: f32, rate: f32) -> js_sys::Float32Arra
     let frame = new_clock.floor();
     arr.set_index(0, new_clock);
     arr.set_index(1, frame);
-    arr
-}
-
-#[wasm_bindgen]
-pub fn rust_compute_day_night(time: f32, era_darkness: f32) -> js_sys::Float32Array {
-    let (sun, total_night) = Engine::day_night_state(time, era_darkness);
-    let arr = js_sys::Float32Array::new_with_length(4);
-    arr.set_index(0, sun.x);
-    arr.set_index(1, sun.y);
-    arr.set_index(2, sun.z);
-    arr.set_index(3, total_night);
     arr
 }
 
@@ -1564,7 +1543,9 @@ pub fn walk_field(types: &[u8], width: u32, height: u32, tx: i32, ty: i32, sea: 
     f
 }
 
-/// Standalone WebAssembly Cast Controller for camera god powers (#33, #108)
+/// Standalone WebAssembly Cast Controller for camera god powers (#33, #108). The browser's
+/// src/camera/casts.js runs this: the three core moves, with the fist-to-open fireball (#150, #159).
+/// `update` returns [held, progress, cast, aiming, armed].
 #[wasm_bindgen]
 pub struct RustCastController {
     inner: camera::casts::CastController,
@@ -1594,6 +1575,7 @@ impl RustCastController {
         arr.push(&JsValue::from_f64(u.progress));
         arr.push(&JsValue::from(u.cast.map(|s| s.as_str())));
         arr.push(&JsValue::from_bool(u.aiming));
+        arr.push(&JsValue::from(u.armed.map(|s| s.as_str())));
         arr
     }
 
@@ -2103,27 +2085,5 @@ mod walk_field_tests {
         // Over water the seam wraps north-south too.
         let s = walk_field(&types, w as u32, h as u32, 0, 0, true);
         assert_eq!(s[5 * w], 1);
-    }
-
-    #[test]
-    fn test_day_night_cycle_progression() {
-        // At T=0 (morning): sun is high, night is 0.0
-        let (sun_morning, night_morning) = Engine::day_night_state(0.0, 0.0);
-        assert!(sun_morning.y > 0.8, "Morning sun should be high in sky");
-        assert_eq!(night_morning, 0.0, "Daytime should have zero night darkness");
-
-        // After ~25s: sunset / twilight, sun descends towards horizon
-        let (sun_sunset, night_sunset) = Engine::day_night_state(25.0, 0.0);
-        assert!(sun_sunset.y < 0.2, "Sunset sun drops towards horizon");
-        assert!(night_sunset > 0.0 && night_sunset < 1.0, "Twilight transitions smoothly");
-
-        // After ~45s: night, sun is below horizon
-        let (sun_night, night_night) = Engine::day_night_state(45.0, 0.0);
-        assert!(sun_night.y < -0.15, "Sun is below horizon at night");
-        assert_eq!(night_night, 1.0, "Night reaches full darkness");
-
-        // Baseline era darkness is preserved if higher than diurnal darkness
-        let (_, night_with_era) = Engine::day_night_state(0.0, 0.85);
-        assert_eq!(night_with_era, 0.85, "Era darkness is respected during daytime");
     }
 }

@@ -45,6 +45,29 @@ pub enum EraEvent {
     StatAddRecession,
 }
 
+/// Objectives handed over from a JS scene (#191), one row each: `flags` bit 1 done, 2 bad, 4 plain.
+pub fn objectives_from_rows(
+    labels: Vec<String>,
+    values: Vec<String>,
+    flags: &[u8],
+) -> Vec<Objective> {
+    labels
+        .into_iter()
+        .zip(values)
+        .enumerate()
+        .map(|(i, (label, value))| {
+            let f = flags.get(i).copied().unwrap_or(0);
+            Objective {
+                label,
+                value,
+                done: f & 1 != 0,
+                bad: f & 2 != 0,
+                plain: f & 4 != 0,
+            }
+        })
+        .collect()
+}
+
 /// What the eras read from the player each tick. `stress` is the JS brain's `brain.stress`:
 /// EEG agitation or face anger, 0..1, about 0.15 at rest (src/brain/brain.js).
 #[derive(Clone, Copy, Debug, Default)]

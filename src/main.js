@@ -4,7 +4,7 @@ import { W, H, HOME_W, HOME_H, clamp, lerp, wrapDelta } from './sim/util.js';
 
 const smoothstep = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
 import { World, setRustWorldGen } from './world/terrain.js';
-import { SimSource, BridgeSource, setRustSimSource } from './brain/sources.js';
+import { SimSource, BridgeSource, liveBridge, setRustSimSource } from './brain/sources.js';
 import { Brain, setRustBrain } from './brain/brain.js';
 import { Advisor, setRustAdvisorEngine } from './ui/advisor.js';
 import { EraIntro } from './ui/intro.js'; // era intro transition (no click-to-dismiss card)
@@ -23,7 +23,6 @@ import initEngine, {
   PointerGesture,
   ViewCamera, // the 320×180 window onto the bigger home world (#129)
   RustWorldGen,
-  RustCastController,
   RustFingerController,
   RustEmotionTracker,
   RustGalaxy,
@@ -37,14 +36,16 @@ import initEngine, {
 import { Cosmos } from './cosmos/cosmos.js';
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel, setRustGalaxy } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
+import { pinchMove } from './camera/pinch-move.js'; // one-hand pinch movement (#270)
 import { initCameraAdapter } from './camera/adapter.js';
-import { setRustCastController } from './camera/casts.js';
 import { setRustFingerController } from './camera/fingers.js';
 import { setRustEmotionTracker } from './camera/emotion.js';
 import { setRustAiPolicy } from './ai/policy.js';
 import { setRustAgentHelpers } from './sim/agents.js';
 import { initDebug } from './camera/debug.js'; // camera debug (#67)
-import { Calibration, readCalibrationConfig, setRustCalibration } from './brain/calibration.js'; // calibration (#54)
+import { Calibration, readCalibrationConfig, saveCalibrationConfig, CALIBRATION_DEFAULTS, setRustCalibration } from './brain/calibration.js';
+import { initSettings, syncCameraIndicator } from './ui/settings.js';
+import { reducedMotion, flashAlpha, shakeAmount as shakeFor } from './ui/motion.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
 import { CivSandbox, initPlanetSizePicker } from './civ/sandbox.js'; // civ (#50)
 import { worldMeta, renderWorldDetail } from './cosmos/panel.js'; // planets (#68)
@@ -52,7 +53,12 @@ import { SimPlanet } from './ai/planet.js';
 import { AIGod } from './ai/autopilot.js';
 import { observe, decodeAction, scriptedAction, BOLT_COOLDOWN } from './ai/observe.js';
 import { loading } from './ui/loading.js'; // loading screen
+import { panelHotkey } from './ui/hotkeys.js'; // E / C / Shift+C sidebars (#211)
+import { engineFailToShow } from './ui/fail.js';
 import { frameLoop } from './ui/loop.js';
+import { dayNight } from './render/daynight.js';
+import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
+import { mirrorHud } from './ui/hud-mirror.js';
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
 // mind read uses the same window.
@@ -86,6 +92,11 @@ function groundAt(e) {
 }
 function grabPan3d(e) {
   if (!grab3d) return false;
+  return keepGroundUnder(e, grab3d);
+}
+// Move the camera so the ground point `anchor` sits under the pointer again: a drag (grab-pan)
+// and a zoom toward the cursor both use it. Returns false where the scene has its own camera.
+function keepGroundUnder(e, anchor) {
   const scene = cosmos?.viewScene?.(G) || G?.scene;
   if (scene instanceof CivSandbox || scene?.civ || (scene && typeof scene.centerColumn === 'function')) {
     return false;
@@ -96,7 +107,7 @@ function grabPan3d(e) {
     if (worldScene(cosmos.viewScene(G)) && cosmos.view) {
       // The home world (#129): a wrap-aware difference on both axes (a torus, #111), then move
       // the one camera (2D window and 3D target) by it.
-      const dx = wrapDelta(grab3d.x, g.x, cosmos.worldW), dz = wrapDelta(grab3d.z, g.z, cosmos.worldH);
+      const dx = wrapDelta(anchor.x, g.x, cosmos.worldW), dz = wrapDelta(anchor.z, g.z, cosmos.worldH);
       if (Math.abs(dx) < 0.05 && Math.abs(dz) < 0.05) break;
       cosmos.pan(-dx, -dz);
       // Apply now, not at the next frame: a fast mouse sends several moves per frame, and each
@@ -105,8 +116,8 @@ function grabPan3d(e) {
       continue;
     }
     // Other worlds' 320×180 relief (#192): pan east–west, move the target north–south.
-    let dx = grab3d.x - g.x; dx = ((dx + W * 1.5) % W) - W / 2;
-    const dz = grab3d.z - g.z;
+    let dx = anchor.x - g.x; dx = ((dx + W * 1.5) % W) - W / 2;
+    const dz = anchor.z - g.z;
     if (Math.abs(dx) < 0.05 && Math.abs(dz) < 0.05) break;
     if (dx) cosmos.pan(-dx);
     engine.set_camera_target(engine.get_camera_target_x(), clamp(engine.get_camera_target_z() + dz, 0, H - 1));
@@ -129,7 +140,6 @@ try {
   loading.start('engine', 'Starting the game engine', { blocking: true }); // loading screen
   await initEngine();
   setRustWorldGen(RustWorldGen);
-  setRustCastController(RustCastController);
   setRustFingerController(RustFingerController);
   setRustEmotionTracker(RustEmotionTracker);
   setRustGalaxy(RustGalaxy);
@@ -227,7 +237,8 @@ cosmos.setViewCamera(viewCam);
 // A scene with its own camera (the civ sandbox's planet) takes every pan: drag, keys, wheel.
 cosmos.panSink = (dx, dy) => { if (G?.scene?.panBy) { G.scene.panBy(dx, dy); return true; } return false; };
 // What the HUD shows while you look at the galaxy.
-const galaxyHudScene = { label: 'Galaxy', powers: ['calm', 'focus', 'stress'], objectives: () => cosmos.galaxy?.objectives() || [] };
+// Blinks raise storms on the galaxy's blink world, so Lightning is a power there too (#178).
+const galaxyHudScene = { label: 'Galaxy', powers: ['blink', 'calm', 'focus', 'stress'], objectives: () => cosmos.galaxy?.objectives() || [] };
 let hudScene = null;
 let G = null;
 let previewSource = null;
@@ -255,7 +266,13 @@ try {
   getBrain: () => G?.brain || previewBrain,
   onConnectBridge: async (url) => {
     const src = new BridgeSource(url);
-    await src.connect();
+    try {
+      await src.connect();
+      await src.waitForFrame();   // swap only to a headset that is sending EEG (#174)
+    } catch (err) {
+      src.disconnect();           // no reconnect loop behind a failed attempt
+      throw err;
+    }
     setGameSource(src);
   },
   onDisconnectBridge: () => {
@@ -286,6 +303,7 @@ function resetAIGod() {
   const btn = $('aiGodBtn');
   if (btn) {
     btn.textContent = 'AI God: OFF';
+    btn.title = 'Toggle AI God autopilot (G)';
     btn.setAttribute('aria-pressed', 'false');
   }
 }
@@ -295,11 +313,24 @@ function toggleAIGod() {
     resetAIGod();
     advisor.say('ai-off', 'AI god disengaged. You have full command.', { mood: 'happy', priority: 2, cooldown: 1 });
   } else {
-    aiGod = new AIGod();
+    // The trained (PPO) policy loads in the background; if it can't, the player is told that a
+    // scripted god is steering, on the button and by the advisor (#181).
+    const god = new AIGod({
+      onStatus: (mode, err) => {
+        if (aiGod !== god) return;   // toggled off meanwhile
+        const b = $('aiGodBtn');
+        if (b) {
+          b.textContent = mode === 'ppo' ? 'AI God: ON' : 'AI God: ON (scripted)';
+          b.title = mode === 'ppo' ? 'AI God: the trained PPO policy is steering (G)' : `AI God: the trained policy did not load (${err?.message || err}), a scripted god is steering (G)`;
+        }
+        if (mode === 'scripted') advisor.say('ai-scripted', 'The trained AI god would not load, my lord. A simple scripted god is steering instead.', { mood: 'panic', priority: 3, cooldown: 1 });
+      },
+    });
+    aiGod = god;
     aiGodTimer = 0;
     const btn = $('aiGodBtn');
     if (btn) {
-      btn.textContent = 'AI God: ON';
+      btn.textContent = god.mode === 'scripted' ? 'AI God: ON (scripted)' : 'AI God: ON';
       btn.setAttribute('aria-pressed', 'true');
     }
     advisor.say('ai-on', 'AI god engaged! The PPO autopilot is steering this world. Stay calm to help it.', { mood: 'nervous', priority: 2, cooldown: 1 });
@@ -392,12 +423,23 @@ function newGame(source, startIndex = 0) {
     return { x: p.x / cosmos.worldW, y: p.y / cosmos.worldH };
   };
   brain.onBlink((aim) => {
+    // Blink is a left click for game mechanics only (#284). Never touch DOM/UI, and do nothing
+    // while an overlay or calibration is open.
+    const gameVisible = !!G && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden
+      && !banner && !intro.active && !eegPanel?.wiz?.active
+      && document.getElementById('moveCalibModal')?.hidden !== false;
+    if (!gameVisible) return;
     hud.flashBlink();
+    if (cosmos.z > 0.5) {
+      // Galaxy/globe: the reticle IS the pointer here. Select/land exactly like a left click.
+      if (cosmos.clickAt?.(aim.x * W, aim.y * H, G)) audio.blip();
+      return;
+    }
     if (engine) engine.game_on_blink(aim.x * cosmos.worldW, aim.y * cosmos.worldH);
     cosmos.galaxy?.onBlink();   // storms on the blink world; a strike on the world you're zoomed into
     if (cosmos.galaxy?.attended) audio.thunder();
     const view = cosmos.viewScene(G); // planets (#68): another world's surface when you're on it
-    if (!banner && !intro.active && view?.onBlink) view.onBlink(aim);
+    if (view?.onBlink) view.onBlink(aim);
   });
   // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
   G.camera = cosmos;          // the eras ask it where the screen is (#129)
@@ -415,8 +457,7 @@ function newGame(source, startIndex = 0) {
     // Around the 3D map: this world's deep sea, so the edges read as open ocean.
     const deep = G.world.palette?.[0]?.[0];
     if (deep && engine.set_backdrop) engine.set_backdrop(deep[0], deep[1], deep[2]);
-    engine.set_era(startIndex);
-    engine.game_start_era(Math.min(2, Math.floor(startIndex / 2)));
+    engine.set_era(startIndex);   // startScene() starts the scene's Rust era sim, if it has one (#194)
   }
   startScene(startIndex);
   try { window.claude?.hot?.snapshot?.(() => ({ sceneIndex: G?.sceneIndex ?? 0, kind: G?.source?.kind })); } catch {}
@@ -435,7 +476,8 @@ function startScene(i) {
   G.scene = scene;
   if (engine) {
     engine.set_era(i);
-    engine.game_start_era(Math.min(2, Math.floor(i / 2)));
+    // Only the playable eras have a Rust sim; a time skip must not restart the last one (#194).
+    if (rustEraOf(scene) !== null) engine.game_start_era(rustEraOf(scene));
   }
   advisor.setEra(scene.era);
   scene.enter(G);
@@ -443,6 +485,7 @@ function startScene(i) {
   hud.setScene(scene);
   document.body.dataset.era = scene.era;
   fade = 1;
+  G.failing = false;
   banner = null;
   $('banner').hidden = true;
   if (scene.intro) startIntro(scene, i);
@@ -464,13 +507,17 @@ function restartScene() {
   G.scene = scene;
   if (engine) {
     engine.set_era(i);
-    engine.game_restart_era();
+    if (rustEraOf(scene) !== null) engine.game_restart_era();
   }
   advisor.setEra(scene.era);
   scene.enter(G);
   lookAtStage(scene);
   hud.setScene(scene);
   fade = 1;
+  // A fresh attempt: no fail pending, and no controls card left over from the fail screen (#172).
+  G.failing = false;
+  banner = null;
+  $('banner').hidden = true;
   if (scene.intro) startIntro(scene, i);
 }
 
@@ -493,7 +540,7 @@ function startTransition(scene, caption = {}) {
   document.body.dataset.intro = 'on';
   G.brain.setCue(null);
   introCam = null;
-  if (engine && engine.is_3d_mode()) {
+  if (engine && engine.is_3d_mode() && !reducedMotion()) {   // no camera sweep under reduced motion (#90)
     // Land on the player's own angle, or the default diorama pose if they were looking straight down.
     const d = engine.get_camera_distance(), pitch = engine.get_camera_pitch();
     const to = d >= CAM3D.blendFrom ? { dist: 300, pitch: 1.05 } : { dist: d, pitch };
@@ -591,6 +638,10 @@ function dismissBanner() {
 
 let failTimer = null;
 function showFail(reason) {
+  if (G) {
+    if (G.failing) return;   // one fail per run: the JS scene and the Rust era sim can both report it (#172)
+    G.failing = true;
+  }
   let heading = 'Collapse';
   let cause = 'The era has collapsed.';
   let nextStep = 'Try again with focused calm and steady aim.';
@@ -628,6 +679,8 @@ function showFail(reason) {
   $('failAdvice').textContent = nextStep;
   $('failScreen').hidden = false;
   $('biometricFeedbackAck').hidden = true;
+  const how = $('showHowBtn');
+  if (how) how.hidden = !G?.scene?.intro;   // no controls card to show for a scene without one (#172)
   updateAssistUI();
 
   audio.bad();
@@ -660,7 +713,7 @@ function quitToTitle() {
   intro.cancel(); introCam = null; delete document.body.dataset.intro;
   pendingScene = null;
   resetAIGod();
-  const keep = G?.source?.kind === 'bridge' && G.source.connected ? G.source : null;
+  const keep = liveBridge(G?.source);
   if (G?.source && G.source !== keep) G.source.disconnect();
   G = null;
   hudScene = null;
@@ -683,6 +736,7 @@ function showEnd() {
   const t = Math.floor(G.runTime);
   const rows = [
     ['Run time', `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`],
+    ['Headset', G.source?.kind === 'bridge' ? `Muse via the bridge (${G.source.connected ? 'connected' : 'disconnected'})` : 'Emulated headset (keyboard)'],
     ['Era restarts', s.restarts],
     ['Lightning bolts', s.lightning],
     ['Villagers who found religion', s.smitten],
@@ -816,7 +870,7 @@ function render() {
   scene.draw(ctx);
   scene.drawAfterLight?.(ctx);
   if (windowed && !G.render3d) {
-    const zoom = intro.active ? 1 + (INTRO_FROM.zoom2d - 1) * intro.away() : 1;
+    const zoom = intro.active && !reducedMotion() ? 1 + (INTRO_FROM.zoom2d - 1) * intro.away() : 1;   // #90
     if (zoom > 1.001) cosmos.blitViewScaled(worldCanvas, low, zoom);   // the intro's wider frame
     else cosmos.blitView(worldCanvas, low);
   }
@@ -837,27 +891,15 @@ function render() {
   const surface = !cosmic || z < 1.0;
   const k = cosmic ? Math.max(0, 1 - z / 0.3) : 1;
   const dark = scene.phase === 'voyage' ? 0 : (scene.darkness || 0) * k;
-  const flash = (scene.flash || 0) * k;
-  const shakeAmount = G.shake ? (G.shake * 0.008) : 0;
+  // #90: flashes are capped for photosensitivity (softer still, and no shake, under reduced motion).
+  const rm = reducedMotion();
+  const flash = flashAlpha((scene.flash || 0) * k, rm);
+  const shakeAmount = shakeFor(G.shake, rm);
   const sx = shakeAmount ? (Math.random() - 0.5) * shakeAmount : 0;
   const sy = shakeAmount ? (Math.random() - 0.5) * shakeAmount : 0;
   // World-space lights and labels repeat at every copy of the world that reaches the screen, so
   // they follow the camera and wrap with the map. In 3D, labels are projected instead.
   const offsets = windowed && !G.render3d ? cosmos.overlayOffsets() : [[0, 0]];
-
-  // Dynamic diurnal day/night cycle (#201)
-  let sunX = 1.0, sunY = 0.85, sunZ = 0.0, totalNight = dark;
-  if (engine && typeof engine.compute_day_night === 'function') {
-    const dn = engine.compute_day_night(G.runTime || 0, dark);
-    sunX = dn[0]; sunY = dn[1]; sunZ = dn[2]; totalNight = dn[3] * k;
-  } else {
-    const phase = 1.05 + (G.runTime || 0) * 0.0785;
-    sunX = Math.cos(phase);
-    sunY = Math.sin(phase);
-    sunZ = Math.cos(phase * 0.7) * 0.35;
-    const diurnal = Math.max(0, Math.min(1, (0.15 - sunY) / 0.30));
-    totalNight = Math.max(dark, diurnal * k);
-  }
 
   if (engine) {
     try {
@@ -881,7 +923,11 @@ function render() {
             engine.add_3d_light(l.x, 10.0, l.y, l.r, 1.2);
           }
         }
-        engine.render_3d(0.016, sunX, sunY, sunZ, totalNight, flash, fade, sx, sy, screen.width, screen.height);
+        // Day and night (#201): the sun rises and sets; after dusk the moonlit night shading takes
+        // over. An era's own darkness (dark) still wins. Off the surface the night must not dim space.
+        const dn = dayNight(G.runTime || 0, dark);
+        const night3d = z > 0.001 || scene.phase === 'voyage' ? dark : dn.night;
+        engine.render_3d(0.016, dn.sun.x, dn.sun.y, dn.sun.z, night3d, flash, fade, sx, sy, screen.width, screen.height);
 
         // Continuous overlay blend between 3D planet view and 3D map view
         if (z > 0.001) {
@@ -895,7 +941,7 @@ function render() {
         engine.begin_frame();
         engine.upload_canvas(low);
         if (surface && scene.lights) addLights2d(scene, offsets);
-        engine.render_uploaded_canvas(surface ? totalNight : 0, flash, fade, sx, sy, screen.width, screen.height);
+        engine.render_uploaded_canvas(dark, flash, fade, sx, sy, screen.width, screen.height);
       }
     } catch (e) {
       console.error('WebGL render error:', e);
@@ -960,18 +1006,22 @@ function frame(ts) {
   lastTs = ts;
   if (G) {
     G.brain.update(dt, G.mood);   // the camera's face anger counts toward brain.stress
-    if (engine) {
+    signalNotices();
+    // The Rust shell draws the WebGL HUD (objectives, clock, meters, advisor text) in game_tick.
+    // It shows the JS scene on screen (#191): mirrorHud hands over its objectives and clock, and
+    // the Rust era sim stands still, so it runs every frame, time skips and intros included.
+    // Without the mirror (an old pkg/), the Rust era sim ticks only in a playable era (#194).
+    const mirrored = engine && mirrorHud(engine, G.runTime, cosmos.hudScene(G, galaxyHudScene));
+    if (engine && (mirrored || rustEraTicks(G.scene, intro.active))) {
       const b = G.brain;
       engine.game_tick(dt, b.calm || 0, b.focus || 0, b.stress ?? 0, b.stats?.blinks || 0);
+      // Under the mirror these never fire: the JS scene calls G.complete / G.fail itself.
       if (engine.is_game_era_complete?.() && !pendingScene && !G.finished && G.sceneIndex < SCENES.length - 1 && G.scene?.era !== 'space') {
         G.complete(1.5);
       }
-      if (engine.is_game_era_failed?.() && $('failScreen').hidden && !G.finished) {
-        const failReason = engine.is_game_era_failed();
-        if (failReason) {
-          showFail(failReason);
-        }
-      }
+      // Once per failed run, not whenever the fail screen is hidden (Controls hides it, #172).
+      const failReason = engineFailToShow(engine, G);
+      if (failReason) showFail(failReason);
     }
     if (intro.active) {
       intro.update(dt);   // the sim stays paused: the era starts exactly as enter() left it
@@ -979,9 +1029,13 @@ function frame(ts) {
     } else if (banner) {
       banner.t += dt;
       if (!banner.manual && banner.t > 8) dismissBanner();
+    } else if (eegPanel?.wiz?.active) {
+      // The calibration wizard overlays the game: the era waits until it closes (#176).
     } else if (G.sandbox) {
       G.runTime += dt;   // the hand-played game stays paused in the sandbox
       G.calibration?.update(dt, G.brain, G.mood);
+    } else if (G.signalPaused && $('failScreen').hidden && $('endScreen').hidden) {
+      // #175: poor contact. The era waits (no scoring on garbage calm/focus) and resumes by itself.
     } else if ($('failScreen').hidden && $('endScreen').hidden) {
       G.runTime += dt;
       G.calibration?.update(dt, G.brain, G.mood);
@@ -1015,6 +1069,7 @@ function frame(ts) {
     $('sourceStatus').dataset.ok = previewSource.connected ? '1' : '0';
   }
   eegPanel?.update();
+  syncCameraIndicator(document);   // "● Camera on" in the top bar while the webcam runs (#89)
   render();
   const fms = performance.now() - ts;
   perfSample.frames++; perfSample.frameMs += fms; perfSample.maxFrameMs = Math.max(perfSample.maxFrameMs, fms);
@@ -1028,6 +1083,31 @@ function sim() { return G?.source?.kind === 'sim' ? G.source : null; }
 function isEegLive() {
   const src = G?.source;
   return !!(src && src.kind === 'bridge' && src.connected && src.streaming && src.lastFrameAt > 0 && (performance.now() - src.lastFrameAt < 3000));
+}
+
+// The headset aims only while it is sending head tilt (#175): a live Muse with no orientation
+// used to freeze the cursor, because a live headset turned the mouse aim off.
+function headAimLive() { return isEegLive() && !!G?.brain?.headTracking; }
+
+// #175: say once per run when the headset can't aim, and while its contact is unusable.
+function signalNotices() {
+  const b = G?.brain;
+  if (!b) return;
+  // Only a live headset can be unusable; if it stops streaming the pause lifts (no stuck era).
+  if (G.source?.kind !== 'bridge' || !isEegLive()) { G.signalPaused = false; return; }
+  if (!b.headTracking && b.stats.framesSeen > 20 && !G.headNoticeShown) {
+    G.headNoticeShown = true;
+    advisor.say('head-lost', 'Head tracking unavailable, my lord: aim with the mouse or the arrow keys.', { mood: 'nervous', priority: 3, cooldown: 30 });
+    hud.showCause?.('Head tracking unavailable: aim with the mouse or the arrow keys', { ms: 5000, tone: 'wait' });
+  }
+  if (b.signalUnusable && !G.signalPaused) {
+    G.signalPaused = true;
+    advisor.say('signal-bad', 'I cannot read your mind, my lord: the headset has poor contact. Settle the band on your forehead and behind your ears. The era waits for you.', { mood: 'panic', priority: 4, cooldown: 10 });
+  } else if (!b.signalUnusable && G.signalPaused) {
+    G.signalPaused = false;
+    advisor.say('signal-ok', 'There you are. The signal is back; the era resumes.', { mood: 'happy', priority: 3, cooldown: 5 });
+  }
+  if (G.signalPaused) hud.showCause?.(`Headset signal unusable (quality ${Math.round(b.signalQuality * 100)}%): the era is paused`, { ms: 600, tone: 'wait' });
 }
 
 function aimFromEvent(e) {
@@ -1056,7 +1136,7 @@ function surfaceAim(e) {
 }
 
 function followCursorAim(e) {
-  if (!G?.brain || isEegLive()) return;
+  if (!G?.brain || headAimLive()) return;
   const a = surfaceAim(e);
   G.brain.aim.x = a.x;
   G.brain.aim.y = a.y;
@@ -1167,7 +1247,7 @@ function zoomOutFromSurface() {
   if (!in3dSurface()) { cosmos.zoomOut(G); return; }
   const d = engine.get_camera_distance();
   if (d < CAM3D.topDown - 4) {
-    cam3dTween = { from: d, t0: performance.now(), dur: 300 };
+    cam3dTween = { from: d, t0: performance.now(), dur: reducedMotion() ? 1 : 300 };   // #90: a cut, not a sweep
   } else {
     cosmos.zoomOut(G);
   }
@@ -1312,32 +1392,51 @@ screen.addEventListener('wheel', (e) => {
   // Horizontal scroll (or Shift+scroll) pans the surface; in 3D the camera follows the pan.
   const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey;
   if (horizontal && !cosmos.active) { cosmos.pan(-(e.shiftKey ? e.deltaY : e.deltaX) * 0.15); return; }
+  // In the galaxy a sideways scroll moves the picker between planets (Alex).
+  if (horizontal && cosmos.inGalaxy) {
+    galaxyScroll += e.shiftKey ? e.deltaY : e.deltaX;
+    if (Math.abs(galaxyScroll) > 80) { if (cosmos.selectSide(Math.sign(galaxyScroll), G)) audio.blip(); galaxyScroll = 0; }
+    return;
+  }
   if (in3dSurface() && (cosmos?.z || 0) <= 0.01) {
     cam3dTween = null;
     const scene = cosmos?.viewScene?.(G) || G?.scene;
     // Already looking straight down at the whole map: scrolling on carries on into the globe,
     // continuously (#143).
     if (e.deltaY > 0 && engine.get_camera_distance() >= CAM3D.topDown - 0.5 && !(scene instanceof CivSandbox) && !scene?.civ) {
-      cosmos.wheel(e.deltaY, G);
+      cosmos.wheel(wheelAmount(e), G);
       return;
     }
-    // In proportion to the scroll (#143): a mouse notch (100) is about ×1.1, a trackpad glides.
-    zoom3dBy(Math.exp(clamp(e.deltaY, -240, 240) * 0.00095));
+    // In proportion to the scroll (#143), and easy to do (Alex: "the zoom is too difficult"):
+    // a mouse notch is about ×1.27, a trackpad pinch counts triple. The ground under the cursor
+    // stays under it, like a map app.
+    const anchor = groundAt(e);
+    zoom3dBy(Math.exp(wheelAmount(e) * 0.0024));
+    if (anchor) keepGroundUnder(e, anchor);
     return;
   }
   const scene = cosmos?.viewScene?.(G) || G?.scene;
   if (scene instanceof CivSandbox || scene?.civ) {
-    scene.onWheel?.(e.deltaY);
+    scene.onWheel?.(wheelAmount(e));
     return;
   }
-  cosmos.wheel(e.deltaY, G);
+  cosmos.wheel(wheelAmount(e), G);
 }, { passive: false });
+// How far one wheel event zooms, in pixel-like units: a mouse notch is about 100, a trackpad
+// pinch (sent as Ctrl+wheel with small deltas) counts triple, line-mode wheels are scaled up.
+let galaxyScroll = 0;   // sideways scroll gathered towards the next planet pick
+function wheelAmount(e) {
+  const lines = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 400 : 1;
+  return clamp(e.deltaY * lines * (e.ctrlKey ? 3 : 1), -300, 300);
+}
 screen.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // Shift is the Stress demo key: full agitation on the emulated headset (input.panic).
 const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'panic' };
 window.addEventListener('keydown', (e) => {
-  if (e.target.closest?.('input')) return;
+  if (e.target?.closest?.('input, select, textarea')) return;
+  if (document.getElementById('moveCalibModal')?.hidden === false) return;
+  if (e.code === 'Escape' && settingsUi?.isOpen()) { e.preventDefault(); settingsUi.close(); return; }
   if (!$('failScreen').hidden) {
     if (e.code === 'Enter') { e.preventDefault(); retryEra(); return; }
     if (e.code === 'KeyA') { e.preventDefault(); toggleAssistMode(); return; }
@@ -1366,19 +1465,39 @@ window.addEventListener('keydown', (e) => {
   if (gate === 'hold') return;
   if (banner && e.code !== 'Enter') return;
   if (e.code === 'KeyM') { toggleModel(); return; }
-  if (e.code === 'KeyE') { eegPanel?.toggle(); return; }
-  if (e.code === 'KeyC') { eegPanel?.calibrateCenter(); return; }
+  // E / C toggle the EEG / Camera sidebars; Shift+C re-centres the EEG head pose (#211).
+  const panelKey = panelHotkey(e);   // ` stays a Camera alias in camera/debug.js
+  if (panelKey === 'eeg') { eegPanel?.toggle(); return; }
+  if (panelKey === 'camera') { e.preventDefault(); window.__moc?.camera?.togglePanel(); return; }
+  if (panelKey === 'eegCenter') { e.preventDefault(); eegPanel?.calibrateCenter(); return; }
   if (e.code === 'KeyT') { toggle3D(); return; }
   if (e.code === 'KeyG') { toggleAIGod(); return; }
   if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { zoomOutFromSurface(); return; }
   if (G && (e.code === 'KeyX' || e.code === 'Equal' || e.code === 'NumpadAdd')) { zoomInOnSurface(); return; }
+  // The galaxy picker (Alex): Left/Right or A/D move between planets; Enter lands on the chosen one.
+  if (G && cosmos.inGalaxy && ['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD'].includes(e.code)) {
+    e.preventDefault();
+    if (!e.repeat && cosmos.selectSide(e.code === 'ArrowLeft' || e.code === 'KeyA' ? -1 : 1, G)) audio.blip();
+    return;
+  }
   if (G && !cosmos.active && (e.code === 'KeyA' || e.code === 'KeyD')) { cosmos.panVel = e.code === 'KeyA' ? 140 : -140; return; }
   if (G && !cosmos.active && (e.code === 'KeyW' || e.code === 'KeyS')) { cosmos.panVelY = e.code === 'KeyW' ? 110 : -110; return; } // planets (#68); home pans north–south too (#129)
   if (G && e.code === 'KeyN' && !e.repeat) { cam3dBase = null; cam3dTween = null; if (cosmos.visitNextWorld(G)) audio.blip(); return; } // planets (#68, #43): visit the next AI world (G is the AI God toggle)
   if (e.code === 'Enter') {
     if (banner) dismissBanner();
     else if (!$('failScreen').hidden) retryEra();
+    else if (G && cosmos.z > 0.5) cosmos.zoomIn(G);   // galaxy → the chosen world's globe → its surface
     else G?.scene?.skip?.();
+    return;
+  }
+  if (!sim() && e.code.startsWith('Arrow') && G?.brain && !headAimLive()) {
+    // A headset without head tracking: the arrows aim, as they do on the emulator (#175).
+    const a = G.brain.aim, step = 0.04;
+    if (e.code === 'ArrowLeft') a.x = clamp(a.x - step);
+    if (e.code === 'ArrowRight') a.x = clamp(a.x + step);
+    if (e.code === 'ArrowUp') a.y = clamp(a.y - step);
+    if (e.code === 'ArrowDown') a.y = clamp(a.y + step);
+    e.preventDefault();
     return;
   }
   const s = sim(); if (!s) return;
@@ -1407,6 +1526,7 @@ document.querySelectorAll('[data-power]').forEach((tile) => {
   const map = { calm: 'calm', focus: 'focus', stress: 'panic' };
   tile.addEventListener('pointerdown', (e) => {
     audio.unlock();
+    if (tile.disabled) return;   // not a power in this era (#178)
     const s = sim(); if (!s) return;
     if (power === 'blink') { s.blink(); return; }
     s.input[map[power]] = true;
@@ -1425,6 +1545,7 @@ function toggleModel() {
   if (!p.hidden) {
     eegPanel?.toggle(false);
     window.__moc?.camera?.togglePanel?.(false);
+    settingsUi?.close();
   }
 }
 $('modelBtn').addEventListener('click', toggleModel);
@@ -1440,12 +1561,19 @@ function toggle3D() {
 }
 $('mode3dBtn')?.addEventListener('click', toggle3D);
 $('aiGodBtn')?.addEventListener('click', toggleAIGod);
+function showSound(on) {
+  $('soundBtn').textContent = on ? 'Sound on' : 'Sound off';
+  $('soundBtn').setAttribute('aria-pressed', String(on));
+}
 $('soundBtn').addEventListener('click', () => {
   audio.unlock();
   const on = audio.toggle();
-  $('soundBtn').textContent = on ? 'Sound on' : 'Sound off';
-  $('soundBtn').setAttribute('aria-pressed', String(on));
+  showSound(on);
+  try { localStorage.setItem('moc.sound', on ? 'on' : 'off'); } catch {}   // survives a reload (#186)
 });
+try {
+  if (localStorage.getItem('moc.sound') === 'off') showSound(audio.toggle());
+} catch {}
 $('bannerGo').addEventListener('click', dismissBanner);
 $('retryBtn').addEventListener('click', retryEra);
 $('assistBtn')?.addEventListener('click', toggleAssistMode);
@@ -1458,7 +1586,7 @@ $('biometricFeedbackBtn')?.addEventListener('click', () => {
     advisor?.say('assist', 'Tolerance widened. Take a deep breath; the gods are forgiving today.', { mood: 'happy', priority: 4, cooldown: 0 });
   }
 });
-$('againBtn').addEventListener('click', () => { $('endScreen').hidden = true; newGame(new SimSource()); });
+$('againBtn').addEventListener('click', () => { $('endScreen').hidden = true; newGame(playSource()); });
 $('endModelBtn').addEventListener('click', toggleModel);
 
 // ---------- zoom + galaxy UI ----------
@@ -1563,14 +1691,21 @@ $('galaxyBtn').addEventListener('click', () => {
 });
 
 // ---------- title screen ----------
+// Every entry point (Play, both sandboxes, Play again) keeps a connected headset and only falls
+// back to the emulator without one; newGame() disconnects whatever it isn't given (#185).
+function playSource() { return liveBridge(G?.source, previewSource) || new SimSource(); }
+let settingsUi = null;   // the Settings panel (#186), wired after the camera and debug panels
 function begin(source) {
   audio.unlock();
   $('titleScreen').hidden = true;
+  settingsUi?.close();
   newGame(source);
+  // Settings › Camera: the player asked for the webcam with every game (#186).
+  if (settingsUi?.settings.cameraOnStart) window.__moc?.camera?.start?.();
 }
-$('playSim').addEventListener('click', () => begin(previewSource?.kind === 'bridge' && previewSource.connected ? previewSource : new SimSource()));
+$('playSim').addEventListener('click', () => begin(playSource()));
 $('playSandbox').addEventListener('click', () => {
-  begin(previewSource?.kind === 'bridge' && previewSource.connected ? previewSource : new SimSource());
+  begin(playSource());
   dismissBanner();
   G.sandbox = true;
   cosmos.sandbox = true;
@@ -1580,10 +1715,10 @@ $('playSandbox').addEventListener('click', () => {
   advisor.setEra('space');
   advisor.say('sandbox', 'Galaxy sandbox, my lord. Three worlds are forming from your thoughts. Make more planets and let them run.', { mood: 'happy', priority: 3, cooldown: 999 });
 });
-// civ (#50): "Sandbox: a crowded planet" runs its own scene (Rust sim in src/civ/) on the emulated headset.
+// civ (#50): "Sandbox: a crowded planet" runs its own scene (Rust sim in src/civ/) on the connected headset, or the emulated one (#185).
 initPlanetSizePicker($('planetSizePick'));   // Small/Medium/Large/Huge or Random (Alex)
 $('playCiv').addEventListener('click', () => {
-  begin(new SimSource());
+  begin(playSource());
   const scene = new CivSandbox({ cosmos });
   G.scene = scene;
   advisor.setEra(scene.era);
@@ -1592,17 +1727,43 @@ $('playCiv').addEventListener('click', () => {
   document.body.dataset.era = scene.era;
   startIntro(scene, -1);
 });
+// Connect a real headset (#174): the run starts on its first EEG frame, not when the socket
+// opens. While it waits the button cancels; after a failure it retries.
+let bridgeWait = null;
 $('playBridge').addEventListener('click', async () => {
-  const url = $('bridgeUrl').value.trim() || 'ws://localhost:8765';
+  const btn = $('playBridge');
   const status = $('bridgeStatus');
+  if (bridgeWait) {
+    const s = bridgeWait;
+    bridgeWait = null;
+    s.disconnect();
+    btn.textContent = 'Connect';
+    status.textContent = 'Cancelled.';
+    return;
+  }
+  const url = $('bridgeUrl').value.trim() || 'ws://localhost:8765';
   status.textContent = `Connecting to ${url}…`;
   const src = new BridgeSource(url);
+  bridgeWait = src;
+  btn.textContent = 'Cancel';
   try {
     await src.connect();
-    status.textContent = 'Connected.';
+    if (bridgeWait !== src) return;
+    status.textContent = 'Bridge connected. Waiting for the first EEG from the headset…';
+    await src.waitForFrame(10000);
+    if (bridgeWait !== src) return;
+    bridgeWait = null;
+    btn.textContent = 'Connect';
+    status.textContent = src.status;
     begin(src);
   } catch (err) {
-    status.textContent = `${err.message}. Start the bridge with: python bridge/muse_bridge.py --board muse2 (or --board synthetic to test).`;
+    if (bridgeWait !== src) return;   // cancelled
+    bridgeWait = null;
+    src.disconnect();
+    btn.textContent = 'Retry';
+    status.textContent = src.connected || /EEG/.test(err.message)
+      ? `${err.message}. Is the Muse on, charged and paired with the bridge? Retry, or play with the emulated headset.`
+      : `${err.message}. Start the bridge with: python bridge/muse_bridge.py --board muse2 (or --board synthetic to test).`;
   }
 });
 
@@ -1628,7 +1789,7 @@ window.__moc = {
 // with coach visual demonstration. Face sets mood.
 window.__moc.camera = initCamera({
   getG: () => cosmos.castG(G), // planets (#68): casts and mood reach the world you're on
-  canCast: () => !!G?.scene && !banner && !intro.active && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,
+  canCast: () => !!G?.scene && !banner && !intro.active && !eegPanel?.wiz?.active && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,
   // camera debug (#67): the fingertip aims on the panned surface like the mouse does.
   // Aims are 0..1 of the world; the camera's overlay draws in 0..1 of the screen (#129).
   mapX: (x) => cosmos.mapX(x * W) / cosmos.worldW,
@@ -1650,32 +1811,60 @@ window.__moc.camera = initCamera({
     // Cosmos zoom (surface <-> globe <-> galaxy): wheel negative zooms in, positive zooms out
     cosmos.wheel(-delta * 750, G);
   },
-  onGrabMove: ({ dx, dy, active, started, released, aim }) => {
-    // One-hand pinch grab & move the globe or world view
+  onGrabMove: ({ dx, dy, headDx = 0, headDy = 0, active, started, released, aim }) => {
+    // One-hand pinch (#270): hand translation pans the map in cardinal directions in 2D and 3D;
+    // aim movement orbits the 3D camera like Alt+drag. Two-hand zoom and entity grab stay separate.
     if (!G) return;
+    const move = pinchMove({ handDx: dx, handDy: dy, headDx, headDy });
     if (cosmos.active || (cosmos?.z || 0) > 0.05) {
-      if (active) {
-        // In normalized hand space (-1..1). Moving hand right rotates globe right.
-        const spin = -dx * 3.5;
-        cosmos.rot += spin;
-        cosmos.spinVel = spin / 0.033;
+      if (active && move.panX) {
+        // Same formula as a pointer drag, so a rotated globe follows the hand (#284).
+        cosmos.dragRotate?.(move.panX * W);
       }
       return;
     }
-    if (in3dSurface() && (cosmos?.z || 0) <= 0.01) {
-      if (active && (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001)) {
-        engine.orbit_camera(-dx * 3.5, dy * 3.5);
-        cam3dBase = null;
+    // On the surface, 2D or 3D, a one-hand pinch drags the map (#156). The sign matches a
+    // pointer drag: hand left moves the world left. In 3D the ground under the centre is
+    // raycast so a rotated/tilted camera pans in screen space (#284).
+    if (active && (move.panX || move.panY)) {
+      if (in3dSurface() && cosmos.view && !cosmos.surfaceInView) {
+        const r = screen.getBoundingClientRect();
+        const w = r.width || screen.clientWidth || W;
+        const h = r.height || screen.clientHeight || H;
+        const a = engine?.screen_to_ground(w / 2, h / 2, w, h);
+        const b = engine?.screen_to_ground(w / 2 + move.panX * w, h / 2 + move.panY * h, w, h);
+        if (a && b && a[0] >= 0 && b[0] >= 0) {
+          cosmos.pan(b[0] - a[0], b[1] - a[1]);
+          cam3dBase = null;
+        } else {
+          panMap(move.panX * W * 1.5, move.panY * H * 1.5);
+        }
+      } else {
+        panMap(move.panX * W * 1.5, move.panY * H * 1.5);
       }
-      return;
     }
-    if (active && (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001)) {
-      panMap(-dx * W * 1.5, -dy * H * 1.5);
+    if (active && in3dSurface() && (move.tiltX || move.tiltY)) {
+      engine.orbit_camera(move.tiltX * W * 0.008, move.tiltY * H * 0.008);
+      cam3dBase = null;
     }
   },
 });
 // camera debug (#67): Debug tab (button in the top bar, ` key; D pans the planet).
 window.__moc.debug = initDebug({ getG: () => G, camera: window.__moc.camera });
+// Settings (#186): comfort, head aim, calibration window, camera, and the Advanced buttons (#89).
+try {
+  settingsUi = initSettings(document, {
+    eegPanel,
+    calibration: {
+      read: () => ({ seconds: calibConfig.seconds, mode: calibConfig.mode }),
+      write: (c) => { saveCalibrationConfig(c); Object.assign(calibConfig, c); SIM.MIND_SECONDS = c.seconds; },
+    },
+    defaults: { aim: { sensitivity: 1, invertYaw: false, invertPitch: false }, calibration: { seconds: CALIBRATION_DEFAULTS.seconds, mode: CALIBRATION_DEFAULTS.mode } },
+  });
+} catch (err) {
+  console.error('Settings panel failed to start; the game runs without it:', err);
+}
+$('camLive')?.addEventListener('click', () => window.__moc?.camera?.togglePanel?.(true));
 
 // ---------- boot ----------
 async function autoConnectBridge() {

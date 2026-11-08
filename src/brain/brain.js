@@ -43,7 +43,22 @@ export function faceAnger(mood) {
   return mood?.active && mood.face ? clamp(mood.anger || 0) : 0;
 }
 
+// Head aim (#221). `aim` is where the god points on the map (world 0..1, mapped through the home
+// camera on a world bigger than the screen, #129); `screenAim` is where the head points on the
+// screen (0..1), which the calibration wizard draws (eeg-panel.js screenAimOf, #234). A
+// non-finite tilt (or camera mapping) used to poison the smoothing for good (util clamp passes
+// NaN, smooth keeps it): every later frame stayed NaN, so the wizard cursor and the in-game
+// reticle silently drew nothing. Bad values are now dropped, a poisoned state heals to the
+// centre, and `aimFault` says why.
+const finite2 = (p) => !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
+
 const WINDOW = 6;            // frames averaged per feature window (~0.6 s)
+// Signal quality (#175): below UNUSABLE the headset's contact is too poor to read calm and focus
+// from, and the game pauses the era until it is back above USABLE (hysteresis, smoothed over
+// about a second of frames). Head tracking counts as lost when no tilt arrived for HEAD_LOST_S.
+export const QUALITY_UNUSABLE = 0.25;
+export const QUALITY_USABLE = 0.4;
+const HEAD_LOST_S = 2;
 const TRAIN_EVERY = 2.5;     // seconds between retrains
 
 let RustBrainClass = null;
@@ -80,6 +95,8 @@ export class Brain {
     this.agRunning = null;    // slow running average of the index: the fallback baseline
     this.stress = REST_STRESS;  // stressFrom(calm, anger, agitation), updated every frame
     this.aim = { x: 0.5, y: 0.55 };
+    this.screenAim = null;    // headset only: the head's screen point (#221)
+    this.aimFault = null;     // why the last tilt was ignored, if it was (#221)
     this.motion = 0;
     this.quality = 1;
     this.bands = { delta: 0.2, theta: 0.2, alpha: 0.2, beta: 0.2, gamma: 0.2 };
@@ -101,6 +118,9 @@ export class Brain {
     this.trainTimer = 0;
     this.restRef = { ab: [], bat: [] };
     this.stats = { blinks: 0, calmSeconds: 0, focusSeconds: 0, framesSeen: 0 };
+    this.signalQuality = 1;       // smoothed headset quality, 0..1 (#175)
+    this.signalUnusable = false;  // contact too poor to play on: the era pauses
+    this.lastTiltAt = -Infinity;  // brain time of the last usable head tilt
     this.onTrained = null;
   }
 
@@ -126,10 +146,15 @@ export class Brain {
     this.stress = REST_STRESS;
     this.motion = 0;
     this.quality = 0;
+    this.signalQuality = 1;
+    this.signalUnusable = false;
+    this.lastTiltAt = -Infinity;
     this.bands = { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 };
     this.contact = null;
     this.orientation = null;
     this.relOrientation = null;
+    this.screenAim = null;
+    this.aimFault = null;
     this.imuCalib = 0;
     this.neutralProgress = 0;
     this.blinkModel = null;
@@ -183,8 +208,8 @@ export class Brain {
         this.wasm.ingest(
           b.delta || 0, b.theta || 0, b.alpha || 0, b.beta || 0, b.gamma || 0,
           !!frame.blink, frame.hr || 0,
-          frame.tilt ? frame.tilt[0] : 0, frame.tilt ? frame.tilt[1] : 0,
-          frame.motion || 0, frame.quality || 1
+          Number.isFinite(frame.tilt?.x) ? frame.tilt.x : 0, Number.isFinite(frame.tilt?.y) ? frame.tilt.y : 0,
+          frame.motion || 0, frame.quality ?? 1   // quality 0 is poor contact, not "unknown" (#175)
         );
       } catch (err) {
         console.warn('RustBrain ingest failed, disabling wasm brain:', err);
@@ -192,6 +217,12 @@ export class Brain {
       }
     }
     this.quality = frame.quality;
+    if (!frame.isSim) {
+      const q = Number.isFinite(frame.quality) ? clamp(frame.quality) : 1;
+      this.signalQuality += (q - this.signalQuality) * 0.2;   // ~1 s at the bridge's 10 frames/s
+      if (this.signalUnusable) this.signalUnusable = this.signalQuality < QUALITY_USABLE;
+      else this.signalUnusable = this.signalQuality < QUALITY_UNUSABLE;
+    }
     if (frame.bands) this.bands = { ...frame.bands };
     if (frame.contact) this.contact = frame.contact;
     if (frame.orientation !== undefined) this.orientation = frame.orientation;
@@ -222,20 +253,7 @@ export class Brain {
         if (this.eegWave[ch].length > 180) this.eegWave[ch].splice(0, this.eegWave[ch].length - 180);
       }
     }
-    if (frame.tilt) {
-      if (frame.isSim) {
-        this.aim.x = clamp(0.5 + frame.tilt.x * 0.5);
-        this.aim.y = clamp(0.5 + frame.tilt.y * 0.5);
-      } else {
-        // A headset aims at the screen. On a world bigger than the screen (#129) the game maps
-        // that through its camera (screenToAim); the smoothing stays in screen space.
-        const s = (this.screenAim ||= { x: this.aim.x, y: this.aim.y });
-        s.x = smooth(s.x, clamp(0.5 + frame.tilt.x * 0.5), 10, 0.1);
-        s.y = smooth(s.y, clamp(0.5 + frame.tilt.y * 0.5), 10, 0.1);
-        const a = this.screenToAim ? this.screenToAim(s.x, s.y) : s;
-        this.aim.x = a.x; this.aim.y = a.y;
-      }
-    }
+    if (frame.tilt) this.ingestTilt(frame.tilt, !!frame.isSim);
     this.motion = frame.motion;
 
     if (frame.blink) {
@@ -273,6 +291,43 @@ export class Brain {
     const tc = this.model.trust('calm'), tf = this.model.trust('focus');
     this.calmRaw = p && p.calm != null ? this.genericCalm * (1 - tc) + p.calm * tc : this.genericCalm;
     this.focusRaw = p && p.focus != null ? this.genericFocus * (1 - tf) + p.focus * tf : this.genericFocus;
+  }
+
+  // Whether the headset is aiming: a tilt arrived lately (#175). Without one (no orientation and
+  // no accelerometer from the bridge) the mouse and arrow keys aim instead.
+  get headTracking() { return this.time - this.lastTiltAt < HEAD_LOST_S; }
+
+  // Head tilt (-1..1 each axis) → aim (#221). Non-finite input never reaches the smoothing.
+  ingestTilt(tilt, isSim) {
+    if (!finite2(tilt)) {
+      this.aimFault = `headset sent a non-finite head tilt (${tilt.x}, ${tilt.y})`;
+      return;
+    }
+    const tx = clamp(0.5 + tilt.x * 0.5), ty = clamp(0.5 + tilt.y * 0.5);
+    this.lastTiltAt = this.time;
+    if (isSim) {
+      this.aim.x = tx;
+      this.aim.y = ty;
+      this.aimFault = null;
+      return;
+    }
+    // A headset aims at the screen. On a world bigger than the screen (#129) the game maps
+    // that through its camera (screenToAim); the smoothing stays in screen space.
+    if (!finite2(this.screenAim)) this.screenAim = { x: 0.5, y: 0.5 };
+    const s = this.screenAim;
+    s.x = smooth(s.x, tx, 10, 0.1);
+    s.y = smooth(s.y, ty, 10, 0.1);
+    let a = s;
+    if (this.screenToAim) {
+      try { a = this.screenToAim(s.x, s.y); } catch { a = null; }
+    }
+    if (!finite2(a)) {
+      this.aimFault = 'the camera could not map the head aim onto the map';
+      if (!finite2(this.aim)) { this.aim.x = 0.5; this.aim.y = 0.5; }
+      return;
+    }
+    this.aim.x = a.x; this.aim.y = a.y;
+    this.aimFault = null;
   }
 
   // The better the model knows the player, the higher the bar. Players never see this.

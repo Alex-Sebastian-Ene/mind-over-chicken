@@ -17,12 +17,6 @@ export class Engine {
     begin_frame(): void;
     bind_dom_shell(): void;
     clear_3d_billboards(): void;
-    /**
-     * Computes the dynamic diurnal sun direction vector and night darkness factor
-     * from elapsed time (in seconds) and baseline era darkness.
-     * Returns [sun_x, sun_y, sun_z, total_night].
-     */
-    compute_day_night(time: number, era_darkness: number): Float32Array;
     draw_chicken(x: number, y: number, facing: number, frame: number, halo: boolean): void;
     draw_era_3d(): void;
     draw_fire(x: number, y: number, heat: number, t: number): void;
@@ -38,6 +32,12 @@ export class Engine {
     draw_text_badge(cx: number, y: number, text: string, text_r: number, text_g: number, text_b: number, bg_r: number, bg_g: number, bg_b: number, bg_a: number): void;
     draw_text_centered(cx: number, y: number, text: string, r: number, g: number, b: number, a: number): void;
     end_frame(night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
+    /**
+     * Mirror the JS scene on screen into the HUD (#191): its objectives (`flags` bit 1 done,
+     * 2 bad, 4 plain) and run time. The Rust era sim then stands still and raises nothing of its
+     * own; see GameFlow::mirrored. Called by src/main.js every frame, before game_tick.
+     */
+    game_mirror(run_time: number, labels: string[], values: string[], flags: Uint8Array | number[]): void;
     game_on_blink(aim_x: number, aim_y: number): void;
     game_on_cast(spell: string, aim_x: number, aim_y: number): void;
     game_restart_era(): void;
@@ -47,6 +47,10 @@ export class Engine {
      * (EEG agitation or face anger, 0..1, about 0.15 at rest).
      */
     game_tick(dt: number, calm: number, focus: number, stress: number, blinks: number): void;
+    /**
+     * Back to the Rust era sim driving the HUD (the all-Rust app never mirrors).
+     */
+    game_unmirror(): void;
     /**
      * Standalone helper to generate a civ planet RGBA texture (#109).
      */
@@ -279,7 +283,9 @@ export class RustCalibration {
 }
 
 /**
- * Standalone WebAssembly Cast Controller for camera god powers (#33, #108)
+ * Standalone WebAssembly Cast Controller for camera god powers (#33, #108). The browser's
+ * src/camera/casts.js runs this: the three core moves, with the fist-to-open fireball (#150, #159).
+ * `update` returns [held, progress, cast, aiming, armed].
  */
 export class RustCastController {
     free(): void;
@@ -564,8 +570,6 @@ export function paint_land_use(base: Uint8Array | number[], types: Uint8Array | 
 
 export function rust_animate_agent(clock: number, dt: number, rate: number): Float32Array;
 
-export function rust_compute_day_night(time: number, era_darkness: number): Float32Array;
-
 export function rust_villager_look(era: string, seed: number): Array<any>;
 
 /**
@@ -606,7 +610,6 @@ export interface InitOutput {
     readonly engine_begin_frame: (a: number) => void;
     readonly engine_bind_dom_shell: (a: number) => [number, number];
     readonly engine_clear_3d_billboards: (a: number) => void;
-    readonly engine_compute_day_night: (a: number, b: number, c: number) => [number, number];
     readonly engine_draw_chicken: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly engine_draw_era_3d: (a: number) => void;
     readonly engine_draw_fire: (a: number, b: number, c: number, d: number, e: number) => void;
@@ -622,11 +625,13 @@ export interface InitOutput {
     readonly engine_draw_text_badge: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
     readonly engine_draw_text_centered: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly engine_end_frame: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+    readonly engine_game_mirror: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly engine_game_on_blink: (a: number, b: number, c: number) => void;
     readonly engine_game_on_cast: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly engine_game_restart_era: (a: number) => void;
     readonly engine_game_start_era: (a: number, b: number) => void;
     readonly engine_game_tick: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly engine_game_unmirror: (a: number) => void;
     readonly engine_generate_civ_terrain: (a: number, b: number, c: number) => [number, number];
     readonly engine_generate_terrain: (a: number, b: number, c: number, d: number) => [number, number];
     readonly engine_get_camera_distance: (a: number) => number;
@@ -711,7 +716,6 @@ export interface InitOutput {
     readonly pointergesture_pan_dy: (a: number) => number;
     readonly pointergesture_up: (a: number, b: number, c: number) => number;
     readonly rust_animate_agent: (a: number, b: number, c: number) => any;
-    readonly rust_compute_day_night: (a: number, b: number) => any;
     readonly rust_villager_look: (a: number, b: number, c: number) => any;
     readonly rustaipolicy_act: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly rustaipolicy_new: () => number;
@@ -900,10 +904,10 @@ export interface InitOutput {
     readonly moc_sim_free: (a: number) => void;
     readonly moc_sim_new: (a: number) => number;
     readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
-    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
-    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__279: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__280: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__279: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__280: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
@@ -912,6 +916,7 @@ export interface InitOutput {
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_destroy_closure: (a: number, b: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
+    readonly __externref_drop_slice: (a: number, b: number) => void;
     readonly __wbindgen_start: () => void;
 }
 

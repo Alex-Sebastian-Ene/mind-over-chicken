@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { OneEuroFilter, PointFilter, softDeadZone, HandRange, FIXED_RANGE, pinchMetrics, PinchDetector, PINCH, FingerController, MultiHandTracker } from '../src/camera/fingers.js';
 import { RateMeter, Ema, FrameMeter } from '../src/camera/meter.js';
 import { workerPreference, workerSupport } from '../src/camera/engine.js';
-import { COACH_MOVES, COACH_CARDS, buildGhostHand } from '../src/camera/coach.js';
+import { COACH_MOVES, COACH_CARDS, buildGhostHand, initCoach } from '../src/camera/coach.js';
 
 // ---------- helpers ----------
 // Deterministic noise in [-1, 1].
@@ -400,11 +400,13 @@ test('MultiHandTracker: two-hand pinch continuous zoom freezes on unpinch or han
 });
 
 // ---------- Coach ghost hand keyframes (#123) ----------
-test('Coach: procedural 21-landmark ghost hands and keyframes exist for all moves', () => {
-  assert.ok(COACH_MOVES.length >= 4);
+test('Coach: procedural 21-landmark ghost hands and keyframes exist for the movement moves', () => {
+  assert.equal(COACH_MOVES.length, 2);
   assert.ok(!COACH_MOVES.some((m) => m.id === 'wave_orbit'));
-  assert.equal(COACH_CARDS.length, COACH_MOVES.length - 1);
+  assert.equal(COACH_CARDS.length, COACH_MOVES.length);
   assert.ok(!COACH_CARDS.some((m) => m.id === 'palm_calm'));
+  assert.ok(!COACH_CARDS.some((m) => m.id === 'fist_strike'));
+  assert.deepEqual(COACH_CARDS.map((m) => m.id), ['pinch_grab', 'two_hand_zoom']);
   for (const move of COACH_MOVES) {
     const ghosts = move.sample(0.5);
     assert.ok(ghosts.length >= 1 && ghosts.length <= 2);
@@ -418,4 +420,64 @@ test('Coach: procedural 21-landmark ghost hands and keyframes exist for all move
   }
   const ghost = buildGhostHand('open', 'pinch', 0.5);
   assert.equal(ghost.length, 21);
+});
+
+test('Coach: initCoach tracks demonstrated moves and defaults to collapsed minimal state (#204)', () => {
+  const panel = {
+    innerHTML: '',
+    classList: {
+      tokens: new Set(['coach-panel', 'is-collapsed']),
+      toggle(cls, force) {
+        if (force === undefined) force = !this.tokens.has(cls);
+        if (force) this.tokens.add(cls); else this.tokens.delete(cls);
+        return force;
+      },
+      has(cls) { return this.tokens.has(cls); }
+    },
+    querySelector(sel) {
+      return {
+        hidden: false,
+        dataset: {},
+        style: {},
+        classList: { toggle() {}, add() {}, remove() {} },
+        setAttribute() {},
+        addEventListener() {},
+        getContext() { return {}; },
+        textContent: '',
+      };
+    },
+  };
+
+  const oldDoc = globalThis.document;
+  const oldStorage = globalThis.localStorage;
+  const oldWin = globalThis.window;
+  const store = new Map();
+  store.set('moc.coachDemonstrated', JSON.stringify(['two_hand_zoom']));
+  globalThis.localStorage = {
+    getItem: (k) => store.get(k) ?? null,
+    setItem: (k, v) => store.set(k, String(v)),
+  };
+  globalThis.document = {
+    getElementById: (id) => (id === 'coachPanel' ? panel : null),
+  };
+  globalThis.window = {
+    addEventListener() {},
+  };
+
+  try {
+    const coach = initCoach();
+    assert.ok(coach);
+    assert.equal(coach.open, false, 'starts in collapsed/minimal state when moves demonstrated');
+    assert.ok(coach.demonstrated.has('two_hand_zoom'));
+    coach.markDemonstrated('pinch_grab');
+    assert.ok(coach.demonstrated.has('pinch_grab'));
+    coach.setOpen(true);
+    assert.equal(coach.open, true);
+    coach.setOpen(false);
+    assert.equal(coach.open, false);
+  } finally {
+    globalThis.document = oldDoc;
+    globalThis.localStorage = oldStorage;
+    globalThis.window = oldWin;
+  }
 });

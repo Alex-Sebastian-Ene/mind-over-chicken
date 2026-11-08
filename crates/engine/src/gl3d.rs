@@ -266,12 +266,7 @@ void main() {
     vec3 glintColor = mix(vec3(1.0, 0.85, 0.55), vec3(0.5, 0.7, 1.0), u_night);
     col += glintColor * (glint * (sunVis + u_night * 0.3));
 
-    // Sparkling foam crests
-    vec2 cell = floor(v_worldPos.xz * 0.5);
-    float h = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
-    if (h > 0.975 && sin(u_time * 3.0 + h * 40.0) > 0.5) {
-        col += vec3(0.35, 0.50, 0.65) * (1.0 - u_night * 0.5);
-    }
+    // (No blinking foam cells: they read as random arrays of white pixels on the sea. Alex.)
 
     // Dynamic point lights reflection on water
     for (int i = 0; i < 16; i++) {

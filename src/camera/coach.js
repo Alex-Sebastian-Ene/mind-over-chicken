@@ -58,9 +58,9 @@ export const COACH_MOVES = [
   {
     id: 'pinch_grab',
     title: 'Pinch Grab',
-    key: '1',
+    key: '',
     glyph: '🤏',
-    instruction: 'Pinch to pick up a living creature under the cursor, move the cursor (headset or mouse), release to drop.',
+    instruction: 'Pinch to grab a living creature under the cursor (move the cursor, release to drop). Nothing to grab? Move your hand to pan the map; head motion tilts the 3D view.',
     contexts: ['surface', 'civ'],
     sample(phase) {
       // 0..0.25 close into pinch, 0.25..0.75 hold pinch & glide horizontally, 0.75..1.0 open to drop
@@ -97,31 +97,6 @@ export const COACH_MOVES = [
       ];
     },
   },
-  {
-    id: 'palm_calm',
-    title: 'Open Palm · Calm',
-    key: '2',
-    glyph: '🖐️',
-    instruction: 'Hold an open palm (or press 2) to calm fear, broker peace and bless the land.',
-    contexts: ['surface', 'civ'],
-    coachHidden: true,
-    sample(phase) {
-      const k = clamp(phase / 0.35);
-      return [{ hand: buildGhostHand('open', 'open', k, { cx: 0.5, cy: 0.78, size: 0.27 }), state: { held: phase > 0.25 } }];
-    },
-  },
-  {
-    id: 'fist_strike',
-    title: 'Closed Fist · Strike',
-    key: '3',
-    glyph: '✊',
-    instruction: 'Hold a closed fist (or press 3) to strike lightning at the cursor.',
-    contexts: ['surface', 'civ'],
-    sample(phase) {
-      const k = phase < 0.3 ? phase / 0.3 : phase > 0.8 ? 1 - (phase - 0.8) / 0.2 : 1;
-      return [{ hand: buildGhostHand('open', 'fist', k, { cx: 0.5, cy: 0.76, size: 0.27 }), state: { held: k > 0.75 } }];
-    },
-  },
 ];
 
 export const COACH_MOVE_BY_ID = Object.fromEntries(COACH_MOVES.map((m) => [m.id, m]));
@@ -153,7 +128,7 @@ const TEMPLATE = `
   </div>
 `;
 
-export function initCoach({ getContext = () => 'surface', onCastMove = null } = {}) {
+export function initCoach({ getContext = () => 'surface' } = {}) {
   const panel = document.getElementById('coachPanel');
   if (!panel) return null;
   panel.innerHTML = TEMPLATE;
@@ -171,10 +146,27 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
   }));
 
   // Collapsed by default: open on the first run it covered the playfield and the era card's
-  // Begin button (#182). The bar stays visible (H or its toggle opens it); the player's last
-  // choice is remembered.
+  // Begin button (#182). Once moves have been demonstrated (#204), stays minimal by default.
+  // The bar stays visible (H or its toggle opens it); the player's last choice is remembered.
+  const demonstratedMoves = new Set();
+  try {
+    const saved = JSON.parse(localStorage.getItem('moc.coachDemonstrated') || '[]');
+    if (Array.isArray(saved)) for (const id of saved) demonstratedMoves.add(id);
+  } catch {}
+
+  function markDemonstrated(id) {
+    if (!id || !COACH_MOVE_BY_ID[id]) return;
+    demonstratedMoves.add(id);
+    try { localStorage.setItem('moc.coachDemonstrated', JSON.stringify([...demonstratedMoves])); } catch {}
+  }
+
   let open = false;
-  try { open = localStorage.getItem('moc.coachOpen') === '1'; } catch {}
+  try {
+    const stored = localStorage.getItem('moc.coachOpen');
+    // If moves have already been demonstrated, prefer collapsed/minimal state by default (#204)
+    if (stored !== null) open = stored === '1';
+    else open = demonstratedMoves.size === 0;
+  } catch {}
 
   let activeMoveId = COACH_CARDS[0].id;
   let flashState = null; // { text, kind: 'ok' | 'bad', until }
@@ -209,6 +201,9 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
     flashState = { text, kind, until: performance.now() + durationMs };
     feedbackEl.textContent = text;
     feedbackEl.dataset.tone = kind;
+    if (kind === 'ok' && activeMoveId) {
+      markDemonstrated(activeMoveId);
+    }
   }
 
   function isReducedMotion() {
@@ -235,7 +230,7 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
     if (move.id === 'two_hand_zoom') {
       ctx.fillText('←  PINCH & SPREAD  →', w / 2, 16);
     } else if (move.id === 'pinch_grab') {
-      ctx.fillText('PINCH · MOVE CURSOR · DROP', w / 2, 16);
+      ctx.fillText('PINCH · HAND PANS · HEAD TILTS', w / 2, 16);
     }
   }
 
@@ -244,19 +239,18 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
 
     if (state.bothPinched) selectMove('two_hand_zoom');
     else if (state.grabActive) selectMove('pinch_grab');
-    else if (state.heldMove === 'fist') selectMove('fist_strike');
 
     const handCount = (state.leftVisible ? 1 : 0) + (state.rightVisible ? 1 : 0);
     dotEl.dataset.ok = state.live ? (handCount > 0 ? '1' : 'wait') : '0';
     liveEl.textContent = !state.live
-      ? 'Camera off · Keys 1–3 active'
+      ? 'Camera off · pinch and two-hand zoom need the camera'
       : handCount === 2
         ? '2 hands tracked'
         : handCount === 1
           ? '1 hand tracked'
           : 'Show hand(s) to camera';
 
-    const strength = clamp(state.holdProgress || state.pinchStrength || 0);
+    const strength = clamp(state.pinchStrength || 0);
     meterEl.style.width = `${Math.round(strength * 100)}%`;
 
     if (flashState && now < flashState.until) {
@@ -279,6 +273,8 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
   return {
     get open() { return open; },
     get activeMoveId() { return activeMoveId; },
+    get demonstrated() { return new Set(demonstratedMoves); },
+    markDemonstrated,
     setOpen,
     selectMove,
     flash,

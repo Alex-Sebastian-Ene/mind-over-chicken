@@ -22,6 +22,7 @@ export class SpaceAge {
   constructor() {
     this.id = 'space';
     this.era = 'space';
+    this.rustEra = 2;   // the Rust era sim under this scene (crates/engine/src/eras, #194)
     this.label = 'Era III · Space Age';
     this.intro = {
       title: 'Space Age',
@@ -363,7 +364,6 @@ export class SpaceAge {
     const { x, y } = G.world.aimPoint(aim);   // aims are 0..1 of the world (#129)
     const watching = this.citizens.filter((c) => c.state !== 'aboard');
     switch (spell) {
-      case 'fist':
       case 'fireball': {
         G.stats.lightning++;
         G.audio.thunder();

@@ -1,5 +1,6 @@
 // camera (#33, #67): draws a tracked hand on a 2D canvas. Shared by the camera panel and the debug tab.
 
+export const HAND_COLORS = { left: '#6fb8ff', right: '#ffb15c' };
 export const HAND_LINKS = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [5, 9], [9, 10], [10, 11], [11, 12],
   [9, 13], [13, 14], [14, 15], [15, 16], [13, 17], [17, 18], [18, 19], [19, 20], [0, 17]];
 
@@ -9,7 +10,7 @@ export function drawHand(ctx, hand, w, h, state = {}) {
   if (!hand || hand.length < 21) return;
   const lw = Math.max(1.5, w / 160);
   ctx.lineWidth = lw;
-  ctx.strokeStyle = state.held ? '#ffcf4a' : state.side === 'left' ? 'rgba(139,212,255,0.9)' : 'rgba(89,216,200,0.9)';
+  ctx.strokeStyle = state.held ? '#ffcf4a' : HAND_COLORS[state.side] || HAND_COLORS.left;
   ctx.beginPath();
   for (const [a, b] of HAND_LINKS) { ctx.moveTo(hand[a].x * w, hand[a].y * h); ctx.lineTo(hand[b].x * w, hand[b].y * h); }
   ctx.stroke();

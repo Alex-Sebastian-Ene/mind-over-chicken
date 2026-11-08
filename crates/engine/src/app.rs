@@ -35,7 +35,7 @@ pub struct App {
     pub last_ts: f64,
     pub running: bool,
     pub aim: [f32; 2],
-    pub run_time: f32,
+    pub sun_angle: f32,
 }
 
 impl App {
@@ -61,7 +61,7 @@ impl App {
             last_ts: 0.0,
             running: true,
             aim: [160.0, 90.0],
-            run_time: 0.0,
+            sun_angle: 0.0,
         })
     }
 
@@ -112,19 +112,19 @@ impl App {
         // 5. 3D era billboards & lights
         self.engine.draw_era_3d();
 
-        // 6. 3D WebGL scene rendering with dynamic diurnal day/night cycle (#201)
-        self.run_time += dt;
-        let (sun_dir, total_night) = Engine::day_night_state(
-            self.run_time,
-            self.engine.get_game_darkness(),
-        );
+        // 6. 3D WebGL scene rendering
+        self.sun_angle += dt * 0.15;
+        let sun_x = self.sun_angle.cos();
+        let sun_y = 0.85;
+        let sun_z = self.sun_angle.sin();
+        let dark = self.engine.get_game_darkness();
 
         self.engine.render_3d(
             dt,
-            sun_dir.x,
-            sun_dir.y,
-            sun_dir.z,
-            total_night,
+            sun_x,
+            sun_y,
+            sun_z,
+            dark,
             0.0,
             0.0,
             0.0,
@@ -184,39 +184,16 @@ impl App {
 
     pub fn on_key_down(&mut self, key: &str, now: f64) {
         match key {
-            "1" => {
-                if self.casts.trigger(SpellId::Point, now) {
-                    self.engine.game_on_cast("pointing", self.aim[0], self.aim[1]);
-                }
-            }
+            // The three core moves (#122, #159). Key 1 (pinch grab) needs the JS shell's scene
+            // grab; this shell has no grab target, so it does nothing here.
             "2" => {
-                if self.casts.trigger(SpellId::Fireball, now) {
-                    self.engine.game_on_cast("fireball", self.aim[0], self.aim[1]);
+                if self.casts.trigger(SpellId::Palm, now) {
+                    self.engine.game_on_cast("palm", self.aim[0], self.aim[1]);
                 }
             }
             "3" => {
-                if self.casts.trigger(SpellId::Spawn, now) {
-                    self.engine.game_on_cast("bounty", self.aim[0], self.aim[1]);
-                }
-            }
-            "4" => {
-                if self.casts.trigger(SpellId::Rain, now) {
-                    self.engine.game_on_cast("rain", self.aim[0], self.aim[1]);
-                }
-            }
-            "5" => {
-                if self.casts.trigger(SpellId::Bless, now) {
-                    self.engine.game_on_cast("bless", self.aim[0], self.aim[1]);
-                }
-            }
-            "6" => {
-                if self.casts.trigger(SpellId::Disaster, now) {
-                    self.engine.game_on_cast("disaster", self.aim[0], self.aim[1]);
-                }
-            }
-            "7" => {
-                if self.casts.trigger(SpellId::Peace, now) {
-                    self.engine.game_on_cast("peace", self.aim[0], self.aim[1]);
+                if self.casts.trigger(SpellId::Fireball, now) {
+                    self.engine.game_on_cast("fireball", self.aim[0], self.aim[1]);
                 }
             }
             " " => {

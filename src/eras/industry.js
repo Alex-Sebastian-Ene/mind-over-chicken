@@ -22,6 +22,7 @@ export class Industry {
   constructor() {
     this.id = 'industry';
     this.era = 'industry';
+    this.rustEra = 1;   // the Rust era sim under this scene (crates/engine/src/eras, #194)
     this.label = 'Era II · Industry';
     this.intro = {
       title: 'Industry',
@@ -497,7 +498,6 @@ export class Industry {
     const w = G.world, ex = w.sites.exchange, picket = w.sites.picket;
     const { x, y } = w.aimPoint(aim);   // aims are 0..1 of the world (#129)
     switch (spell) {
-      case 'fist':
       case 'fireball': {
         // No lightning power in this era, so the fist throws a fireball. It frightens whoever it lands near.
         G.stats.lightning++;

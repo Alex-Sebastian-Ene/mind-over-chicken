@@ -18,7 +18,7 @@ export const EVENT = {
 };
 // News line tones (Rust `news::TONE_*`).
 export const TONE = { info: 0, good: 1, bad: 2, warn: 3 };
-export const CAST = { fireball: 1, spawn: 2, peace: 3, disaster: 4, bless: 5, rain: 6, palm: 3, fist: 1 };
+export const CAST = { fireball: 1, spawn: 2, peace: 3, disaster: 4, bless: 5, rain: 6, palm: 3 };
 export const SEED_SOURCE = ['the run seed', 'calibration', 'your mind', 'rebellion'];
 
 export function loadCivModule() {
@@ -114,6 +114,8 @@ export class Civ {
 
   // ---- founding the civilisations one at a time (#98; the flow lives in Rust, setup.rs) ----
   get setupPhase() { return this.ex.civ_setup_phase(this.w); }
+  // Seeding window progress, 0..1 (the 5 s mind read for the civilisation being founded, #88).
+  get setupProgress() { return this.ex.civ_setup_progress ? this.ex.civ_setup_progress(this.w) : 0; }
   setupHover(x, y) { return this.ex.civ_setup_hover(this.w, x, y) > 0; }
   setupClick(x, y) { return this.ex.civ_setup_click(this.w, x, y); }
   setupEnter() { return this.ex.civ_setup_enter(this.w); }
@@ -123,6 +125,10 @@ export class Civ {
   setupLines() { const len = this.ex.civ_setup_text_build(this.w); return this.str(this.ex.civ_text_buf_ptr(this.w), len).split('\n').filter(Boolean); }
   get time() { return this.ex.civ_time(this.w); }
   get agents() { return this.ex.civ_agent_count(this.w); }
+  // Pinch-grab a person (#188): the nearest living one, where they are, and setting them down.
+  agentNear(x, y, r) { return this.ex.civ_agent_near ? this.ex.civ_agent_near(this.w, x, y, r) : -1; }
+  agentPos(i) { return { x: this.ex.civ_agent_x(this.w, i), y: this.ex.civ_agent_y(this.w, i) }; }
+  moveAgent(i, x, y) { return !!this.ex.civ_move_agent?.(this.w, i, x, y); }
 
   // The camera's 320×180 view as ImageData (copied out of wasm memory).
   render() {

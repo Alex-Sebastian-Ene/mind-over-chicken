@@ -220,6 +220,7 @@ pub fn update(w: &mut World, dt: f32) {
     let night = w.night;
     let mut deaths: Vec<(usize, Cause)> = Vec::new();
     let mut settle: Vec<usize> = Vec::new();
+    let mut felled: Vec<usize> = Vec::new();
     let mut loot: Vec<(usize, u16, u8)> = Vec::new();
     let mut arrivals: Vec<Arrival> = Vec::new();
     {
@@ -406,6 +407,10 @@ pub fn update(w: &mut World, dt: f32) {
                                 _ => ji.rate * if fac.strike_t > 0.0 { 0.3 } else { 1.0 } * (1.0 + 0.5 * focus * (age == 3 || age == 8) as u8 as f32),
                             };
                             a.carry += got * yield_mul * (0.8 + 0.4 * fert);
+                            // Woodcutters clear the forest near their villages, a tree at a time.
+                            if ji.site == Site::Forest && terrain.kind[ti] == FOREST && rng.chance(crate::world::FELL_CHANCE) {
+                                felled.push(ti);
+                            }
                             a.state = State::ToHome;
                         }
                     }
@@ -827,6 +832,9 @@ pub fn update(w: &mut World, dt: f32) {
     }
     for arr in arrivals {
         arrive(w, arr.agent, arr.village);
+    }
+    for i in felled {
+        w.fell_tree(i);
     }
     for i in settle {
         politics::settle(w, i);
