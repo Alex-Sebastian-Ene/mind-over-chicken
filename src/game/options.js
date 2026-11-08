@@ -25,7 +25,7 @@ export const DIFFICULTY = {
       holdSeconds: 4,         // calm held this long feeds the fire
       calmThreshold: 0.45,    // the calm a hold needs (before calibration moves it)
       mammothDanger: 0.6,     // × giant chicken (mammoth) harm
-      crashThreshold: 0.72,   // the goat index crashes below this share of its peak
+      crashThreshold: 0.72,   // the chicken index crashes below this share of its peak
       launchNeeds: 0.8,       // × the work a rocket needs
       hints: 1.5,             // × how often the advisor hints
     },

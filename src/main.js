@@ -794,7 +794,7 @@ function showFail(reason) {
       if (lower.includes('strike') || lower.includes('union')) {
         nextStep = 'Maintain calm when workers strike to settle tensions and resume production.';
       } else if (lower.includes('depression') || lower.includes('price')) {
-        nextStep = 'Steady your breathing and focus to stimulate goat market confidence.';
+        nextStep = 'Steady your breathing and focus to stimulate chicken market confidence.';
       } else if (lower.includes('fire')) {
         nextStep = 'Hold Insight/Focus when the flame begins to fade to rekindle warmth.';
       } else if (lower.includes('starv') || lower.includes('food')) {
@@ -906,7 +906,7 @@ function showEnd() {
     ['Era restarts', s.restarts],
     ['Lightning bolts', s.lightning],
     ['Villagers who found religion', s.smitten],
-    ['Goat recessions caused', s.recessions],
+    ['Chicken recessions caused', s.recessions],
     ['Passengers to the new world', `${x.passengers ?? 0} and one chicken`],
     ['Countdown scrubs', x.scrubs ?? 0],
     ['Seconds of calm', Math.round(b.stats.calmSeconds)],
