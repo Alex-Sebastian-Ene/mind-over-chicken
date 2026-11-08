@@ -4,6 +4,7 @@ use crate::math3d::{Mat4, Vec3};
 /// island reads like a tilted diorama of the 2D map instead of a low wide-angle shot.
 pub const DEFAULT_PITCH: f32 = 1.05;
 pub const DEFAULT_DISTANCE: f32 = 300.0;
+/// Close enough to pick out single villagers (Alex: "zoom in further like I was before").
 pub const MIN_DISTANCE: f32 = 12.0;
 pub const MAX_DISTANCE: f32 = 600.0;
 
