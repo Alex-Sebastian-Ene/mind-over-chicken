@@ -140,7 +140,12 @@ impl AdvisorDriver {
             let total_len = c.text.len() as f32;
             if c.shown < total_len {
                 c.shown = (c.shown + dt * 48.0).min(total_len);
-                let char_idx = c.shown.floor() as usize;
+                // `shown` counts bytes: back off to a char boundary, or a "×" or "·" in a
+                // line panics the slice (and with it every later game_tick).
+                let mut char_idx = (c.shown.floor() as usize).min(c.text.len());
+                while !c.text.is_char_boundary(char_idx) {
+                    char_idx -= 1;
+                }
                 update_dom_text = Some(c.text[..char_idx].to_string());
             } else {
                 c.hold -= dt;
@@ -404,5 +409,14 @@ mod advisor_era_tests {
         assert!(a.say("intro", "industry", "happy", 2, 999.0));
         a.set_era("space");
         assert!(a.say("intro", "space", "happy", 2, 999.0));
+    }
+
+    #[test]
+    fn typing_out_a_line_with_multibyte_characters_does_not_panic() {
+        let mut a = AdvisorDriver::new();
+        assert!(a.say("tier", "Your world enters the age of orbital industry: fleets ×1.20, shields ×1.20 · ✓", "happy", 2, 1.0));
+        for _ in 0..200 {
+            a.update(1.0 / 60.0);
+        }
     }
 }
