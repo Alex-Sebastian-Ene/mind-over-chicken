@@ -304,6 +304,7 @@ let aiGodTimer = 0;
 function resetAIGod() {
   if (!aiGod) return;
   aiGod = null;
+  if (G) G.aiGodActive = false;
   const s = sim();
   if (s) { s.input.calm = false; s.input.focus = false; s.input.panic = false; }
   const btn = $('aiGodBtn');
@@ -333,6 +334,7 @@ function toggleAIGod() {
       },
     });
     aiGod = god;
+    if (G) G.aiGodActive = true;
     aiGodTimer = 0;
     const btn = $('aiGodBtn');
     if (btn) {
@@ -723,7 +725,7 @@ function showFail(reason) {
       } else if (lower.includes('depression') || lower.includes('price')) {
         nextStep = 'Steady your breathing and focus to stimulate goat market confidence.';
       } else if (lower.includes('fire')) {
-        nextStep = 'Stay calm when the flame begins to fade to rekindle warmth.';
+        nextStep = 'Hold Insight/Focus when the flame begins to fade to rekindle warmth.';
       } else if (lower.includes('starv') || lower.includes('food')) {
         nextStep = 'Strike giant chickens with lightning so hunters can gather meat for the tribe.';
       } else if (lower.includes('dark')) {

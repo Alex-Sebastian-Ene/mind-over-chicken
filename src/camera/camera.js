@@ -5,6 +5,7 @@
 //          1. One-hand pinch grabs & relocates living entities under the cursor (#120)
 //          2. Two-hand pinch distance continuously zooms in/out & freezes on release (#119)
 //          3. One deliberate cast (#291): fist → pull back → thrust + open palm = charged fireball.
+//          4. Rain spell (#330): open palm + Insight/Focus held together for two seconds.
 //   Face:  MediaPipe Face Landmarker blendshapes → Joy (continuous) + Surprise (debounced event) (#117).
 //   Coach: Collapsible bottom panel with procedural 21-landmark ghost hands (#123).
 //
@@ -27,7 +28,7 @@ import { manualMood, surpriseRisingEdge } from './manual-mood.js';
 import { loadVision } from './vision.js';
 import { loadEngine, workerPreference } from './engine.js';
 import { handsEnabled, setHandsEnabled } from './hands-pref.js';
-import { FingerController, MultiHandTracker } from './fingers.js';
+import { FingerController, MultiHandTracker, pinchMetrics } from './fingers.js';
 import { initCoach } from './coach.js';
 import { FrameMeter } from './meter.js';
 import { drawHand } from './draw.js';
@@ -105,6 +106,7 @@ const TEMPLATE = `
       <b data-cam-fb-pct>0%</b>
     </div>
     <p class="eeg-msg">Hold a fist, pull it back, then thrust forward and open your palm. Or hold <kbd>3</kbd> and release.</p>
+    <p class="eeg-msg">Rain spell: open your palm and hold Insight/Focus for two seconds. Without the camera, hold <kbd>F</kbd>.</p>
   </section>
 
   <section class="eeg-sec" aria-label="Mood read from your face">
@@ -396,6 +398,10 @@ export function initCamera({
   // Hand moves switched off: let go of anything held and forget the hands.
   function dropHands() {
     const G = getG();
+    if (G) {
+      G.handInput = { active: false, palm: false, at: performance.now() };
+      if (G.scene) G.scene.handInput = G.handInput;
+    }
     if (grabbed && G?.scene?.onGrabEnd) {
       try { G.scene.onGrabEnd({ x: G.brain?.aim?.x ?? 0.5, y: G.brain?.aim?.y ?? 0.5, cancelled: true }); } catch {}
     }
@@ -431,6 +437,10 @@ export function initCamera({
     lastGestureAt = 0;
     pinchSmoother.reset();
     fireball.reset();
+    if (G) {
+      G.handInput = { active: false, palm: false, at: performance.now() };
+      if (G.scene) G.scene.handInput = G.handInput;
+    }
     movementCal?.stop?.();
     if (calibModal) calibModal.hidden = true;
     mood = neutralMood();
@@ -590,6 +600,16 @@ export function initCamera({
 
     const G = getG();
     const live = canCast() && !!G?.brain;
+    // Rain spell (#330): the Stone Age reads this shared hand state. Open palm + Insight.
+    const handSize = hand && hand.length >= 21 ? pinchMetrics(hand, handAspect) : null;
+    const palm = !!hand && (
+      (gesture.name === 'Open_Palm' && gesture.score >= 0.55)
+      || (handSize && handSize.reach > 1.35)
+    );
+    if (G) {
+      G.handInput = { active: true, palm, at: now };
+      if (G.scene) G.scene.handInput = G.handInput;   // AI-world capital tribe shares the hand state
+    }
 
     // Aim movement while pinched (#270): it is head pose or mouse — never the webcam.
     // Screen-space keeps the tilt independent of the world camera; screenX/Y map a world aim
