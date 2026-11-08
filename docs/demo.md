@@ -15,7 +15,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 - [ ] **Webcam**: Camera positioned at eye level with even lighting. Click **"Camera"** on the top bar to open the sidebar, then **"Start Camera"** and allow the permission prompt (status turns green).
 - [ ] **Hotkeys Reference Card**:
   - `Space`: Hold Calm (high alpha)
-  - `F`: Hold Focus / Rain or Calm (beta+theta). Hold ~2 s to summon rain and put out a forest fire
+  - `F`: Hold Focus / Insight. Hold ~2 s (Rain or Calm) to summon rain and put out a forest fire
   - `Shift`: Spike Stress (drops calm)
   - `B`: Deliberate Blink (lightning bolt). A strike on a tree starts a forest fire
   - `T`: Toggle 3D Heightmap Terrain vs 2D Classic

@@ -22,7 +22,7 @@ function fakeDoc() {
   };
 }
 const fakeBrain = () => ({
-  calm: 0.4, focus: 0.2, rain: 0.3, stress: 0.1, cue: 'rest', personal: {}, genericCalm: 0.3, genericFocus: 0.2,
+  calm: 0.4, focus: 0.2, stress: 0.1, cue: 'rest', personal: {}, genericCalm: 0.3, genericFocus: 0.2,
   stats: { blinks: 0 },
   threshold: () => 0.5,
   model: { count: () => 3, trained: false, accuracy: 0, chance: 0.33, trust: () => 0, trainCount: 0, lastTrainMs: 0, weights: () => [] },
