@@ -33,7 +33,7 @@ export function galaxySummary(galaxy) {
   const planets = Array.isArray(galaxy?.planets) ? galaxy.planets : [];
   return planets.map((p) => ({
     name: String(p.name ?? ''), seed: finite(p.seed) ? p.seed : null,
-    channel: p.channel ?? null, biome: p.biome ?? null, home: !!p.home,
+    channel: p.channel ?? null, biome: p.biome ?? null, home: !!p.home, forming: !!p.forming,
   }));
 }
 
