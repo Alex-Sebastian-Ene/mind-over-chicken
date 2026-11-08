@@ -15,6 +15,7 @@ pub mod particles;
 pub mod shell;
 mod sprites;
 mod terrain;
+pub mod view; // the home world is bigger than the screen (#129)
 
 pub use app::RustApp;
 pub use biosignal::{RustBlinkClassifier, RustImuTracker};
@@ -25,6 +26,8 @@ use math3d::Vec3;
 use mesh3d::TerrainMesh;
 use sprites::*;
 use terrain::{Mulberry32, Terrain};
+pub use view::ViewCamera;
+use view::WorldGrid;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
@@ -34,6 +37,8 @@ pub struct Engine {
     renderer_3d: Option<WebGl3DRenderer>,
     camera_3d: OrbitCamera,
     terrain: Option<Terrain>,
+    /// The world's heights at its own size (#129): the 3D mesh, raycast, billboards and lights.
+    grid: WorldGrid,
     frame_pixels: Vec<u8>,
     lights: Vec<Light>,
     lights_3d: Vec<Light3D>,
@@ -88,6 +93,7 @@ impl Engine {
             renderer_3d,
             camera_3d,
             terrain: None,
+            grid: WorldGrid::new(0, 0, Vec::new()),
             frame_pixels: vec![0; W * H * 4],
             lights: Vec::new(),
             lights_3d: Vec::new(),
@@ -121,9 +127,10 @@ impl Engine {
                 sprites::ATLAS_SIZE as i32,
             );
             if let Some(t) = &self.terrain {
-                let mesh = TerrainMesh::build(&t.h, W, H, W as f32, H as f32, 24.0, 0.33);
-                r3d.upload_mesh(&mesh);
                 r3d.upload_terrain_texture(&t.pixels, W as i32, H as i32);
+            }
+            if self.grid.w > 0 {
+                r3d.upload_mesh(&Self::mesh_for(&self.grid));
             }
             self.renderer_3d = Some(r3d);
         }
@@ -133,22 +140,37 @@ impl Engine {
 
     pub fn init_world(&mut self, seed: u32) {
         let terrain = Terrain::new(seed);
+        // Until JS hands over its world (set_heightmap), the 3D relief is the Rust port's map.
+        self.grid = WorldGrid::new(W, H, terrain.h.clone());
         self.terrain = Some(terrain);
         self.set_era(self.current_era);
 
         // Build 3D heightmap terrain mesh
         if let (Some(r3d), Some(t)) = (&mut self.renderer_3d, &self.terrain) {
-            let mesh = TerrainMesh::build(&t.h, W, H, W as f32, H as f32, 24.0, 0.33);
-            r3d.upload_mesh(&mesh);
+            r3d.upload_mesh(&Self::mesh_for(&self.grid));
             r3d.upload_terrain_texture(&t.pixels, W as i32, H as i32);
         }
+    }
+
+    /// The 3D relief for a world grid: one vertex per map pixel, one world unit per pixel.
+    fn mesh_for(grid: &WorldGrid) -> TerrainMesh {
+        TerrainMesh::build(&grid.heights, grid.w, grid.h, grid.w as f32, grid.h as f32, 24.0, 0.33)
+    }
+
+    /// The world's size in map pixels (= 3D units), as last set by `set_heightmap` (#129).
+    pub fn world_w(&self) -> usize {
+        self.grid.w
+    }
+
+    pub fn world_h(&self) -> usize {
+        self.grid.h
     }
 
     pub fn set_era(&mut self, era: u8) {
         self.current_era = era;
         if let Some(t) = &mut self.terrain {
             t.bake_era(era);
-            if let Some(r3d) = &self.renderer_3d {
+            if let Some(r3d) = &mut self.renderer_3d {
                 r3d.upload_terrain_texture(&t.pixels, W as i32, H as i32);
             }
         }
@@ -170,7 +192,7 @@ impl Engine {
     pub fn set_camera_target(&mut self, tx: f32, tz: f32) {
         self.camera_3d.target.x = tx;
         self.camera_3d.target.z = tz;
-        let h_norm = self.get_terrain_height_at(tx.rem_euclid(W as f32), tz.rem_euclid(H as f32));
+        let h_norm = self.get_terrain_height_at(tx, tz); // the world grid wraps (#129)
         self.camera_3d.target.y = (h_norm * 24.0).max(7.92);
     }
 
@@ -198,10 +220,10 @@ impl Engine {
     pub fn screen_to_ground(&self, sx: f32, sy: f32, cw: f32, ch: f32) -> js_sys::Float32Array {
         let result = js_sys::Float32Array::new_with_length(2);
         // Land on the terrain surface (hills included), never below the sea. Seamless torus (#111).
-        let ground_at = |x: f32, z: f32| (self.get_terrain_height_at(x.rem_euclid(W as f32), z.rem_euclid(H as f32)) * 24.0).max(7.92);
+        let ground_at = |x: f32, z: f32| (self.grid.height_at(x, z) * 24.0).max(7.92);
         if let Some([hx, hz]) = self.camera_3d.screen_to_terrain(sx, sy, cw, ch, 24.0, ground_at) {
-            let hx = hx.rem_euclid(W as f32);
-            let hz = hz.rem_euclid(H as f32);
+            let hx = view::wrap(hx, self.grid.width());
+            let hz = view::wrap(hz, self.grid.depth());
             result.set_index(0, hx);
             result.set_index(1, hz);
         } else {
@@ -214,20 +236,10 @@ impl Engine {
     // Project 3D terrain world coordinates [wx, wz] to screen pixels [sx, sy]
     pub fn project_to_screen(&self, wx: f32, wz: f32, cw: f32, ch: f32) -> js_sys::Float32Array {
         let result = js_sys::Float32Array::new_with_length(2);
-        let mut wrapped_x = wx.rem_euclid(W as f32);
-        let mut wrapped_z = wz.rem_euclid(H as f32);
-        // Torus seam wrapping relative to camera target (#111)
-        if wrapped_x - self.camera_3d.target.x > (W as f32) * 0.5 {
-            wrapped_x -= W as f32;
-        } else if self.camera_3d.target.x - wrapped_x > (W as f32) * 0.5 {
-            wrapped_x += W as f32;
-        }
-        if wrapped_z - self.camera_3d.target.z > (H as f32) * 0.5 {
-            wrapped_z -= H as f32;
-        } else if self.camera_3d.target.z - wrapped_z > (H as f32) * 0.5 {
-            wrapped_z += H as f32;
-        }
-        let h_norm = self.get_terrain_height_at(wrapped_x.rem_euclid(W as f32), wrapped_z.rem_euclid(H as f32));
+        // The copy of the point nearest the camera target: the torus repeats both ways (#111).
+        let t = &self.camera_3d.target;
+        let (wrapped_x, wrapped_z) = self.grid.nearest_copy(wx, wz, t.x, t.z);
+        let h_norm = self.grid.height_at(wrapped_x, wrapped_z);
         let wy = (h_norm * 24.0).max(7.92);
         if let Some([sx, sy]) = self.camera_3d.world_to_screen(wrapped_x, wy, wrapped_z, cw, ch) {
             result.set_index(0, sx);
@@ -267,29 +279,33 @@ impl Engine {
         }
     }
 
-    /// Use the JS world's heights (row-major W×H, 0..1, sea level 0.33) for the 3D mesh, the
-    /// raycast and where billboards stand.
-    pub fn set_heightmap(&mut self, heights: &[f32]) -> Result<(), JsValue> {
-        if heights.len() != W * H {
+    /// Use the JS world's heights (row-major `width × height`, 0..1, sea level 0.33) for the 3D
+    /// mesh, the raycast and where billboards stand. The world may be bigger than the view
+    /// (#129: 640×360 under a 320×180 screen); width 0 means the classic 320×180.
+    pub fn set_heightmap(&mut self, heights: &[f32], width: usize, height: usize) -> Result<(), JsValue> {
+        let (w, h) = if width == 0 || height == 0 { (W, H) } else { (width, height) };
+        if heights.len() != w * h {
             return Err(JsValue::from_str(&format!(
                 "set_heightmap: expected {} heights ({}x{}), got {}",
-                W * H, W, H, heights.len()
+                w * h, w, h, heights.len()
             )));
         }
-        if let Some(t) = &mut self.terrain {
-            t.h.copy_from_slice(heights);
+        if (w, h) == (W, H) {
+            if let Some(t) = &mut self.terrain {
+                t.h.copy_from_slice(heights);
+            }
         }
+        self.grid = WorldGrid::new(w, h, heights.to_vec());
         if let Some(r3d) = &mut self.renderer_3d {
-            let mesh = TerrainMesh::build(heights, W, H, W as f32, H as f32, 24.0, 0.33);
-            r3d.upload_mesh(&mesh);
+            r3d.upload_mesh(&Self::mesh_for(&self.grid));
         }
         Ok(())
     }
 
     /// Generate a home world with moc-terrain (#109) and make it the engine's: heights, tiles,
     /// colours, sites and the 3D relief. `width`/`height` 0 (or left out) mean the engine's
-    /// 320×180; the engine only draws worlds of its own size, so another size only updates the
-    /// 3D mesh (until the game supports bigger maps, #129).
+    /// 320×180. Any size drives the 3D mesh, raycast and billboards (#129); the Rust 2D port's
+    /// own tiles stay 320×180.
     pub fn generate_terrain(&mut self, seed: u32, width: u32, height: u32) -> Result<(), JsValue> {
         let (w, h) = if width == 0 || height == 0 { (W, H) } else { (width as usize, height as usize) };
         let map = moc_terrain::generate(&moc_terrain::TerrainParams::home_world_sized(seed, w, h));
@@ -299,12 +315,10 @@ impl Engine {
             t.bake_era(self.current_era);
             self.terrain = Some(t);
         }
+        self.grid = WorldGrid::new(map.width, map.height, map.heights.clone());
         if let Some(r3d) = &mut self.renderer_3d {
-            let mesh = TerrainMesh::build(&map.heights, w, h, w as f32, h as f32, 24.0, 0.33);
-            r3d.upload_mesh(&mesh);
-            if let Some(t) = &self.terrain {
-                r3d.upload_terrain_texture(&t.pixels, W as i32, H as i32);
-            }
+            r3d.upload_mesh(&Self::mesh_for(&self.grid));
+            r3d.upload_terrain_texture(&map.rgba, map.width as i32, map.height as i32);
         }
         Ok(())
     }
@@ -336,27 +350,7 @@ impl Engine {
     }
 
     fn get_terrain_height_at(&self, x: f32, z: f32) -> f32 {
-        if let Some(t) = &self.terrain {
-            let map_w = W as f32;
-            let map_h = H as f32;
-            let wx = x.rem_euclid(map_w);
-            let wz = z.rem_euclid(map_h);
-            let x0 = wx.floor() as usize;
-            let z0 = wz.floor() as usize;
-            let x1 = (x0 + 1) % W;
-            let z1 = (z0 + 1) % H;
-            let fx = wx - wx.floor();
-            let fz = wz - wz.floor();
-            let h00 = t.h[z0 * W + x0];
-            let h10 = t.h[z0 * W + x1];
-            let h01 = t.h[z1 * W + x0];
-            let h11 = t.h[z1 * W + x1];
-            let h0 = h00 * (1.0 - fx) + h10 * fx;
-            let h1 = h01 * (1.0 - fx) + h11 * fx;
-            h0 * (1.0 - fz) + h1 * fz
-        } else {
-            0.33
-        }
+        self.grid.height_at(x, z)
     }
 
     pub fn add_billboard(
@@ -381,10 +375,11 @@ impl Engine {
         frame: u32,
         variant: u32,
     ) {
-        let map_w = W as f32;
-        let map_h = H as f32;
-        let wx = x.rem_euclid(map_w);
-        let wz = z.rem_euclid(map_h);
+        // The world's own size (640×360 at home, #129), wrapping both ways.
+        let map_w = self.grid.width();
+        let map_h = self.grid.depth();
+        let wx = view::wrap(x, map_w);
+        let wz = view::wrap(z, map_h);
         let h_norm = self.get_terrain_height_at(wx, wz);
 
         let ground_y = (h_norm * 24.0).max(7.92) + 0.15; // Ground elevation or at water level (7.92)
@@ -525,8 +520,8 @@ impl Engine {
     ) {
         self.time_3d += dt;
         // Torus wrap camera target along both axes (#111)
-        self.camera_3d.target.x = self.camera_3d.target.x.rem_euclid(W as f32);
-        self.camera_3d.target.z = self.camera_3d.target.z.rem_euclid(H as f32);
+        self.camera_3d.target.x = view::wrap(self.camera_3d.target.x, self.grid.width());
+        self.camera_3d.target.z = view::wrap(self.camera_3d.target.z, self.grid.depth());
         self.settle_camera_on_ground(dt);
 
         let sun_dir = Vec3::new(sun_x, sun_y, sun_z).normalize();
@@ -781,24 +776,18 @@ impl Engine {
         sprites::put_pixel(&mut self.frame_pixels, x, y, r, g, b, a);
     }
 
+    /// The 2D frame: the low-res view canvas (320×180) the 2D renderer scales up and lights.
     pub fn upload_canvas(&mut self, canvas: &HtmlCanvasElement) -> Result<(), JsValue> {
-        self.renderer.upload_canvas(canvas)?;
-        if let Some(r3d) = &self.renderer_3d {
-            let gl = &r3d.gl;
-            gl.bind_texture(
-                web_sys::WebGlRenderingContext::TEXTURE_2D,
-                Some(&r3d.terrain_texture),
-            );
-            gl.tex_image_2d_with_u32_and_u32_and_canvas(
-                web_sys::WebGlRenderingContext::TEXTURE_2D,
-                0,
-                web_sys::WebGlRenderingContext::RGBA as i32,
-                web_sys::WebGlRenderingContext::RGBA,
-                web_sys::WebGlRenderingContext::UNSIGNED_BYTE,
-                canvas,
-            )?;
+        self.renderer.upload_canvas(canvas)
+    }
+
+    /// The 3D terrain's colour map: a canvas the size of the world (#129), not the screen. The
+    /// mesh's texture coordinates span the whole world, so this is what drapes over the relief.
+    pub fn upload_terrain_canvas(&mut self, canvas: &HtmlCanvasElement) -> Result<(), JsValue> {
+        match &mut self.renderer_3d {
+            Some(r3d) => r3d.upload_terrain_canvas(canvas),
+            None => Ok(()),
         }
-        Ok(())
     }
 
     pub fn end_frame(
@@ -990,7 +979,7 @@ impl Engine {
             t.generate();
             t.bake_era(self.game.era_index as u8);
             if let Some(r3d) = &mut self.renderer_3d {
-                r3d.upload_terrain_texture(&t.pixels, 320, 180);
+                r3d.upload_terrain_texture(&t.pixels, W as i32, H as i32);
             }
         }
     }

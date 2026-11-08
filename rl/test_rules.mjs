@@ -13,7 +13,7 @@ import { AIGod, autopilotStep } from '../src/ai/autopilot.js';
 import { Brain } from '../src/brain/brain.js';
 import { SimSource } from '../src/brain/sources.js';
 import { observe, aimAt, planetDist, wrapDx, OBS_NAMES, OBS_SIZE, scriptedAction } from '../src/ai/observe.js';
-import { W } from '../src/sim/util.js';
+import { W, H } from '../src/sim/util.js';
 
 Math.random = mulberry32(12345);
 const results = [];
@@ -67,8 +67,11 @@ test('planet wrap: distances and aims go the short way round', () => {
   assert.equal(wrapDx(-(W - 3)), 3);
   assert.ok(Math.abs(planetDist(1, 50, W - 1, 50) - 2) < 1e-9);
   const a = aimAt(-1, 50);                    // one pixel west of x = 0 is x = W - 1
-  assert.ok(Math.abs(a.x * (W - 1) - (W - 1)) < 1e-9);
-  assert.ok(aimAt(W + 5, 50).x * (W - 1) - 5 < 1e-9);
+  assert.ok(Math.abs(a.x * W - (W - 1)) < 1e-9);   // aims are 0..1 of the world (world.aimPoint, #129)
+  assert.ok(Math.abs(aimAt(W + 5, 50).x * W - 5) < 1e-9);
+  assert.ok(Math.abs(aimAt(5, -1).y * H - (H - 1)) < 1e-9);   // north–south wraps too (#111)
+  // On the 640×360 home world, sizes come from the world.
+  assert.ok(Math.abs(planetDist(1, 2, 639, 358, 640, 360) - Math.hypot(2, 4)) < 1e-9);
 });
 
 test('observation covers the whole planet', () => {

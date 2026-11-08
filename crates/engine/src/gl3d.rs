@@ -1,6 +1,6 @@
 use crate::camera3d::OrbitCamera;
-use crate::math3d::Vec3;
-use crate::mesh3d::TerrainMesh;
+use crate::math3d::{Frustum, Vec3};
+use crate::mesh3d::{MeshChunk, TerrainMesh};
 use web_sys::{
     WebGlBuffer, WebGlFramebuffer, WebGlProgram, WebGlRenderbuffer, WebGlRenderingContext,
     WebGlShader, WebGlTexture, WebGlUniformLocation,
@@ -30,6 +30,15 @@ pub struct WebGl3DRenderer {
     pub terrain_vbo: WebGlBuffer,
     pub terrain_ibo: WebGlBuffer,
     pub terrain_index_count: i32,
+    /// Independently drawn and culled pieces of the terrain (u16 indices each, #129).
+    pub terrain_chunks: Vec<MeshChunk>,
+    /// The world the mesh spans: the period of the wrap copies (a torus, #111).
+    pub world_w: f32,
+    pub world_h: f32,
+    pub water_min: [f32; 3],
+    pub water_max: [f32; 3],
+    /// Size of the terrain texture now on the GPU, so per-frame uploads can reuse it.
+    pub terrain_tex_size: (u32, u32),
 
     // Water buffers
     pub water_vbo: WebGlBuffer,
@@ -594,6 +603,12 @@ impl WebGl3DRenderer {
             terrain_vbo,
             terrain_ibo,
             terrain_index_count: 0,
+            terrain_chunks: Vec::new(),
+            world_w: crate::sprites::W as f32,
+            world_h: crate::sprites::H as f32,
+            water_min: [0.0; 3],
+            water_max: [0.0; 3],
+            terrain_tex_size: (0, 0),
             water_vbo,
             water_ibo,
             water_index_count: 0,
@@ -667,6 +682,11 @@ impl WebGl3DRenderer {
             );
         }
         self.terrain_index_count = mesh.indices.len() as i32;
+        self.terrain_chunks = mesh.chunks.clone();
+        self.world_w = mesh.world_w;
+        self.world_h = mesh.world_h;
+        self.water_min = mesh.water_min;
+        self.water_max = mesh.water_max;
 
         // Water vertices
         gl.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&self.water_vbo));
@@ -692,7 +712,30 @@ impl WebGl3DRenderer {
         self.water_index_count = mesh.water_indices.len() as i32;
     }
 
-    pub fn upload_terrain_texture(&self, pixels: &[u8], width: i32, height: i32) {
+    /// The terrain's colour map from a canvas the size of the world (#129): the era's base layer
+    /// plus whatever the scene paints on the ground this frame. Reuses the texture's storage
+    /// while the size stays the same (the per-frame case).
+    pub fn upload_terrain_canvas(&mut self, canvas: &web_sys::HtmlCanvasElement) -> Result<(), wasm_bindgen::JsValue> {
+        let gl = &self.gl;
+        let size = (canvas.width(), canvas.height());
+        gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&self.terrain_texture));
+        if size == self.terrain_tex_size {
+            gl.tex_sub_image_2d_with_u32_and_u32_and_canvas(
+                WebGlRenderingContext::TEXTURE_2D, 0, 0, 0,
+                WebGlRenderingContext::RGBA, WebGlRenderingContext::UNSIGNED_BYTE, canvas,
+            )?;
+        } else {
+            gl.tex_image_2d_with_u32_and_u32_and_canvas(
+                WebGlRenderingContext::TEXTURE_2D, 0, WebGlRenderingContext::RGBA as i32,
+                WebGlRenderingContext::RGBA, WebGlRenderingContext::UNSIGNED_BYTE, canvas,
+            )?;
+            self.terrain_tex_size = size;
+        }
+        Ok(())
+    }
+
+    pub fn upload_terrain_texture(&mut self, pixels: &[u8], width: i32, height: i32) {
+        self.terrain_tex_size = (width as u32, height as u32);
         let gl = &self.gl;
         gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&self.terrain_texture));
         gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
@@ -800,44 +843,45 @@ impl WebGl3DRenderer {
 
         gl.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&self.terrain_vbo));
         let stride = 8 * 4;
-        let terrain_attrs = [
-            bind_attr(gl, &self.terrain_program, "a_position", 3, stride, 0),
-            bind_attr(gl, &self.terrain_program, "a_texCoord", 2, stride, 3 * 4),
-            bind_attr(gl, &self.terrain_program, "a_normal", 3, stride, 5 * 4),
-        ];
-
-        // Determine visible wrap copies along both axes for seamless torus world (#111)
-        let map_w = crate::sprites::W as f32;
-        let map_h = crate::sprites::H as f32;
-        let view_radius_x = (camera.distance * 0.75 + 40.0).max(150.0);
-        let view_radius_z = (camera.distance * 0.55 + 30.0).max(120.0);
-
-        let mut x_offsets = vec![0.0f32];
-        if camera.target.x - view_radius_x < 0.0 {
-            x_offsets.push(-map_w);
-        }
-        if camera.target.x + view_radius_x > map_w {
-            x_offsets.push(map_w);
-        }
-
-        let mut z_offsets = vec![0.0f32];
-        if camera.target.z - view_radius_z < 0.0 {
-            z_offsets.push(-map_h);
-        }
-        if camera.target.z + view_radius_z > map_h {
-            z_offsets.push(map_h);
-        }
-
         gl.bind_buffer(WebGlRenderingContext::ELEMENT_ARRAY_BUFFER, Some(&self.terrain_ibo));
-        for &off_z in &z_offsets {
-            for &off_x in &x_offsets {
-                gl.uniform1f(Some(&self.u_terrain_offset_x), off_x);
-                gl.uniform1f(Some(&self.u_terrain_offset_z), off_z);
+
+        // The world is a torus (#111) bigger than the view (#129): each chunk is drawn at every
+        // wrap copy (one world period either way) that the camera can see, and nowhere else.
+        let frustum = Frustum::from_view_proj(&view_proj);
+        let (map_w, map_h) = (self.world_w, self.world_h);
+        let mut offsets = Vec::with_capacity(9);
+        for oz in [-map_h, 0.0, map_h] {
+            for ox in [-map_w, 0.0, map_w] {
+                offsets.push((ox, oz));
+            }
+        }
+        let visible = |min: [f32; 3], max: [f32; 3], pad: f32, ox: f32, oz: f32| {
+            frustum.intersects_aabb(
+                [min[0] + ox - pad, min[1] - pad, min[2] + oz - pad],
+                [max[0] + ox + pad, max[1] + pad, max[2] + oz + pad],
+            )
+        };
+        let mut terrain_attrs = [None, None, None];
+        for chunk in &self.terrain_chunks {
+            let seen: Vec<(f32, f32)> = offsets.iter().copied().filter(|&(ox, oz)| visible(chunk.min, chunk.max, 0.5, ox, oz)).collect();
+            if seen.is_empty() {
+                continue;
+            }
+            // u16 indices are local to the chunk, so point the attributes at its first vertex.
+            let base = (chunk.first_vertex * 8 * 4) as i32;
+            terrain_attrs = [
+                bind_attr(gl, &self.terrain_program, "a_position", 3, stride, base),
+                bind_attr(gl, &self.terrain_program, "a_texCoord", 2, stride, base + 3 * 4),
+                bind_attr(gl, &self.terrain_program, "a_normal", 3, stride, base + 5 * 4),
+            ];
+            for (ox, oz) in seen {
+                gl.uniform1f(Some(&self.u_terrain_offset_x), ox);
+                gl.uniform1f(Some(&self.u_terrain_offset_z), oz);
                 gl.draw_elements_with_i32(
                     WebGlRenderingContext::TRIANGLES,
-                    self.terrain_index_count,
+                    chunk.index_count as i32,
                     WebGlRenderingContext::UNSIGNED_SHORT,
-                    0,
+                    (chunk.first_index * 2) as i32,
                 );
             }
         }
@@ -873,17 +917,18 @@ impl WebGl3DRenderer {
         gl.bind_buffer(WebGlRenderingContext::ELEMENT_ARRAY_BUFFER, Some(&self.water_ibo));
         // The glaze must not hide sprites standing in shallow water, so it doesn't write depth.
         gl.depth_mask(false);
-        for &off_z in &z_offsets {
-            for &off_x in &x_offsets {
-                gl.uniform1f(Some(&self.u_water_offset_x), off_x);
-                gl.uniform1f(Some(&self.u_water_offset_z), off_z);
-                gl.draw_elements_with_i32(
-                    WebGlRenderingContext::TRIANGLES,
-                    self.water_index_count,
-                    WebGlRenderingContext::UNSIGNED_SHORT,
-                    0,
-                );
+        for &(ox, oz) in &offsets {
+            if !visible(self.water_min, self.water_max, 1.0, ox, oz) {
+                continue;
             }
+            gl.uniform1f(Some(&self.u_water_offset_x), ox);
+            gl.uniform1f(Some(&self.u_water_offset_z), oz);
+            gl.draw_elements_with_i32(
+                WebGlRenderingContext::TRIANGLES,
+                self.water_index_count,
+                WebGlRenderingContext::UNSIGNED_SHORT,
+                0,
+            );
         }
         gl.depth_mask(true);
         unbind_attrs(gl, &water_attrs);
@@ -950,12 +995,14 @@ impl WebGl3DRenderer {
                 bind_attr(gl, &self.billboard_program, "a_texCoord", 2, b_stride, 6 * 4),
             ];
 
-            for &off_z in &z_offsets {
-                for &off_x in &x_offsets {
-                    gl.uniform1f(Some(&self.u_billboard_offset_x), off_x);
-                    gl.uniform1f(Some(&self.u_billboard_offset_z), off_z);
-                    gl.draw_arrays(WebGlRenderingContext::TRIANGLES, 0, billboards.len() as i32);
+            // Sprites stand up to ~40 units tall and spread a few units around their feet.
+            for &(ox, oz) in &offsets {
+                if !visible([0.0, 0.0, 0.0], [map_w, 48.0, map_h], 16.0, ox, oz) {
+                    continue;
                 }
+                gl.uniform1f(Some(&self.u_billboard_offset_x), ox);
+                gl.uniform1f(Some(&self.u_billboard_offset_z), oz);
+                gl.draw_arrays(WebGlRenderingContext::TRIANGLES, 0, billboards.len() as i32);
             }
             unbind_attrs(gl, &billboard_attrs);
         }

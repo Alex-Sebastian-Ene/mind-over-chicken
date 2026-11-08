@@ -472,20 +472,8 @@ export class CivSandbox {
 
   // ---------- drawing ----------
   draw(ctx) {
-    // The surface strip pans east–west in main.js (drag, wheel); this planet has its own
-    // camera, so take that pan over and keep the strip still.
-    const cos = this.cosmos;
-    if (cos) {
-      if (cos.panX) {
-        const d = cos.panX > W / 2 ? cos.panX - W : cos.panX;
-        this.civ?.pan(-d, 0);
-        cos.panX = 0;
-      }
-      if (cos.panY) {
-        this.civ?.pan(0, -cos.panY);
-        cos.panY = 0;
-      }
-    }
+    // Every pan (drag, A/D/W/S, wheel) reaches this planet's own camera through panBy: main.js
+    // routes cosmos.pan here while the sandbox is on (#129).
     const civ = this.civ;
     if (!civ) {
       ctx.fillStyle = '#0b1020';

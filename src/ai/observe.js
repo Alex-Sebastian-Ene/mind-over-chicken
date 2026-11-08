@@ -4,10 +4,10 @@
 // scaling constants, action decoding. Change anything here and the policy must be retrained
 // (bump OBS_VERSION).
 //
-// The world is a planet: an equirectangular W x H map that wraps east-west, so every
-// horizontal distance here is the shorter way round, and aims are never clamped in x.
+// The world is a torus (#111) of its own size (640×360 at home, #129; W x H by default), so every
+// distance here is the shorter way round, and aims are 0..1 of the world.
 
-import { W, H } from '../sim/util.js';
+import { W, H, wrap, wrapDelta } from '../sim/util.js';
 
 export const OBS_VERSION = 2;
 
@@ -46,10 +46,11 @@ export const OBS_SIZE = OBS_NAMES.length;
 
 const cap = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
-// Shorter east-west separation on a planet W pixels round.
-export const wrapDx = (dx) => dx - W * Math.round(dx / W);
-export const wrapX = (x) => ((x % W) + W) % W;
-export const planetDist = (ax, ay, bx, by) => Math.hypot(wrapDx(ax - bx), ay - by);
+// Shorter separation on a torus `w` x `h` pixels round.
+export const wrapDx = (dx, w = W) => wrapDelta(dx, 0, w);
+export const wrapX = (x, w = W) => wrap(x, w);
+export const planetDist = (ax, ay, bx, by, w = W, h = H) => Math.hypot(wrapDelta(ax, bx, w), wrapDelta(ay, by, h));
+const sizeOf = (scene) => [scene.G?.world?.width || W, scene.G?.world?.height || H];
 
 export function calmThreshold(G) {
   return G.brain?.threshold ? G.brain.threshold('calm', 0.55) : 0.55;
@@ -57,10 +58,11 @@ export function calmThreshold(G) {
 
 export function nearestMammoth(scene) {
   const f = scene.fire;
+  const [w, h] = sizeOf(scene);
   let best = null, bd = Infinity;
   for (const m of scene.mammoths || []) {
     if (!m.alive) continue;
-    const d = planetDist(m.x, m.y, f.x, f.y);
+    const d = planetDist(m.x, m.y, f.x, f.y, w, h);
     if (d < bd) { bd = d; best = m; }
   }
   return best ? { m: best, d: bd } : null;
@@ -113,19 +115,19 @@ export function observe(scene, G, { lastBolt = -Infinity } = {}) {
   ];
 }
 
-// World pixel -> the 0..1 aim StoneAge.onBlink expects (it rounds aim * (W-1, H-1)).
-// x wraps round the planet and is never clamped; y stops at the poles.
-export const aimAt = (x, y) => ({ x: wrapX(x) / (W - 1), y: cap(y / (H - 1), 0, 1) });
+// World pixel -> the 0..1 aim StoneAge.onBlink expects (world.aimPoint rounds aim * size).
+// Both axes wrap round the torus.
+export const aimAt = (x, y, w = W, h = H) => ({ x: wrap(x, w) / w, y: wrap(y, h) / h });
 
 // Turn a discrete action into what the god does this step:
 //   aim: where to throw lightning (null = no bolt), calm: hold calm this step.
 export function decodeAction(scene, action, rng = Math.random) {
   switch (action) {
-    case 1: return { aim: aimAt(scene.fire.x, scene.fire.y), calm: false };
+    case 1: return { aim: aimAt(scene.fire.x, scene.fire.y, ...sizeOf(scene)), calm: false };
     case 2: {
       const near = nearestMammoth(scene);
       // StoneAge tests the bolt against (m.x, m.y - 2).
-      return { aim: near ? aimAt(near.m.x, near.m.y - 2) : null, calm: false };
+      return { aim: near ? aimAt(near.m.x, near.m.y - 2, ...sizeOf(scene)) : null, calm: false };
     }
     case 3: return { aim: null, calm: true };
     case 4: return { aim: { x: rng(), y: rng() }, calm: false }; // anywhere on the planet
