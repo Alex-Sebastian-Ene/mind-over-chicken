@@ -71,7 +71,7 @@ test('your people in the Stone Age: camp, colonies and boats; later every contin
   assert.equal(later.launched, false);
 });
 
-test('a raid takes food and people (never the last three); trade brings food; wars move the goat market', () => {
+test('a raid takes food and people (never the last three); trade brings food; wars move the chicken market', () => {
   const people = Array.from({ length: 5 }, (_, i) => ({ alive: true, x: 10 * i, y: 0 }));
   const scene = { food: 2, living: () => people.filter((p) => p.alive), kill: (p) => { p.alive = false; } };
   const said = [];

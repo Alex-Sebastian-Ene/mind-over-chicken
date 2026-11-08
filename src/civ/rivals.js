@@ -5,7 +5,7 @@
 // from the home World's tiles and heights. Your tribe is a mirrored faction inside their sim, so
 // they can meet you, trade, raid, go to war and race you to space; the era scene stays the truth
 // for your own people. What they do to you arrives as lines (ticker text, an advisor line, food,
-// people hurt, a goat-market shock) that applyRivalLine() turns into the scene's own numbers.
+// people hurt, a chicken-market shock) that applyRivalLine() turns into the scene's own numbers.
 //
 // Like civ.js, the module is plain `extern "C"` WebAssembly: views on memory.buffer are made
 // fresh on every read, because any call may grow (and so replace) the buffer.
@@ -359,7 +359,7 @@ export function playerState(scene, world, k) {
 
 const MOOD = { [TONE.bad]: 'panic', [TONE.warn]: 'nervous', [TONE.good]: 'happy', [TONE.info]: 'nervous' };
 
-// What a rival line does to the scene: food, people hurt, the goat market; and the words.
+// What a rival line does to the scene: food, people hurt, the chicken market; and the words.
 // Returns what was applied (for tests and the log).
 export function applyRivalLine(line, { scene, advisor, hud } = {}) {
   const done = { food: 0, hurt: 0, market: 0, said: false };
