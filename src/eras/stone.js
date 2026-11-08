@@ -16,6 +16,10 @@ const CALM_TARGET = 2;
 // 3D firelight strength at the pit (was 1.8, which read as a white glare around the fire).
 const FIRE_GLOW = 0.9;
 const HOLD_SECONDS = 5;
+// The tribe's hunger clock (#298), before the difficulty's `hunger` and `starvationGrace`:
+// hunger per second (0 → 1 takes ~110 s; assist mode ~200 s), the opening grace in which nobody
+// starves, and how long someone at full hunger holds on before dying. Was 0.017 / 0.008, 75 s, 8 s.
+export const STONE_HUNGER = Object.freeze({ rate: 0.009, assistRate: 0.005, grace: 120, starve: 12 });
 const NAMES = ['Grug', 'Ugg-a', 'Thak', 'Mo', 'Brakka', 'Nub', 'Ila', 'Krog', 'Zuz', 'Hap', 'Wenna', 'Dorf', 'Yip', 'Ooma'];
 
 export class StoneAge {
@@ -379,13 +383,13 @@ export class StoneAge {
         p.hunger = 0;
         p.starve = 0;
       } else {
-        const hungerRate = (this.G.assistMode ? 0.008 : 0.017) * eraTuning(this.G).hunger;
+        const hungerRate = (this.G.assistMode ? STONE_HUNGER.assistRate : STONE_HUNGER.rate) * eraTuning(this.G).hunger;
         p.hunger = clamp(p.hunger + dt * (p.colony ? -0.01 : hungerRate));
-        // 75-second initial starvation grace period so new players have time to learn (× difficulty)
-        const inGrace = this.t < 75 * eraTuning(this.G).starvationGrace;
+        // An opening starvation grace so new players have time to learn (× difficulty)
+        const inGrace = this.t < STONE_HUNGER.grace * eraTuning(this.G).starvationGrace;
         if (p.hunger >= 1 && !inGrace) {
           p.starve += dt;
-          if (p.starve > 8) {
+          if (p.starve > STONE_HUNGER.starve) {
             this.kill(p);
             floater(this.particles, p.x, p.y - 7, `${p.name} starved`, '#c9c2b0', 6);
             G.advisor.say('starve', `${p.name} has starved. The tribe asks if you could be slightly more of a god.`, { mood: 'nervous', priority: 2, cooldown: 12 });
