@@ -51,6 +51,7 @@ import { SimPlanet } from './ai/planet.js';
 import { AIGod } from './ai/autopilot.js';
 import { observe, decodeAction, scriptedAction, BOLT_COOLDOWN } from './ai/observe.js';
 import { loading } from './ui/loading.js'; // loading screen
+import { frameLoop } from './ui/loop.js';
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
 // mind read uses the same window.
@@ -916,11 +917,7 @@ function frame(ts) {
   const fms = performance.now() - ts;
   perfSample.frames++; perfSample.frameMs += fms; perfSample.maxFrameMs = Math.max(perfSample.maxFrameMs, fms);
 }
-function rafLoop() {
-  if (!jsLoopRunning) return;
-  frame();
-  requestAnimationFrame(rafLoop);
-}
+const rafLoop = frameLoop(frame, { running: () => jsLoopRunning }); // survives a throwing frame (#171)
 setInterval(() => { if (performance.now() - lastFrameAt > 45) frame(); }, 33);
 
 // ---------- input ----------
