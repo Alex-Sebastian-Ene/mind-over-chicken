@@ -111,6 +111,12 @@ export class Engine {
     is_game_finished(): boolean;
     is_terrain_reachable(x: number, y: number): boolean;
     is_walkable(x: number, y: number): boolean;
+    /**
+     * (#214) Whether the caller should rebuild the world mesh for `key`: `true` on a new
+     * world/camera chunk, `false` while the camera stays inside the same quantized chunk.
+     * The world-mesh cache counts both outcomes for `render_stats_json`.
+     */
+    mesh_needed(key: string): boolean;
     constructor(canvas_id: string);
     orbit_camera(delta_yaw: number, delta_pitch: number): void;
     pan_camera(dx: number, dz: number): void;
@@ -120,6 +126,11 @@ export class Engine {
      * Blit an overlay canvas on top of the rendered 3D scene with alpha blending.
      */
     render_overlay_canvas(canvas: HTMLCanvasElement, alpha: number, canvas_w: number, canvas_h: number): void;
+    /**
+     * Hot-path counters (#214) as JSON, for devtools and the perf tests: canvas/terrain
+     * texture uploads and storage reallocations, plus world-mesh builds and skipped rebuilds.
+     */
+    render_stats_json(): string;
     render_uploaded_canvas(night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
     screen_to_ground(sx: number, sy: number, cw: number, ch: number): Float32Array;
     set_3d_mode(enabled: boolean): void;
@@ -769,12 +780,14 @@ export interface InitOutput {
     readonly engine_is_game_finished: (a: number) => number;
     readonly engine_is_terrain_reachable: (a: number, b: number, c: number) => number;
     readonly engine_is_walkable: (a: number, b: number, c: number) => number;
+    readonly engine_mesh_needed: (a: number, b: number, c: number) => number;
     readonly engine_new: (a: number, b: number) => [number, number, number];
     readonly engine_orbit_camera: (a: number, b: number, c: number) => void;
     readonly engine_pan_camera: (a: number, b: number, c: number) => void;
     readonly engine_project_to_screen: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly engine_render_3d: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
     readonly engine_render_overlay_canvas: (a: number, b: any, c: number, d: number, e: number) => [number, number];
+    readonly engine_render_stats_json: (a: number) => [number, number];
     readonly engine_render_uploaded_canvas: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly engine_screen_to_ground: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly engine_set_3d_mode: (a: number, b: number) => void;
@@ -1017,10 +1030,10 @@ export interface InitOutput {
     readonly moc_sim_free: (a: number) => void;
     readonly moc_sim_new: (a: number) => number;
     readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__307: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__308: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__309: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__310: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

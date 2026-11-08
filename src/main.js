@@ -61,6 +61,7 @@ import { engineFailToShow } from './ui/fail.js';
 import { frameLoop } from './ui/loop.js';
 import { dayNight } from './render/daynight.js';
 import { surfaceMaxDistance } from './render/surface-zoom.js';
+import { civMeshKey } from './render/render-perf.js'; // render perf (#214)
 import { drawAimReticle } from './render/reticle.js';
 import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
 import { mirrorHud } from './ui/hud-mirror.js';
@@ -1496,12 +1497,21 @@ function camMax() {
 let cam3dBase = null;   // the player's own angle when the tip-over began
 let cam3dTween = null;  // a keyboard/button zoom-out animates the tip-over, then hands over
 let current3dWorldKey = '';
+// render perf (#214): the engine owns the build/skip cache (and its counters); this wrapper
+// keeps the old JS-only fallback for a stale pkg/ and remembers the last key either way.
+function meshKeyChanged(key) {
+  const changed = typeof engine?.mesh_needed === 'function'
+    ? engine.mesh_needed(key)
+    : key !== current3dWorldKey;
+  current3dWorldKey = key;
+  return changed;
+}
 function sync3dWorldMesh(scene) {
   if (!engine || !scene) return;
   if (scene instanceof CivSandbox || scene?.civ) {
-    const key = `civ_${scene.seed || 0}_${Math.round(scene.civ?.camX || 0)}_${Math.round(scene.civ?.camY || 0)}`;
-    if (key === current3dWorldKey) return;
-    current3dWorldKey = key;
+    // Quantize the pan into a small cell (#214): a 1-pixel pan keeps the existing terrain mesh.
+    const key = civMeshKey(scene.seed || 0, scene.civ?.camX || 0, scene.civ?.camY || 0);
+    if (!meshKeyChanged(key)) return;
     const h = scene.getVisibleHeightmap?.();
     if (h && engine.set_heightmap) {
       try { engine.set_heightmap(h); } catch (e) { console.warn('set_heightmap failed:', e); }
@@ -1514,8 +1524,7 @@ function sync3dWorldMesh(scene) {
   if (typeof scene.getGlobeHeightmap === 'function' || typeof scene.getVisibleHeightmap === 'function') {
     const sId = scene.p?.name || scene.p?.id || scene.seed || scene.id || 'other';
     const key = `other_${sId}`;
-    if (key === current3dWorldKey) return;
-    current3dWorldKey = key;
+    if (!meshKeyChanged(key)) return;
 
     const h = scene.getGlobeHeightmap?.() || scene.getVisibleHeightmap?.();
     if (h && engine.set_heightmap) {
@@ -1532,8 +1541,7 @@ function sync3dWorldMesh(scene) {
   const world = G?.world;
   if (!world) return;
   const key = `home_${world.seed}`;
-  if (key === current3dWorldKey) return;
-  current3dWorldKey = key;
+  if (!meshKeyChanged(key)) return;
 
   if (world.h && engine.set_heightmap) {
     try { engine.set_heightmap(world.h, world.width || 0, world.height || 0); } catch (e) { console.warn('set_heightmap failed:', e); }
@@ -2180,6 +2188,10 @@ window.__moc = {
     const t0 = performance.now();
     for (let i = 0; i < n; i++) { lastFrameAt = 0; lastTs = performance.now() - 16.7; frame(); }
     return (performance.now() - t0) / n;
+  },
+  // render perf (#214): texture uploads/reallocations and world-mesh build/skip counters.
+  renderStats() {
+    try { return JSON.parse(engine?.render_stats_json?.() || '{}'); } catch { return {}; }
   },
 };
 // Local saves (src/game/saves.js): continue a run, and the saves for the title screen and console.

@@ -1,6 +1,7 @@
 use crate::camera3d::OrbitCamera;
 use crate::math3d::{Frustum, Vec3};
 use crate::mesh3d::{MeshChunk, TerrainMesh};
+use crate::render_perf::TextureUpload;
 use web_sys::{
     WebGlBuffer, WebGlFramebuffer, WebGlProgram, WebGlRenderbuffer, WebGlRenderingContext,
     WebGlShader, WebGlTexture, WebGlUniformLocation,
@@ -37,8 +38,9 @@ pub struct WebGl3DRenderer {
     pub world_h: f32,
     pub water_min: [f32; 3],
     pub water_max: [f32; 3],
-    /// Size of the terrain texture now on the GPU, so per-frame uploads can reuse it.
-    pub terrain_tex_size: (u32, u32),
+    /// The terrain texture's allocated size and upload counters, so per-frame uploads can reuse
+    /// its storage instead of reallocating it (#214).
+    pub terrain_upload: TextureUpload,
 
     // Water buffers
     pub water_vbo: WebGlBuffer,
@@ -615,7 +617,7 @@ impl WebGl3DRenderer {
             world_h: crate::sprites::H as f32,
             water_min: [0.0; 3],
             water_max: [0.0; 3],
-            terrain_tex_size: (0, 0),
+            terrain_upload: TextureUpload::default(),
             water_vbo,
             water_ibo,
             water_index_count: 0,
@@ -728,23 +730,23 @@ impl WebGl3DRenderer {
         let gl = &self.gl;
         let size = (canvas.width(), canvas.height());
         gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&self.terrain_texture));
-        if size == self.terrain_tex_size {
-            gl.tex_sub_image_2d_with_u32_and_u32_and_canvas(
-                WebGlRenderingContext::TEXTURE_2D, 0, 0, 0,
-                WebGlRenderingContext::RGBA, WebGlRenderingContext::UNSIGNED_BYTE, canvas,
-            )?;
-        } else {
+        // render perf (#214): only reallocate when the world-sized canvas changes size.
+        if self.terrain_upload.note(size.0, size.1) {
             gl.tex_image_2d_with_u32_and_u32_and_canvas(
                 WebGlRenderingContext::TEXTURE_2D, 0, WebGlRenderingContext::RGBA as i32,
                 WebGlRenderingContext::RGBA, WebGlRenderingContext::UNSIGNED_BYTE, canvas,
             )?;
-            self.terrain_tex_size = size;
+        } else {
+            gl.tex_sub_image_2d_with_u32_and_u32_and_canvas(
+                WebGlRenderingContext::TEXTURE_2D, 0, 0, 0,
+                WebGlRenderingContext::RGBA, WebGlRenderingContext::UNSIGNED_BYTE, canvas,
+            )?;
         }
         Ok(())
     }
 
     pub fn upload_terrain_texture(&mut self, pixels: &[u8], width: i32, height: i32) {
-        self.terrain_tex_size = (width as u32, height as u32);
+        self.terrain_upload.note_realloc(width as u32, height as u32);
         let gl = &self.gl;
         gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&self.terrain_texture));
         gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(

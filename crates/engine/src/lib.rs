@@ -12,6 +12,7 @@ mod gl3d;
 mod math3d;
 mod mesh3d;
 pub mod particles;
+mod render_perf;
 pub mod shell;
 mod sprites;
 mod terrain;
@@ -24,6 +25,7 @@ use gl::{Light, WebGlRenderer};
 use gl3d::{BillboardVertex, Light3D, WebGl3DRenderer};
 use math3d::Vec3;
 use mesh3d::TerrainMesh;
+use render_perf::MeshCache;
 use sprites::*;
 use terrain::{Mulberry32, Terrain};
 pub use view::ViewCamera;
@@ -45,6 +47,8 @@ pub struct Engine {
     billboards_3d: Vec<BillboardVertex>,
     /// Ground contact shadows, drawn before the sprites without writing depth (#200).
     shadows_3d: Vec<BillboardVertex>,
+    /// Last keyed world mesh and the build/skip counters (#214).
+    mesh_cache: MeshCache,
     current_era: u8,
     is_3d_mode: bool,
     time_3d: f32,
@@ -101,6 +105,7 @@ impl Engine {
             lights_3d: Vec::new(),
             billboards_3d: Vec::new(),
             shadows_3d: Vec::new(),
+            mesh_cache: MeshCache::default(),
             current_era: 0,
             is_3d_mode: true,
             time_3d: 0.0,
@@ -138,6 +143,9 @@ impl Engine {
             self.renderer_3d = Some(r3d);
         }
         self.is_3d_mode = true;
+        // A freshly created renderer (or a mesh uploaded from the grid) must not be skipped by a
+        // stale key (#214).
+        self.mesh_cache.reset();
         Ok(())
     }
 
@@ -153,6 +161,7 @@ impl Engine {
             r3d.upload_mesh(&Self::mesh_for(&self.grid));
             r3d.upload_terrain_texture(&t.pixels, W as i32, H as i32);
         }
+        self.mesh_cache.reset();
     }
 
     /// The 3D relief for a world grid: one vertex per map pixel, one world unit per pixel.
@@ -167,6 +176,41 @@ impl Engine {
 
     pub fn world_h(&self) -> usize {
         self.grid.h
+    }
+
+    /// (#214) Whether the caller should rebuild the world mesh for `key`: `true` on a new
+    /// world/camera chunk, `false` while the camera stays inside the same quantized chunk.
+    /// The world-mesh cache counts both outcomes for `render_stats_json`.
+    pub fn mesh_needed(&mut self, key: &str) -> bool {
+        self.mesh_cache.needs_build(key)
+    }
+
+    /// Hot-path counters (#214) as JSON, for devtools and the perf tests: canvas/terrain
+    /// texture uploads and storage reallocations, plus world-mesh builds and skipped rebuilds.
+    pub fn render_stats_json(&self) -> String {
+        let tex = &self.renderer.texture_upload;
+        let terrain = self
+            .renderer_3d
+            .as_ref()
+            .map(|r| r.terrain_upload)
+            .unwrap_or_default();
+        format!(
+            concat!(
+                "{{\"upload_canvas\":{{\"uploads\":{},\"reallocations\":{},\"width\":{},\"height\":{}}},",
+                "\"upload_terrain\":{{\"uploads\":{},\"reallocations\":{},\"width\":{},\"height\":{}}},",
+                "\"mesh\":{{\"builds\":{},\"skips\":{}}}}}"
+            ),
+            tex.uploads,
+            tex.reallocations,
+            tex.size.0,
+            tex.size.1,
+            terrain.uploads,
+            terrain.reallocations,
+            terrain.size.0,
+            terrain.size.1,
+            self.mesh_cache.builds,
+            self.mesh_cache.skips,
+        )
     }
 
     pub fn set_era(&mut self, era: u8) {
@@ -340,6 +384,7 @@ impl Engine {
             r3d.upload_mesh(&Self::mesh_for(&self.grid));
             r3d.upload_terrain_texture(&map.rgba, map.width as i32, map.height as i32);
         }
+        self.mesh_cache.reset();
         Ok(())
     }
 

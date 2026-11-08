@@ -4,6 +4,8 @@ use web_sys::{
     WebGlUniformLocation,
 };
 
+use crate::render_perf::TextureUpload;
+
 pub struct Light {
     pub x: f32,
     pub y: f32,
@@ -18,6 +20,8 @@ pub struct WebGlRenderer {
     pub a_position: u32,
     pub a_tex_coord: u32,
     pub texture: WebGlTexture,
+    /// The 2D frame texture's allocated size and upload counters (#214).
+    pub texture_upload: TextureUpload,
     pub u_night: WebGlUniformLocation,
     pub u_flash: WebGlUniformLocation,
     pub u_fade: WebGlUniformLocation,
@@ -198,6 +202,7 @@ impl WebGlRenderer {
             a_position,
             a_tex_coord,
             texture,
+            texture_upload: TextureUpload::default(),
             u_night,
             u_flash,
             u_fade,
@@ -209,33 +214,66 @@ impl WebGlRenderer {
         })
     }
 
-    pub fn upload_pixels(&self, pixels: &[u8], width: i32, height: i32) {
+    pub fn upload_pixels(&mut self, pixels: &[u8], width: i32, height: i32) {
         self.gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&self.texture));
-        self.gl
-            .tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
+        // render perf (#214): reuse the storage when the frame size is unchanged.
+        if self.texture_upload.note(width as u32, height as u32) {
+            self.gl
+                .tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
+                    WebGlRenderingContext::TEXTURE_2D,
+                    0,
+                    WebGlRenderingContext::RGBA as i32,
+                    width,
+                    height,
+                    0,
+                    WebGlRenderingContext::RGBA,
+                    WebGlRenderingContext::UNSIGNED_BYTE,
+                    Some(pixels),
+                )
+                .unwrap();
+        } else {
+            self.gl
+                .tex_sub_image_2d_with_i32_and_i32_and_u32_and_type_and_opt_u8_array(
+                    WebGlRenderingContext::TEXTURE_2D,
+                    0,
+                    0,
+                    0,
+                    width,
+                    height,
+                    WebGlRenderingContext::RGBA,
+                    WebGlRenderingContext::UNSIGNED_BYTE,
+                    Some(pixels),
+                )
+                .unwrap();
+        }
+    }
+
+    pub fn upload_canvas(&mut self, canvas: &HtmlCanvasElement) -> Result<(), wasm_bindgen::JsValue> {
+        let gl = &self.gl;
+        let size = (canvas.width(), canvas.height());
+        gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&self.texture));
+        // render perf (#214): allocate once for a stable canvas size, then upload with
+        // texSubImage2D. The old path reallocated the texture storage on every frame.
+        if self.texture_upload.note(size.0, size.1) {
+            gl.tex_image_2d_with_u32_and_u32_and_canvas(
                 WebGlRenderingContext::TEXTURE_2D,
                 0,
                 WebGlRenderingContext::RGBA as i32,
-                width,
-                height,
+                WebGlRenderingContext::RGBA,
+                WebGlRenderingContext::UNSIGNED_BYTE,
+                canvas,
+            )
+        } else {
+            gl.tex_sub_image_2d_with_u32_and_u32_and_canvas(
+                WebGlRenderingContext::TEXTURE_2D,
+                0,
+                0,
                 0,
                 WebGlRenderingContext::RGBA,
                 WebGlRenderingContext::UNSIGNED_BYTE,
-                Some(pixels),
+                canvas,
             )
-            .unwrap();
-    }
-
-    pub fn upload_canvas(&self, canvas: &HtmlCanvasElement) -> Result<(), wasm_bindgen::JsValue> {
-        self.gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&self.texture));
-        self.gl.tex_image_2d_with_u32_and_u32_and_canvas(
-            WebGlRenderingContext::TEXTURE_2D,
-            0,
-            WebGlRenderingContext::RGBA as i32,
-            WebGlRenderingContext::RGBA,
-            WebGlRenderingContext::UNSIGNED_BYTE,
-            canvas,
-        )
+        }
     }
 
     pub fn render_scene(
