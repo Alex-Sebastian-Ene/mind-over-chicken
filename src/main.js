@@ -422,7 +422,7 @@ function newGame(source, startIndex = 0) {
     cosmos.galaxy?.onBlink();   // storms on the blink world; a strike on the world you're zoomed into
     if (cosmos.galaxy?.attended) audio.thunder();
     const view = cosmos.viewScene(G); // planets (#68): another world's surface when you're on it
-    if (!banner && !intro.active && view?.onBlink) view.onBlink(aim);
+    if (!banner && !intro.active && !eegPanel?.wiz?.active && view?.onBlink) view.onBlink(aim);   // not while calibrating (#176)
   });
   // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
   G.camera = cosmos;          // the eras ask it where the screen is (#129)
@@ -1009,6 +1009,8 @@ function frame(ts) {
     } else if (banner) {
       banner.t += dt;
       if (!banner.manual && banner.t > 8) dismissBanner();
+    } else if (eegPanel?.wiz?.active) {
+      // The calibration wizard overlays the game: the era waits until it closes (#176).
     } else if (G.sandbox) {
       G.runTime += dt;   // the hand-played game stays paused in the sandbox
       G.calibration?.update(dt, G.brain, G.mood);
@@ -1689,7 +1691,7 @@ window.__moc = {
 // with coach visual demonstration. Face sets mood.
 window.__moc.camera = initCamera({
   getG: () => cosmos.castG(G), // planets (#68): casts and mood reach the world you're on
-  canCast: () => !!G?.scene && !banner && !intro.active && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,
+  canCast: () => !!G?.scene && !banner && !intro.active && !eegPanel?.wiz?.active && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,
   // camera debug (#67): the fingertip aims on the panned surface like the mouse does.
   // Aims are 0..1 of the world; the camera's overlay draws in 0..1 of the screen (#129).
   mapX: (x) => cosmos.mapX(x * W) / cosmos.worldW,
