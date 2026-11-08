@@ -86,7 +86,7 @@ The Rust/Wasm simulation loop and world rules.
 
 * **Blink lightning:** deliberate blinks strike at the head cursor.
 * **Calm / focus / stress:** EEG bands (and the keyboard fallback) drive the era mechanics.
-* **Pinch grab & two-hand zoom:** hand input moves living entities and the camera; it does not cast spells.
+* **Pinch grab & two-hand zoom:** hand input moves living entities and the camera; it does not cast spells. The Camera sidebar has a guided pinch/head calibration with wireframe hand and head animation; gains persist per browser.
 * **Rain or Calm:** the Insight/focus signal held for ~2 s summons rain, putting out forest fires and the Stone campfire.
 * **Forest fires:** lightning aimed at a tree starts a fire that spreads to nearby trees.
 

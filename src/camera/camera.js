@@ -20,6 +20,7 @@
 import { clamp } from '../sim/util.js';
 import { GESTURE_LABEL } from './gestures.js';
 import { PinchMoveSmoother } from './pinch-move.js';
+import { initMovementCalibration, loadPinchCalibration, savePinchCalibration } from './movement-calibration.js';
 import { EMOTIONS, EmotionTracker, neutralMood, blendshapeMap } from './emotion.js';
 import { manualMood, surpriseRisingEdge } from './manual-mood.js';
 import { loadVision } from './vision.js';
@@ -83,6 +84,20 @@ const TEMPLATE = `
           <span>Pinch / Zoom: <b data-cam-pinch>--</b></span>
         </div>
       </div>
+    </div>
+  </section>
+
+  <section class="eeg-sec" aria-label="Pinch movement calibration">
+    <div class="eeg-sec-head">
+      <h3>Pinch &amp; Head Calibration</h3>
+      <span class="eeg-qual" data-calib-status>idle</span>
+    </div>
+    <canvas class="cam-calib" width="300" height="160"></canvas>
+    <p class="eeg-msg" data-calib-msg>Pinch and follow the wireframe: left hand, right hand, then pinch + head tilt.</p>
+    <div class="eeg-url-row">
+      <button type="button" class="btn btn-primary btn-small" data-calib-start>Calibrate</button>
+      <button type="button" class="btn btn-small" data-calib-skip disabled>Skip</button>
+      <button type="button" class="btn btn-small" data-calib-reset>Reset</button>
     </div>
   </section>
 
@@ -173,7 +188,18 @@ export function initCamera({
   const multiHand = new MultiHandTracker();
   const pinchSmoother = new PinchMoveSmoother();
   let lastGestureAt = 0;
-  let status = 'off';          // off | starting | on | error
+  let status = 'off';
+  let pinchCal = loadPinchCalibration();
+  const movementCal = initMovementCalibration({
+    canvas: $('.cam-calib'),
+    statusEl: $('[data-calib-status]'),
+    msgEl: $('[data-calib-msg]'),
+    startBtn: $('[data-calib-start]'),
+    skipBtn: $('[data-calib-skip]'),
+    resetBtn: $('[data-calib-reset]'),
+    getState: () => ({ live: !!stream && status === 'on', hands: multi, multi, grabbed, brain: getG()?.brain }),
+    onChange: (cal) => { pinchCal = cal; savePinchCalibration(cal); },
+  });          // off | starting | on | error
   let stream = null;
   let engine = null;
   let enginePending = null;
@@ -324,6 +350,7 @@ export function initCamera({
     lastHeadAim = null;
     lastGestureAt = 0;
     pinchSmoother.reset();
+    movementCal?.stop?.();
     mood = neutralMood();
     strongPending = false;
     surprisePending = false;
@@ -523,7 +550,9 @@ export function initCamera({
         if (grabbed) {
           G.scene?.onGrabMove?.({ x: G.brain.aim.x, y: G.brain.aim.y });
         } else if (onGrabMove) {
-          onGrabMove({ dx: pinchMove.handDx, dy: pinchMove.handDy, headDx: pinchMove.headDx, headDy: pinchMove.headDy, started: false, active: true, aim: G.brain.aim, grab: multi.grab });
+          const handGain = multi.grab.side === 'left' ? pinchCal.left.gain : multi.grab.side === 'right' ? pinchCal.right.gain : 1;
+          const headGain = pinchCal.head.gain;
+          onGrabMove({ dx: pinchMove.handDx * handGain, dy: pinchMove.handDy * handGain, headDx: pinchMove.headDx * headGain, headDy: pinchMove.headDy * headGain, started: false, active: true, aim: G.brain.aim, grab: multi.grab });
         }
       } else if (multi.grab.released || multi.grab.cancelled) {
         if (grabbed) {
@@ -751,6 +780,7 @@ export function initCamera({
       pinchStrength: finger?.pinching ? 1 : 0,
       statusText: nowText(now),
     });
+    movementCal?.update?.(now);
     drawFx(now);
   }
   function guardFrames(now) {
