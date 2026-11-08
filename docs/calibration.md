@@ -41,6 +41,6 @@ All three are clamped to 0–1. A calm, smiling player seeds a friendly civilisa
 `friendliness`, `aggressiveness` and `violence` (scaled by 0.8) are the first three draws of `mulberry32(seed)`, so the same seed always gives the same setup.
 
 ## Output
-`G.calibration.result = { friendliness, aggressiveness, violence, source, seconds, seed, features }`. It's shown in the model panel (press **M**). The four-civilisation sandbox (#50, #52) reads it to seed the player's civilisation.
+`G.calibration.result = { friendliness, aggressiveness, violence, source, seconds, seed, features }`. It's shown in the model panel (press **M**). The crowded-planet sandbox (#50, #52) applies it to the player's civilisation once founding is over, and logs what it applied (#190, `src/civ/calibration-traits.js`).
 
 Code: `src/brain/calibration.js`. Tests: `tests/calibration.test.mjs`.

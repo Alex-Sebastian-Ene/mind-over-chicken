@@ -97,7 +97,7 @@ The Rust/Wasm simulation loop and world rules.
 * **Pinch grab & two-hand zoom:** hand input moves living entities and the camera. In the crowded-planet sandbox a pinch picks up the nearest person and sets them down on land (#272). The Camera sidebar has a guided pinch movement calibration with the live camera and hand wireframe: left, right, up and down targets for each hand, auto-advancing and auto-closing when complete. Per-axis gains persist per browser; head tilt is not calibrated because it already works.
 * **Charged fireball (#291):** hold a fist, pull it back, then thrust forward and open the palm; or hold `3` and release. Colour follows mood: joy red, surprise blue, neutral ember. This is the one deliberate hand cast.
 * **Rain or Calm:** the Insight/focus signal held for ~2 s summons rain, putting out forest fires and the Stone campfire.
-* **Forest fires:** lightning aimed at a tree starts a fire that spreads to nearby trees.
+* **Forest fires:** lightning aimed at a tree starts a fire that spreads to nearby trees and dies down in about half a minute; lighting the campfire never sets the forest alight.
 * **Manual mood:** joy lifts morale (in the Stone Age the tribe dances); surprise sets off a sky flash and lightning once each time the slider crosses into the surprised side (#155).
 
 **Status:** the old hand-gesture and keyboard spell set (bounty, rain, bless, disaster, peace, point) was removed in #261. The single deliberate charged fireball is the exception (#291).
