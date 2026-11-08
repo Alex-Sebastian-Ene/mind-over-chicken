@@ -1544,12 +1544,19 @@ function toggle3D() {
 }
 $('mode3dBtn')?.addEventListener('click', toggle3D);
 $('aiGodBtn')?.addEventListener('click', toggleAIGod);
+function showSound(on) {
+  $('soundBtn').textContent = on ? 'Sound on' : 'Sound off';
+  $('soundBtn').setAttribute('aria-pressed', String(on));
+}
 $('soundBtn').addEventListener('click', () => {
   audio.unlock();
   const on = audio.toggle();
-  $('soundBtn').textContent = on ? 'Sound on' : 'Sound off';
-  $('soundBtn').setAttribute('aria-pressed', String(on));
+  showSound(on);
+  try { localStorage.setItem('moc.sound', on ? 'on' : 'off'); } catch {}   // survives a reload (#186)
 });
+try {
+  if (localStorage.getItem('moc.sound') === 'off') showSound(audio.toggle());
+} catch {}
 $('bannerGo').addEventListener('click', dismissBanner);
 $('retryBtn').addEventListener('click', retryEra);
 $('assistBtn')?.addEventListener('click', toggleAssistMode);
