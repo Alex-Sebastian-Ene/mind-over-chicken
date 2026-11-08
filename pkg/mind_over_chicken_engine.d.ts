@@ -333,6 +333,10 @@ export class RustGalaxy {
     planet_pos_y(idx: number): number;
     planet_progress(idx: number): number;
     set_attended(planet_idx: number): void;
+    ship_count(): number;
+    ship_from(idx: number): number;
+    ship_t(idx: number): number;
+    ship_to(idx: number): number;
     step(dt: number, calm: number, focus: number, stress: number, blinks_last_10s: number, blinks_total: number): void;
 }
 
@@ -779,6 +783,10 @@ export interface InitOutput {
     readonly rustgalaxy_planet_pos_y: (a: number, b: number) => number;
     readonly rustgalaxy_planet_progress: (a: number, b: number) => number;
     readonly rustgalaxy_set_attended: (a: number, b: number) => void;
+    readonly rustgalaxy_ship_count: (a: number) => number;
+    readonly rustgalaxy_ship_from: (a: number, b: number) => number;
+    readonly rustgalaxy_ship_t: (a: number, b: number) => number;
+    readonly rustgalaxy_ship_to: (a: number, b: number) => number;
     readonly rustgalaxy_step: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly rustimutracker_add_calib_point: (a: number, b: number, c: number) => void;
     readonly rustimutracker_aim_x: (a: number) => number;
@@ -892,8 +900,8 @@ export interface InitOutput {
     readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
     readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
     readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__277: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__278: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__281: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__282: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

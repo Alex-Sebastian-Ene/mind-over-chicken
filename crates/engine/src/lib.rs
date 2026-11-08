@@ -1833,6 +1833,22 @@ impl RustGalaxy {
     pub fn is_mind_done(&self) -> bool {
         self.inner.mind.done
     }
+
+    pub fn ship_count(&self) -> usize {
+        self.inner.ships.len()
+    }
+
+    pub fn ship_from(&self, idx: usize) -> usize {
+        self.inner.ships.get(idx).map(|s| s.from_planet).unwrap_or(0)
+    }
+
+    pub fn ship_to(&self, idx: usize) -> usize {
+        self.inner.ships.get(idx).map(|s| s.to_planet).unwrap_or(0)
+    }
+
+    pub fn ship_t(&self, idx: usize) -> f32 {
+        self.inner.ships.get(idx).map(|s| s.t / s.duration.max(0.001)).unwrap_or(0.0)
+    }
 }
 
 /// Standalone WebAssembly MLP Policy AI God (#25, #108)

@@ -524,3 +524,44 @@ test('zoom in from planet globe to surface maintains continuous 3D camera zoom (
   assert.ok(z.z < 0.2, `expected descent below 0.2, got ${z.z}`);
   assert.ok(z.z >= 0, `expected non-negative zoom, got ${z.z}`);
 });
+
+test('wasm galaxy avoids double-simulation (#196)', () => {
+  const g = new Galaxy();
+  g.add({ name: 'Home', home: true, alive: true, pop: 20 });
+  g.add({ name: 'Lumen', home: false, alive: true, pop: 10 });
+  let jsSimulateCalled = 0;
+  let jsSampleMindCalled = 0;
+  g.simulate = () => { jsSimulateCalled++; };
+  g.sampleMind = () => { jsSampleMindCalled++; };
+
+  // Mock wasm galaxy
+  g.wasm = {
+    step: () => {},
+    set_attended: () => {},
+    planet_count: () => g.planets.length,
+    planet_is_forming: () => false,
+    planet_name: (i) => `WasmPlanet${i}`,
+    planet_channel: () => 'calm',
+    planet_biome: () => 'temperate',
+    planet_pop: () => 42,
+    planet_era: () => 1,
+    planet_progress: () => 0.5,
+    planet_market: () => 120,
+    ship_count: () => 1,
+    ship_from: () => 0,
+    ship_to: () => 1,
+    ship_t: () => 0.3,
+  };
+
+  const brain = { calm: 0.8, focus: 0.5, stress: 0.2, recentBlinks: [], stats: { blinks: 3 } };
+  g.update(0.1, 0.1, brain);
+
+  // JS simulate and sampleMind must not be called when wasm is active
+  assert.equal(jsSimulateCalled, 0, 'JS simulate must not run when wasm is present');
+  assert.equal(jsSampleMindCalled, 0, 'JS sampleMind must not run when wasm is present');
+
+  // Wasm state synchronized
+  assert.equal(g.planets[1].pop, 42);
+  assert.equal(g.ships.length, 1);
+  assert.equal(g.ships[0].t, 0.3);
+});
