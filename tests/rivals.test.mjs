@@ -83,8 +83,12 @@ test('a raid takes food and people (never the last three); trade brings food; wa
   assert.deepEqual(said, ['rival-raid']);
   d = applyRivalLine({ kind: RIVAL.TRADE, tone: 1, food: 1.5, hurt: 0, text: 'Trade' }, { scene });
   assert.equal(scene.food, 1.5);
-  const market = { price: 100, headlines: [] };
-  applyRivalLine({ kind: RIVAL.WAR, tone: 2, market: -0.1, text: 'War in the east' }, { scene: market });
+  const market = { price: 100 };
+  const tape = [];
+  const news = { push: (text, o) => { tape.push([text, o.tone, o.source]); return true; } };
+  applyRivalLine({ kind: RIVAL.WAR, tone: 2, market: -0.1, text: 'War in the east' }, { scene: market, news });
   assert.equal(Math.round(market.price), 90);
-  assert.deepEqual(market.headlines, ['WAR IN THE EAST']);
+  assert.deepEqual(tape, [['War in the east', 'market', 'rivals']], 'it goes on the one news ticker');
+  applyRivalLine({ kind: RIVAL.WORLD, tone: 0, n: 0, text: 'Two far peoples trade' }, { scene: market, news });
+  assert.equal(tape.length, 1, 'quiet world news stays off the ticker');
 });

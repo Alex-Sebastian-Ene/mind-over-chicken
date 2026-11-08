@@ -58,12 +58,14 @@ import { panelHotkey } from './ui/hotkeys.js'; // E / C / Shift+C sidebars (#211
 import { engineFailToShow } from './ui/fail.js';
 import { frameLoop } from './ui/loop.js';
 import { dayNight } from './render/daynight.js';
+import { surfaceMaxDistance } from './render/surface-zoom.js';
 import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
 import { mirrorHud } from './ui/hud-mirror.js';
 import { createRivals, playerState, applyRivalLine } from './civ/rivals.js'; // rivals on the home world (#212)
-import { readOptions, worldSizeOf, difficultyOf } from './game/options.js'; // world size and difficulty (#220)
+import { readOptions, worldSizeOf, difficultyOf, bootModeOf } from './game/options.js'; // world size and difficulty (#220)
+import { News } from './ui/news.js'; // the one news ticker (#220)
 import { initNewGameOptions } from './ui/new-game.js';
-import { footprint3d } from './ui/minimap.js';   // the minimap's 3D window (release QA)
+import { minimapWindow3d, viewWindow } from './ui/minimap.js';   // the minimap's 3D window (release QA)
 import { AIM_VIEW, aimViewKind, clampHomeAim, clampScreenAim } from './input/visible-aim.js';
 import { listSaves, getSave, latestSave, saveRun, deleteSave, clearSaves, newRunId, nextRunNumber } from './game/saves.js'; // local saves
 import { buildCheckpoint, galaxySummary, restoreBrain } from './game/checkpoint.js';
@@ -307,6 +309,7 @@ let aiGodTimer = 0;
 function resetAIGod() {
   if (!aiGod) return;
   aiGod = null;
+  if (G) G.aiGodActive = false;
   const s = sim();
   if (s) { s.input.calm = false; s.input.focus = false; s.input.panic = false; }
   const btn = $('aiGodBtn');
@@ -336,6 +339,7 @@ function toggleAIGod() {
       },
     });
     aiGod = god;
+    if (G) G.aiGodActive = true;
     aiGodTimer = 0;
     const btn = $('aiGodBtn');
     if (btn) {
@@ -416,6 +420,7 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null } = {})
   G = {
     world: new World(seed, { width: size.w || HOME_W, height: size.h || HOME_H }), // the home world, sized by the New Game choice (#129, #220)
     options: { worldSize: options.worldSize, difficulty: options.difficulty, size: size.id },
+    news: new News(),   // the one news ticker (#220): the goat market and the rivals
     difficulty: difficultyOf(options.difficulty),
     brain, source, advisor, hud, audio, engine,
     calibration: new Calibration(Number.isFinite(calibSeed) ? { ...calibConfig, seed: calibSeed >>> 0 } : calibConfig), // calibration (#54)
@@ -532,7 +537,7 @@ function updateRivals(dt) {
   const r = G.rivals;
   if (!r || !WORLD_SCENES.some((c) => G.scene instanceof c)) return;
   const lines = r.update(dt, playerState(G.scene, G.world, G.sceneIndex));
-  for (const l of lines) applyRivalLine(l, { scene: G.scene, advisor, hud });
+  for (const l of lines) applyRivalLine(l, { scene: G.scene, advisor, news: G.news });
 }
 
 function startScene(i) {
@@ -556,6 +561,7 @@ function startScene(i) {
   scene.enter(G);
   lookAtStage(scene);
   hud.setScene(scene);
+  syncInvincibleButton();
   document.body.dataset.era = scene.era;
   fade = 1;
   G.failing = false;
@@ -615,6 +621,7 @@ function restartScene() {
   scene.enter(G);
   lookAtStage(scene);
   hud.setScene(scene);
+  syncInvincibleButton();
   fade = 1;
   // A fresh attempt: no fail pending, and no controls card left over from the fail screen (#172).
   G.failing = false;
@@ -763,7 +770,7 @@ function showFail(reason) {
       } else if (lower.includes('depression') || lower.includes('price')) {
         nextStep = 'Steady your breathing and focus to stimulate chicken market confidence.';
       } else if (lower.includes('fire')) {
-        nextStep = 'Stay calm when the flame begins to fade to rekindle warmth.';
+        nextStep = 'Hold Insight/Focus when the flame begins to fade to rekindle warmth.';
       } else if (lower.includes('starv') || lower.includes('food')) {
         nextStep = 'Strike giant chickens with lightning so hunters can gather meat for the tribe.';
       } else if (lower.includes('dark')) {
@@ -805,6 +812,33 @@ function toggleAssistMode() {
   updateAssistUI();
 }
 
+function syncInvincibleButton() {
+  const btn = $('invincibleBtn');
+  if (!btn) return;
+  const people = G?.scene?.id === 'stone' && Array.isArray(G.scene.people) && G.scene.people.length > 0;
+  btn.hidden = !people;
+  const on = !!G?.invincible;
+  btn.setAttribute('aria-pressed', String(on));
+  btn.classList.toggle('is-active', on);
+  btn.style.setProperty('--level', on ? '100%' : '0%');
+  const state = btn.querySelector('[data-invincible-state]');
+  if (state) state.textContent = on ? 'ON' : 'OFF';
+  btn.title = on
+    ? 'People invincibility ON: hunger, lightning and trampling cannot kill them (I)'
+    : 'Toggle people invincibility: hunger and deaths paused (I)';
+}
+
+function toggleInvincible() {
+  if (!G) return;
+  G.invincible = !G.invincible;
+  if (G.invincible && G.scene?.people) for (const p of G.scene.people) { p.hunger = 0; p.starve = 0; }
+  syncInvincibleButton();
+  G.hud?.showCause?.(G.invincible ? '🛡️ People invincible: ON · hunger and death paused' : '🛡️ People invincible: OFF');
+  G.advisor?.say('invincible', G.invincible
+    ? 'The tribe is invincible. Hunger, lightning and trampling cannot touch them.'
+    : 'The tribe is mortal again. Try to keep them fed.', { priority: 2, cooldown: 2 });
+}
+
 function quitToTitle() {
   clearTimeout(failTimer);
   failTimer = null;
@@ -819,6 +853,7 @@ function quitToTitle() {
   if (G?.source && G.source !== keep) G.source.disconnect();
   G = null;
   hudScene = null;
+  syncInvincibleButton();
   fade = 0;
   setGameSource(keep);
   $('titleScreen').hidden = false;
@@ -884,6 +919,7 @@ function addLights2d(scene, offsets) {
 }
 // Small map of the whole world with the camera's window on it (#129), in the screen's corner.
 const MINI = { w: 64, h: 36, pad: 4 };
+const MINIMAP_MIN_PITCH = 0.35;   // below this the horizon makes the ground quad unsafe; use the 2D window
 const miniCache = { layer: null, canvas: null };
 function drawMinimap(ctx, scene) {
   const world = scene.G.world, layer = scene.layer || world.layers?.stone;
@@ -908,8 +944,9 @@ function drawMinimap(ctx, scene) {
   ctx.strokeStyle = '#ffe066';
   ctx.lineWidth = 0.6;
   // In 3D the window is the ground the zoomed, tilted camera sees, not the 2D 320×180 (release QA).
-  const fp = G.render3d && typeof engine?.screen_to_ground === 'function'
-    ? footprint3d((x, y) => engine.screen_to_ground(x, y, screen.width, screen.height), {
+  const pitch = engine?.get_camera_pitch?.() ?? 1;
+  const fp = G.render3d && pitch >= MINIMAP_MIN_PITCH && typeof engine?.screen_to_ground === 'function'
+    ? minimapWindow3d((x, y) => engine.screen_to_ground(x, y, screen.width, screen.height), {
       tx: engine.get_camera_target_x(), tz: engine.get_camera_target_z(),
       ww: world.width || W, wh: world.height || H, sw: screen.width, sh: screen.height,
     })
@@ -917,13 +954,20 @@ function drawMinimap(ctx, scene) {
   if (fp) {
     ctx.save();
     ctx.beginPath(); ctx.rect(x0, y0, MINI.w, MINI.h); ctx.clip();
-    for (const ox of [-MINI.w, 0, MINI.w]) for (const oy of [-MINI.h, 0, MINI.h]) {   // wrap copies
-      ctx.beginPath();
-      fp.forEach(([x, y], i) => (i ? ctx.lineTo(x0 + ox + x * sx, y0 + oy + y * sy) : ctx.moveTo(x0 + ox + x * sx, y0 + oy + y * sy)));
-      ctx.closePath();
-      ctx.stroke();
-    }
+    ctx.beginPath();
+    fp.forEach(([x, y], i) => (i ? ctx.lineTo(x0 + x * sx, y0 + y * sy) : ctx.moveTo(x0 + x * sx, y0 + y * sy)));
+    ctx.closePath();
+    ctx.stroke();
     ctx.restore();
+  } else if (G.render3d) {
+    // Low pitch / off-map quad: one stable box around the 2D camera window instead of a wrapped
+    // ground trapezoid that can cross the whole minimap (#332).
+    const box = viewWindow(
+      cosmos.view?.center_x?.() ?? (world.width || W) / 2,
+      cosmos.view?.center_y?.() ?? (world.height || H) / 2,
+      world.width || W, world.height || H, W, H,
+    );
+    ctx.strokeRect(x0 + box.x * sx, y0 + box.y * sy, box.w * sx, box.h * sy);
   } else {
     const r = cosmos.view.blits();
     for (let i = 0; i < r.length; i += 6) ctx.strokeRect(x0 + r[i] * sx, y0 + r[i + 1] * sy, r[i + 2] * sx, r[i + 3] * sy);
@@ -993,7 +1037,8 @@ function render() {
       // Continuous camera zoom between orbit and ground
       const k = clamp(z / 0.75);
       const groundDist = CAM3D.blendFrom;
-      const targetDist = groundDist + (CAM3D.topDown - groundDist) * k;
+      const wide = camMax() > CAM3D.topDown + 1 ? camMax() : 0;   // a big home world: stay wide
+      const targetDist = wide || groundDist + (CAM3D.topDown - groundDist) * k;
       const targetPitch = 1.05 + (CAM3D.topPitch - 1.05) * k;
       if (typeof engine.set_camera_distance === 'function') {
         engine.set_camera_distance(targetDist);
@@ -1121,6 +1166,7 @@ function render() {
     textCtx.setTransform(K, 0, 0, K, 0, 0);
     if (G.render3d) scene.drawScreen?.(textCtx);   // 3D has no low-res frame to paint into
     if (!intro.active) scene.drawScreenOverlay?.(textCtx);   // the stage's own HUD waits for the intro
+    if (!intro.active && scene === G.scene && worldScene(scene)) G.news?.draw(textCtx, W, H);   // the one news ticker (#220)
     if (windowed && !cosmic && scene.phase !== 'voyage' && !intro.active) drawMinimap(textCtx, scene);   // not over the voyage's starfield
     if (intro.active) drawIntroCaption(textCtx);
   }
@@ -1206,6 +1252,7 @@ function frame(ts) {
     cosmos.update(dt, G);
     updateAimTarget();   // #294: keep the cursor and every blink target inside the visible view
     advisor.update(dt);
+    G.news?.update(dt);
     // planets (#68): the HUD names the world you're on: "your world" at home, "AI god" elsewhere.
     const wanted = cosmos.hudScene(G, galaxyHudScene);
     if (wanted !== hudScene) { hudScene = wanted; hud.setScene(wanted); }
@@ -1383,6 +1430,13 @@ let orbitDrag = null;
 // 90 / tan(15 deg) + 7.92 = 344. The world is bigger (#129), but the camera target is the centre of
 // the 2D window, so the top-down 3D frame is exactly the 2D view at hand-over.
 const CAM3D = { blendFrom: 300, topDown: 344, topPitch: 1.55 };
+// The farthest the camera pulls back on this surface before the globe: further on bigger home
+// worlds (src/render/surface-zoom.js); other worlds and the civ sandbox keep their 320×180 frame.
+function camMax() {
+  const scene = cosmos?.viewScene?.(G) || G?.scene;
+  if (cosmos?.surfaceInView || scene instanceof CivSandbox || scene?.civ) return CAM3D.topDown;
+  return surfaceMaxDistance(G?.world?.width);
+}
 let cam3dBase = null;   // the player's own angle when the tip-over began
 let cam3dTween = null;  // a keyboard/button zoom-out animates the tip-over, then hands over
 let current3dWorldKey = '';
@@ -1463,7 +1517,7 @@ function applyCam3dBlend() {
 }
 function zoom3dBy(f) {
   const d = engine.get_camera_distance();
-  engine.zoom_camera(Math.min(CAM3D.topDown, d * f) / d);
+  engine.zoom_camera(Math.min(camMax(), d * f) / d);
   applyCam3dBlend();
 }
 function zoomOutFromSurface() {
@@ -1475,8 +1529,8 @@ function zoomOutFromSurface() {
   }
   if (!in3dSurface()) { cosmos.zoomOut(G); return; }
   const d = engine.get_camera_distance();
-  if (d < CAM3D.topDown - 4) {
-    cam3dTween = { from: d, t0: performance.now(), dur: reducedMotion() ? 1 : 300 };   // #90: a cut, not a sweep
+  if (d < camMax() - 4) {
+    cam3dTween = { from: d, to: camMax(), t0: performance.now(), dur: reducedMotion() ? 1 : 300 };   // #90: a cut, not a sweep
   } else {
     cosmos.zoomOut(G);
   }
@@ -1498,7 +1552,7 @@ function stepCam3dTween() {
   if (!cam3dTween) return;
   const k = clamp((performance.now() - cam3dTween.t0) / cam3dTween.dur);
   const d = engine.get_camera_distance();
-  engine.zoom_camera((cam3dTween.from + (CAM3D.topDown - cam3dTween.from) * k) / d);
+  engine.zoom_camera((cam3dTween.from + ((cam3dTween.to ?? CAM3D.topDown) - cam3dTween.from) * k) / d);
   applyCam3dBlend();
   if (k >= 1) { cam3dTween = null; cosmos.zoomOut(G); }
 }
@@ -1634,7 +1688,7 @@ screen.addEventListener('wheel', (e) => {
     const scene = cosmos?.viewScene?.(G) || G?.scene;
     // Already looking straight down at the whole map: scrolling on carries on into the globe,
     // continuously (#143).
-    if (e.deltaY > 0 && engine.get_camera_distance() >= CAM3D.topDown - 0.5 && !(scene instanceof CivSandbox) && !scene?.civ) {
+    if (e.deltaY > 0 && engine.get_camera_distance() >= camMax() - 0.5 && !(scene instanceof CivSandbox) && !scene?.civ) {
       cosmos.wheel(wheelAmount(e), G);
       return;
     }
@@ -1704,12 +1758,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyT') { toggle3D(); return; }
   if (e.code === 'KeyG') { toggleAIGod(); return; }
   if (G && e.code === 'KeyI' && !e.repeat) {
-    G.invincible = !G.invincible;
-    if (G.invincible && G.scene?.people) for (const p of G.scene.people) { p.hunger = 0; p.starve = 0; }
-    G.hud?.showCause?.(G.invincible ? '🛡️ People invincible: ON · hunger and death paused' : '🛡️ People invincible: OFF');
-    G.advisor?.say('invincible', G.invincible
-      ? 'The tribe is invincible. Hunger, lightning and trampling cannot touch them.'
-      : 'The tribe is mortal again. Try to keep them fed.', { priority: 2, cooldown: 2 });
+    toggleInvincible();
     e.preventDefault();
     return;
   }
@@ -1812,6 +1861,7 @@ function toggle3D() {
 }
 $('mode3dBtn')?.addEventListener('click', toggle3D);
 $('aiGodBtn')?.addEventListener('click', toggleAIGod);
+$('invincibleBtn')?.addEventListener('click', toggleInvincible);
 function showSound(on) {
   $('soundBtn').textContent = on ? 'Sound on' : 'Sound off';
   $('soundBtn').setAttribute('aria-pressed', String(on));
@@ -1984,6 +2034,7 @@ function startCivSandbox(source, resume = null) {
   advisor.setEra(scene.era);
   scene.enter(G);
   hud.setScene(scene);
+  syncInvincibleButton();
   document.body.dataset.era = scene.era;
   startIntro(scene, -1);
   autosave({ civSeed: scene.seed, planet: scene.planetSize?.name ?? null });
@@ -2084,7 +2135,7 @@ window.__moc.camera = initCamera({
     if (!G) return;
     if (in3dSurface() && (cosmos?.z || 0) <= 0.01) {
       cam3dTween = null;
-      if (delta < 0 && engine.get_camera_distance() >= CAM3D.topDown - 0.5) {
+      if (delta < 0 && engine.get_camera_distance() >= camMax() - 0.5) {
         cosmos.zoomOut(G);
         return;
       }
@@ -2176,6 +2227,11 @@ function start(data = {}) {
     newGame(new SimSource(), data.sceneIndex);
   }
   autoConnectBridge();
+  // The old modes for testing (#220): ?mode=civ, ?mode=galaxy, or ?mode=story straight into play.
+  const mode = bootModeOf(location.search);
+  if (mode === 'crowded') startCivSandbox(playSource());
+  else if (mode === 'galaxy') startGalaxySandbox(playSource());
+  else if (mode === 'story') begin(playSource());
 }
 document.fonts?.load('16px "Pixelify Sans"').finally?.(() => {});
 if (typeof window !== 'undefined' && window.location?.search?.includes('rust=1')) {

@@ -30,7 +30,7 @@ export function signalSummary(G, nowMs = globalThis.performance?.now?.() ?? 0) {
 // 8×8 pixel icons for the power tiles.
 const ICONS = {
   blink: { c: '#ffcf4a', p: ['....##..', '...##...', '..##....', '.######.', '....##..', '...##...', '..##....', '.#......'] },
-  // Rain or Calm (#276): a rain cloud.
+  // Rain spell (#276, #330): a rain cloud.
   focus: { c: '#9ec9ff', p: ['..####..', '.######.', '########', '..#..#..', '.#..#...', '..#..#..', '.#..#...', '........'] },
   // Stress: the cartoon "cross vein" of an agitated god.
   stress: { c: '#ff5a72', p: ['..#..#..', '.##..##.', '##....##', '........', '........', '##....##', '.##..##.', '..#..#..'] },

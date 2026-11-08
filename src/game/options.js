@@ -81,5 +81,12 @@ export function worldSizeOf(choice, seed = 0) {
 
 export function difficultyOf(id) { return DIFFICULTY[id] || DIFFICULTY.normal; }
 
+// The old modes stay reachable for testing by URL (epic #220): ?mode=civ (the crowded planet),
+// ?mode=galaxy (the galaxy sandbox), ?mode=story (straight into the one game). Else null.
+export function bootModeOf(search = '') {
+  const m = new URLSearchParams(search).get('mode');
+  return m === 'civ' || m === 'crowded' ? 'crowded' : m === 'galaxy' ? 'galaxy' : m === 'story' ? 'story' : null;
+}
+
 // What an era reads: G.difficulty's era numbers, or Normal's when a run has none (tests, old saves).
 export function eraTuning(G) { return (G?.difficulty || DIFFICULTY.normal).eras; }
