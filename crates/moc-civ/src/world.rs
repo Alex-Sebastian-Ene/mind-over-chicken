@@ -1380,6 +1380,11 @@ impl World {
         let phase = (self.time / DAY_SECONDS).fract();
         self.night = 0.5 - 0.5 * (phase * std::f32::consts::TAU).cos();
         self.rain_t = (self.rain_t - dt).max(0.0);
+        // #217: size the field caches to the settlements that need them, then allow this
+        // step's builds. Deferred requests wait in the queue instead of stalling agents.
+        let settlements = self.villages.iter().filter(|v| v.alive).count();
+        self.paths.set_settlements(settlements);
+        self.sea.set_settlements(settlements);
         self.paths.refill(2);
         self.sea.refill(1);
         self.update_fires(dt);

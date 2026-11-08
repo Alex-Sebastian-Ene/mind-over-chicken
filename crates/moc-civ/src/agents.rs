@@ -89,7 +89,15 @@ pub const ROUTE_GREEDY: u8 = 0;
 pub const ROUTE_STUCK: u8 = 1;
 pub const ROUTE_FIELD: u8 = 2;
 
-fn next_tile(a: &Agent, cx: i32, cy: i32, t: &Terrain, paths: &mut Paths, route: u8) -> Option<(i32, i32)> {
+/// What a walker should do this step. `Wait` is not a failure: its field was queued for a
+/// later step (#217), so it holds position without counting `stuck` or abandoning the route.
+enum Next {
+    Step(i32, i32),
+    Wait,
+    None,
+}
+
+fn next_tile(a: &Agent, cx: i32, cy: i32, t: &Terrain, paths: &mut Paths, route: u8) -> Next {
     let far = t.d.cheb(cx, cy, a.gx, a.gy);
     let want = match route {
         ROUTE_FIELD => far > 8 || a.stuck > 6,
@@ -97,11 +105,17 @@ fn next_tile(a: &Agent, cx: i32, cy: i32, t: &Terrain, paths: &mut Paths, route:
         _ => false,
     };
     if want && far < crate::planet::FIELD_RADIUS {
-        if let Some(n) = paths.get(t.d, &t.walk, a.gx, a.gy).and_then(|f| f.next_step(cx, cy)) {
-            return Some(n);
+        if let Some((nx, ny)) = paths.get(t.d, &t.walk, a.gx, a.gy).and_then(|f| f.next_step(cx, cy)) {
+            return Next::Step(nx, ny);
+        }
+        if paths.is_pending(t.d, a.gx, a.gy) {
+            return Next::Wait;
         }
     }
-    greedy(t, cx, cy, a.gx, a.gy, a.px, a.py)
+    match greedy(t, cx, cy, a.gx, a.gy, a.px, a.py) {
+        Some((nx, ny)) => Next::Step(nx, ny),
+        None => Next::None,
+    }
 }
 
 /// Move toward the goal at `speed` tiles/s. Returns true when standing on the goal tile.
@@ -115,13 +129,14 @@ pub fn walk(a: &mut Agent, t: &Terrain, paths: &mut Paths, speed: f32, dt: f32, 
             return true;
         }
         match next_tile(a, cx, cy, t, paths, route) {
-            Some((nx, ny)) => {
+            Next::Step(nx, ny) => {
                 a.px = cx;
                 a.py = cy;
                 a.nx = nx;
                 a.ny = ny;
             }
-            None => {
+            Next::Wait => return false,
+            Next::None => {
                 a.stuck = a.stuck.saturating_add(4);
                 return false;
             }
