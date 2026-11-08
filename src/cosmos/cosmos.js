@@ -14,6 +14,7 @@ import { label } from '../eras/stone.js';
 import { ZoomState } from './zoom.js';
 import { tierName } from './planet-sim.js';
 import { drawReticle } from '../render/sprites.js';
+import { sideNeighbour } from './select.js';
 
 const CENTER = { x: W / 2, y: H / 2 };
 const BIG_R = 74;
@@ -263,7 +264,7 @@ export class Cosmos extends ZoomState {
       const t = z - 1, e = ease(t);
       const gal = this.galaxy;
       const fp = look.planet || gal.home;
-      gal.draw(ctx, this.globe, G.scene?.layer || G.world.layers.stone, G.world.structures, { alpha: smoothstep(0.15, 0.9, t), skip: fp, hover: this.hover });
+      gal.draw(ctx, this.globe, G.scene?.layer || G.world.layers.stone, G.world.structures, { alpha: smoothstep(0.15, 0.9, t), skip: fp, hover: this.hover || this.selectedPlanet() });
       const q = gal.pos(fp);
       const toStar = [160 - q.x, 92 - q.y, 26];
       const n = Math.hypot(...toStar);
@@ -377,7 +378,11 @@ export class Cosmos extends ZoomState {
       label(ctx, CENTER.x, H - 6, this.canLand() ? 'drag to spin · scroll or X to land · Z for the galaxy' : 'drag to spin · scroll or Z to see the galaxy', '#a3a6c4', 5);
       ctx.globalAlpha = 1;
     }
-    if (this.galaxy && z > 1.2) this.galaxy.drawOverlay(ctx, { alpha: smoothstep(1.3, 1.9, z), hover: this.hover });
+    if (this.galaxy && z > 1.2) this.galaxy.drawOverlay(ctx, { alpha: smoothstep(1.3, 1.9, z), hover: this.hover || this.selectedPlanet() });
+    if (this.galaxy && z > 1.6) {
+      const sp = this.selectedPlanet();
+      label(ctx, W / 2, H - 6, `◀ ▶ choose a world${sp ? ` (${sp.name})` : ''} · scroll in or Enter to land`, '#a3a6c4', 5);
+    }
     if (this.toast) { ctx.globalAlpha = Math.min(1, this.toast.t); label(ctx, CENTER.x, 30, this.toast.text, '#ffd166', 6); ctx.globalAlpha = 1; }
     if (G?.brain?.aim) {
       drawReticle(ctx, G.brain.aim.x * (W - 1), G.brain.aim.y * (H - 1), this.time, '#ffe066');
@@ -434,7 +439,23 @@ export class Cosmos extends ZoomState {
     return null;
   }
 
+  // The galaxy's picker (Alex): Left/Right select the next planet to that side on screen; the
+  // selected one is highlighted and is the world a zoom-in (wheel, X, pinch, Enter) lands on.
+  selectSide(dir, G) {
+    const gal = this.galaxy;
+    if (!gal || !this.inGalaxy) return null;
+    const items = gal.planets.map((p) => ({ p, x: gal.pos(p).x }));
+    const p = sideNeighbour(items, this.selectedPlanet(), dir);
+    if (!p) return null;
+    this.selected = p;
+    this.focus = this.isCampaign(p) ? null : p;
+    return p;
+  }
+  // The planet the galaxy view is "hovering": the last one picked, else the one in focus, else home.
+  selectedPlanet() { return this.selected || this.focus || this.galaxy?.home || null; }
+
   focusPlanet(p, G) {
+    this.selected = p;
     const r = super.focusPlanet(p);
     if (r.refused) { this.say(r.refused); return; }
     this.rot = this.galaxy ? this.galaxy.time * p.spin + p.phase : this.rot;
