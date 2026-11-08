@@ -594,26 +594,28 @@ export class StoneAge {
   }
 
   drawOverlay(ctx) {
-    const f = this.fire;
-    ctx.textAlign = 'center';
-    if (!f.lit && !this.done) {
-      const bob = Math.sin(this.t * 5) * 1.5;
-      label(ctx, f.x, f.y - 12 + bob, 'blink here to light the fire', '#ffd166', 6);
-    } else if (f.lit && this.food < 1 && !this.meat.length && !this.done) {
-      const nearby = this.mammoths.find((m) => m.alive && dist(m.x, m.y, f.x, f.y) < 70);
-      if (nearby) {
+    if (!this.G?.simulated && !this.simulated) {
+      const f = this.fire;
+      ctx.textAlign = 'center';
+      if (!f.lit && !this.done) {
         const bob = Math.sin(this.t * 5) * 1.5;
-        label(ctx, nearby.x, nearby.y - 14 + bob, 'blink chicken for food', '#ffd166', 5.5);
+        label(ctx, f.x, f.y - 12 + bob, 'blink here to light the fire', '#ffd166', 6);
+      } else if (f.lit && this.food < 1 && !this.meat.length && !this.done) {
+        const nearby = this.mammoths.find((m) => m.alive && dist(m.x, m.y, f.x, f.y) < 70);
+        if (nearby) {
+          const bob = Math.sin(this.t * 5) * 1.5;
+          label(ctx, nearby.x, nearby.y - 14 + bob, 'blink chicken for food', '#ffd166', 5.5);
+        }
       }
-    }
-    if (this.hold.active) {
-      const p = this.hold.progress / HOLD_SECONDS;
-      ctx.lineWidth = 1.4;
-      ctx.strokeStyle = 'rgba(10,12,30,0.7)';
-      ctx.beginPath(); ctx.arc(f.x, f.y - 3, 13, 0, Math.PI * 2); ctx.stroke();
-      ctx.strokeStyle = '#59d8c8';
-      ctx.beginPath(); ctx.arc(f.x, f.y - 3, 13, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2); ctx.stroke();
-      label(ctx, f.x, f.y - 20, `HOLD CALM  ${(HOLD_SECONDS - this.hold.progress).toFixed(1)}s`, '#59d8c8', 7);
+      if (this.hold.active) {
+        const p = this.hold.progress / HOLD_SECONDS;
+        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = 'rgba(10,12,30,0.7)';
+        ctx.beginPath(); ctx.arc(f.x, f.y - 3, 13, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = '#59d8c8';
+        ctx.beginPath(); ctx.arc(f.x, f.y - 3, 13, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2); ctx.stroke();
+        label(ctx, f.x, f.y - 20, `HOLD CALM  ${(HOLD_SECONDS - this.hold.progress).toFixed(1)}s`, '#59d8c8', 7);
+      }
     }
     this.particles.drawText(ctx);
   }
@@ -802,7 +804,8 @@ export class StoneAge {
 export function label(ctx, x, y, text, color, size = 6) {
   if (ctx.__project3d) {
     const pr = ctx.__project3d(x, y);
-    if (pr) { x = pr[0]; y = pr[1]; }
+    if (!pr) return;
+    x = pr[0]; y = pr[1];
   }
   ctx.font = `${size}px "Pixelify Sans", monospace`;
   ctx.textAlign = 'center';
