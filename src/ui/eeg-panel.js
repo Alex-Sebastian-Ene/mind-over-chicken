@@ -198,6 +198,25 @@ export class PausableClock {
   now() { return this.realNow() - this.pausedMs; }
 }
 
+// Head-aim settings (sensitivity, yaw and pitch inversion) survive a reload (#186), under
+// localStorage "moc.aimPrefs". Bad or missing values fall back to the defaults.
+export const AIM_PREFS_KEY = 'moc.aimPrefs';
+const AIM_DEFAULTS = { sensitivity: 1.0, invertYaw: false, invertPitch: false };
+function prefsStorage() { try { return globalThis.localStorage ?? null; } catch { return null; } }
+export function loadAimPrefs(storage = prefsStorage()) {
+  let saved = {};
+  try { saved = JSON.parse(storage?.getItem(AIM_PREFS_KEY) || '{}') || {}; } catch { saved = {}; }
+  const s = Number(saved.sensitivity);
+  return {
+    sensitivity: Number.isFinite(s) ? Math.min(2.5, Math.max(0.5, s)) : AIM_DEFAULTS.sensitivity,
+    invertYaw: saved.invertYaw === true,
+    invertPitch: saved.invertPitch === true,
+  };
+}
+export function saveAimPrefs(prefs, storage = prefsStorage()) {
+  try { storage?.setItem(AIM_PREFS_KEY, JSON.stringify({ sensitivity: prefs.sensitivity, invertYaw: !!prefs.invertYaw, invertPitch: !!prefs.invertPitch })); } catch {}
+}
+
 export class EegPanel {
   constructor(doc, { getSource, getBrain, onConnectBridge, onDisconnectBridge }) {
     this.doc = doc;
@@ -277,7 +296,12 @@ export class EegPanel {
     this.accelCtx = this.ui.accelScope.getContext('2d');
     this.gyroCtx = this.ui.gyroScope.getContext('2d');
     this.connecting = false;
-    this.prefs = { sensitivity: 1.0, invertYaw: false, invertPitch: false };
+    this.prefs = loadAimPrefs();   // saved by the controls below (#186)
+    this.prefsSource = null;       // the source they were last applied to
+    this.ui.sensInput.value = String(this.prefs.sensitivity);
+    this.ui.sensVal.textContent = `${this.prefs.sensitivity.toFixed(1)}×`;
+    this.ui.invYaw.checked = this.prefs.invertYaw;
+    this.ui.invPitch.checked = this.prefs.invertPitch;
     this.logs = [];
     this.lastLoggedBlinkCount = 0;
     this.lastLoggedSampleCount = 0;
@@ -309,16 +333,19 @@ export class EegPanel {
       this.ui.sensVal.textContent = `${v.toFixed(1)}×`;
       const src = this.getSource();
       if (src) src.sensitivity = v;
+      saveAimPrefs(this.prefs);
     });
     this.ui.invYaw.addEventListener('change', () => {
       this.prefs.invertYaw = this.ui.invYaw.checked;
       const src = this.getSource();
       if (src) src.invertYaw = this.prefs.invertYaw;
+      saveAimPrefs(this.prefs);
     });
     this.ui.invPitch.addEventListener('change', () => {
       this.prefs.invertPitch = this.ui.invPitch.checked;
       const src = this.getSource();
       if (src) src.invertPitch = this.prefs.invertPitch;
+      saveAimPrefs(this.prefs);
     });
   }
 
@@ -1150,6 +1177,12 @@ export class EegPanel {
   update() {
     const src = this.getSource();
     const b = this.getBrain();
+    // Every headset gets the saved aim settings, however it was connected (title screen, this
+    // panel, auto-connect at boot), not only one connected from this panel (#186).
+    if (src !== this.prefsSource) {
+      this.prefsSource = src;
+      if (src?.kind === 'bridge') this.applyPrefsToSource(src);
+    }
     const isBridge = src?.kind === 'bridge';
     const wsConnected = isBridge && src.connected;
     const hasRealStream = wsConnected && src.streaming && src.lastFrameAt > 0 && (performance.now() - src.lastFrameAt < 3000);
