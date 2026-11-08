@@ -1,4 +1,4 @@
-use moc_cosmos::galaxy::Galaxy;
+use moc_cosmos::galaxy::{Galaxy, Ship, PLANET_METRIC_STRIDE, SHIP_METRIC_STRIDE};
 use moc_cosmos::math::Mulberry32;
 use moc_cosmos::planet_sim::{
     arrive_ship, blink_planet, step_planet, BrainEffects, Channel, EventKind, MindSnapshot,
@@ -143,4 +143,59 @@ fn test_galaxy_orchestration_and_ships() {
     let outcome = arrive_ship(&mut target);
     assert_eq!(outcome, "settled");
     assert!(target.pop > 0.0);
+}
+
+#[test]
+fn test_packed_planet_and_ship_metric_buffers() {
+    let mut galaxy = Galaxy::new(4242);
+    let fx = BrainEffects {
+        calm: 0.5,
+        focus: 0.5,
+        stress: 0.5,
+        blink_rate: 0.0,
+    };
+    for _ in 0..80 {
+        galaxy.step(0.1, &fx, 0);
+    }
+    galaxy.ships.push(Ship {
+        from_planet: 0,
+        to_planet: 1,
+        t: 0.25,
+        duration: 6.0,
+        mission: None,
+    });
+
+    let mut planets = Vec::new();
+    galaxy.fill_planet_metrics(&mut planets);
+    assert_eq!(planets.len(), galaxy.planets.len() * PLANET_METRIC_STRIDE);
+    for (i, p) in galaxy.planets.iter().enumerate() {
+        let o = i * PLANET_METRIC_STRIDE;
+        let (x, y, _) = p.position(galaxy.time);
+        assert_eq!(planets[o], p.state.pop);
+        assert_eq!(planets[o + 1], p.state.era_index as f32);
+        assert_eq!(planets[o + 2], p.state.progress);
+        assert_eq!(planets[o + 3], p.state.market);
+        assert_eq!(planets[o + 4], p.state.storms as f32);
+        assert_eq!(planets[o + 5], if p.alive { 1.0 } else { 0.0 });
+        assert_eq!(planets[o + 6], if p.forming { 1.0 } else { 0.0 });
+        assert_eq!(planets[o + 7], x);
+        assert_eq!(planets[o + 8], y);
+    }
+
+    let mut ships = Vec::new();
+    galaxy.fill_ship_metrics(&mut ships);
+    assert_eq!(ships.len(), galaxy.ships.len() * SHIP_METRIC_STRIDE);
+    for (i, s) in galaxy.ships.iter().enumerate() {
+        let o = i * SHIP_METRIC_STRIDE;
+        assert_eq!(ships[o], s.from_planet as f32);
+        assert_eq!(ships[o + 1], s.to_planet as f32);
+        assert_eq!(ships[o + 2], s.t / s.duration.max(0.001));
+        assert_eq!(ships[o + 3], s.duration);
+    }
+
+    // Reusing the buffers must not reallocate: JS holds a view over the same memory (#216).
+    let cap = planets.capacity();
+    galaxy.fill_planet_metrics(&mut planets);
+    assert_eq!(planets.capacity(), cap);
+    assert_eq!(planets.len(), galaxy.planets.len() * PLANET_METRIC_STRIDE);
 }

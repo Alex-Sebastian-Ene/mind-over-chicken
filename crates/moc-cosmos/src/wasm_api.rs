@@ -55,7 +55,7 @@ pub unsafe extern "C" fn moc_galaxy_planet_count(ptr: *const Galaxy) -> u32 {
 }
 
 /// Query planet metrics into a float buffer:
-/// [pop, era_index, progress, market, storms, alive (1.0/0.0), posX, posY]
+/// [pop, era_index, progress, market, storms, alive (1.0/0.0), forming (1.0/0.0), posX, posY]
 #[no_mangle]
 pub unsafe extern "C" fn moc_galaxy_planet_metrics(
     ptr: *const Galaxy,
@@ -70,21 +70,14 @@ pub unsafe extern "C" fn moc_galaxy_planet_metrics(
         None => return 0,
     };
 
-    if (idx as usize) >= galaxy.planets.len() {
-        return 0;
+    let m = match galaxy.planet_metrics(idx as usize) {
+        Some(m) => m,
+        None => return 0,
+    };
+
+    for (i, v) in m.iter().enumerate() {
+        *out.add(i) = *v;
     }
-
-    let p = &galaxy.planets[idx as usize];
-    let (px, py, _) = p.position(galaxy.time);
-
-    *out.add(0) = p.state.pop;
-    *out.add(1) = p.state.era_index as f32;
-    *out.add(2) = p.state.progress;
-    *out.add(3) = p.state.market;
-    *out.add(4) = p.state.storms as f32;
-    *out.add(5) = if p.alive { 1.0 } else { 0.0 };
-    *out.add(6) = px;
-    *out.add(7) = py;
 
     1
 }

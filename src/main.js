@@ -33,6 +33,7 @@ import initEngine, {
   RustCalibration,
   rust_villager_look,
   rust_animate_agent,
+  engine_memory, // #216: zero-copy galaxy buffers
 } from '../pkg/mind_over_chicken_engine.js';
 import { Cosmos } from './cosmos/cosmos.js';
 import { ReturnHome } from './cosmos/return-home.js'; // death returns the camera home (#297)
@@ -157,7 +158,7 @@ try {
   setRustWorldGen(RustWorldGen);
   setRustFingerController(RustFingerController);
   setRustEmotionTracker(RustEmotionTracker);
-  setRustGalaxy(RustGalaxy);
+  setRustGalaxy(RustGalaxy, engine_memory); // #216: pass the memory handle for zero-copy views
   setRustAiPolicy(RustAiPolicy);
   setRustBrain(RustBrain);
   setRustSimSource(RustSimSource);

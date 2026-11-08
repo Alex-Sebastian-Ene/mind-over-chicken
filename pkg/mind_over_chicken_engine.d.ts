@@ -352,11 +352,35 @@ export class RustGalaxy {
     planet_pos_x(idx: number): number;
     planet_pos_y(idx: number): number;
     planet_progress(idx: number): number;
+    /**
+     * Floats per planet in the packed buffer (#216).
+     */
+    planet_stride(): number;
+    /**
+     * Length in `f32`s of the packed planet buffer (#216).
+     */
+    planets_len(): number;
+    /**
+     * Byte offset (in wasm linear memory) of the packed planet buffer (#216).
+     */
+    planets_ptr(): number;
     set_attended(planet_idx: number): void;
     ship_count(): number;
     ship_from(idx: number): number;
+    /**
+     * Floats per ship in the packed buffer (#216).
+     */
+    ship_stride(): number;
     ship_t(idx: number): number;
     ship_to(idx: number): number;
+    /**
+     * Length in `f32`s of the packed ship buffer (#216).
+     */
+    ships_len(): number;
+    /**
+     * Byte offset (in wasm linear memory) of the packed ship buffer (#216).
+     */
+    ships_ptr(): number;
     step(dt: number, calm: number, focus: number, stress: number, blinks_last_10s: number, blinks_total: number): void;
     war_battles(): Float32Array;
     war_bodies(): Float32Array;
@@ -649,6 +673,12 @@ export class ViewCamera {
 }
 
 /**
+ * The engine's WebAssembly memory (#216). JS keeps one `Float32Array` view over it and reads
+ * the galaxy's packed planet/ship buffers without per-entity getter calls.
+ */
+export function engine_memory(): WebAssembly.Memory;
+
+/**
  * The era's land use (farms, roads, paving: tiles whose type differs from the base type)
  * painted over the base colour layer, in a planet biome's colours.
  */
@@ -769,6 +799,7 @@ export interface InitOutput {
     readonly engine_is_game_finished: (a: number) => number;
     readonly engine_is_terrain_reachable: (a: number, b: number, c: number) => number;
     readonly engine_is_walkable: (a: number, b: number, c: number) => number;
+    readonly engine_memory: () => any;
     readonly engine_new: (a: number, b: number) => [number, number, number];
     readonly engine_orbit_camera: (a: number, b: number, c: number) => void;
     readonly engine_pan_camera: (a: number, b: number, c: number) => void;
@@ -878,11 +909,17 @@ export interface InitOutput {
     readonly rustgalaxy_planet_pos_x: (a: number, b: number) => number;
     readonly rustgalaxy_planet_pos_y: (a: number, b: number) => number;
     readonly rustgalaxy_planet_progress: (a: number, b: number) => number;
+    readonly rustgalaxy_planet_stride: (a: number) => number;
+    readonly rustgalaxy_planets_len: (a: number) => number;
+    readonly rustgalaxy_planets_ptr: (a: number) => number;
     readonly rustgalaxy_set_attended: (a: number, b: number) => void;
     readonly rustgalaxy_ship_count: (a: number) => number;
     readonly rustgalaxy_ship_from: (a: number, b: number) => number;
+    readonly rustgalaxy_ship_stride: (a: number) => number;
     readonly rustgalaxy_ship_t: (a: number, b: number) => number;
     readonly rustgalaxy_ship_to: (a: number, b: number) => number;
+    readonly rustgalaxy_ships_len: (a: number) => number;
+    readonly rustgalaxy_ships_ptr: (a: number) => number;
     readonly rustgalaxy_step: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly rustgalaxy_war_battles: (a: number) => [number, number];
     readonly rustgalaxy_war_bodies: (a: number) => [number, number];
@@ -1017,10 +1054,10 @@ export interface InitOutput {
     readonly moc_sim_free: (a: number) => void;
     readonly moc_sim_new: (a: number) => number;
     readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__307: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__308: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__314: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__315: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
