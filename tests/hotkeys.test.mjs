@@ -43,7 +43,7 @@ test('every label documents C / Shift+C (#211)', () => {
   const read = (f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
   const html = read('index.html');
   assert.match(html, /id="camBtn"[^>]*title="[^"]*\(C\)"[^>]*>Camera <kbd>C<\/kbd>/);
-  assert.match(html, /<kbd>C<\/kbd> Camera/, 'start-screen hint names C');
+  assert.match(html, /<kbd>C<\/kbd> Camera/, 'the Settings key list names C (the title screen has no hint now)');
   const cam = read('src/camera/camera.js');
   assert.doesNotMatch(cam, /Camera(?: on|…)? <kbd>`<\/kbd>/, 'dynamic button label uses C');
   assert.match(cam, /'Camera <kbd>C<\/kbd>'/);
