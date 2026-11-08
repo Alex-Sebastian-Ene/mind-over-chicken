@@ -384,11 +384,7 @@ export class Cosmos extends ZoomState {
       label(ctx, W / 2, H - 6, `◀ ▶ choose a world${sp ? ` (${sp.name})` : ''} · scroll in or Enter to land`, '#a3a6c4', 5);
     }
     if (this.toast) { ctx.globalAlpha = Math.min(1, this.toast.t); label(ctx, CENTER.x, 30, this.toast.text, '#ffd166', 6); ctx.globalAlpha = 1; }
-    // The globe and galaxy use the screen pointer; below 0.5 the surface scene draws its own
-    // world-space reticle (#294).
-    if (G?.brain?.aim && this.z > 0.5) {
-      drawReticle(ctx, G.brain.aim.x * (W - 1), G.brain.aim.y * (H - 1), this.time, '#ffe066');
-    }
+    // The aim reticle (screen pointer here) is drawn once, on top, by main.js (#301).
   }
 
   // ---- input (coordinates in world pixels) ----

@@ -750,11 +750,8 @@ export class StoneAge {
 
   drawAfterLight(ctx) {
     for (const b of this.bolts) drawBolt(ctx, b.pts, Math.min(1, b.life * 4));
-    const a = this.G.brain.aim;
-    // Painted into the map in 3D too: the map drapes over the terrain, so it lands exactly on the
-    // ground point under the cursor (the standing sprite version sat above it, or didn't show).
-    const w = this.G.world, p = w.aimPoint(a);
-    drawReticle(ctx, p.x, p.y, this.t, '#ffe066');
+    // The aim reticle is drawn once, on top of the lighting, by main.js (#301).
+    const w = this.G.world;
     if (this.flash > 0) { ctx.fillStyle = `rgba(220,230,255,${this.flash * 0.9})`; ctx.fillRect(0, 0, w.width, w.height); }
   }
 

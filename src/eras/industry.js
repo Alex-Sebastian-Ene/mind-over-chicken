@@ -377,12 +377,7 @@ export class Industry {
     // Chicken (SPRITE_CHICKEN = 3)
     engine.add_billboard(3, this.chicken.x, this.chicken.y, this.chicken.facing || 1, this.chicken.frame || 0, 0);
 
-    // Aim reticle (SPRITE_RETICLE = 13)
-    const aim = this.G.brain?.aim;
-    if (aim) {
-      const p = this.G.world.aimPoint(aim);
-      engine.add_billboard(13, p.x, p.y, 1, 0, 0);
-    }
+    // The aim reticle is drawn once, on top, by main.js (#301).
   }
 
   draw(ctx) {
@@ -415,12 +410,7 @@ export class Industry {
 
   drawAfterLight(ctx) {
     for (const b of this.bolts) drawBolt(ctx, b.pts, Math.min(1, b.life * 4));
-    const a = this.G.brain?.aim;
-    const w = this.G.world;
-    if (a && w && !ctx.__project3d) {
-      const p = w.aimPoint(a);
-      drawReticle(ctx, p.x, p.y, this.t, '#ffe066');
-    }
+    const w = this.G.world;   // the aim reticle is drawn once, on top, by main.js (#301)
     if (this.flash > 0 && w) {
       ctx.fillStyle = `rgba(220,230,255,${this.flash * 0.9})`;
       ctx.fillRect(0, 0, w.width, w.height);
