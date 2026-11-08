@@ -395,6 +395,10 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 .power[data-power="calm"] { --tint: var(--calm); }
 .power[data-power="focus"] { --tint: var(--focus); }
 .power[data-power="stress"] { --tint: var(--alarm); }
+.power.invincible-power { --tint: var(--good); opacity: 1; }
+.power.invincible-power[aria-pressed="false"] { opacity: 0.72; }
+.power.invincible-power[aria-pressed="true"] { border-color: var(--good); background: color-mix(in srgb, var(--good) 10%, var(--panel)); }
+.invincible-icon { display: grid; place-items: center; font-size: 22px; line-height: 1; }
 .power-icon { grid-area: icon; width: 28px; height: 28px; image-rendering: pixelated; }
 .power-name { grid-area: name; font: 700 15px/1 var(--pixel); color: var(--tint); }
 .power-sub { grid-area: sub; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

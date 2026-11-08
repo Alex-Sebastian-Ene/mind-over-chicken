@@ -18,12 +18,12 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 - [ ] **Pinch calibration** (optional): Camera sidebar → **🎯 Pinch Movement Calibration** opens a pop-up. Follow the live camera + wireframe to the LEFT, RIGHT, UP and DOWN targets with each hand. It auto-advances, saves per-axis gains and closes when complete. Gains persist in the browser. Esc closes it. Head tilt is not calibrated.
 - [ ] **Hotkeys Reference Card**:
   - `Space`: Hold Calm (high alpha)
-  - `F`: Hold Focus / Insight. Hold ~2 s (Rain or Calm) to summon rain and put out a forest fire
+  - `F`: Hold Focus / Insight. Hold 5 s at the fading campfire to rekindle it. For the Rain spell, open your palm and hold Insight ~2 s (or hold `F` alone without the camera) to put out a forest fire
   - `Shift`: Spike Stress (drops calm)
   - `B`: Deliberate Blink. On a surface it throws lightning (a tree strike starts a forest fire); in the galaxy/globe it selects/lands like a left click
   - `Space` / `Enter` / click during an era's opening camera move: skip it
   - `3`: Hold to charge the charged fireball, release to throw (or fist → pull back → thrust + open palm with the camera). Its colour follows joy (red) / surprise (blue)
-  - `I`: Toggle people invincibility in Stone Age (no hunger, starvation, lightning or trample deaths)
+  - `I` or the top-bar **🛡️ People** button: Toggle people invincibility in Stone Age (no hunger, starvation, lightning or trample deaths)
   - `T`: Toggle 3D Heightmap Terrain vs 2D Classic
   - `Z` / `X` (or scroll, or a trackpad pinch): one continuous zoom out to the globe and galaxy / back in to the surface. In 3D the zoom goes toward the cursor
   - `Left` / `Right` (or `A` / `D`) in the galaxy: choose a world; `Enter` or zoom in to land on it. `N`: visit the next world
@@ -56,7 +56,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 #### Operator Actions
 - **0:00**: Title screen visible. Click **"Play with the emulated headset"** (or **Connect a real headset → Connect** if the Muse is streaming).
 - **0:05**: The camera sweeps down onto the 640×360 home world in **3D WebGL mode** (3.2 s; pixel-art heightmap terrain, the sun crossing a 150-second day). There is no card to dismiss. Under reduced motion the sweep is dropped.
-- **0:12**: Show the power tiles (`Lightning`, `Rain or Calm`, `Markets`). Point out that the 10-second calibration window is active, recording baseline alpha/beta rhythms.
+- **0:12**: Show the power tiles (`Lightning`, `Rain`, `Markets`). Point out that the 10-second calibration window is active, recording baseline alpha/beta rhythms.
 
 ---
 
@@ -66,14 +66,14 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 > *"We start in the Stone Age. My tribe is freezing, and Oog, the High Priest, is quietly judging me.*  
 > *Watch the reticle. When I perform a deliberate double-blink—[BLINK]—lightning strikes the fire pit, igniting civilization's first flame.*  
 > *Now I strike a giant chicken across the river—[BLINK]—barbecuing dinner for the hunters.*  
-> *Notice the fire fading! The game demands serenity. As I take a deep breath and enter calm hold... [HOLD 5s]... my alpha-to-beta wave ratio spikes above 60%, the fire roars back, and a baby is born.*  
-> *And if a stray bolt sets the forest alight, I focus for two seconds and call down the rain."*
+> *Notice the fire fading! The game demands focus. As I hold Insight... [HOLD 5s]... my beta rhythm locks in, the fire roars back, and a baby is born.*  
+> *And if a stray bolt sets the forest alight, I open my palm and hold focus for two seconds to call down the rain."*
 
 #### Operator Actions
 - **0:22**: Aim mouse/head at the fire pit. Press `B` (or physical blink). Lightning crashes, fire ignites, audio synth roars.
 - **0:30**: Aim at a giant chicken. Press `B`. A roast chicken appears, food count rises to 5+.
-- **0:36**: Fire heat drops under 50%; calm hold begins. Hold `Space` (or close eyes for EEG calm). Meter fills to 100%, advisor celebrates, tribe population grows.
-- **0:50**: Aim at a tree and press `B`: a forest fire starts and spreads. Hold `F` (Rain or Calm) for about 2 s: rain puts it out.
+- **0:36**: Fire heat drops under 50%; the Insight hold begins. Hold `F` (or focus for the headset). The ring fills to 100%, the advisor celebrates and the tribe grows.
+- **0:50**: Aim at a tree and press `B`: a forest fire starts and spreads. Open your palm and hold Insight for about 2 s (or hold `F` with the camera off): the Rain spell puts it out.
 - **0:50**: Show the camera hands: pinch over a villager to carry them, then pinch with both hands and spread them to zoom. Optional: hold `3` (or, on camera, make a fist, pull it back, then thrust and open the palm) to throw the charged fireball (#291).
 
 ---

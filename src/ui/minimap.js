@@ -24,3 +24,31 @@ export function footprint3d(groundAt, { tx, tz, ww, wh, sw, sh }) {
   const pts = [corner(0, true), corner(sw, true), corner(sw, false), corner(0, false)];
   return pts.every(Boolean) ? pts : null;
 }
+
+
+// A minimap-sized, single-copy camera window is only useful when the four ground corners are
+// real points on this world and form a normal quad. At a low pitch the top corners can miss the
+// ground entirely; walking down to the first hit then lands on the wrapped side of the world,
+// and drawing all wrap copies made a giant self-intersecting shape. Reject those footprints so
+// the caller can fall back to the stable 2D window box.
+export function minimapWindow3d(groundAt, opts) {
+  const pts = footprint3d(groundAt, opts);
+  if (!pts) return null;
+  const { ww, wh } = opts;
+  const eps = 0.5;   // the Rust camera snaps window edges to whole pixels
+  if (!pts.every(([x, y]) => Number.isFinite(x) && Number.isFinite(y) && x >= -eps && x <= ww + eps && y >= -eps && y <= wh + eps)) return null;
+  const [a, b, c, d] = pts;
+  const cross = (p, q, r) => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+  const crosses = (p, q, r, s) => cross(p, q, r) * cross(p, q, s) < 0 && cross(r, s, p) * cross(r, s, q) < 0;
+  if (crosses(a, b, c, d) || crosses(b, c, d, a)) return null;
+  return pts;
+}
+
+// The 2D camera window as one clamped box, a stable fallback at low pitch or when the 3D ground
+// quad runs off the map. `vw`/`vh` are the home view's world-pixel size (320×180).
+export function viewWindow(cx, cy, ww, wh, vw = 320, vh = 180) {
+  const w = Math.min(vw, ww), h = Math.min(vh, wh);
+  const x = Math.min(Math.max(cx - w / 2, 0), Math.max(0, ww - w));
+  const y = Math.min(Math.max(cy - h / 2, 0), Math.max(0, wh - h));
+  return { x, y, w, h };
+}
