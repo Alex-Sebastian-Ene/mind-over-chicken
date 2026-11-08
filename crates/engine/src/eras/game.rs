@@ -1,7 +1,7 @@
 use super::industry::IndustryEra;
 use super::space::SpaceAge;
 use super::stone::StoneAge;
-use super::{BrainInput, Era, EraEvent};
+use super::{BrainInput, Era, EraBillboard, EraEvent, EraLight};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct GameStats {
@@ -111,6 +111,14 @@ impl GameFlow {
 
     pub fn on_cast(&mut self, spell: &str, aim_x: f32, aim_y: f32) -> Vec<EraEvent> {
         self.era.on_cast(spell, aim_x, aim_y)
+    }
+
+    pub fn billboards_3d(&self) -> Vec<EraBillboard> {
+        self.era.billboards_3d()
+    }
+
+    pub fn lights_3d(&self) -> Vec<EraLight> {
+        self.era.lights_3d()
     }
 }
 

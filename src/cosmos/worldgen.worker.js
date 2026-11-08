@@ -12,8 +12,8 @@ self.onmessage = (e) => {
     if (vast) {
       const v = buildVast(w, seed);
       const rgba = paintVast(v, w.biome, seed);
-      msg.vast = { w: v.w, h: v.h, tile: v.tile, type: v.type, continents: v.continents, spots: v.spots, rgba };
-      transfer.push(v.type.buffer, rgba.buffer);
+      msg.vast = { w: v.w, h: v.h, tile: v.tile, type: v.type, height: v.height, continents: v.continents, spots: v.spots, rgba };
+      transfer.push(v.type.buffer, v.height.buffer, rgba.buffer);
     }
     self.postMessage(msg, transfer);
   } catch (err) {

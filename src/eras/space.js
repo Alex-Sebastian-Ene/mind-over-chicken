@@ -8,7 +8,7 @@
 
 import { W, H, Particles, clamp, dist, rand, chance, floater, pick, mulberry32 } from '../sim/util.js';
 import { walk, animate, villagerLook } from '../sim/agents.js';
-import { drawPerson, drawChicken, drawRocket, drawGantry } from '../render/sprites.js';
+import { drawPerson, drawChicken, drawRocket, drawGantry, drawReticle } from '../render/sprites.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
 
@@ -171,6 +171,7 @@ export class SpaceAge {
     }
 
     if (this.phase === 'voyage') {
+      this.darkness = 0;
       this.voyageT += dt;
       if (this.voyageT > 7.5 && !this.done) {
         this.done = true;
@@ -221,7 +222,16 @@ export class SpaceAge {
 
     // Billboards
     // Rocket (SPRITE_ROCKET = 12)
-    engine.add_billboard(12, pad.x, pad.y, 1, Math.floor(this.progress * 100), this.phase === 'launch' ? 1 : 0);
+    if (this.phase === 'launch') {
+      const ry = (this.rocketY || 0) * 0.25;
+      if (typeof engine.add_billboard_y === 'function') {
+        engine.add_billboard_y(12, pad.x, ry, pad.y, 1, Math.floor(this.progress * 100), 1);
+      } else {
+        engine.add_billboard(12, pad.x, pad.y, 1, Math.floor(this.progress * 100), 1);
+      }
+    } else {
+      engine.add_billboard(12, pad.x, pad.y, 1, Math.floor(this.progress * 100), 0);
+    }
 
     // Engineers (SPRITE_VILLAGER = 0)
     for (const e of this.engineers) {
@@ -324,6 +334,8 @@ export class SpaceAge {
     if (this.phase === 'voyage') {
       label(ctx, W / 2, 24, this.voyageT < 3.5 ? 'Leaving home.' : 'A new world.', '#f2e8d5', 12);
     }
+    const aim = G.brain?.aim;
+    if (aim) drawReticle(ctx, aim.x * (W - 1), aim.y * (H - 1), this.t, '#ffe066');
   }
 
   // ---- camera (#33): hand casts and face mood. Extra inputs on top of the brain, never instead of it. ----
