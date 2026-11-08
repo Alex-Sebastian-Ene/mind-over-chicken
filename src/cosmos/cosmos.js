@@ -94,13 +94,15 @@ export class Cosmos extends ZoomState {
     return { x: this.view.to_screen_x(wx), y: this.view.to_screen_y(wy) };
   }
 
-  ensureGalaxy(G, { autonomousHome = false } = {}) {
+  ensureGalaxy(G, { autonomousHome = false, setupPlanets = null } = {}) {
     if (this.galaxy) return this.galaxy;
     this.galaxy = new Galaxy();
     // A sandbox home runs on its own, on a mirror of the same world (built off-thread), so the paused game's map is untouched.
     this.galaxy.addHome(G.world, { autonomous: autonomousHome });
     // Three more worlds take shape from the player's first ten seconds of brain data.
     this.galaxy.addMindWorlds();
+    // The worlds shaped on the setup screen keep their PPO temperament.
+    if (setupPlanets?.length) this.galaxy.addSetupPlanets(setupPlanets);
     this.galaxy.onEvent = (p, text, kind) => this.onEvent?.(p, text, kind);
     return this.galaxy;
   }

@@ -8,6 +8,7 @@ import { SimSource, BridgeSource, liveBridge, setRustSimSource } from './brain/s
 import { Brain, setRustBrain } from './brain/brain.js';
 import { Advisor, setRustAdvisorEngine } from './ui/advisor.js';
 import { EraIntro } from './ui/intro.js'; // era intro transition (no click-to-dismiss card)
+import { PlanetSetup } from './ui/planet-setup.js'; // shape four worlds before the home planet
 import { Hud, setRustHudEngine } from './ui/hud.js';
 import { EegPanel } from './ui/eeg-panel.js';
 import { Audio } from './audio.js';
@@ -396,7 +397,8 @@ function updateAIGodAutopilot(dt) {
 
 // mode: 'story' (the eras), 'galaxy' or 'crowded' (the sandboxes). resume: a save to continue
 // (src/game/saves.js): its world seed and size, stats, run time, calibration seed and brain model.
-function newGame(source, startIndex = 0, { mode = 'story', resume = null } = {}) {
+// setupPlanets: the four worlds shaped before a new story run (their PPO temperaments).
+function newGame(source, startIndex = 0, { mode = 'story', resume = null, setupPlanets = null } = {}) {
   if (previewSource && previewSource !== source) previewSource.disconnect();
   previewSource = null;
   previewBrain = null;
@@ -422,6 +424,7 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null } = {})
     scene: null, sceneIndex: startIndex, runTime: 0, shake: 0, invincible: false,
     stats: { lightning: 0, smitten: 0, births: 0, deaths: 0, recessions: 0, restarts: 0 },
     eraTimes: [], eraStart: 0, finished: false,
+    setupPlanets: setupPlanets ? setupPlanets.map((p) => ({ ...p, traits: { ...p.traits } })) : null,
     complete(delay = 2) {
       if (G.sceneIndex >= SCENES.length - 1) return;
       pendingScene = G.sceneIndex + 1;
@@ -488,7 +491,9 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null } = {})
   // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
   G.camera = cosmos;          // the eras ask it where the screen is (#129)
   cosmos.attachWorld(G.world); // the camera looks at the village
-  cosmos.ensureGalaxy(G);
+  // The worlds shaped on the setup screen join the galaxy now; the home campaign still starts
+  // exactly where it did before. Home + three mind worlds + these four fit the galaxy's limit.
+  cosmos.ensureGalaxy(G, { setupPlanets: G.setupPlanets });
   brain.onTrained = () => {};
   $('endScreen').hidden = true;
   $('failScreen').hidden = true;
@@ -1665,6 +1670,12 @@ screen.addEventListener('contextmenu', (e) => e.preventDefault());
 // Shift is the Stress demo key: full agitation on the emulated headset (input.panic).
 const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'panic' };
 window.addEventListener('keydown', (e) => {
+  // The setup screen owns the keyboard while it is open: Escape goes back to the title, and no
+  // game hotkey fires behind it.
+  if (planetSetup?.isOpen) {
+    if (e.code === 'Escape') { e.preventDefault(); planetSetup.cancel(); }
+    return;
+  }
   if (e.target?.closest?.('input, select, textarea')) return;
   if (document.getElementById('moveCalibModal')?.hidden === false) return;
   if (e.code === 'Escape' && settingsUi?.isOpen()) { e.preventDefault(); settingsUi.close(); return; }
@@ -1688,7 +1699,7 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Backspace') { e.preventDefault(); dismissBanner(); }
     return;
   }
-  const overlay = !G || !$('titleScreen').hidden || !$('failScreen').hidden || !$('endScreen').hidden;
+  const overlay = !G || !$('titleScreen').hidden || !$('planetSetup').hidden || !$('failScreen').hidden || !$('endScreen').hidden;
   if (overlay) return;
   // The era intro: Space or Enter skip it, every other game key waits for the stage.
   const gate = intro.gate('key', e.code);
@@ -1837,7 +1848,7 @@ $('biometricFeedbackBtn')?.addEventListener('click', () => {
     advisor?.say('assist', 'Tolerance widened. Take a deep breath; the gods are forgiving today.', { mood: 'happy', priority: 4, cooldown: 0 });
   }
 });
-$('againBtn').addEventListener('click', () => { $('endScreen').hidden = true; newGame(playSource()); });
+$('againBtn').addEventListener('click', () => { $('endScreen').hidden = true; newGame(playSource(), 0, { setupPlanets: G?.setupPlanets || null }); });
 $('endModelBtn').addEventListener('click', toggleModel);
 
 // ---------- zoom + galaxy UI ----------
@@ -1950,18 +1961,46 @@ $('galaxyBtn').addEventListener('click', () => {
 // back to the emulator without one; newGame() disconnects whatever it isn't given (#185).
 function playSource() { return liveBridge(G?.source, previewSource) || new SimSource(); }
 let settingsUi = null;   // the Settings panel (#186), wired after the camera and debug panels
-// startIndex: Sections start a fresh run at any era.
-function begin(source, { startIndex = 0, mode = 'story', resume = null } = {}) {
+let titleUi = null;      // the title menu, so Back from planet setup returns to New Game
+// startIndex: Sections start a fresh run at any era. setupPlanets: the four worlds shaped on
+// the planet setup screen, with their PPO temperaments.
+function begin(source, { startIndex = 0, mode = 'story', resume = null, setupPlanets = null } = {}) {
   audio.unlock();
   $('titleScreen').hidden = true;
+  $('planetSetup').hidden = true;
   settingsUi?.close();
-  newGame(source, startIndex, { mode, resume });
+  newGame(source, startIndex, { mode, resume, setupPlanets });
   // Settings › Camera: the player asked for the webcam with every game (#186).
   if (settingsUi?.settings.cameraOnStart) window.__moc?.camera?.start?.();
 }
-// New Game opens its step (world size, difficulty, #220); Start begins the run with those choices.
-$('newGameStart').addEventListener('click', () => begin(playSource()));
+// New Game opens its step (world size, difficulty, #220); Start then shapes the four worlds
+// before the run begins.
+$('newGameStart').addEventListener('click', () => openPlanetSetup(playSource()));
 initNewGameOptions($('titleScreen').querySelector('[data-title-view="new"]'));
+
+// The planet setup sits between Start and the home planet. The four worlds are shaped there;
+// Begin then drops the player onto the home planet with the normal campaign untouched.
+let setupSource = null;
+const planetSetup = new PlanetSetup($('planetSetup'), {
+  onBegin: (planets) => {
+    const src = setupSource || playSource();
+    setupSource = null;
+    begin(src, { setupPlanets: planets });
+  },
+  onCancel: () => {
+    setupSource = null;
+    planetSetup.close();
+    // Back returns to the New Game step it came from, not the main menu.
+    $('titleScreen').hidden = false;
+    titleUi?.show?.('new');
+  },
+});
+function openPlanetSetup(source) {
+  audio.unlock();
+  setupSource = source;
+  $('titleScreen').hidden = true;
+  planetSetup.open();
+}
 function startGalaxySandbox(source, resume = null) {
   begin(source, { mode: 'galaxy', resume });
   dismissBanner();
@@ -2031,12 +2070,12 @@ $('playBridge').addEventListener('click', async () => {
 });
 // Continue and Load resume a save (src/game/saves.js) through __moc.continueRun, set below.
 try {
-  initTitle(document, {
+  titleUi = initTitle(document, {
     onContinue: (save) => window.__moc?.continueRun?.(save),
     onSection: (i) => begin(playSource(), { startIndex: i }),
     onCalibrate: () => eegPanel?.startWizard('both'),
     headsetLive: () => !!liveBridge(G?.source, previewSource)?.streaming,
-    isBusy: () => !!(settingsUi?.isOpen() || eegPanel?.wiz?.active || $('moveCalibModal')?.hidden === false),
+    isBusy: () => !!(settingsUi?.isOpen() || planetSetup?.isOpen || eegPanel?.wiz?.active || $('moveCalibModal')?.hidden === false),
   });
 } catch (err) {
   console.error('Title menu failed to start; its buttons still work:', err);
@@ -2073,7 +2112,7 @@ window.__moc.saves = {
 // with coach visual demonstration. Face sets mood.
 window.__moc.camera = initCamera({
   getG: () => cosmos.castG(G), // planets (#68): casts and mood reach the world you're on
-  canCast: () => !!G?.scene && !banner && !intro.active && !eegPanel?.wiz?.active && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,
+  canCast: () => !!G?.scene && !banner && !intro.active && !eegPanel?.wiz?.active && !G.finished && $('titleScreen').hidden && $('planetSetup').hidden && $('failScreen').hidden && $('endScreen').hidden,
   // camera debug (#67): the fingertip aims on the panned surface like the mouse does.
   // Aims are 0..1 of the world; the camera's overlay draws in 0..1 of the screen (#129).
   mapX: (x) => cosmos.mapX(x * W) / cosmos.worldW,

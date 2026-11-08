@@ -11,6 +11,42 @@ const ACT = {
   identity: (x) => x,
 };
 
+// Wrap a policy with per-action multipliers (a planet's temperament). The trained policy still
+// supplies the base probabilities; the multipliers only lean them, so a peaceful world can
+// still strike when the fire goes out and a violent one can still be calm when it must.
+export function weightedPolicy(policy, weights = []) {
+  const w = weights.map((v) => { const n = Number(v); return Number.isFinite(n) ? Math.max(0, n) : 0; });
+  const adjust = (p) => {
+    let total = 0;
+    const out = new Array(p.length);
+    for (let i = 0; i < p.length; i++) {
+      const v = Math.max(0, p[i] * (w[i] ?? 1));
+      out[i] = v;
+      total += v;
+    }
+    if (total > 0) for (let i = 0; i < out.length; i++) out[i] /= total;
+    else out.fill(1 / out.length);   // every action suppressed: fall back to uniform
+    return out;
+  };
+  return {
+    obsSize: policy.obsSize,
+    actionWeights: w,
+    probs: (obs) => adjust(policy.probs(obs)),
+    act(obs, { greedy = true, rng = Math.random } = {}) {
+      const p = adjust(policy.probs(obs));
+      if (greedy) {
+        let bi = 0;
+        for (let i = 1; i < p.length; i++) if (p[i] > p[bi]) bi = i;
+        return bi;
+      }
+      let u = rng();
+      for (let i = 0; i < p.length; i++) { u -= p[i]; if (u <= 0) return i; }
+      return p.length - 1;
+    },
+    selfCheck: () => (policy.selfCheck ? policy.selfCheck() : 0),
+  };
+}
+
 export class MLPPolicy {
   constructor(spec) {
     if (!spec || !Array.isArray(spec.layers) || !spec.layers.length) throw new Error('policy: no layers');

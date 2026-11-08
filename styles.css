@@ -514,6 +514,64 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 }
 .size-pick button:hover { border-color: var(--ember); }
 .size-pick button[aria-checked="true"] { background: var(--ember); border-color: var(--ember); color: #102423; }
+/* Planet setup: four worlds get their PPO temperament before the home campaign. */
+.setup-inner { width: 100%; max-width: 1120px; display: grid; gap: 18px; }
+.setup-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: end; }
+.setup-head h1 { margin: 0; font: 700 clamp(34px, 6vw, 64px)/0.98 var(--pixel); letter-spacing: -0.01em; }
+.setup-legend {
+  display: grid; gap: 6px; min-width: 220px;
+  border-left: 2px solid var(--line); padding-left: 12px;
+  color: var(--muted); font-size: 13px;
+}
+.setup-legend b { color: var(--bone); font-family: var(--pixel); font-weight: 600; }
+.setup-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.setup-card {
+  --planet: #6cbf84;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--planet);
+  border-radius: 4px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.setup-card-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.setup-orb {
+  width: 34px; height: 34px; flex: none; border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.65), transparent 32%),
+    radial-gradient(circle at 68% 70%, rgba(0, 0, 0, 0.45), transparent 60%),
+    var(--planet);
+  box-shadow: inset -4px -4px 0 rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.setup-card-title { min-width: 0; }
+.setup-card-title h2 { margin: 0; font: 700 19px/1.1 var(--pixel); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setup-card-title p { margin: 2px 0 0; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.setup-card-title p span:first-child { color: var(--planet); font-weight: 700; }
+.setup-biome { display: flex; align-items: center; justify-content: space-between; gap: 8px; font: 600 12px var(--pixel); color: var(--muted); }
+.setup-biome select {
+  flex: 1 1 auto; min-width: 0; background: var(--ink); color: var(--bone);
+  border: 1px solid var(--line); border-radius: 3px; padding: 4px 6px; font: 12px var(--body);
+}
+.setup-traits { display: grid; gap: 7px; }
+.setup-trait { display: grid; gap: 2px; }
+.setup-trait-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; color: var(--muted); }
+.setup-trait-head b { font: 600 12px var(--pixel); color: var(--bone); }
+.setup-trait-head output { font-variant-numeric: tabular-nums; color: var(--planet); }
+.setup-trait input[type="range"] { width: 100%; margin: 0; accent-color: var(--planet); cursor: pointer; }
+.setup-weights { border-top: 1px solid var(--line); padding-top: 8px; display: grid; gap: 5px; }
+.setup-weights header { display: flex; justify-content: space-between; align-items: baseline; font: 600 11px var(--pixel); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.setup-weights small { font: 10px var(--body); text-transform: none; letter-spacing: 0; color: var(--muted); opacity: 0.8; }
+.setup-weights ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.setup-weights li { display: grid; grid-template-columns: 66px minmax(0, 1fr) 30px; align-items: center; gap: 6px; font-size: 11px; }
+.setup-action { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.setup-bar { height: 5px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
+.setup-bar i { display: block; width: var(--p, 0%); height: 100%; background: var(--planet); border-radius: 2px; transition: width 0.12s linear; }
+.setup-weights li b { text-align: right; font: 600 11px var(--pixel); color: var(--bone); font-variant-numeric: tabular-nums; }
+.setup-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.setup-foot .hint { flex: 1 1 300px; }
+.setup-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .row label { font: 600 13px var(--pixel); color: var(--muted); }
 .row input {
@@ -637,6 +695,14 @@ body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
   .powers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .bar-tools { margin-left: 0; }
   .objectives { flex-basis: 100%; }
+  .setup-head { grid-template-columns: 1fr; }
+  .setup-legend { border-left: 0; border-top: 1px solid var(--line); padding-left: 0; padding-top: 10px; }
+  .setup-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .setup-foot { display: grid; }
+}
+
+@media (max-width: 560px) {
+  .setup-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -4,6 +4,7 @@
 import { TIERS, CONFLICT, MILESTONES, tierName } from './planet-sim.js';
 import { ownerLabel, ERA_LABEL, ERA_NAMES, fmtPop } from './galaxy.js';
 import { fmtNum } from './surface.js';
+import { personalityLabel } from '../ai/personality.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
@@ -22,7 +23,7 @@ export function renderWorldDetail(root, p) {
   const campaign = p.home && !p.autonomous;
   const hist = (p.history || []).filter((h) => h.kind !== 'milestone').slice(0, 4);   // milestones show as chips
   const key = [p.name, ownerLabel(p), p.tier, p.eraIndex, Math.round(p.pop), Math.round(p.food), Math.round(p.wood), Math.round(p.stone), Math.round(p.goats),
-    Math.round((p.stability ?? 0) * 20), p.conflict, !!p.factions, (p.milestones || []).length, hist.map((h) => h.text).join('|')].join(';');
+    Math.round((p.stability ?? 0) * 20), p.conflict, !!p.factions, p.traits ? personalityLabel(p.traits) : '', (p.milestones || []).length, hist.map((h) => h.text).join('|')].join(';');
   if (key === lastKey) return;
   lastKey = key;
   root.hidden = false;
@@ -34,6 +35,7 @@ export function renderWorldDetail(root, p) {
   } else if (p.pop > 0) {
     const next = TIERS[(p.tier ?? 0) + 1];
     parts.push(el('p', 'wd-line', `${tierName(p)} · ${ERA_LABEL[ERA_NAMES[p.eraIndex]]} · ${fmtPop(p.pop)} people${next ? ` · next: ${next.name.toLowerCase()} at ${fmtNum(next.enter.all.population)}` : ''}`));
+    if (p.traits) parts.push(el('p', 'wd-line', `temperament: ${personalityLabel(p.traits)} (PPO)`));
     parts.push(el('p', 'wd-line wd-stock', `food ${fmtNum(p.food)} · wood ${fmtNum(p.wood)} · stone ${fmtNum(p.stone)} · goats ${fmtNum(p.goats)}`));
     const stab = el('p', 'wd-line wd-stab');
     const bar = el('span', 'wd-bar'); bar.style.setProperty('--p', `${Math.round((p.stability ?? 0) * 100)}%`);
