@@ -1,20 +1,23 @@
 // ERA II · INDUSTRY
-// The Goat Exchange. Prices come from trader agents, half fundamentalists (goats are worth
-// what the economy produces) and half chartists (goats are worth whatever they did yesterday,
+// The Chicken Exchange (chicken futures). Prices come from trader agents, half fundamentalists
+// (chickens are worth what the economy produces) and half chartists (chickens are worth whatever
+// they did yesterday,
 // plus vibes). Your stress (brain.stress: EEG agitation, or an angry face on camera; about 0.15
 // at rest) adds noise and herding, so bubbles and crashes emerge from the agents instead of being
 // scripted. Fear spreads between neighbours, unrest turns into strikes at the factory gate and,
 // if fear runs hot, riots.
-// Brain challenge: the Goat IPO, 8 s of steady nerves (stress below STRESSED).
+// Brain challenge: the Chicken IPO, 8 s of steady nerves (stress below STRESSED).
 
 import { W, H, Particles, clamp, dist, rand, chance, gauss, floater, pick } from '../sim/util.js';
 import { walk, animate, villagerLook, sail } from '../sim/agents.js';
-import { drawPerson, drawGoat, drawChicken, drawBoat, drawReticle, makeBolt, drawBolt } from '../render/sprites.js';
+import { drawPerson, drawHen, drawChicken, drawBoat, drawReticle, makeBolt, drawBolt } from '../render/sprites.js';
 import { FireballFX } from '../render/fireball.js';
 import { isResidential } from '../world/buildings.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
 import { eraTuning } from '../game/options.js'; // difficulty (#220)
+import { joyBuff, surpriseFires, surpriseEffect, sparkleCount, JOY_COLORS } from '../camera/mood-actions.js'; // #152
+import { reducedMotion } from '../ui/motion.js';
 
 const N = 38;
 const GDP_TARGET = 620;
@@ -29,8 +32,8 @@ export class Industry {
     this.label = 'Era II · Industry';
     this.intro = {
       title: 'Industry',
-      goal: `Reach ${GDP_TARGET} goats of GDP and land the Goat IPO.`,
-      how: [['Stress', 'Your stress drives market volatility. Stay steady or the goats stampede.'], ['Calm', 'A serene god calms the traders and cools the strikers.']],
+      goal: `Reach ${GDP_TARGET} chickens of GDP and land the Chicken IPO.`,
+      how: [['Stress', 'Your stress drives market volatility. Stay steady or the whole coop panics.'], ['Calm', 'A serene god calms the traders and cools the strikers.']],
     };
     this.powers = ['stress', 'calm'];
     this.darkness = 0.12;
@@ -55,8 +58,8 @@ export class Industry {
     this.tick = 0;
     this.crashCooldown = 0;
     this.recessions = 0;
-    // The goat market's headlines go on the game's one news ticker (#220), with the rivals' news.
-    const opening = ['GOAT EXCHANGE OPENS FOR BUSINESS', 'ANALYSTS: "GOATS ARE THE FUTURE"'];
+    // The chicken market's headlines go on the game's one news ticker (#220), with the rivals' news.
+    const opening = ['CHICKEN EXCHANGE OPENS FOR BUSINESS', 'ANALYSTS: "CHICKEN FUTURES ARE THE FUTURE"'];
     this.headlines = G.news ? G.news.channel('market', opening, 'market') : opening;
     this.tickerX = W;
     this.generalStrike = 0;
@@ -84,7 +87,7 @@ export class Industry {
     }
     // Agents that start at work begin inside the factory.
     for (const a of this.agents) if (a.state === 'work') { a.x = a.workSpot.x; a.y = a.workSpot.y; }
-    // Trade ships run goats to the other continents and bring back export earnings.
+    // Trade ships run chickens to the other continents and bring back export earnings.
     this.ships = w.continents.slice(1).map((c, i) => ({ kind: 'ship', x: c.homeHarbor.dock.x, y: c.homeHarbor.dock.y, dest: c, leg: 'out', facing: 1, wait: 1 + i * 3, cargo: '#efe8dc', sail: i ? '#e8c46a' : '#f2ead8' }));
     this.exports = 0;
     this.goats = [];
@@ -93,7 +96,7 @@ export class Industry {
     this.chicken = { x: ex.x + 6, y: ex.y + 2, frame: 0, ft: 0, facing: -1, side: 1 };
     G.brain.setCue('rest');
     G.advisor.setEra('industry');
-    G.advisor.say('intro', 'My lord! Bro. The Goat Exchange is open. Keep your nerves steady or the market goes full stampede.', { mood: 'happy', priority: 3, cooldown: 999 });
+    G.advisor.say('intro', 'My lord! Bro. The Chicken Exchange is open and chicken futures are hot. Keep your nerves steady or the market goes full headless chicken.', { mood: 'happy', priority: 3, cooldown: 999 });
   }
 
   // The traders' arousal, 0..1: the god's stress (about 0.15 at rest, 1 when agitated).
@@ -106,7 +109,7 @@ export class Industry {
     const herd = 1 + 1.6 * ar;
     let demand = 0;
     for (const a of this.agents) {
-      if (a.state === 'riot') continue; // strikers still buy and sell goats
+      if (a.state === 'riot') continue; // strikers still buy and sell chickens
       const fundamental = 0.5 * Math.log(this.value / this.price);
       const chart = herd * this.momentum * 22;
       const r = (1 - a.greed) * fundamental + a.greed * chart - a.fear * 0.03 + gauss() * 0.01;
@@ -120,8 +123,8 @@ export class Industry {
       const good = chance(0.45);
       this.momentum += good ? 0.012 : -0.016;
       this.headlines.push(pick(good
-        ? ['RUMOUR: GOATS CAN PREDICT RAIN', 'NEIGHBOURING TRIBE ORDERS 900 GOATS', 'GOAT CHEESE DECLARED A HEALTH FOOD']
-        : ['RUMOUR: GOATS ARE JUST LARGE CHICKENS', 'GOAT FLU REPORTED IN NEXT VALLEY', 'MAN SELLS ALL GOATS, WILL NOT SAY WHY']));
+        ? ['RUMOUR: CHICKENS CAN PREDICT RAIN', 'NEIGHBOURING TRIBE ORDERS 900 CHICKENS', 'EGGS DECLARED A HEALTH FOOD']
+        : ['RUMOUR: THE EGG CAME FIRST', 'BIRD FLU REPORTED IN NEXT VALLEY', 'MAN SELLS ALL CHICKENS, WILL NOT SAY WHY']));
     }
     const sigma = 0.003 + 0.016 * ar;
     // When traders are frightened, buyers vanish and quotes get marked down.
@@ -144,14 +147,14 @@ export class Industry {
       for (const a of this.agents) a.fear = clamp(a.fear + 0.3);
       this.confidence = Math.max(0.5, this.confidence - 0.15);
       const stress = Math.round((brain.stress ?? 0) * 100);
-      this.headlines.push(`GOAT INDEX -${Math.round((1 - this.price / this.peak) * 100)}% AS GOD'S STRESS HITS ${stress}%`);
-      G.advisor.say('crash', 'My lord, your stress has caused a goat recession.', { mood: 'panic', priority: 4, cooldown: 6 });
+      this.headlines.push(`CHICKEN INDEX -${Math.round((1 - this.price / this.peak) * 100)}% AS GOD'S STRESS HITS ${stress}%`);
+      G.advisor.say('crash', 'My lord, your stress has caused a chicken recession.', { mood: 'panic', priority: 4, cooldown: 6 });
       const c = G.camera?.viewCenter?.() || G.world.sites.exchange;   // mid-screen (#129)
-      floater(this.particles, c.x, c.y - 50, 'GOAT RECESSION', '#ff5a72', 12);
+      floater(this.particles, c.x, c.y - 50, 'CHICKEN RECESSION', '#ff5a72', 12);
     }
     if (this.price > this.value * 1.45) {
-      if (G.advisor.say('bubble', 'Goats are up forty percent. Nobody knows why. I have put the temple roof up as collateral.', { mood: 'happy', priority: 2, cooldown: 20 }))
-        this.headlines.push('GOAT BUBBLE? "NO SUCH THING," SAYS MAN HOLDING 40 GOATS');
+      if (G.advisor.say('bubble', 'Chicken futures are up forty percent. Nobody knows why. I have put my own eggs up as collateral.', { mood: 'happy', priority: 2, cooldown: 20 }))
+        this.headlines.push('CHICKEN BUBBLE? "NO SUCH THING," SAYS MAN HOLDING 40 CHICKENS');
     }
     this.confidence = clamp(this.confidence + TICK * 0.02 * (1 - this.confidence), 0.5, 1.6);
   }
@@ -163,6 +166,7 @@ export class Industry {
     this.particles.update(dt);
     this.bolts = this.bolts.filter((b) => (b.life -= dt) > 0);
     this.flash = Math.max(0, this.flash - dt);
+    this.joyStep(dt);   // #152: the joy buff, every frame while you smile
     this.tick += dt;
     while (this.tick >= TICK) { this.tick -= TICK; this.marketTick(); }
     const ar = this.arousal();
@@ -184,7 +188,7 @@ export class Industry {
       let nf = 0, nn = 0;
       for (const b of this.agents) { if (b !== a && Math.abs(b.x - a.x) < 16 && Math.abs(b.y - a.y) < 16) { nf += b.fear; nn++; } }
       if (nn) a.fear += dt * 0.5 * (nf / nn - a.fear);
-      // The god's stress frightens traders directly; the goats can smell fear.
+      // The god's stress frightens traders directly; the chickens can smell fear.
       a.fear += dt * (0.25 * Math.min(1, Math.max(0, -this.momentum * 60)) + 0.3 * Math.max(0, ar - 0.3) - 0.06 - 0.4 * brain.calm * (ar < 0.3 ? 1 : 0.3));
       a.fear = clamp(a.fear);
       // Greed follows paper gains.
@@ -201,8 +205,8 @@ export class Industry {
       if ((a.state === 'strike' || a.state === 'riot') && a.unrest < 0.32) { a.state = 'commute'; a.spot = null; }
       else if (a.state !== 'strike' && a.state !== 'riot' && a.unrest > 0.72) {
         a.state = 'strike'; a.spot = null;
-        if (G.advisor.say('strike', pick(['The mill workers are striking. They want "wages". Is that a type of goat?', 'Strike at the factory gate. They have made signs. The signs are quite good.']), { mood: 'nervous', priority: 2, cooldown: 18 }))
-          this.headlines.push('WORKERS DOWN TOOLS OVER GOAT-DENOMINATED WAGES');
+        if (G.advisor.say('strike', pick(['The mill workers are striking. They want "wages". Is that a type of corn?', 'Strike at the factory gate. They have made signs. The signs are quite good.']), { mood: 'nervous', priority: 2, cooldown: 18 }))
+          this.headlines.push('WORKERS DOWN TOOLS OVER EGG-DENOMINATED WAGES');
       }
       this.move(a, dt, w, fx, ex, picket);
       if (a.state === 'work') working++;
@@ -214,7 +218,7 @@ export class Industry {
     if (strikers.length >= 8 && angry >= 5) {
       for (const a of strikers) if (a.fear > 0.45) a.state = 'riot';
       if (Math.random() < dt * 8) this.particles.add({ x: picket.x + rand(-8, 8), y: picket.y - rand(0, 4), vx: rand(-6, 6), vy: rand(-18, -8), life: 1, maxLife: 1, size: 1, color: pick(['#ff9a2e', '#e8452c', '#777']) });
-      if (G.advisor.say('riot', 'There is a riot at the mill. Disruptive, bro. Literally.', { mood: 'panic', priority: 3, cooldown: 20 })) this.headlines.push('RIOT AT THE MILL; GOATS UNHARMED, MOSTLY');
+      if (G.advisor.say('riot', 'There is a riot at the mill. Disruptive, bro. Literally.', { mood: 'panic', priority: 3, cooldown: 20 })) this.headlines.push('RIOT AT THE MILL; CHICKENS UNHARMED, MOSTLY');
     } else for (const a of strikers) if (a.state === 'riot' && a.fear < 0.4) a.state = 'strike';
 
     // GDP
@@ -245,7 +249,7 @@ export class Industry {
       }
     }
 
-    // Goats and the chicken
+    // Hens and the sacred chicken
     for (const g of this.goats) { animate(g, dt, 3); if (!g.spot || walk(g, g.spot.x, g.spot.y, 3, dt, w)) g.spot = w.randomLand(ex.x, ex.y + 6, 1, 7); }
     animate(this.chicken, dt, 4);
 
@@ -256,13 +260,13 @@ export class Industry {
       brain.setCue('calm');
       G.audio.bell();
       G.advisor.say('ipo', 'It is IPO time. Steady nerves for eight seconds. Do not look at the ticker. Do NOT look at the ticker.', { mood: 'nervous', priority: 4, cooldown: 0 });
-      this.headlines.push('GOAT EXCHANGE ANNOUNCES IPO OF... THE GOAT EXCHANGE');
+      this.headlines.push('CHICKEN EXCHANGE ANNOUNCES IPO OF... THE CHICKEN EXCHANGE');
     }
     if (ipo.state === 'active') {
       ipo.limit = STRESSED;
       if ((brain.stress ?? 1) <= ipo.limit) ipo.progress += dt;
       else {
-        if (ipo.progress > 2) { ipo.attempts++; G.advisor.say('ipofail', 'Stress spiked, IPO wobbled. The goats can smell fear.', { mood: 'panic', priority: 3, cooldown: 6 }); }
+        if (ipo.progress > 2) { ipo.attempts++; G.advisor.say('ipofail', 'Stress spiked, IPO wobbled. The chickens can smell fear.', { mood: 'panic', priority: 3, cooldown: 6 }); }
         ipo.progress = Math.max(0, ipo.progress - dt * 2);
       }
       if (ipo.progress >= IPO_SECONDS) {
@@ -271,7 +275,7 @@ export class Industry {
         this.confidence += 0.4;
         this.price *= 1.15;
         G.audio.fanfare();
-        G.advisor.say('ipook', 'IPO priced! We are now richer than the concept of goats.', { mood: 'happy', priority: 4, cooldown: 0 });
+        G.advisor.say('ipook', 'IPO priced! We are now richer than the concept of eggs.', { mood: 'happy', priority: 4, cooldown: 0 });
         this.headlines.push('IPO SOARS; GOD DESCRIBED AS "WEIRDLY CHILL"');
         floater(this.particles, ex.x, ex.y - 14, 'IPO PRICED', '#59d8c8', 9);
       }
@@ -285,13 +289,13 @@ export class Industry {
     // Win / lose
     if (this.done) return;
     if (striking + rioting >= N * 0.8) this.generalStrike += dt; else this.generalStrike = Math.max(0, this.generalStrike - dt);
-    if (this.generalStrike > 8) { this.done = true; G.fail('General strike. The economy has stopped. The goats have unionised.'); return; }
-    if (this.price < 12) { this.done = true; G.fail('The Great Goat Depression. A goat is now worth less than its hat.'); return; }
+    if (this.generalStrike > 8) { this.done = true; G.fail('General strike. The economy has stopped. The chickens have unionised.'); return; }
+    if (this.price < 12) { this.done = true; G.fail('The Great Chicken Depression. A chicken is now worth less than its egg.'); return; }
     if (this.gdp >= GDP_TARGET && ipo.state === 'done') {
       this.done = true;
       brain.setCue(null);
       G.audio.fanfare();
-      G.advisor.say('win', 'GDP target smashed. The engineers want to know if goats can fly. I said we would find out.', { mood: 'happy', priority: 5, cooldown: 999 });
+      G.advisor.say('win', 'GDP target smashed. The engineers want to know if chickens can fly. I said we would find out.', { mood: 'happy', priority: 5, cooldown: 999 });
       G.complete(3);
     }
   }
@@ -328,8 +332,8 @@ export class Industry {
     const ipoProgress = Math.min(IPO_SECONDS, Math.ceil(this.ipo.progress));
     return [
       { label: 'GDP', value: gdpVal, done: gdpDone },
-      { label: 'Goat IPO', value: st === 'done' ? 'priced' : st === 'active' ? `${ipoProgress}/${IPO_SECONDS}s` : 'soon', done: st === 'done' },
-      { label: 'Goat index', value: this.price.toFixed(1), plain: true, bad: this.price < this.peak * eraTuning(this.G).crashThreshold },
+      { label: 'Chicken IPO', value: st === 'done' ? 'priced' : st === 'active' ? `${ipoProgress}/${IPO_SECONDS}s` : 'soon', done: st === 'done' },
+      { label: 'Chicken index', value: this.price.toFixed(1), plain: true, bad: this.price < this.peak * eraTuning(this.G).crashThreshold },
       { label: 'Striking', value: `${this.agents.filter((a) => a.state === 'strike' || a.state === 'riot').length}`, plain: true },
     ];
   }
@@ -364,7 +368,7 @@ export class Industry {
     }
 
     // Billboards
-    // Goats (SPRITE_GOAT = 2)
+    // Hens (SPRITE_GOAT = 2 is drawn as a hen)
     for (const g of this.goats) {
       engine.add_billboard(2, g.x, g.y, g.facing || 1, g.frame || 0, 0);
     }
@@ -379,12 +383,7 @@ export class Industry {
     // Chicken (SPRITE_CHICKEN = 3)
     engine.add_billboard(3, this.chicken.x, this.chicken.y, this.chicken.facing || 1, this.chicken.frame || 0, 0);
 
-    // Aim reticle (SPRITE_RETICLE = 13)
-    const aim = this.G.brain?.aim;
-    if (aim) {
-      const p = this.G.world.aimPoint(aim);
-      engine.add_billboard(13, p.x, p.y, 1, 0, 0);
-    }
+    // The aim reticle is drawn once, on top, by main.js (#301).
   }
 
   draw(ctx) {
@@ -393,14 +392,14 @@ export class Industry {
     const base = is3d ? (G?.world?.layers3d?.industry || this.layer) : this.layer;
     ctx.drawImage(base, 0, 0);
     if (!is3d) G?.world?.drawWater?.(ctx, this.t);
-    // In 3D, draw3d stands workers, traders, goats and chicken up as billboards
+    // In 3D, draw3d stands workers, traders, hens and the sacred chicken up as billboards
     if (is3d) {
       for (const sh of this.ships) drawBoat(ctx, sh.x, sh.y, sh);
       this.particles.draw(ctx);
       return;
     }
     const actors = [];
-    for (const g of this.goats) actors.push({ y: g.y, d: () => drawGoat(ctx, g.x, g.y, g) });
+    for (const g of this.goats) actors.push({ y: g.y, d: () => drawHen(ctx, g.x, g.y, g) });
     for (const sh of this.ships) actors.push({ y: sh.y, d: () => drawBoat(ctx, sh.x, sh.y, sh) });
     for (const a of this.agents) {
       if (a.state === 'work') continue; // inside the factory
@@ -417,12 +416,7 @@ export class Industry {
 
   drawAfterLight(ctx) {
     for (const b of this.bolts) drawBolt(ctx, b.pts, Math.min(1, b.life * 4));
-    const a = this.G.brain?.aim;
-    const w = this.G.world;
-    if (a && w && !ctx.__project3d) {
-      const p = w.aimPoint(a);
-      drawReticle(ctx, p.x, p.y, this.t, '#ffe066');
-    }
+    const w = this.G.world;   // the aim reticle is drawn once, on top, by main.js (#301)
     if (this.flash > 0 && w) {
       ctx.fillStyle = `rgba(220,230,255,${this.flash * 0.9})`;
       ctx.fillRect(0, 0, w.width, w.height);
@@ -446,11 +440,11 @@ export class Industry {
     if (this.agents.some((a) => a.state === 'strike' || a.state === 'riot')) label(ctx, G.world.sites.picket.x, G.world.sites.picket.y + 12, 'picket line', '#f2e8d5', 5);
   }
 
-  // Fixed to the screen, not the map (#129): the floating goat index window (goatWindowX/Y move
+  // Fixed to the screen, not the map (#129): the floating chicken index window (goatWindowX/Y move
   // it) and the ticker tape. Drawn once, through main.js's screen-overlay pass.
   drawScreenOverlay(ctx) {
     const G = this.G;
-    // Floating Goat Index Window
+    // Floating Chicken Futures Window
     const cw = 90, ch = 42;
     const x0 = this.goatWindowX ?? (W - cw - 6);
     const y0 = this.goatWindowY ?? 6;
@@ -472,7 +466,7 @@ export class Industry {
     ctx.font = '5px "Pixelify Sans", monospace';
     ctx.textAlign = 'left';
     ctx.fillStyle = '#ffcf4a';
-    ctx.fillText('GOAT INDEX · MARKET', x0 + 3, y0 + 6);
+    ctx.fillText('CHICKEN FUTURES · MARKET', x0 + 3, y0 + 6);
 
     const hist = this.history.slice(-140);
     if (hist.length > 2) {
@@ -578,7 +572,7 @@ export class Industry {
       G.advisor.say('picket-struck', 'The picket line scattered before the divine thunderbolt! Back to work!', { mood: 'shocked', priority: 2, cooldown: 20 });
     }
 
-    // Goat exchange
+    // Chicken exchange
     const ex = G.world.sites.exchange;
     if (ex && dist(x, y, ex.x, ex.y) < 22) {
       this.price = clamp(this.price * 1.08, 10, 500);
@@ -588,11 +582,11 @@ export class Industry {
       G.advisor.say('exchange-hit', 'Lightning struck the exchange bell! Bulls are running wild on the trading floor!', { mood: 'happy', priority: 2, cooldown: 15 });
     }
 
-    // Goats
+    // Hens
     for (const g of this.goats) {
       if (dist(x, y, g.x, g.y) < 18) {
         g.facing = -g.facing;
-        floater(this.particles, g.x, g.y - 8, 'BAAA!', '#ffffff', 5);
+        floater(this.particles, g.x, g.y - 8, 'BAWK!', '#ffffff', 5);
       }
     }
   }
@@ -612,7 +606,13 @@ export class Industry {
     G.audio?.thunder?.();
     this.particles.burst(22 + Math.round(charge * 26), () => ({ x, y, vx: rand(-44, 44), vy: rand(-58, 4), g: 70, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color }));
     this.particles.burst(8 + Math.round(charge * 8), () => ({ x: x + rand(-4, 4), y: y + rand(-1, 2), vx: rand(-18, 18), vy: rand(-16, -2), g: 24, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color: pick(['#c9c2b0', '#8a7a5a', '#5f5545']) }));
-    for (const a of this.agents) if (dist(x, y, a.x, a.y) < 18 + charge * 12) a.fear = clamp(a.fear + 0.25);
+    const R = 60 + charge * 80;
+    for (const a of this.agents) if (dist(x, y, a.x, a.y) < R) a.fear = clamp(a.fear + 0.6);
+    const rivals = G.rivals?.smite?.(x, y, R) || 0;
+    if (rivals) G.hud?.showCause?.(`🔥 ${rivals} rival ${rivals === 1 ? 'person' : 'people'} killed in the blast`);
+    // The slam also strikes like a blink where it lands (factories, pickets, the exchange).
+    this.lastBolt = -Infinity;
+    if (G.world?.aimOf) this.onBlink(G.world.aimOf(x, y));
   }
 
   onCast(spell, aim) {
@@ -629,13 +629,13 @@ export class Industry {
       }
       case 'palm':
       case 'spawn': {
-        // Open palm: goats from heaven, straight into GDP.
+        // Open palm: chickens from heaven, straight into GDP.
         this.gdp += 30;
         const at = w.walkable(x, y) ? { x, y } : w.randomLand(ex.x, ex.y + 6, 1, 6);
         for (let i = 0; i < 2 && this.goats.length < 24; i++) this.goats.push({ x: at.x + rand(-2, 2), y: at.y + rand(-1, 1), frame: 0, ft: 0, facing: 1, side: 1, spot: null });
-        floater(this.particles, at.x, at.y - 8, '+2 goats · +30 GDP', '#ffcf5c', 6);
+        floater(this.particles, at.x, at.y - 8, '+2 chickens · +30 GDP', '#ffcf5c', 6);
         G.audio.coin();
-        this.headlines.push('GOATS FALL FROM THE SKY; GDP UP, ROOFS DOWN');
+        this.headlines.push('CHICKENS FALL FROM THE SKY; GDP UP, ROOFS DOWN');
         break;
       }
       case 'rain': {
@@ -667,7 +667,7 @@ export class Industry {
         this.particles.burst(16, () => ({ x: x + rand(-8, 8), y: y - rand(0, 30), vx: 0, vy: 0, life: 0.25, maxLife: 0.25, size: 1, color: '#ffffff' }));
         floater(this.particles, x, y - 12, 'STORM', '#9ec9ff', 9);
         this.headlines.push('FREAK STORM; BUSINESS CONFIDENCE CRASHES');
-        G.advisor.say('cast-storm', 'A storm, bro? Business confidence just fell off a cliff. So did a goat.', { mood: 'panic', priority: 2, cooldown: 20 });
+        G.advisor.say('cast-storm', 'A storm, bro? Business confidence just fell off a cliff. So did a chicken. It flapped a bit.', { mood: 'panic', priority: 2, cooldown: 20 });
         break;
       }
       case 'peace': {
@@ -692,8 +692,38 @@ export class Industry {
     this.particles.burst(60, () => ({ x: cx + rand(-60, 60), y: cy + rand(-100, 26), vx: -4, vy: rand(70, 100), life: rand(0.5, 1), maxLife: 1, size: 1, color: 'rgba(158,201,255,0.75)' }));
   }
 
-  // Face mood. Joy calms the markets, anger adds volatility and unrest, surprise brings
-  // lightning, sadness darkens the sky.
+  // #152: joy is a continuous buff while you smile: workers lose fear, business confidence
+  // climbs, the goat index steadies, and sparkles rise over the exchange.
+  joyStep(dt) {
+    const joy = this.done ? 0 : joyBuff(this.G.mood);
+    this.joy = joy;
+    if (!joy) return;
+    for (const a of this.agents) a.fear = clamp(a.fear - dt * 0.1 * joy);
+    this.confidence = clamp(this.confidence + dt * 0.03 * joy, 0.5, 1.6);
+    this.momentum *= 1 - Math.min(1, dt * 0.6 * joy);
+    const ex = this.G.world.sites.exchange;
+    for (let n = sparkleCount(joy, dt, 12); n > 0; n--) {
+      this.particles.add({ x: ex.x + rand(-24, 24), y: ex.y - rand(4, 18), vx: rand(-3, 3), vy: rand(-14, -8), life: 1, maxLife: 1, size: 1, color: pick(JOY_COLORS) });
+    }
+  }
+
+  // #152: a surprise is a one-shot: lightning hits the mill (a capped flash, a short shake, none
+  // under reduced motion), the goat market lurches and nearby workers jump.
+  surpriseStrike() {
+    const G = this.G, fx = surpriseEffect(reducedMotion()), mill = G.world.sites.factory;
+    G.audio?.thunder?.();
+    G.shake = Math.max(G.shake || 0, fx.shake);
+    this.flash = Math.max(this.flash, fx.flash);
+    for (let i = 0; i < fx.bolts; i++) this.bolts.push({ pts: makeBolt(mill.x + rand(-14, 14), mill.y - 6), life: 0.3 + i * 0.12 });
+    this.particles.burst(18, () => ({ x: mill.x + rand(-6, 6), y: mill.y - 14 - rand(0, 40), vx: 0, vy: 0, life: 0.3, maxLife: 0.3, size: 1, color: '#ffffff' }));
+    this.momentum += 0.015;
+    for (const a of this.agents) if (dist(a.x, a.y, mill.x, mill.y) < 40) a.fear = clamp(a.fear + 0.15);
+    floater(this.particles, mill.x, mill.y - 26, 'SURPRISE!', '#ffe066', 10);
+    this.headlines.push('LIGHTNING OVER THE MILL; NOBODY SAW IT COMING');
+  }
+
+  // Face mood. Joy is the continuous buff above (its onset makes a headline). Surprise fires once
+  // per event (mood.surpriseTriggered). Anger adds volatility and unrest, sadness darkens the sky.
   onMood(mood) {
     const G = this.G;
     if (!G) return;
@@ -701,21 +731,17 @@ export class Industry {
     this.darkness = clamp(this.baseDarkness + (mood.dominant === 'sadness' ? 0.3 : 0), 0, 0.9);
     if (this.done) return;
     const first = mood.reason === 'change';
+    if (surpriseFires(mood)) this.surpriseStrike();
     if (mood.dominant === 'joy') {
-      for (const a of this.agents) a.fear = clamp(a.fear - 0.12);
-      this.momentum *= 0.5;
-      this.confidence = clamp(this.confidence + 0.04, 0.5, 1.6);
-      if (first) this.headlines.push('GOD SMILES; GOAT INDEX STEADIES');
+      if (first && joyBuff(mood) > 0) {
+        const ex = G.world.sites.exchange;
+        this.headlines.push('GOD SMILES; CHICKEN INDEX STEADIES');
+        floater(this.particles, ex.x, ex.y - 20, 'markets steady', '#9be38a', 7);
+      }
     } else if (mood.dominant === 'anger') {
       this.momentum += gauss() * 0.012;
       for (const a of this.agents) { a.unrest = clamp(a.unrest + 0.1); a.fear = clamp(a.fear + 0.06); }
       if (first) this.headlines.push('GOD SCOWLS; TRADERS SWEAT, WORKERS GRUMBLE');
-    } else if (mood.dominant === 'surprise') {
-      const fx = G.world.sites.factory;
-      G.audio.thunder();
-      G.shake = Math.max(G.shake || 0, 1);
-      this.particles.burst(18, () => ({ x: fx.x + rand(-6, 6), y: fx.y - 14 - rand(0, 40), vx: 0, vy: 0, life: 0.3, maxLife: 0.3, size: 1, color: '#ffffff' }));
-      if (first) this.headlines.push('LIGHTNING OVER THE MILL; NOBODY SAW IT COMING');
     } else if (mood.dominant === 'sadness' && first) {
       this.headlines.push('OVERCAST SKIES; ANALYSTS BLAME THE GOD\'S MOOD');
     }

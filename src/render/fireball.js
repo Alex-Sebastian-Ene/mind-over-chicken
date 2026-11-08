@@ -9,7 +9,7 @@ import { clamp, lerp } from '../sim/util.js';
 import { reducedMotion } from '../ui/motion.js';
 import {
   drawFireballSprite, drawPixels, shockwavePixels, scorchPixels, shade,
-  FB_HOT, FB_SMOKE, FB_SCORCH, FB_DEBRIS,
+  FB_CORE, FB_HOT, FB_SMOKE, FB_SCORCH, FB_DEBRIS,
 } from './fireball-sprite.js';
 
 // Pixel art (#319): the orb is the fireball sprite (spinning flame tongues, hot core, the emotion
@@ -19,8 +19,8 @@ import {
 
 export const FIREBALL_FX = {
   travel: 0.58,
-  impact: 0.8,
-  hold: 0.08,         // s the impact frame holds before the burst spreads
+  impact: 1.0,
+  hold: 0.1,         // s the impact frame holds before the burst spreads
   windup: 0.16,       // share of the flight spent pulling back before the drop
   windupLift: 6,      // px the orb rises while pulling back
   lift: 96,
@@ -99,7 +99,7 @@ export class FireballFX {
     const o = this.opts;
     const k = clamp(after / o.impact);
     const frame = Math.floor(after * 14) % 4;
-    const big = r + 2 + Math.round(s.charge * 2);
+    const big = r + 4 + Math.round(s.charge * 4);
     // The scorch stays under everything and fades last.
     drawPixels(ctx, tx, ty + 1, scorchPixels(3 + Math.round(s.charge * 3)).map((q) => ({ ...q, c: 's' })), { s: FB_SCORCH }, { alpha: 0.55 * clamp((1 - k) * 2) });
     if (reduced) {
@@ -113,11 +113,14 @@ export class FireballFX {
       return;
     }
     const k2 = clamp((after - o.hold) / (o.impact - o.hold));
-    // Stepped pixel shockwave on the ground, with a hot inner ring.
-    const R = 3 + k2 * (18 + s.charge * 16);
+    // A huge stepped pixel shockwave, with a white-hot inner blast.
+    const R = 10 + k2 * (90 + s.charge * 100);
     const ring = shockwavePixels(R, k2).map((q) => ({ ...q, c: 'tint' }));
     drawPixels(ctx, tx, ty, ring, { tint: s.color }, { alpha: 1 - k2 });
-    if (k2 < 0.6) drawPixels(ctx, tx, ty, shockwavePixels(R * 0.62, k2 + 0.3).map((q) => ({ ...q, c: 'hot' })), { hot: FB_HOT }, { alpha: 0.9 * (1 - k2 / 0.6) });
+    if (k2 < 0.7) drawPixels(ctx, tx, ty, shockwavePixels(R * 0.62, k2 + 0.3).map((q) => ({ ...q, c: 'hot' })), { hot: FB_HOT }, { alpha: 1 - k2 / 0.7 });
+    if (k2 < 0.3) {
+      drawPixels(ctx, tx, ty, shockwavePixels(R * 0.45, k2).map((q) => ({ ...q, c: 'core' })), { core: FB_CORE, hot: FB_HOT, tint: s.color }, { alpha: (1 - k2 / 0.3) * 0.9 });
+    }
     // Fire burst rising and shrinking out of the crater.
     const burst = Math.max(1, Math.round(big * (1 - k2)));
     if (k2 < 0.85) drawFireballSprite(ctx, tx, ty - 2 - k2 * 7, { r: burst, frame, color: s.color, alpha: 1 - k2 * 0.6 });

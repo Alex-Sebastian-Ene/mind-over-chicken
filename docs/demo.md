@@ -63,7 +63,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 ### Act 2: Era I · Stone Age & Divine Interventions (0:20 – 1:05, 45s)
 
 #### Spoken Script
-> *"We start in the Stone Age. My tribe is freezing, and Oog, the High Priest, is quietly judging me.*  
+> *"We start in the Stone Age. My tribe is freezing, and Cluck, the High Priest (a chicken), is quietly judging me.*  
 > *Watch the reticle. When I perform a deliberate double-blink—[BLINK]—lightning strikes the fire pit, igniting civilization's first flame.*  
 > *Now I strike a giant chicken across the river—[BLINK]—barbecuing dinner for the hunters.*  
 > *Notice the fire fading! The game demands focus. As I hold Insight... [HOLD 5s]... my beta rhythm locks in, the fire roars back, and a baby is born.*  
@@ -81,13 +81,13 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 ### Act 3: Era II · Industry & Market Volatility (1:05 – 1:45, 40s)
 
 #### Spoken Script
-> *"Fast forward to the Industrial Era. We traded sticks for the Goat Exchange stock ticker.*  
+> *"Fast forward to the Industrial Era. We traded sticks for the Chicken Exchange futures ticker.*  
 > *Here, market prices don't follow fixed scripts; they model chartist momentum versus fundamental value. And the market is hyper-sensitive to divine anxiety.*  
 > *Watch what happens when my stress spikes—[STRESS SPIKE]—the ticker goes red, panic spreads, and we trigger an emergent market crash! The workers go on strike.*  
 > *To fix it, the game tests my emotional regulation: I breathe, calm down, and hold composure through the IPO window until green bars return and industry flourishes."*
 
 #### Operator Actions
-- **1:05**: The Farming · Kingdoms montage plays first: hold `F` and the scholars ink your thoughts (Writing, Law, Taxes) letter by letter, faster the harder you focus. There is no arithmetic. Press `Enter` to skip it if you are short of time. Then the era switches to Industry and the Goat Exchange chart appears in retro amber pixels.
+- **1:05**: The Farming · Kingdoms montage plays first: hold `F` and the scholars ink your thoughts (Writing, Law, Taxes) letter by letter, faster the harder you focus. There is no arithmetic. Press `Enter` to skip it if you are short of time. Then the era switches to Industry and the Chicken Exchange chart appears in retro amber pixels.
 - **1:15**: Hold `Shift` (or tense up, or scowl at the camera) to spike stress: calm drops to 0 and the `Stress` meter fills.
 - **1:22**: Market drops sharply; recession alert triggers, siren sound plays, red crash banner appears.
 - **1:30**: Release `Shift`, hold `Space` (`Calm` meter > 80%). The market stabilizes, confidence rebounds, and the IPO completes.
@@ -135,7 +135,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 > *To conquer the stars, you don't need faster fingers. You need to master your own mind. Thank you!"*
 
 #### Operator Actions
-- **2:55**: Press `Z` to zoom back to the home planet.
+- **2:55**: Press `Z` to zoom back to the home planet. (A death does this by itself: the camera returns to the home globe, #297.)
 - **3:00**: Close presentation. Invite judges to try the headset, or to pinch and pan the world with their hands in front of the camera.
 
 ---

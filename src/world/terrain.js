@@ -9,6 +9,7 @@ import { W, H, lerp, mulberry32, dist, wrap, wrapDelta } from '../sim/util.js';
 import { drawStructure } from '../render/sprites.js';
 import { STRUCTURE_SPRITES, chooseStructureKind, sampleBiome, structureVariant } from './buildings.js';
 import * as wasm from '../../pkg/mind_over_chicken_engine.js';
+import { pickBuilding, roofFor } from './building-mix.js';
 
 export const T = { DEEP: 0, SHALLOW: 1, SAND: 2, GRASS: 3, FOREST: 4, HILL: 5, MOUNTAIN: 6, SNOW: 7, FARM: 8, ROAD: 9, PAVED: 10 };
 
@@ -239,9 +240,12 @@ export class World {
         for (let i = 0; i < n; i++) {
           const p = this.clusterSpot(c.village.x, c.village.y, 9, 6, null, this.structures, rng, 3, 2);
           if (!p) continue;
-          if (era === 'farming') this.structures.push(this.structureAt('farming', p.x, p.y, 'hut'));
-          else if (era === 'space' && i % 3 === 0) this.structures.push(this.structureAt('space', p.x, p.y, 'tower', { h: 7 + (i % 4) }));
-          else this.structures.push(this.structureAt(era, p.x, p.y, 'house', { roof: era === 'space' ? '#5a6b8c' : '#8e3b2a' }));
+          // Older building types stay standing next to the new ones (building-mix.js), and the
+          // biome variants recolour/re-shape whichever type the mix picks (#206).
+          const b = pickBuilding(era, rng());
+          if (b.kind === 'tower') this.structures.push(this.structureAt(b.from, p.x, p.y, 'tower', { h: 7 + (i % 4) }));
+          else if (b.kind === 'hut') this.structures.push(this.structureAt(b.from, p.x, p.y, 'hut'));
+          else this.structures.push(this.structureAt(b.from, p.x, p.y, 'house', { roof: roofFor(b.from, rng()) }));
         }
         if (era !== 'farming' && c.harbor) road(c.village, c.harbor.land, 1);
       }
@@ -252,14 +256,17 @@ export class World {
       road({ x: v.x - 30, y: v.y - 2 }, { x: v.x + 30, y: v.y - 2 });
       road({ x: v.x, y: v.y - 22 }, { x: v.x, y: v.y + 22 });
       for (let y = -2; y <= 2; y++) for (let x = -3; x <= 3; x++) setT(v.x + x, v.y + y, T.PAVED);
-      const roofs = era === 'industry' ? ['#a4402f', '#8e3b2a', '#b5543a', '#6f4a3a'] : ['#5a6b8c', '#7f8fa8', '#a4402f', '#4d5d7a'];
       for (let i = 0; i < 48; i++) {
         const p = this.clusterSpot(v.x, v.y, 30, 20,
           (x, y) => dist(x, y, s.exchange.x, s.exchange.y) >= 9 && dist(x, y, s.factory.x, s.factory.y) >= 12,
           this.structures, rng, 9, 6);
         if (!p) continue;
-        if (era === 'space' && i % 10 === 0) this.structures.push(this.structureAt('space', p.x, p.y, 'tower', { h: 8 + Math.floor(rng() * 7) }));
-        else this.structures.push(this.structureAt(era, p.x, p.y, 'house', { roof: roofs[i % roofs.length] }));
+        // An Industry town keeps some old huts, a Space-age town some Industry houses; the
+        // biome variant is chosen from the era that type belongs to (#206).
+        const b = pickBuilding(era, rng());
+        if (b.kind === 'tower') this.structures.push(this.structureAt(b.from, p.x, p.y, 'tower', { h: 8 + Math.floor(rng() * 7) }));
+        else if (b.kind === 'hut') this.structures.push(this.structureAt(b.from, p.x, p.y, 'hut'));
+        else this.structures.push(this.structureAt(b.from, p.x, p.y, 'house', { roof: roofFor(b.from, rng()) }));
       }
       this.structures.push({ kind: 'factory', x: s.factory.x, y: s.factory.y, smoke: era === 'industry', variant: 0 });
       this.structures.push({ kind: 'exchange', x: s.exchange.x, y: s.exchange.y, variant: 0 });

@@ -48,7 +48,7 @@ export function drawExchange(ctx, x, y) {
   px(ctx, x - 6, y - 7, '#d8d0bd', 13, 1);
   px(ctx, x - 4, y - 8, '#d8d0bd', 9, 1);
   px(ctx, x - 2, y - 9, '#d8d0bd', 5, 1);
-  px(ctx, x, y - 8, '#f2c14e');                // the golden goat
+  px(ctx, x, y - 8, '#f2c14e');                // the golden egg
 }
 
 export function drawHangar(ctx, x, y) {
@@ -402,13 +402,21 @@ export function drawMammoth(ctx, x, y, o = {}) {
   px(ctx, m(-1 + step), y - 1, orange); px(ctx, m(1 - step), y - 1, orange); // legs
 }
 
-export function drawGoat(ctx, x, y, o = {}) {
+// A brown hen: the livestock that is traded, eaten and floated on the Chicken Exchange (it was
+// a goat once). The sacred chicken is the white one, drawChicken.
+export function drawHen(ctx, x, y, o = {}) {
   x = Math.round(x); y = Math.round(y);
   const f = o.facing || 1;
-  px(ctx, x - 1, y - 2, '#efe8dc', 3, 1);
-  px(ctx, x + (f > 0 ? 2 : -2), y - 3, '#cfc6b8');
-  px(ctx, x - 1, y - 1, '#7a6a58'); px(ctx, x + 1, y - 1, '#7a6a58');
+  const peck = (o.frame || 0) % 4 === 1 ? 1 : 0;
+  const hx = x + (f > 0 ? 1 : -1);
+  px(ctx, x - 1, y - 3, '#b0703a', 3, 2);                      // body
+  px(ctx, x - (f > 0 ? 2 : -2), y - 4, '#7f4a22');              // tail
+  px(ctx, hx, y - 4 + peck, '#b0703a');                          // head
+  px(ctx, hx, y - 5 + peck, '#e53935');                          // comb
+  px(ctx, x + (f > 0 ? 2 : -2), y - 4 + peck, '#f6a623');        // beak
+  px(ctx, x - 1, y - 1, '#f6a623'); px(ctx, x + 1, y - 1, '#f6a623'); // legs
 }
+export const drawGoat = drawHen;   // old name, kept for callers
 
 export function drawChicken(ctx, x, y, o = {}) {
   x = Math.round(x); y = Math.round(y);
@@ -524,41 +532,60 @@ export function drawReticle(ctx, x, y, t, color = '#ffe066') {
   px(ctx, x, y, color);
 }
 
-// Small pixel portrait for the advisor, drawn on its own 16×16 canvas.
+// Small pixel portrait for the advisor, drawn on its own 16×16 canvas: Cluck, a chicken in
+// profile (comb, beak, wattle, eye, neck feathers) facing right, in the era's costume. Moods:
+// happy (laughing beak, squinting eye), nervous (wide eye, sweat drop), panic (both, plus a
+// shake and a gaping beak).
 export function drawAdvisorPortrait(ctx, era, mood, t) {
   ctx.clearRect(0, 0, 16, 16);
   const bg = era === 'industry' ? '#3b2a20' : era === 'space' ? '#1d2840' : '#2a1d2e';
   px(ctx, 0, 0, bg, 16, 16);
   const shake = mood === 'panic' ? (Math.floor(t * 20) % 2) : 0;
   const ox = shake;
-  const skin = '#d9a477';
-  // head
-  px(ctx, 5 + ox, 5, skin, 6, 6);
-  px(ctx, 4 + ox, 7, skin, 1, 2); px(ctx, 11 + ox, 7, skin, 1, 2);
-  // eyes (wide when nervous)
-  const eye = mood === 'panic' || mood === 'nervous' ? '#ffffff' : '#2b1d14';
-  px(ctx, 6 + ox, 7, eye, 1, mood === 'panic' ? 2 : 1); px(ctx, 9 + ox, 7, eye, 1, mood === 'panic' ? 2 : 1);
-  if (mood === 'panic' || mood === 'nervous') { px(ctx, 6 + ox, 8, '#2b1d14'); px(ctx, 9 + ox, 8, '#2b1d14'); }
-  // mouth
-  if (mood === 'happy') { px(ctx, 6 + ox, 9, '#7a2e22', 4, 1); px(ctx, 7 + ox, 10, '#7a2e22', 2, 1); }
-  else if (mood === 'panic') px(ctx, 7 + ox, 9, '#3a0f0a', 2, 2);
-  else px(ctx, 7 + ox, 10, '#7a2e22', 2, 1);
-  // sweat drop
-  if (mood === 'nervous' || mood === 'panic') { const d = Math.floor(t * 4) % 3; px(ctx, 12 + ox, 5 + d, '#8fd3ff'); }
-  if (era === 'stone' || era === 'farming') {
-    // bone headdress and fur robe
-    px(ctx, 4 + ox, 3, '#efe3c2', 8, 2); px(ctx, 5 + ox, 1, '#efe3c2', 1, 2); px(ctx, 10 + ox, 1, '#efe3c2', 1, 2); px(ctx, 7 + ox, 0, '#e8452c', 2, 3);
-    px(ctx, 3, 11, '#7b5536', 10, 5); px(ctx, 7, 12, '#efe3c2', 2, 1);
-  } else if (era === 'industry') {
-    // slicked hair, suit, gold chain: the finance bro years
-    px(ctx, 5 + ox, 3, '#1c1410', 6, 2); px(ctx, 4 + ox, 4, '#1c1410');
-    px(ctx, 3, 11, '#26304a', 10, 5); px(ctx, 7, 11, '#f2ead8', 2, 3); px(ctx, 7, 12, '#c0392b', 2, 3);
-    px(ctx, 5, 12, '#f2c14e'); px(ctx, 10, 12, '#f2c14e');
+  const white = '#fbf6ea', shade = '#ddd0b4', red = '#e53935', redDark = '#a8241c';
+  const beak = '#f6a623', beakDark = '#c77d12', ink = '#2a1a10', bone = '#efe3c2';
+  // head and neck feathers
+  px(ctx, 6 + ox, 4, white, 4, 1);
+  px(ctx, 5 + ox, 5, white, 6, 4);
+  px(ctx, 5 + ox, 9, white, 5, 2);
+  px(ctx, 5 + ox, 6, shade, 1, 3);                              // back of the head
+  px(ctx, 5 + ox, 9, shade); px(ctx, 7 + ox, 10, shade); px(ctx, 9 + ox, 10, shade); // hackles
+  // comb: three points, or slicked back with gel in the finance-bro years
+  if (era === 'industry') {
+    px(ctx, 5 + ox, 3, red, 5, 1); px(ctx, 3 + ox, 2, red, 5, 1); px(ctx, 2 + ox, 1, redDark, 3, 1);
+    px(ctx, 6 + ox, 2, '#ff9a8a');                              // gel shine
   } else {
-    // mission headset
-    px(ctx, 5 + ox, 3, '#4a3a2a', 6, 2);
-    px(ctx, 3 + ox, 6, '#20242c', 2, 4); px(ctx, 4 + ox, 4, '#20242c', 8, 1); px(ctx, 11 + ox, 6, '#20242c', 1, 3);
-    px(ctx, 2 + ox, 10, '#20242c', 3, 1);
+    px(ctx, 6 + ox, 3, red, 4, 1); px(ctx, 6 + ox, 2, red, 4, 1);
+    px(ctx, 6 + ox, 1, red); px(ctx, 8 + ox, 1, red);
+    px(ctx, 9 + ox, 3, redDark);
+  }
+  // beak (pointing right), open when laughing or panicking
+  px(ctx, 11 + ox, 6, beak, 2, 1);
+  if (mood === 'panic') { px(ctx, 11 + ox, 7, '#3a0f0a', 2, 1); px(ctx, 11 + ox, 8, beakDark, 2, 1); }
+  else if (mood === 'happy') { px(ctx, 11 + ox, 7, '#3a0f0a'); px(ctx, 11 + ox, 8, beakDark); }
+  else px(ctx, 11 + ox, 7, beakDark);
+  // wattle under the beak
+  px(ctx, 10 + ox, 8, red, 1, 2); px(ctx, 10 + ox, 10, redDark);
+  // eye: a happy squint, a wide nervous stare, or a pinprick of panic
+  if (mood === 'happy') { px(ctx, 7 + ox, 6, ink); px(ctx, 8 + ox, 5, ink); px(ctx, 9 + ox, 6, ink); }
+  else if (mood === 'panic') { px(ctx, 8 + ox, 5, '#ffffff', 2, 3); px(ctx, 9 + ox, 6, ink); }
+  else if (mood === 'nervous') { px(ctx, 8 + ox, 5, '#ffffff', 2, 2); px(ctx, 9 + ox, 6, ink); }
+  else { px(ctx, 8 + ox, 6, ink); px(ctx, 8 + ox, 5, '#ffffff'); }
+  // sweat drop, behind the head
+  if (mood === 'nervous' || mood === 'panic') { const d = Math.floor(t * 4) % 3; px(ctx, 3 + ox, 5 + d, '#8fd3ff'); }
+  if (era === 'stone' || era === 'farming') {
+    // bone headdress (a leather band, two tusks curving out round the comb) and a fur robe
+    px(ctx, 5 + ox, 4, '#6b4a2c', 6, 1); px(ctx, 7 + ox, 4, bone);
+    px(ctx, 5 + ox, 3, bone); px(ctx, 4 + ox, 1, bone, 1, 2); px(ctx, 10 + ox, 3, bone); px(ctx, 11 + ox, 1, bone, 1, 2);
+    px(ctx, 3, 11, '#7b5536', 10, 5); px(ctx, 4, 11, '#93694a', 2, 1); px(ctx, 7, 12, bone, 2, 1);
+  } else if (era === 'industry') {
+    // suit, tie and gold chain: the finance bro years
+    px(ctx, 3, 11, '#26304a', 10, 5); px(ctx, 7, 11, '#f2ead8', 2, 3); px(ctx, 7, 12, '#c0392b', 2, 3);
+    px(ctx, 5, 12, '#f2c14e'); px(ctx, 6, 13, '#f2c14e'); px(ctx, 9, 13, '#f2c14e'); px(ctx, 10, 12, '#f2c14e');
+  } else {
+    // mission headset: band over the head, ear cup, mic boom to the beak
+    px(ctx, 5 + ox, 2, '#20242c', 1, 3); px(ctx, 4 + ox, 5, '#20242c', 2, 4);
+    px(ctx, 5 + ox, 9, '#20242c'); px(ctx, 6 + ox, 10, '#20242c', 3, 1); px(ctx, 9 + ox, 10, '#3e8ed0');
     px(ctx, 3, 11, '#d9dde6', 10, 5); px(ctx, 5, 12, '#3e8ed0', 2, 2);
   }
 }

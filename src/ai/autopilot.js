@@ -14,7 +14,7 @@
 // time, and plays the scripted baseline god until the policy file has loaded (or if it fails).
 
 import { scriptedAction, ACTIONS, DECISION_DT, OBS_SIZE } from './observe.js';
-import { loadPolicy } from './policy.js';
+import { loadPolicy, weightedPolicy } from './policy.js';
 import { loading } from '../ui/loading.js'; // loading screen: the corner pill while the policy loads
 
 const cache = new Map(); // one fetch per policy URL, shared by every planet
@@ -42,16 +42,19 @@ export class AIGod {
   // onStatus(mode, error): 'ppo' once the trained policy is in, 'scripted' if it failed to load
   // or was refused (#181: that fallback used to be a console line only, so the player thought
   // the PPO god was playing). `mode` is 'loading' until then.
-  constructor({ url, greedy = true, policy = null, onStatus = null } = {}) {
+  // weights: optional per-action multipliers from a planet's temperament (src/ai/personality.js).
+  // They wrap the shared PPO policy, so every world still uses the same trained brain.
+  constructor({ url, greedy = true, policy = null, weights = null, onStatus = null } = {}) {
     this.greedy = greedy;
-    this.policy = policy;
+    this.weights = weights;
+    this.policy = policy ? (weights ? weightedPolicy(policy, weights) : policy) : null;
     this.error = null;
     this.timer = 0;
     this.last = null;
     this.mode = policy ? 'ppo' : 'loading';
     if (!policy) {
       sharedPolicy(url)
-        .then((p) => { this.policy = p; this.mode = 'ppo'; onStatus?.('ppo', null); })
+        .then((p) => { this.policy = weights ? weightedPolicy(p, weights) : p; this.mode = 'ppo'; onStatus?.('ppo', null); })
         .catch((e) => {
           this.error = e;
           this.mode = 'scripted';

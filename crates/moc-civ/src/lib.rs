@@ -26,6 +26,10 @@
 //! [`politics`]; the weights run here ([`policy_rt`]), and [`gym`] is the training environment.
 //! Without valid weights the rules decide.
 //!
+//! **Space (#166).** From age 19 a civilisation runs a space program ([`space`]): fleets that
+//! strike other planets of the galaxy (`moc_cosmos::war`, run by the host), and from age 20
+//! the endgame tiers.
+//!
 //! The browser loads this crate as a plain `extern "C"` WebAssembly module ([`ffi`]); build
 //! it with `crates/moc-civ/build-wasm.sh` (no wasm-bindgen needed).
 
@@ -48,6 +52,7 @@ pub mod politics;
 pub mod powers;
 pub mod render;
 pub mod setup;
+pub mod space;
 pub mod terrain;
 pub mod war_ffi;
 pub mod world;

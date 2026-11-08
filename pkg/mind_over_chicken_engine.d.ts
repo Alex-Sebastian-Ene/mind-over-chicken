@@ -358,6 +358,75 @@ export class RustGalaxy {
     ship_t(idx: number): number;
     ship_to(idx: number): number;
     step(dt: number, calm: number, focus: number, stress: number, blinks_last_10s: number, blinks_total: number): void;
+    war_battles(): Float32Array;
+    war_bodies(): Float32Array;
+    static war_body_stride(): number;
+    war_fleets(): Float32Array;
+    /**
+     * HUD rows for the player's power (or the galaxy's): "label\tvalue\tbad" lines.
+     */
+    war_hud(): string;
+    /**
+     * A civilisation's fleet, already taken from its dock, flies at planet `target`. Returns
+     * the fleet's id (−1: refused).
+     */
+    war_launch_external(power: number, target: number, order: number, strength: number, motive: number): number;
+    war_name(idx: number, name: string): void;
+    /**
+     * News from line `from` on: [seq, tone, about the player, about a civ sandbox
+     * civilisation, text, …].
+     */
+    war_news(from: number): Array<any>;
+    /**
+     * The player orders an attack (0 raid, 1 bombard, 2 invade): "" if it is away, else why not.
+     */
+    war_order(target: number, order: number): string;
+    war_planet_meta(idx: number): string;
+    /**
+     * The player's power (−1 none).
+     */
+    war_player(): number;
+    war_player_pressure(): number;
+    war_power_name(p: number): string;
+    war_powers(): Float32Array;
+    /**
+     * The campaign's home (−1: none, as in the sandboxes).
+     */
+    war_set_player_home(idx: number): void;
+    /**
+     * Difficulty seam: how hard the AI powers press the player, ×how often they launch at the
+     * player's world and ×how hard those fleets hit (1 default; Easy about 0.5, Hard about 1.6;
+     * clamped to 0.1..=3).
+     */
+    war_set_player_pressure(x: number): void;
+    /**
+     * A planet several civilisations share (the civ sandbox's).
+     */
+    war_set_shared(idx: number, shared: boolean): void;
+    war_step(dt: number, calm: number, focus: number, stress: number): void;
+    /**
+     * Every planet of the browser's galaxy, `war_body_stride()` floats each.
+     */
+    war_sync(data: Float32Array | number[]): void;
+    /**
+     * What the war did to every planet since the last call (`moc_cosmos::host::FX_OUT` each).
+     * The planets this galaxy also simulates take it here too, so their next sync agrees.
+     */
+    war_take_fx(): Float32Array;
+    /**
+     * What happened to a civilisation's power since the last call (`moc_cosmos::host::RESULT_OUT`).
+     */
+    war_take_results(power: number): Float32Array;
+    war_target_line(idx: number): string;
+    /**
+     * The planets power `power` may strike (`moc_cosmos::host::TARGET_OUT` each).
+     */
+    war_targets_for(power: number): Float32Array;
+    /**
+     * Register or update a civilisation in space living on planet `home` (by the host's key).
+     * Returns its power id (−1 if the galaxy has no room, or it was retired).
+     */
+    war_upsert_civ(key: number, name: string, r: number, g: number, b: number, home: number, production: number, knowledge: number, resources: number, fleet: number, shields: number, defences: number, garrison: number, tier: number, temper: number, alive: boolean): number;
 }
 
 export class RustImuTracker {
@@ -815,6 +884,30 @@ export interface InitOutput {
     readonly rustgalaxy_ship_t: (a: number, b: number) => number;
     readonly rustgalaxy_ship_to: (a: number, b: number) => number;
     readonly rustgalaxy_step: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly rustgalaxy_war_battles: (a: number) => [number, number];
+    readonly rustgalaxy_war_bodies: (a: number) => [number, number];
+    readonly rustgalaxy_war_body_stride: () => number;
+    readonly rustgalaxy_war_fleets: (a: number) => [number, number];
+    readonly rustgalaxy_war_hud: (a: number) => [number, number];
+    readonly rustgalaxy_war_launch_external: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly rustgalaxy_war_name: (a: number, b: number, c: number, d: number) => void;
+    readonly rustgalaxy_war_news: (a: number, b: number) => any;
+    readonly rustgalaxy_war_order: (a: number, b: number, c: number) => [number, number];
+    readonly rustgalaxy_war_planet_meta: (a: number, b: number) => [number, number];
+    readonly rustgalaxy_war_player: (a: number) => number;
+    readonly rustgalaxy_war_player_pressure: (a: number) => number;
+    readonly rustgalaxy_war_power_name: (a: number, b: number) => [number, number];
+    readonly rustgalaxy_war_powers: (a: number) => [number, number];
+    readonly rustgalaxy_war_set_player_home: (a: number, b: number) => void;
+    readonly rustgalaxy_war_set_player_pressure: (a: number, b: number) => void;
+    readonly rustgalaxy_war_set_shared: (a: number, b: number, c: number) => void;
+    readonly rustgalaxy_war_step: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly rustgalaxy_war_sync: (a: number, b: number, c: number) => void;
+    readonly rustgalaxy_war_take_fx: (a: number) => [number, number];
+    readonly rustgalaxy_war_take_results: (a: number, b: number) => [number, number];
+    readonly rustgalaxy_war_target_line: (a: number, b: number) => [number, number];
+    readonly rustgalaxy_war_targets_for: (a: number, b: number) => [number, number];
+    readonly rustgalaxy_war_upsert_civ: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number) => number;
     readonly rustimutracker_add_calib_point: (a: number, b: number, c: number) => void;
     readonly rustimutracker_aim_x: (a: number) => number;
     readonly rustimutracker_aim_y: (a: number) => number;
@@ -926,8 +1019,8 @@ export interface InitOutput {
     readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
     readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
     readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__283: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__284: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__307: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__308: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

@@ -6,7 +6,8 @@
 
 export const SETTINGS_KEY = 'moc.settings';
 // reducedMotion: null follows the system setting (prefers-reduced-motion), true/false overrides it.
-export const SETTINGS_DEFAULTS = Object.freeze({ reducedMotion: null, cameraOnStart: false });
+export const SETTINGS_DEFAULTS = Object.freeze({ reducedMotion: null, cameraOnStart: true, cursorSize: 'm', cursorContrast: false });
+export const CURSOR_SIZES = ['s', 'm', 'l'];
 
 function safeStorage() { try { return globalThis.localStorage ?? null; } catch { return null; } }
 
@@ -15,12 +16,14 @@ export function loadSettings(storage = safeStorage()) {
   try { saved = JSON.parse(storage?.getItem(SETTINGS_KEY) || '{}') || {}; } catch { saved = {}; }
   return {
     reducedMotion: typeof saved.reducedMotion === 'boolean' ? saved.reducedMotion : null,
-    cameraOnStart: saved.cameraOnStart === true,
+    cameraOnStart: saved.cameraOnStart !== false,   // on by default; only an explicit opt-out disables it
+    cursorSize: CURSOR_SIZES.includes(saved.cursorSize) ? saved.cursorSize : 'm',
+    cursorContrast: saved.cursorContrast === true,
   };
 }
 
 export function saveSettings(settings, storage = safeStorage()) {
-  try { storage?.setItem(SETTINGS_KEY, JSON.stringify({ reducedMotion: settings.reducedMotion, cameraOnStart: !!settings.cameraOnStart })); } catch {}
+  try { storage?.setItem(SETTINGS_KEY, JSON.stringify({ reducedMotion: settings.reducedMotion, cameraOnStart: !!settings.cameraOnStart, cursorSize: CURSOR_SIZES.includes(settings.cursorSize) ? settings.cursorSize : 'm', cursorContrast: !!settings.cursorContrast })); } catch {}
 }
 
 // Whether motion is reduced: the player's choice, else the system's.
@@ -47,14 +50,23 @@ export function initSettings(doc, { eegPanel = null, calibration = null, default
     invYaw: $('setInvYaw'), invPitch: $('setInvPitch'),
     calibSeconds: $('setCalibSeconds'), calibMode: $('setCalibMode'), cameraOnStart: $('setCameraOnStart'),
     savesNote: $('setSavesNote'), deleteSaves: $('setDeleteSaves'),
+    cursorSize: $('setCursorSize'), cursorContrast: $('setCursorContrast'),
   };
 
   function applyMotion() {
     doc.body.dataset.reducedMotion = reducedMotionOn(settings, systemReducedMotion()) ? '1' : '0';
   }
+  // The aim cursor (#301): main.js reads these when it draws the reticle.
+  function applyCursor() {
+    doc.body.dataset.cursorSize = settings.cursorSize;
+    doc.body.dataset.cursorContrast = settings.cursorContrast ? '1' : '0';
+  }
+  applyCursor();
 
   function fill() {
     if (ui.motion) ui.motion.checked = doc.body.dataset.reducedMotion === '1';
+    if (ui.cursorSize) ui.cursorSize.value = settings.cursorSize;
+    if (ui.cursorContrast) ui.cursorContrast.checked = !!settings.cursorContrast;
     const aim = eegPanel?.prefs;
     if (aim) {
       if (ui.sens) ui.sens.value = String(aim.sensitivity);
@@ -103,6 +115,16 @@ export function initSettings(doc, { eegPanel = null, calibration = null, default
   // The Advanced buttons (Camera, Model, Debug) open their own panels: make way for them.
   panel.querySelector('[data-set-advanced]')?.addEventListener('click', (e) => { if (e.target.closest?.('button')) close(); });
 
+  ui.cursorSize?.addEventListener('change', () => {
+    settings.cursorSize = CURSOR_SIZES.includes(ui.cursorSize.value) ? ui.cursorSize.value : 'm';
+    saveSettings(settings);
+    applyCursor();
+  });
+  ui.cursorContrast?.addEventListener('change', () => {
+    settings.cursorContrast = !!ui.cursorContrast.checked;
+    saveSettings(settings);
+    applyCursor();
+  });
   ui.motion?.addEventListener('change', () => {
     settings.reducedMotion = !!ui.motion.checked;
     saveSettings(settings);

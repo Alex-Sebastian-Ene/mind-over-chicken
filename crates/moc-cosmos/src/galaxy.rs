@@ -6,8 +6,9 @@
 use crate::math::Mulberry32;
 use crate::planet_sim::{
     arrive_ship, blink_planet, step_planet, BrainEffects, Channel, EventKind, MindSnapshot,
-    PlanetState, SimEvent,
+    PlanetState, SimEvent, MIN_POP, POP_CAP, SETTLE_POP,
 };
+use crate::war::{BodyFx, Mind, Mission, SpaceWar, WorldStats};
 
 pub const MAX_PLANETS: usize = 7;
 pub const STAR_X: f32 = 132.0;
@@ -95,6 +96,8 @@ pub struct Ship {
     pub to_planet: usize,
     pub t: f32,
     pub duration: f32,
+    /// A war fleet's orders (#166); None for a colony ship.
+    pub mission: Option<Mission>,
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +108,12 @@ pub struct Galaxy {
     pub mind: MindSnapshot,
     pub attended: Option<usize>,
     pub log: Vec<(f32, String)>,
+    /// The interplanetary war (#166): fleets, raids, bombardments, invasions.
+    pub war: SpaceWar,
+    /// Run the war from these planets in `step` (true). The browser's galaxy has more planets
+    /// than this one and syncs them itself, so `RustGalaxy` turns this off.
+    pub war_auto: bool,
+    war_news_seen: u32,
     rng: Mulberry32,
 }
 
@@ -118,8 +127,12 @@ impl Galaxy {
             mind: MindSnapshot::new(),
             attended: None,
             log: Vec::new(),
+            war: SpaceWar::new(seed),
+            war_auto: true,
+            war_news_seen: 0,
             rng,
         };
+        galaxy.war.set_player_home(Some(0));
 
         // Add home planet
         galaxy.add_planet(
@@ -272,7 +285,77 @@ impl Galaxy {
             }
         }
 
+        // 4. The interplanetary war (#166).
+        if self.war_auto {
+            self.step_war(dt, fx);
+        }
+
         all_events
+    }
+
+    /// What the war needs to know about planet `i`.
+    pub fn world_stats(&self, i: usize) -> WorldStats {
+        let p = &self.planets[i];
+        let s = &p.state;
+        // This galaxy's planets have no settlement or stores: tier from the people, stores
+        // from the goat market.
+        let tier = if s.pop >= 1800.0 { 3 } else if s.pop >= 220.0 { 2 } else if s.pop >= 25.0 { 1 } else { 0 };
+        let temper = match s.channel {
+            Channel::Stress => 0.75,
+            Channel::Calm => 0.25,
+            Channel::Focus => 0.45,
+            Channel::Blink => 0.55,
+            Channel::Mixed => 0.5,
+        };
+        WorldStats {
+            alive: p.alive && !p.forming,
+            pop: s.pop.max(0.0),
+            era: s.era_index as u8,
+            tier,
+            progress: if s.era_index + 1 >= POP_CAP.len() { 1.0 } else { s.progress },
+            stock: s.market.max(0.0) * 10.0,
+            stability: 0.7,
+            temper,
+            hand_played: p.home && !p.autonomous,
+        }
+    }
+
+    /// What the war did to planet `i`: people, progress and the goat market (the hand-played
+    /// home's scene isn't the galaxy's to hurt).
+    pub fn apply_war_fx(&mut self, i: usize, w: &BodyFx) {
+        let Some(p) = self.planets.get_mut(i) else { return };
+        if w.is_empty() || (p.home && !p.autonomous) {
+            return;
+        }
+        let s = &mut p.state;
+        if w.settled && s.pop <= 0.0 {
+            s.pop = SETTLE_POP;
+            s.era_index = 0;
+            s.progress = 0.0;
+        }
+        if s.pop > 0.0 {
+            s.pop = (s.pop * w.pop_mul).max(MIN_POP);
+        }
+        s.progress = (s.progress - w.progress_loss).max(0.0);
+        s.market *= w.stock_mul.max(0.2);
+    }
+
+    /// Sync the planets into the war, step it, and apply what it did.
+    pub fn step_war(&mut self, dt: f32, fx: &BrainEffects) {
+        for i in 0..self.planets.len() {
+            let stats = self.world_stats(i);
+            self.war.sync_body(i, &self.planets[i].name, stats);
+        }
+        self.war.step(dt, Mind { calm: fx.calm, focus: fx.focus, stress: fx.stress });
+        for i in 0..self.planets.len() {
+            let w = self.war.take_fx(i);
+            self.apply_war_fx(i, &w);
+        }
+        let news: Vec<String> = self.war.news_since(self.war_news_seen).map(|n| n.text.clone()).collect();
+        self.war_news_seen = self.war.next_news;
+        for text in news {
+            self.note(text);
+        }
     }
 
     fn launch_ship_from(&mut self, from_idx: usize) {
@@ -305,6 +388,7 @@ impl Galaxy {
                 to_planet: to_idx,
                 t: 0.0,
                 duration,
+                mission: None,
             });
             self.note(format!("{} launched a colony ship to {}.", from_name, to_name));
         }

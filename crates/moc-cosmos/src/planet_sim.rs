@@ -73,16 +73,16 @@ pub const ERA_TITLES: [&str; ERA_COUNT] = ["Stone Age", "Farming", "Industry", "
 
 pub const FLAVOUR: [&[&str]; ERA_COUNT] = [
     &["invented the spear", "worships a rock", "met a mammoth"],
-    &["domesticated goats", "invented cheese", "elected a chicken"],
+    &["domesticated chickens", "invented the omelette", "elected a chicken"],
     &[
-        "opened a goat exchange",
+        "opened a chicken exchange",
         "invented the strike",
         "built a mill",
     ],
     &[
         "launched a satellite",
         "found water on a moon",
-        "built a goat in orbit",
+        "put a chicken in orbit",
     ],
 ];
 
@@ -375,7 +375,7 @@ pub fn step_planet(
             p.progress = 0.0f32.max(p.progress - CRASH_PROGRESS * steady);
             events.push(SimEvent {
                 kind: EventKind::Bad,
-                text: "goat crash".to_string(),
+                text: "chicken crash".to_string(),
                 cause: Some(format!("your stress at {:.0}%", fx.stress * 100.0)),
             });
         } else if !p.boomed && p.market > BOOM_LEVEL {
@@ -383,7 +383,7 @@ pub fn step_planet(
             p.progress = 1.0f32.min(p.progress + BOOM_PROGRESS);
             events.push(SimEvent {
                 kind: EventKind::Good,
-                text: "goat boom".to_string(),
+                text: "chicken boom".to_string(),
                 cause: Some("a lively mind".to_string()),
             });
         }

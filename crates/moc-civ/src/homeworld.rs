@@ -1752,6 +1752,25 @@ impl HomeWorld {
         });
     }
 
+    /// A divine blast at a world point: every rival person inside `radius` dies. The player's
+    /// mirrored guards are left to the era scene, which owns the player's people. Returns the
+    /// number killed. Snapshots are refreshed by the caller after this.
+    pub fn smite(&mut self, x: f32, y: f32, radius: f32) -> u32 {
+        let mirror = self.mirror;
+        let mut killed = 0;
+        for i in 0..self.w.agents.len() {
+            let a = &self.w.agents[i];
+            if !a.alive || a.faction == mirror {
+                continue;
+            }
+            if self.w.d.dist(a.x, a.y, x, y) <= radius {
+                self.w.kill(i, Cause::Smitten);
+                killed += 1;
+            }
+        }
+        killed
+    }
+
     // -----------------------------------------------------------------------------------
     // What JS draws.
 

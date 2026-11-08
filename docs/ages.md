@@ -11,9 +11,9 @@ This is **not a tech tree**: there's no research screen and no player-chosen upg
 | 1 | Wanderers | forage, hunt | campfire | hunger, fear, fire | famine, predators |
 | 2 | Hearth Clans | woodcut, cook | hut | shelter, families, night and sleep | cold snap |
 | 3 | Toolmakers | knap stone, fish | workshop, raft | tools, coastal exploration | lost at sea |
-| 4 | First Farmers | farm, herd goats | field, goat pen | seasons, harvest | drought, locusts |
+| 4 | First Farmers | farm, keep chickens | field, chicken coop | seasons, harvest | drought, locusts |
 | 5 | Villages | build, carry, settle | granary, well | storage, settlers, territory | granary fire, flood |
-| 6 | Trade Routes | trade, guard | market, dock | trade between civs, goat currency | bandits |
+| 6 | Trade Routes | trade, guard | market, dock | trade between civs, egg currency | bandits |
 | 7 | Chiefdoms | chief, warrior, raid | longhouse, palisade | leadership, tribute, raids | succession split |
 | 8 | Bronze Age | mine, smith | mine, forge | metal tools and weapons, ore scarcity | ore war |
 | 9 | Kingdoms | scribe, tax | palace, road | law, taxes, inequality, unrest | tax revolt |
@@ -22,7 +22,7 @@ This is **not a tech tree**: there's no research screen and no player-chosen upg
 | 12 | Medieval Realms | knight, monk, miller | castle, monastery, mill | lords, guilds, disease along trade | plague, peasant revolt |
 | 13 | Age of Sail | sailor, explorer, colonist | shipyard, port | overseas colonies, naval war | shipwreck storms |
 | 14 | Renaissance | scholar, artist, banker | university, bank, theatre | faster knowledge, credit, culture spread | censorship |
-| 15 | Industrial Revolution | factory, rail, miner | factory, railway | goat exchange, strikes, smog | market crash |
+| 15 | Industrial Revolution | factory, rail, miner | factory, railway | chicken exchange, strikes, smog | market crash |
 | 16 | Revolutions | agitator, reformer | parliament | government change, civil war, splits | civil war |
 | 17 | Electric Age | electrician, clerk | power plant, street lights | cities, night lights, alliances | blackout, world war |
 | 18 | Information Age | programmer, broadcaster | tower, data centre | networks, instant ideas, misinformation | panic, cyber war |
@@ -41,7 +41,7 @@ Entry conditions are in `data/ages.json` (e.g. Kingdoms: population 80, 5 settle
   Some ages have alternative conditions (`"any"`) for exactly this.
 - **Collapse.** Stability below 0.15 for 30 s, or population below 60% of the age's entry level, drops a civilisation back one age: a Dark Age. Its buildings go dormant and its jobs stop until it climbs back.
 - **Crises are emergent.** Plague spreads along trade routes, ore wars start over hills, and revolutions come from inequality. The player's signals tilt them but don't script them.
-- **Daily life.** Agents sleep at night, eat at the hearth or market, hold festivals when the player is joyful, mourn their dead, form families, make friends and rivals across civilisations, and migrate when hungry or at war.
+- **Daily life.** Agents sleep at night, eat at the hearth or market, hold festivals when the player is joyful, mourn their dead, form families, make friends and rivals across civilisations, and migrate when hungry or at war. A person lives 3–5 in-game days (240–400 s at 80 s a day; `world::lifespan` in `crates/moc-civ/src/world.rs`), a full belly lasts 50 s and an empty one kills in 40 s (`STARVE_HP_RATE`); past 60% of their own lifespan people are old and plague hits them twice as hard. The Stone Age tribe's hunger clock is `STONE_HUNGER` in `src/eras/stone.js` (#298).
 
 ## Conflict
 Fights are **agent against agent** and come out of the simulation. They also happen **inside a single civilisation**: a civilisation alone on its planet still has clans, rebels and lords who fight. The full model is under `conflict` in `data/ages.json`.
@@ -51,7 +51,7 @@ Fights are **agent against agent** and come out of the simulation. They also hap
 | Level | Who fights | Started by | Result |
 |---|---|---|---|
 | Scuffle | two agents | an insult, a rivalry, the same food or tile | wounds; a grudge between families |
-| Feud | two families or clans | repeated scuffles or a death | ambushes, revenge, stolen goats |
+| Feud | two families or clans | repeated scuffles or a death | ambushes, revenge, stolen chickens |
 | Raid | a war band against a settlement | hunger, greed, aggressive traits | stolen food, burned buildings, captives |
 | Battle | two armies | a raid answered, a border dispute | a won or lost field; morale swings |
 | War | two civilisations or realms (age 7+) | several battles, or a declaration | territory changes hands; truce or conquest |
@@ -85,7 +85,7 @@ The peace, fireball and disaster spells went with the other hand-gesture casts i
 Every age has a "brain moment" (the `brain` field in the data). Examples:
 - calm brings rain to first farmers and keeps the lords loyal;
 - focus lets the scribes write law and fuels Renaissance breakthroughs;
-- stress crashes the goat market and spreads misinformation;
+- stress crashes the chicken market and spreads misinformation;
 - anger drives conquest and bloody revolutions;
 - blinks are lightning, miracles or storms at sea.
 

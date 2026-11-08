@@ -520,7 +520,7 @@ impl World {
             let (ax, ay) = if self.terrain.walkable(x + ox, y + oy) { (x + ox, y + oy) } else { (x, y) };
             let job = if k % 2 == 0 { Job::Forage } else { Job::Hunt };
             if let Some(a) = self.spawn_agent(f, v, job, ax, ay) {
-                let age = self.rng.range(0.0, 20.0);
+                let age = self.rng.range(0.0, crate::world::lifespan::START_AGE_MAX);
                 self.agents[a].age = age;
                 self.agents[a].clan = (k / 2) as u8;
             }

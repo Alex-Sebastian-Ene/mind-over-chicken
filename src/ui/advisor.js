@@ -1,13 +1,14 @@
-// Oog: high priest, then finance bro, then flight director. Reacts to your brain live.
+// Cluck, the advisor chicken: high priest, then finance bro (Chief Egg Officer), then flight
+// director, which for a chicken is ambitious. Reacts to your brain live.
 
 import { drawAdvisorPortrait } from '../render/sprites.js';
 
 const NAMES = {
-  stone: 'Oog · High Priest of the Flame',
-  farming: 'Oog · High Priest of the Harvest',
-  kingdoms: 'Oog · Royal Scribe',
-  industry: 'Oog III · Chief Goat Officer',
-  space: 'Oog IX · Flight Director',
+  stone: 'Cluck · High Priest of the Flame',
+  farming: 'Cluck · High Priest of the Harvest',
+  kingdoms: 'Cluck · Royal Scribe',
+  industry: 'Cluck III · Chief Egg Officer',
+  space: 'Cluck IX · Flight Director',
 };
 
 let rustEngine = null;
