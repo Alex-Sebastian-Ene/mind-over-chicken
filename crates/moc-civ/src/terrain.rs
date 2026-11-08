@@ -116,6 +116,13 @@ impl Terrain {
         let relief = WrapNoise::new(&mut rng, period(c_relief), 4);
         let moist = WrapNoise::new(&mut rng, period(c_moist), 4);
         let icy = WrapNoise::new(&mut rng, period(c_ice), 3);
+        // Past the default planet the biome noise grows with it, which smears woods and
+        // grassland into huge flat blobs (#205). A detail octave at a fixed tile scale, from its
+        // own generator so nothing else drawn here changes, breaks them back up. The default
+        // planet and smaller ones skip it and come out exactly as before.
+        const C_FINE: f32 = 18.0;
+        let fine_amp = (s - 1.0).min(1.0);
+        let fine = (s > 1.0).then(|| WrapNoise::new(&mut Rng::new(seed ^ 0x0f0e_57a5), period(C_FINE), 2));
 
         // Continents spread unevenly and shaped like real ones (Alex). Each is a chain of
         // overlapping, rotated, stretched lobes along a wandering (sometimes branching) spine,
@@ -305,8 +312,17 @@ impl Terrain {
                 } else if e < 0.115 {
                     SAND
                 } else {
-                    let r = relief.fbm(u, yf / c_relief, 4);
-                    let m = moist.fbm(u, yf / c_moist, 4);
+                    let mut r = relief.fbm(u, yf / c_relief, 4);
+                    let mut m = moist.fbm(u, yf / c_moist, 4);
+                    if let Some(fine) = &fine {
+                        // Patches of wood, meadow and heath at the default planet's scale (#205).
+                        // Never across the mountain line, so walkability (and every landmass)
+                        // stays exactly as the coarse noise made it.
+                        m += (fine.fbm(u, yf / C_FINE, 2) - 0.5) * 0.3 * fine_amp;
+                        if r <= 0.71 {
+                            r = (r + (fine.fbm(u, yf / C_FINE + 29.0, 2) - 0.5) * 0.12 * fine_amp).min(0.709);
+                        }
+                    }
                     if r > 0.71 && !spine[i] {
                         MOUNTAIN
                     } else if r > 0.64 {
@@ -458,17 +474,63 @@ impl Terrain {
                 }
             }
             SAND => (212, 192, 132),
-            GRASS => (88, 154, 70),
-            FOREST => (44, 104, 56),
+            GRASS | FOREST => self.foliage(k, x, y),
             HILLS => (132, 128, 84),
             MOUNTAIN => (118, 110, 108),
             _ => (226, 236, 244),
         };
         let h = hash((x as u32).wrapping_mul(73_856_093) ^ (y as u32).wrapping_mul(19_349_663) ^ self.seed);
         let j = (h % 13) as i32 - 6;
-        let j = if k == FOREST && h & 0x100 != 0 { j - 10 } else { j };
         let f = |c: i32| (c + j).clamp(0, 255) as u8;
         [f(r), f(g), f(b), 255]
+    }
+
+    /// Trees and bushes (#205), one tile per pixel: a forest is crowns lit from above with a
+    /// shadow under each, the tree fitting the place (pines in the cold and by the hills, palms
+    /// on warm coasts, broadleaf elsewhere); grassland has a lone tree or a bush here and there.
+    /// It depends only on the tile's own kind and things that never change at runtime (where it
+    /// is, the water and hills round it), so a tile felled, burnt or grown back (#265) repaints
+    /// on its own without leaving stale shadows next to it. Every colour stays green-dominant
+    /// and blue no more than 15 above red, so the 3D view's height-from-colour still reads it as
+    /// plains or forest (src/civ/sandbox.js `getVisibleHeightmap`).
+    fn foliage(&self, k: u8, x: i32, y: i32) -> (i32, i32, i32) {
+        let d = self.d;
+        let (x, y) = (d.wrap_x(x), d.wrap_y(y));
+        let at = |x: i32, y: i32, salt: u32| hash((d.wrap_x(x) as u32).wrapping_mul(2_654_435_761) ^ (d.wrap_y(y) as u32).wrapping_mul(40_503) ^ self.seed ^ salt);
+        let lat = ((y as f32 + 0.5) / d.h as f32 - 0.5).abs() * 2.0;
+        let near = |r: i32, kinds: &[u8]| (-r..=r).any(|oy| (-r..=r).any(|ox| kinds.contains(&self.kind_at(x + ox, y + oy))));
+        // Which tree grows here: (shadow, canopy, lit crown).
+        let tree = || -> [(i32, i32, i32); 3] {
+            if lat > 0.5 || near(2, &[HILLS, MOUNTAIN, ICE]) {
+                [(20, 60, 34), (32, 82, 46), (48, 102, 60)] // pine
+            } else if lat < 0.3 && near(2, &[WATER, DEEP]) {
+                [(48, 90, 38), (76, 122, 50), (102, 140, 58)] // palm
+            } else {
+                [(28, 74, 40), (44, 104, 56), (66, 122, 58)] // broadleaf
+            }
+        };
+        if k == FOREST {
+            const CROWN: u32 = 0x7a3c_11e5;
+            let [shadow, canopy, lit] = tree();
+            if at(x, y, CROWN) % 3 == 0 {
+                lit
+            } else if at(x, y - 1, CROWN) % 3 == 0 || at(x - 1, y - 1, CROWN) % 5 == 0 {
+                shadow
+            } else {
+                canopy
+            }
+        } else {
+            const LONE: u32 = 0x2b9e_6d07;
+            if at(x, y, LONE) % 31 == 0 {
+                tree()[1]
+            } else if at(x, y - 1, LONE) % 31 == 0 {
+                (64, 122, 52) // its shadow on the grass
+            } else if at(x, y, LONE ^ 0x55) % 9 == 0 {
+                (78, 140, 60) // a darker tuft
+            } else {
+                (88, 154, 70)
+            }
+        }
     }
 }
 
