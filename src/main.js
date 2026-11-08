@@ -61,7 +61,8 @@ import { dayNight } from './render/daynight.js';
 import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
 import { mirrorHud } from './ui/hud-mirror.js';
 import { createRivals, playerState, applyRivalLine } from './civ/rivals.js'; // rivals on the home world (#212)
-import { readOptions, worldSizeOf, difficultyOf } from './game/options.js'; // world size and difficulty (#220)
+import { readOptions, worldSizeOf, difficultyOf, bootModeOf } from './game/options.js'; // world size and difficulty (#220)
+import { News } from './ui/news.js'; // the one news ticker (#220)
 import { initNewGameOptions } from './ui/new-game.js';
 import { footprint3d } from './ui/minimap.js';   // the minimap's 3D window (release QA)
 import { AIM_VIEW, aimViewKind, clampHomeAim, clampScreenAim } from './input/visible-aim.js';
@@ -416,6 +417,7 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null } = {})
   G = {
     world: new World(seed, { width: size.w || HOME_W, height: size.h || HOME_H }), // the home world, sized by the New Game choice (#129, #220)
     options: { worldSize: options.worldSize, difficulty: options.difficulty, size: size.id },
+    news: new News(),   // the one news ticker (#220): the goat market and the rivals
     difficulty: difficultyOf(options.difficulty),
     brain, source, advisor, hud, audio, engine,
     calibration: new Calibration(Number.isFinite(calibSeed) ? { ...calibConfig, seed: calibSeed >>> 0 } : calibConfig), // calibration (#54)
@@ -532,7 +534,7 @@ function updateRivals(dt) {
   const r = G.rivals;
   if (!r || !WORLD_SCENES.some((c) => G.scene instanceof c)) return;
   const lines = r.update(dt, playerState(G.scene, G.world, G.sceneIndex));
-  for (const l of lines) applyRivalLine(l, { scene: G.scene, advisor, hud });
+  for (const l of lines) applyRivalLine(l, { scene: G.scene, advisor, news: G.news });
 }
 
 function startScene(i) {
@@ -1121,6 +1123,7 @@ function render() {
     textCtx.setTransform(K, 0, 0, K, 0, 0);
     if (G.render3d) scene.drawScreen?.(textCtx);   // 3D has no low-res frame to paint into
     if (!intro.active) scene.drawScreenOverlay?.(textCtx);   // the stage's own HUD waits for the intro
+    if (!intro.active && scene === G.scene && worldScene(scene)) G.news?.draw(textCtx, W, H);   // the one news ticker (#220)
     if (windowed && !cosmic && scene.phase !== 'voyage' && !intro.active) drawMinimap(textCtx, scene);   // not over the voyage's starfield
     if (intro.active) drawIntroCaption(textCtx);
   }
@@ -1206,6 +1209,7 @@ function frame(ts) {
     cosmos.update(dt, G);
     updateAimTarget();   // #294: keep the cursor and every blink target inside the visible view
     advisor.update(dt);
+    G.news?.update(dt);
     // planets (#68): the HUD names the world you're on: "your world" at home, "AI god" elsewhere.
     const wanted = cosmos.hudScene(G, galaxyHudScene);
     if (wanted !== hudScene) { hudScene = wanted; hud.setScene(wanted); }
@@ -2176,6 +2180,11 @@ function start(data = {}) {
     newGame(new SimSource(), data.sceneIndex);
   }
   autoConnectBridge();
+  // The old modes for testing (#220): ?mode=civ, ?mode=galaxy, or ?mode=story straight into play.
+  const mode = bootModeOf(location.search);
+  if (mode === 'crowded') startCivSandbox(playSource());
+  else if (mode === 'galaxy') startGalaxySandbox(playSource());
+  else if (mode === 'story') begin(playSource());
 }
 document.fonts?.load('16px "Pixelify Sans"').finally?.(() => {});
 if (typeof window !== 'undefined' && window.location?.search?.includes('rust=1')) {
