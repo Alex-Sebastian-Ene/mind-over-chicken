@@ -19,6 +19,7 @@
 
 import { clamp } from '../sim/util.js';
 import { GESTURE_LABEL } from './gestures.js';
+import { PinchMoveSmoother } from './pinch-move.js';
 import { EMOTIONS, EmotionTracker, neutralMood, blendshapeMap } from './emotion.js';
 import { manualMood, surpriseRisingEdge } from './manual-mood.js';
 import { loadVision } from './vision.js';
@@ -170,6 +171,8 @@ export function initCamera({
   const tracker = new EmotionTracker();
   const fingers = new FingerController({ headCursorOnly: true });
   const multiHand = new MultiHandTracker();
+  const pinchSmoother = new PinchMoveSmoother();
+  let lastGestureAt = 0;
   let status = 'off';          // off | starting | on | error
   let stream = null;
   let engine = null;
@@ -319,6 +322,8 @@ export function initCamera({
     faceBox = null;
     gesture = { name: 'None', score: 0 };
     lastHeadAim = null;
+    lastGestureAt = 0;
+    pinchSmoother.reset();
     mood = neutralMood();
     strongPending = false;
     surprisePending = false;
@@ -445,6 +450,8 @@ export function initCamera({
   function onGesture(r) {
     if (!stream || status !== 'on') return;
     const now = performance.now();
+    const gestureDt = Math.min(0.2, (now - (lastGestureAt || now)) / 1000) || 1 / 30;
+    lastGestureAt = now;
     hand = r.hand || null;
     handAspect = r.aspect || 4 / 3;
     gesture = { name: r.name || 'None', score: r.score || 0 };
@@ -489,6 +496,13 @@ export function initCamera({
 
     // Multi-hand tracker: 2-hand continuous zoom (#118, #119), 1-hand grab (#120)
     multi = multiHand.update({ hands: rawHands, now, aspect: handAspect });
+    if (multi.grab.started) pinchSmoother.reset();
+    const pinchMove = pinchSmoother.filter({
+      handDx: multi.grab.dx,
+      handDy: multi.grab.dy,
+      headDx,
+      headDy,
+    }, gestureDt);
 
     if (live) {
       // 1. Two-hand continuous pinch zoom (#119)
@@ -503,18 +517,19 @@ export function initCamera({
       if (multi.grab.started) {
         tryGrabStart(G, now);
         if (!grabbed && onGrabMove) {
-          onGrabMove({ dx: 0, dy: 0, headDx, headDy, started: true, active: true, aim: G.brain.aim, grab: multi.grab });
+          onGrabMove({ dx: 0, dy: 0, headDx: 0, headDy: 0, started: true, active: true, aim: G.brain.aim, grab: multi.grab });
         }
       } else if (multi.grab.active) {
         if (grabbed) {
           G.scene?.onGrabMove?.({ x: G.brain.aim.x, y: G.brain.aim.y });
         } else if (onGrabMove) {
-          onGrabMove({ dx: multi.grab.dx, dy: multi.grab.dy, headDx, headDy, started: false, active: true, aim: G.brain.aim, grab: multi.grab });
+          onGrabMove({ dx: pinchMove.handDx, dy: pinchMove.handDy, headDx: pinchMove.headDx, headDy: pinchMove.headDy, started: false, active: true, aim: G.brain.aim, grab: multi.grab });
         }
       } else if (multi.grab.released || multi.grab.cancelled) {
         if (grabbed) {
           tryGrabEnd(G, now, !!multi.grab.cancelled);
         } else if (onGrabMove) {
+          pinchSmoother.reset();
           onGrabMove({ dx: 0, dy: 0, headDx: 0, headDy: 0, released: true, cancelled: !!multi.grab.cancelled, active: false, aim: G.brain.aim, grab: multi.grab });
         }
       }
