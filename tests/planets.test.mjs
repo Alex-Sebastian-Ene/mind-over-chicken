@@ -10,8 +10,11 @@ import {
 } from '../src/cosmos/planet-sim.js';
 import { ZoomState } from '../src/cosmos/zoom.js';
 import { Galaxy, FORM_SECONDS } from '../src/cosmos/galaxy.js';
-import { World } from '../src/world/terrain.js';
-import { buildVast, settlementPlan, VW, VH, TILE, wrapX } from '../src/cosmos/vast.js';
+import { World, initTerrainSync } from '../src/world/terrain.js';
+import { settlementPlan, VW, VH, TILE, wrapX } from '../src/cosmos/vast.js';
+
+// The worlds come from Rust (#109): load the engine wasm once.
+initTerrainSync(readFileSync(new URL('../pkg/mind_over_chicken_engine_bg.wasm', import.meta.url)));
 
 const W = 320, H = 180;
 const calmFx = (o = {}) => brainEffects({ calm: 0.2, focus: 0.2, stress: 0, blinksLast10s: 0, ...o });
@@ -414,15 +417,17 @@ test('a world that loses its surface pushes the view back to its globe', () => {
 
 // ---------- vaster worlds ----------
 
-test('vast surfaces: 4× the area, the capital is the AI world unchanged, more continents', () => {
-  const world = new World(4242, { biome: 'jungle' });
-  const v = buildVast(world, 4242);
+test('vast surfaces: 4× the area, the capital is the AI world cut from it, more continents', () => {
+  const world = World.planet(4242, 'jungle');
+  const v = world.vast;
   assert.equal(VW * VH, 4 * W * H);
+  assert.equal(v.w * v.h, VW * VH);
   assert.equal(v.type.length, VW * VH);
+  assert.deepEqual(v.tile, TILE);
   for (const [x, y] of [[0, 0], [100, 90], [319, 179], [200, 40]]) {
     assert.equal(v.type[(y + TILE.y) * VW + wrapX(x + TILE.x)], world.baseType[y * W + x], `capital pixel ${x},${y}`);
   }
-  assert.ok(v.continents.length >= world.continents.length + 4, `continents: ${v.continents.length}`);
+  assert.ok(v.continents.length >= 4, `continents: ${v.continents.length}`);
   assert.ok(v.spots[0].capital);
   assert.equal(v.spots[0].x, wrapX(world.sites.village.x + TILE.x));
   assert.ok(v.spots.length >= 8);
