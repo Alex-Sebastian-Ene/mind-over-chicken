@@ -21,6 +21,8 @@
       <span class="source" id="sourceStatus" data-ok="0">No headset</span>
       <!-- #85: how far to trust the headset right now (src/ui/hud.js signalSummary) -->
       <span class="signal" id="signalChip" data-level="good" role="status" hidden></span>
+      <!-- #152: joy buff and surprise while a mood is live (src/camera/mood-actions.js moodChip) -->
+      <span class="mood-chip" id="moodChip" data-tone="idle" hidden></span>
       <span class="clock" id="clock" aria-label="Run time">0:00</span>
       <button type="button" class="tool eeg-btn" id="eegBtn" aria-pressed="false" aria-controls="eegPanel" title="Connect or disconnect EEG headset and view live signals (E)">EEG <kbd>E</kbd></button>
       <!-- #89: Camera, Model and Debug live in Settings › Advanced; this shows while the webcam runs -->
@@ -74,6 +76,8 @@
       <p class="mind-line" id="mindLine"></p>
       <!-- planets (#68): the selected world's tier, stocks, strife, milestones and history -->
       <section class="world-detail" id="worldDetail" aria-label="World details" aria-live="polite" hidden></section>
+      <!-- space war (#166): once your world is in space, target a world and raid, bombard or invade it -->
+      <section class="war-orders" id="warOrders" aria-label="Space orders" hidden></section>
       <ul class="planet-list" id="planetList" aria-label="Worlds"></ul>
       <ol class="galaxy-log" id="galaxyLog" aria-label="Galaxy news" aria-live="polite"></ol>
     </aside>
@@ -81,7 +85,7 @@
     <aside class="advisor is-idle" id="advisor" data-mood="nervous" aria-live="polite">
       <canvas width="16" height="16" aria-hidden="true"></canvas>
       <div class="bubble">
-        <p class="advisor-name" data-advisor-name>Oog · High Priest of the Flame</p>
+        <p class="advisor-name" data-advisor-name>Cluck · High Priest of the Flame</p>
         <p class="advisor-text" data-advisor-text></p>
       </div>
     </aside>
@@ -105,7 +109,7 @@
     <button type="button" class="power" data-power="focus">
       <canvas class="power-icon" width="8" height="8" aria-hidden="true"></canvas>
       <span class="power-name">Rain</span>
-      <span class="power-sub">Open palm + Insight · hold <kbd>F</kbd></span>
+      <span class="power-sub">Open palm + Insight · camera</span>
       <span class="power-value">0%</span>
       <span class="meter"><span></span></span>
     </button>
@@ -125,6 +129,22 @@
     </button>
   </nav>
 </div>
+
+<section class="overlay planet-setup" id="planetSetup" hidden aria-labelledby="planetSetupHeading">
+  <div class="setup-inner">
+    <header class="setup-head">
+      <p class="eyebrow" data-setup-count>World 1 of 4</p>
+      <h1 id="planetSetupHeading">Your mind makes four worlds</h1>
+      <p class="setup-hint" data-setup-hint>Hold a feeling. Each world is made from it.</p>
+    </header>
+    <div class="pack-row" id="planetSetupGrid" aria-live="polite"></div>
+    <footer class="setup-actions">
+      <button type="button" class="btn" id="planetSetupBack">Back</button>
+      <button type="button" class="btn" id="planetSetupAgain" hidden>Read again</button>
+      <button type="button" class="btn btn-primary" id="planetSetupBegin" hidden>Begin on the home planet</button>
+    </footer>
+  </div>
+</section>
 
 <section class="overlay title-screen" id="titleScreen" aria-labelledby="titleHeading">
   <div class="title-inner title-menu">
@@ -264,6 +284,8 @@
   <section class="set-group" aria-labelledby="setComfortH">
     <h3 id="setComfortH">Comfort</h3>
     <label class="set-row"><input type="checkbox" id="setReducedMotion"> <span>Reduce motion <small>No screen shake, softer lightning flashes, no camera sweeps. Starts from your system setting.</small></span></label>
+    <label class="set-row"><span>Cursor size <small>The aim reticle on the map.</small></span> <select id="setCursorSize"><option value="s">Small</option><option value="m">Medium</option><option value="l">Large</option></select></label>
+    <label class="set-row"><input type="checkbox" id="setCursorContrast"> <span>High-contrast cursor <small>White on black instead of amber.</small></span></label>
   </section>
   <section class="set-group" aria-labelledby="setAimH">
     <h3 id="setAimH">Head aim (Muse)</h3>

@@ -373,7 +373,7 @@ pub fn update(w: &mut World, dt: f32) {
             let asleep_now = a.state == State::Sleep;
             a.food = (a.food - EAT_RATE * dt * if asleep_now { 0.6 } else { 1.0 }).max(0.0);
             if a.food <= 0.0 {
-                a.hp -= dt * 0.1;
+                a.hp -= dt * STARVE_HP_RATE;
             } else if a.hp < 1.0 {
                 a.hp = (a.hp + dt * 0.03).min(1.0);
             }
@@ -400,7 +400,7 @@ pub fn update(w: &mut World, dt: f32) {
             let mut sick = false;
             if let Some(v) = villages.get(a.home as usize) {
                 if v.alive && v.plague > 0.2 {
-                    a.hp -= dt * 0.012 * v.plague * if a.age > 60.0 { 2.0 } else { 1.0 };
+                    a.hp -= dt * 0.012 * v.plague * if a.age > lifespan::OLD_FRAC * a.life { 2.0 } else { 1.0 };
                     sick = true;
                 }
             }

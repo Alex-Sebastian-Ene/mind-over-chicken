@@ -72,12 +72,12 @@ impl AdvisorDriver {
         self.cooldowns.clear();
 
         let name = match era {
-            "stone" => "Oog · High Priest of the Flame",
-            "farming" => "Oog · High Priest of the Harvest",
-            "kingdoms" => "Oog · Royal Scribe",
-            "industry" => "Oog III · Chief Goat Officer",
-            "space" => "Oog IX · Flight Director",
-            _ => "Oog · High Priest of the Flame",
+            "stone" => "Cluck · High Priest of the Flame",
+            "farming" => "Cluck · High Priest of the Harvest",
+            "kingdoms" => "Cluck · Royal Scribe",
+            "industry" => "Cluck III · Chief Egg Officer",
+            "space" => "Cluck IX · Flight Director",
+            _ => "Cluck · High Priest of the Flame",
         };
 
         #[cfg(target_arch = "wasm32")]

@@ -18,7 +18,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 - [ ] **Pinch calibration** (optional): Camera sidebar → **🎯 Pinch Movement Calibration** opens a pop-up. Follow the live camera + wireframe to the LEFT, RIGHT, UP and DOWN targets with each hand. It auto-advances, saves per-axis gains and closes when complete. Gains persist in the browser. Esc closes it. Head tilt is not calibrated.
 - [ ] **Hotkeys Reference Card**:
   - `Space`: Hold Calm (high alpha)
-  - `F`: Hold Focus / Insight. Hold 5 s at the fading campfire to rekindle it. For the Rain spell, open your palm and hold Insight ~2 s (or hold `F` alone without the camera) to put out a forest fire
+  - `F`: Hold Focus / Insight. Hold 5 s at the fading campfire to rekindle it. The Rain spell is camera-only: hold an open palm to the camera and hold Insight ~2 s to put out a forest fire
   - `Shift`: Spike Stress (drops calm)
   - `B`: Deliberate Blink. On a surface it throws lightning (a tree strike starts a forest fire); in the galaxy/globe it selects/lands like a left click
   - `Space` / `Enter` / click during an era's opening camera move: skip it
@@ -63,7 +63,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 ### Act 2: Era I · Stone Age & Divine Interventions (0:20 – 1:05, 45s)
 
 #### Spoken Script
-> *"We start in the Stone Age. My tribe is freezing, and Oog, the High Priest, is quietly judging me.*  
+> *"We start in the Stone Age. My tribe is freezing, and Cluck, the High Priest (a chicken), is quietly judging me.*  
 > *Watch the reticle. When I perform a deliberate double-blink—[BLINK]—lightning strikes the fire pit, igniting civilization's first flame.*  
 > *Now I strike a giant chicken across the river—[BLINK]—barbecuing dinner for the hunters.*  
 > *Notice the fire fading! The game demands focus. As I hold Insight... [HOLD 5s]... my beta rhythm locks in, the fire roars back, and a baby is born.*  
@@ -73,7 +73,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 - **0:22**: Aim mouse/head at the fire pit. Press `B` (or physical blink). Lightning crashes, fire ignites, audio synth roars.
 - **0:30**: Aim at a giant chicken. Press `B`. A roast chicken appears, food count rises to 5+.
 - **0:36**: Fire heat drops under 50%; the Insight hold begins. Hold `F` (or focus for the headset). The ring fills to 100%, the advisor celebrates and the tribe grows.
-- **0:50**: Aim at a tree and press `B`: a forest fire starts and spreads. Open your palm and hold Insight for about 2 s (or hold `F` with the camera off): the Rain spell puts it out.
+- **0:50**: Aim at a tree and press `B`: a forest fire starts and spreads. Hold an open palm to the camera and hold Insight for about 2 s: the Rain spell puts it out.
 - **0:50**: Show the camera hands: pinch over a villager to carry them, then pinch with both hands and spread them to zoom. Optional: hold `3` (or, on camera, make a fist, pull it back, then thrust and open the palm) to throw the charged fireball (#291).
 
 ---
@@ -81,13 +81,13 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 ### Act 3: Era II · Industry & Market Volatility (1:05 – 1:45, 40s)
 
 #### Spoken Script
-> *"Fast forward to the Industrial Era. We traded sticks for the Goat Exchange stock ticker.*  
+> *"Fast forward to the Industrial Era. We traded sticks for the Chicken Exchange futures ticker.*  
 > *Here, market prices don't follow fixed scripts; they model chartist momentum versus fundamental value. And the market is hyper-sensitive to divine anxiety.*  
 > *Watch what happens when my stress spikes—[STRESS SPIKE]—the ticker goes red, panic spreads, and we trigger an emergent market crash! The workers go on strike.*  
 > *To fix it, the game tests my emotional regulation: I breathe, calm down, and hold composure through the IPO window until green bars return and industry flourishes."*
 
 #### Operator Actions
-- **1:05**: The Farming · Kingdoms montage plays first: hold `F` and the scholars ink your thoughts (Writing, Law, Taxes) letter by letter, faster the harder you focus. There is no arithmetic. Press `Enter` to skip it if you are short of time. Then the era switches to Industry and the Goat Exchange chart appears in retro amber pixels.
+- **1:05**: The Farming · Kingdoms montage plays first: hold `F` and the scholars ink your thoughts (Writing, Law, Taxes) letter by letter, faster the harder you focus. There is no arithmetic. Press `Enter` to skip it if you are short of time. Then the era switches to Industry and the Chicken Exchange chart appears in retro amber pixels.
 - **1:15**: Hold `Shift` (or tense up, or scowl at the camera) to spike stress: calm drops to 0 and the `Stress` meter fills.
 - **1:22**: Market drops sharply; recession alert triggers, siren sound plays, red crash banner appears.
 - **1:30**: Release `Shift`, hold `Space` (`Calm` meter > 80%). The market stabilizes, confidence rebounds, and the IPO completes.
@@ -135,7 +135,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 > *To conquer the stars, you don't need faster fingers. You need to master your own mind. Thank you!"*
 
 #### Operator Actions
-- **2:55**: Press `Z` to zoom back to the home planet.
+- **2:55**: Press `Z` to zoom back to the home planet. (A death does this by itself: the camera returns to the home globe, #297.)
 - **3:00**: Close presentation. Invite judges to try the headset, or to pinch and pan the world with their hands in front of the camera.
 
 ---

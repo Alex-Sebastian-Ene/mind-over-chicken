@@ -5,7 +5,7 @@
 //          1. One-hand pinch grabs & relocates living entities under the cursor (#120)
 //          2. Two-hand pinch distance continuously zooms in/out & freezes on release (#119)
 //          3. One deliberate cast (#291): fist → pull back → thrust + open palm = charged fireball.
-//          4. Rain spell (#330): open palm + Insight/Focus held together for two seconds.
+//          4. Rain spell (#330, #340): open palm held in camera + Insight/Focus for two seconds.
 //   Face:  MediaPipe Face Landmarker blendshapes → Joy (continuous) + Surprise (debounced event) (#117).
 //   Coach: Collapsible bottom panel with procedural 21-landmark ghost hands (#123).
 //
@@ -26,6 +26,7 @@ import { FireballController } from './fireball.js';
 import { formation, drawFireballSprite, drawPixels, drawSegmentRing, ringSegments, FB_HOT } from '../render/fireball-sprite.js';
 import { EMOTIONS, EmotionTracker, neutralMood, blendshapeMap } from './emotion.js';
 import { manualMood, surpriseRisingEdge } from './manual-mood.js';
+import { surpriseReady, sceneKind, joyCause, surpriseCause } from './mood-actions.js';   // #152
 import { loadVision } from './vision.js';
 import { loadEngine, workerPreference } from './engine.js';
 import { handsEnabled, setHandsEnabled } from './hands-pref.js';
@@ -107,7 +108,7 @@ const TEMPLATE = `
       <b data-cam-fb-pct>0%</b>
     </div>
     <p class="eeg-msg">Hold a fist, pull it back, then thrust forward and open your palm. Or hold <kbd>3</kbd> and release.</p>
-    <p class="eeg-msg">Rain spell: open your palm and hold Insight/Focus for two seconds. Without the camera, hold <kbd>F</kbd>.</p>
+    <p class="eeg-msg">Rain spell: hold an open palm to the camera and hold Insight/Focus for two seconds. No camera, no Rain.</p>
   </section>
 
   <section class="eeg-sec" aria-label="Mood read from your face">
@@ -249,6 +250,7 @@ export function initCamera({
   let grabbed = null;          // { label, kind, at } when holding a living entity (#120)
   let mood = neutralMood();
   let moodScene = null, moodSent = null, strongPending = false, surprisePending = false;
+  let surpriseAt = null;       // seconds (performance.now) of the last surprise event (#152)
   // Manual mood (#155): off by default ("No emotion"); while on it replaces the camera's mood.
   let manualOn = false, manualValue = 0, manualPrev = null;
   let advisorAt = -Infinity;
@@ -540,6 +542,9 @@ export function initCamera({
       surprisePending = false;
       return;
     }
+    // #152: one surprise per cooldown whatever the source (the slider can be wiggled across Mix).
+    const nowSec = performance.now() / 1000;
+    if (surprisePending && !surpriseReady(nowSec, surpriseAt)) surprisePending = false;
     let reason = null;
     if (surprisePending) reason = 'surprise';
     else if (scene !== moodScene || mood.dominant !== moodSent) reason = 'change';
@@ -551,16 +556,24 @@ export function initCamera({
     moodSent = mood.dominant;
     strongPending = false;
     surprisePending = false;
+    const source = manualOn ? 'manual' : 'camera';
+    if (wasSurprise) surpriseAt = nowSec;
     try {
-      scene.onMood({ ...mood, reason, surpriseTriggered: wasSurprise });
+      scene.onMood({ ...mood, reason, surpriseTriggered: wasSurprise, active: manualOn || !!stream, source });
     } catch (err) {
       console.error('[camera] mood failed:', err);
     }
+    // #152: the cause line names the emotion and what it did in this scene; the coach echoes it.
+    const kind = sceneKind(scene);
     if (wasSurprise) {
-      G.hud?.showCause?.(manualOn ? '😮 Manual mood: surprise startled the sky!' : '😮 Your surprised expression startled the sky!');
+      const text = surpriseCause(kind, source);
+      G.hud?.showCause?.(text, { tone: 'surprise', ms: 3000 });
+      coach?.flash(text, 'info', 2400);
       advisorReact(G, 'surprise');
     } else if (reason === 'change' && changed && mood.dominant === 'joy') {
-      G.hud?.showCause?.(manualOn ? '😊 Manual mood: joy boosted morale' : '😊 Your smile boosted morale (+joy)');
+      const text = joyCause(kind, source);
+      G.hud?.showCause?.(text, { tone: 'joy', ms: 3000 });
+      coach?.flash(text, 'info', 2400);
       advisorReact(G, 'joy');
     }
   }
@@ -932,7 +945,7 @@ export function initCamera({
         if (surpriseRisingEdge(manualPrev, manualValue)) surprisePending = true;   // once per crossing
         manualPrev = manualValue;
       }
-      G.mood = { ...(manualOn || stream ? mood : neutralMood()), active: manualOn || !!stream, source: manualOn ? 'manual' : stream ? 'camera' : 'none' };
+      G.mood = { ...(manualOn || stream ? mood : neutralMood()), active: manualOn || !!stream, source: manualOn ? 'manual' : stream ? 'camera' : 'none', surpriseAt, kind: sceneKind(G.scene) };
       if (grabbed && G.brain) {
         G.scene?.onGrabMove?.({ x: G.brain.aim.x, y: G.brain.aim.y });
       }

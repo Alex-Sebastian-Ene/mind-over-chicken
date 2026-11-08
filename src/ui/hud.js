@@ -3,6 +3,7 @@
 
 import { FEATURE_NAMES } from '../brain/model.js';
 import { STRESSED, QUALITY_USABLE } from '../brain/brain.js';
+import { moodChip, sceneKind } from '../camera/mood-actions.js';
 
 // Signal truth (#85): how far to trust what the headset says, next to the source chip. Quality is
 // the brain's smoothed contact quality (the #175 gate), plus head tracking and the calibration
@@ -82,6 +83,7 @@ export class Hud {
     this.source = doc.getElementById('sourceStatus');
     this.signal = doc.getElementById('signalChip');   // #85
     this.cause = doc.getElementById('causeToast');   // #177: what your hands and face just did
+    this.moodEl = doc.getElementById('moodChip');    // #152: the joy buff and surprise cooldown
     this.causeLeft = 0;
     this.modelPanel = doc.getElementById('modelPanel');
     this.modelBody = doc.getElementById('modelBody');
@@ -138,8 +140,23 @@ export class Hud {
     if (this.signal.title !== s.title) this.signal.title = s.title;
   }
 
+  // The mood chip (#152): hidden with no live mood, else the joy buff and the surprise cooldown.
+  showMood(G, nowSec = (globalThis.performance?.now?.() ?? 0) / 1000) {
+    const el = this.moodEl;
+    if (!el) return;
+    // The camera stamps the kind of the scene its mood reaches (the HUD's own scene is a wrapper).
+    const kind = G?.mood && 'kind' in G.mood ? G.mood.kind : sceneKind(G?.scene);
+    const c = moodChip(G?.mood, kind, nowSec);
+    el.hidden = !c;
+    if (!c) return;
+    if (el.textContent !== c.text) el.textContent = c.text;
+    if (el.dataset.tone !== c.tone) el.dataset.tone = c.tone;
+    if (el.title !== c.title) el.title = c.title;
+  }
+
   update(dt, G) {
     this.showSignal(G);
+    this.showMood(G);
     if (this.causeLeft > 0) {
       this.causeLeft -= dt;
       if (this.causeLeft <= 0 && this.cause) this.cause.hidden = true;

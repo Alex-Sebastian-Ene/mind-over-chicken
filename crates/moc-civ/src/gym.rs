@@ -201,7 +201,7 @@ pub fn new_world(seed: u32, n: usize, d: Dims) -> World {
             let (x, y) = if w.terrain.walkable(start.0 + ox, start.1 + oy) { (start.0 + ox, start.1 + oy) } else { start };
             let job = if k % 2 == 0 { Job::Forage } else { Job::Hunt };
             if let Some(a) = w.spawn_agent(f, v, job, x, y) {
-                let age = w.rng.range(0.0, 20.0);
+                let age = w.rng.range(0.0, crate::world::lifespan::START_AGE_MAX);
                 w.agents[a].age = age;
                 w.agents[a].clan = (k / 2) as u8;
             }

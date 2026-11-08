@@ -94,14 +94,25 @@ export class Cosmos extends ZoomState {
     return { x: this.view.to_screen_x(wx), y: this.view.to_screen_y(wy) };
   }
 
-  ensureGalaxy(G, { autonomousHome = false } = {}) {
+  ensureGalaxy(G, { autonomousHome = false, setupPlanets = null } = {}) {
     if (this.galaxy) return this.galaxy;
     this.galaxy = new Galaxy();
     // A sandbox home runs on its own, on a mirror of the same world (built off-thread), so the paused game's map is untouched.
     this.galaxy.addHome(G.world, { autonomous: autonomousHome });
-    // Three more worlds take shape from the player's first ten seconds of brain data.
-    this.galaxy.addMindWorlds();
-    this.galaxy.onEvent = (p, text, kind) => this.onEvent?.(p, text, kind);
+    if (setupPlanets?.length) {
+      // The four worlds the setup screen read from the player's mind replace the three that the
+      // first ten seconds of play would make (Alex: no second reading, no remade worlds). The Rust
+      // galaxy only has the home and three mind slots, so this galaxy runs on the JS sim alone.
+      this.galaxy.wasm = null;
+      this.galaxy.mind.done = true;
+      this.galaxy.addSetupPlanets(setupPlanets);
+    } else {
+      // Three more worlds take shape from the player's first ten seconds of brain data.
+      this.galaxy.addMindWorlds();
+    }
+    this.galaxy.onEvent = (p, text, kind, tone) => this.onEvent?.(p, text, kind, tone);
+    // The space war presses your world as hard as the difficulty says (#220: Easy 0.5, Hard 1.6).
+    this.galaxy.war?.setPlayerPressure(G.difficulty?.space?.pressure ?? 1);
     return this.galaxy;
   }
 
@@ -384,11 +395,7 @@ export class Cosmos extends ZoomState {
       label(ctx, W / 2, H - 6, `◀ ▶ choose a world${sp ? ` (${sp.name})` : ''} · scroll in or Enter to land`, '#a3a6c4', 5);
     }
     if (this.toast) { ctx.globalAlpha = Math.min(1, this.toast.t); label(ctx, CENTER.x, 30, this.toast.text, '#ffd166', 6); ctx.globalAlpha = 1; }
-    // The globe and galaxy use the screen pointer; below 0.5 the surface scene draws its own
-    // world-space reticle (#294).
-    if (G?.brain?.aim && this.z > 0.5) {
-      drawReticle(ctx, G.brain.aim.x * (W - 1), G.brain.aim.y * (H - 1), this.time, '#ffe066');
-    }
+    // The aim reticle (screen pointer here) is drawn once, on top, by main.js (#301).
   }
 
   // ---- input (coordinates in world pixels) ----
@@ -474,6 +481,7 @@ export class Cosmos extends ZoomState {
     const r = super.focusPlanet(p);
     if (r.refused) { this.say(r.refused); return; }
     this.rot = this.galaxy ? this.galaxy.time * p.spin + p.phase : this.rot;
+    if (this.galaxy?.war && !this.isCampaign(p)) this.galaxy.war.target = p;   // #166: the orders' target
   }
 
   // Continuous (#143): every wheel delta moves the zoom (a mouse notch of 100 is 0.4 of a level;

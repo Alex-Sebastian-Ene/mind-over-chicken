@@ -8,6 +8,7 @@ import { SimSource, BridgeSource, liveBridge, setRustSimSource } from './brain/s
 import { Brain, setRustBrain } from './brain/brain.js';
 import { Advisor, setRustAdvisorEngine } from './ui/advisor.js';
 import { EraIntro } from './ui/intro.js'; // era intro transition (no click-to-dismiss card)
+import { PlanetSetup } from './ui/planet-setup.js'; // shape four worlds before the home planet
 import { Hud, setRustHudEngine } from './ui/hud.js';
 import { EegPanel } from './ui/eeg-panel.js';
 import { Audio } from './audio.js';
@@ -34,6 +35,7 @@ import initEngine, {
   rust_animate_agent,
 } from '../pkg/mind_over_chicken_engine.js';
 import { Cosmos } from './cosmos/cosmos.js';
+import { ReturnHome } from './cosmos/return-home.js'; // death returns the camera home (#297)
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel, setRustGalaxy } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
 import { pinchMove } from './camera/pinch-move.js'; // one-hand pinch movement (#270)
@@ -50,6 +52,7 @@ import { reducedMotion, flashAlpha, shakeAmount as shakeFor } from './ui/motion.
 import { SIM } from './cosmos/planet-sim.js';
 import { CivSandbox, initPlanetSizePicker } from './civ/sandbox.js'; // civ (#50)
 import { worldMeta, renderWorldDetail } from './cosmos/panel.js'; // planets (#68)
+import { renderWarOrders } from './cosmos/space-war.js'; // space war (#166)
 import { SimPlanet } from './ai/planet.js';
 import { AIGod } from './ai/autopilot.js';
 import { observe, decodeAction, scriptedAction, BOLT_COOLDOWN } from './ai/observe.js';
@@ -59,6 +62,7 @@ import { engineFailToShow } from './ui/fail.js';
 import { frameLoop } from './ui/loop.js';
 import { dayNight } from './render/daynight.js';
 import { surfaceMaxDistance } from './render/surface-zoom.js';
+import { drawAimReticle } from './render/reticle.js';
 import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
 import { mirrorHud } from './ui/hud-mirror.js';
 import { createRivals, playerState, applyRivalLine } from './civ/rivals.js'; // rivals on the home world (#212)
@@ -400,7 +404,9 @@ function updateAIGodAutopilot(dt) {
 
 // mode: 'story' (the eras), 'galaxy' or 'crowded' (the sandboxes). resume: a save to continue
 // (src/game/saves.js): its world seed and size, stats, run time, calibration seed and brain model.
-function newGame(source, startIndex = 0, { mode = 'story', resume = null } = {}) {
+// setupPlanets: the four worlds shaped before a new story run (their PPO temperaments).
+function newGame(source, startIndex = 0, { mode = 'story', resume = null, setupPlanets = null } = {}) {
+  if (!setupPlanets && Array.isArray(resume?.setupPlanets) && resume.setupPlanets.length) setupPlanets = resume.setupPlanets;
   if (previewSource && previewSource !== source) previewSource.disconnect();
   previewSource = null;
   previewBrain = null;
@@ -427,12 +433,14 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null } = {})
     scene: null, sceneIndex: startIndex, runTime: 0, shake: 0, invincible: false,
     stats: { lightning: 0, smitten: 0, births: 0, deaths: 0, recessions: 0, restarts: 0 },
     eraTimes: [], eraStart: 0, finished: false,
+    setupPlanets: setupPlanets ? setupPlanets.map((p) => ({ ...p, traits: { ...p.traits } })) : null,
     complete(delay = 2) {
       if (G.sceneIndex >= SCENES.length - 1) return;
       pendingScene = G.sceneIndex + 1;
       pendingTimer = delay;
     },
     fail(reason) { showFail(reason); },
+    returnHome(opts) { returnHome(opts); },   // the civ sandbox reports its wipe-out here (#297)
     finish(extra) { G.finished = true; G.extra = extra; patchSave({ finished: true }); setTimeout(showEnd, 2200); },
     // The intro transition for the scene in play (#137), e.g. a new stage inside one scene.
     startTransition(caption) { startTransition(G.scene, caption); },
@@ -493,7 +501,9 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null } = {})
   // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
   G.camera = cosmos;          // the eras ask it where the screen is (#129)
   cosmos.attachWorld(G.world); // the camera looks at the village
-  cosmos.ensureGalaxy(G);
+  // The four worlds read on the setup screen join the galaxy now, in place of the three mind
+  // worlds; the home campaign still starts exactly where it did before.
+  cosmos.ensureGalaxy(G, { setupPlanets: G.setupPlanets });
   brain.onTrained = () => {};
   $('endScreen').hidden = true;
   $('failScreen').hidden = true;
@@ -745,6 +755,29 @@ function dismissBanner() {
   if (G.scene.id === 'stone' || G.scene.id === 'industry') G.brain.setCue(G.scene.hold?.active || G.scene.ipo?.state === 'active' ? 'calm' : 'rest');
 }
 
+// ---------- death returns the camera home (#297, src/cosmos/return-home.js) ----------
+// Every death path calls returnHome({ reason, level }): a home era failing (behind the fail
+// screen), an AI world's capital tribe dying while you watch, the civ sandbox wiping you out.
+const homeward = new ReturnHome(cosmos, {
+  cause: (text) => hud.showCause(text, { ms: 2400, tone: 'bad' }),
+  say: (text) => cosmos.say(text),
+  advise: (text) => advisor.say('return-home', text, { mood: 'nervous', priority: 2, cooldown: 10 }),
+  reduced: () => reducedMotion(),
+});
+const homewardCtx = () => ({
+  screen: !$('titleScreen').hidden ? 'title' : !$('endScreen').hidden ? 'end' : null,
+  finished: !!G?.finished, intro: intro.active, navigating: !!cam3dTween, G,
+});
+function returnHome(ask) { return G ? homeward.request(ask, homewardCtx()) : null; }
+// Retry lands home: back down from the home globe onto the era's stage.
+function landHome() {
+  homeward.cancel();
+  const home = cosmos.homePlanet();
+  if (cosmos.focus && home) cosmos.focusPlanet(home, G);
+  cosmos.zoomTo(0, G);
+  if (reducedMotion()) { cosmos.z = cosmos.target; cosmos.vz = 0; }
+}
+
 let failTimer = null;
 function showFail(reason) {
   if (G) {
@@ -768,7 +801,7 @@ function showFail(reason) {
       if (lower.includes('strike') || lower.includes('union')) {
         nextStep = 'Maintain calm when workers strike to settle tensions and resume production.';
       } else if (lower.includes('depression') || lower.includes('price')) {
-        nextStep = 'Steady your breathing and focus to stimulate goat market confidence.';
+        nextStep = 'Steady your breathing and focus to stimulate chicken market confidence.';
       } else if (lower.includes('fire')) {
         nextStep = 'Hold Insight/Focus when the flame begins to fade to rekindle warmth.';
       } else if (lower.includes('starv') || lower.includes('food')) {
@@ -795,6 +828,7 @@ function showFail(reason) {
   audio.bad();
   clearTimeout(failTimer);
   failTimer = null; // No silent auto-retry (#86)
+  returnHome({ reason: 'home-fail' });   // the camera eases to the home globe behind the card (#297)
 }
 
 function updateAssistUI() {
@@ -842,6 +876,7 @@ function toggleInvincible() {
 function quitToTitle() {
   clearTimeout(failTimer);
   failTimer = null;
+  homeward.cancel();
   $('failScreen').hidden = true;
   $('banner').hidden = true;
   $('endScreen').hidden = true;
@@ -865,6 +900,7 @@ function retryEra() {
   if ($('failScreen').hidden) return;
   $('failScreen').hidden = true;
   restartScene();
+  landHome();
 }
 
 function showEnd() {
@@ -877,7 +913,7 @@ function showEnd() {
     ['Era restarts', s.restarts],
     ['Lightning bolts', s.lightning],
     ['Villagers who found religion', s.smitten],
-    ['Goat recessions caused', s.recessions],
+    ['Chicken recessions caused', s.recessions],
     ['Passengers to the new world', `${x.passengers ?? 0} and one chicken`],
     ['Countdown scrubs', x.scrubs ?? 0],
     ['Seconds of calm', Math.round(b.stats.calmSeconds)],
@@ -1008,6 +1044,7 @@ function render() {
   textCtx.setTransform(1, 0, 0, 1, 0, 0);
   textCtx.clearRect(0, 0, textLayer.width, textLayer.height);
   if (!scene) {
+    document.body.dataset.reticle = '0';
     if (engine) {
       engine.begin_frame();
       engine.end_frame(0, 0, 0, 0, 0, screen.width, screen.height);
@@ -1174,7 +1211,31 @@ function render() {
   textCtx.globalAlpha = visible;
   if (cosmic) cosmos.overlay(textCtx, G);
   textCtx.globalAlpha = 1;
+  // The aim cursor (#301), last of all: above lighting, night, weather, flashes and labels.
+  const aimAt = !intro.active && !G.finished ? aimScreenPoint(scene, z) : null;
+  document.body.dataset.reticle = aimAt ? '1' : '0';   // hides the native crosshair (styles.css)
+  if (aimAt) {
+    textCtx.setTransform(1, 0, 0, 1, 0, 0);
+    const b = document.body.dataset;
+    drawAimReticle(textCtx, aimAt.x * K, aimAt.y * K, { f: Math.max(1, Math.round(K / 2)), size: b.cursorSize || 'm', contrast: b.cursorContrast === '1', t: G.runTime || 0, reduced: rm });
+  }
   perfSample.n++; perfSample.ms += performance.now() - t0;
+}
+
+// Where the aim is on screen, in low-res pixels (#301). The globe and galaxy use the screen
+// pointer; the home world maps its world point to the 2D window or projects it in 3D; other
+// worlds' surfaces and the civ sandbox aim in their own 320×180 view.
+function aimScreenPoint(scene, z) {
+  const aim = G?.brain?.aim;
+  if (!aim || !Number.isFinite(aim.x) || !Number.isFinite(aim.y)) return null;
+  if (z > 0.5) return { x: aim.x * (W - 1), y: aim.y * (H - 1) };
+  const world = worldScene(scene) ? scene.G?.world : null;
+  const p = world?.aimPoint ? world.aimPoint(aim) : { x: aim.x * (W - 1), y: aim.y * (H - 1) };
+  if (G.render3d && engine && typeof engine.project_to_screen === 'function') {
+    const q = engine.project_to_screen(p.x, p.y, textLayer.width, textLayer.height);
+    return q[0] < -9000 ? null : { x: q[0] / K, y: q[1] / K };
+  }
+  return world ? cosmos.toScreen(p.x, p.y) : p;
 }
 
 // 3D: only the trees and buildings near the camera target are sent as billboards (the world is
@@ -1250,6 +1311,7 @@ function frame(ts) {
     } else fade = Math.max(0, fade - dt * 1.6);
     G.shake = Math.max(0, (G.shake || 0) - dt * 2);
     cosmos.update(dt, G);
+    homeward.update(dt, homewardCtx());   // #297
     updateAimTarget();   // #294: keep the cursor and every blink target inside the visible view
     advisor.update(dt);
     G.news?.update(dt);
@@ -1262,6 +1324,10 @@ function frame(ts) {
     previewBrain.update(dt);
     $('sourceStatus').textContent = previewSource.status;
     $('sourceStatus').dataset.ok = previewSource.connected ? '1' : '0';
+  }
+  if (planetSetup?.isOpen) {
+    if (G && setupBrain && setupBrain !== G.brain) setupBrain.update(dt);   // no preview loop mid-run
+    planetSetup.update(dt);
   }
   eegPanel?.update();
   syncCameraIndicator(document);   // "● Camera on" in the top bar while the webcam runs (#89)
@@ -1719,6 +1785,15 @@ screen.addEventListener('contextmenu', (e) => e.preventDefault());
 // Shift is the Stress demo key: full agitation on the emulated headset (input.panic).
 const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'panic' };
 window.addEventListener('keydown', (e) => {
+  // The setup screen owns the keyboard while it is open: Escape goes back to the title, and no
+  // game hotkey fires behind it.
+  if (planetSetup?.isOpen) {
+    if (e.code === 'Escape') { e.preventDefault(); planetSetup.cancel(); return; }
+    const s = setupSim();
+    if (s && KEYS[e.code]) { s.input[KEYS[e.code]] = true; e.preventDefault(); }
+    if (s && e.code === 'KeyB' && !e.repeat) s.blink();
+    return;
+  }
   if (e.target?.closest?.('input, select, textarea')) return;
   if (document.getElementById('moveCalibModal')?.hidden === false) return;
   if (e.code === 'Escape' && settingsUi?.isOpen()) { e.preventDefault(); settingsUi.close(); return; }
@@ -1742,7 +1817,7 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Backspace') { e.preventDefault(); dismissBanner(); }
     return;
   }
-  const overlay = !G || !$('titleScreen').hidden || !$('failScreen').hidden || !$('endScreen').hidden;
+  const overlay = !G || !$('titleScreen').hidden || !$('planetSetup').hidden || !$('failScreen').hidden || !$('endScreen').hidden;
   if (overlay) return;
   // The era intro: Space or Enter skip it, every other game key waits for the stage.
   const gate = intro.gate('key', e.code);
@@ -1815,7 +1890,7 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => {
   if (e.code === 'Digit3' || e.code === 'Numpad3') { window.__moc?.camera?.fireballKeyUp?.(); return; }
-  const s = sim(); if (!s) return;
+  const s = sim() || setupSim(); if (!s) return;
   if (KEYS[e.code]) s.input[KEYS[e.code]] = false;
 });
 window.addEventListener('blur', () => { const s = sim(); if (s) Object.keys(s.input).forEach((k) => (s.input[k] = false)); });
@@ -1887,20 +1962,24 @@ $('biometricFeedbackBtn')?.addEventListener('click', () => {
     advisor?.say('assist', 'Tolerance widened. Take a deep breath; the gods are forgiving today.', { mood: 'happy', priority: 4, cooldown: 0 });
   }
 });
-$('againBtn').addEventListener('click', () => { $('endScreen').hidden = true; newGame(playSource()); });
+$('againBtn').addEventListener('click', () => { $('endScreen').hidden = true; newGame(playSource(), 0, { setupPlanets: G?.setupPlanets || null }); });
 $('endModelBtn').addEventListener('click', toggleModel);
 
 // ---------- zoom + galaxy UI ----------
 let revealed = 0;
-cosmos.onEvent = (p, text, kind) => {
+cosmos.onEvent = (p, text, kind, tone) => {
+  if (kind === 'tribe-lost') { returnHome({ reason: 'ai-tribe', planet: p, world: p.name, cause: text }); return; }   // #297
   if (kind === 'born') patchSave({ galaxy: galaxySummary(cosmos.galaxy) });   // the save names the worlds born
-  if (kind === 'born' && p.mindSlot) {
+  if (kind === 'born' && (p.mindSlot || (p.setup && CHANNELS[p.channel]))) {
     revealed++;
     audio.good();
     if (revealed === 1) advisor.say('mindworlds', `My lord, your thoughts are making worlds. ${p.name} was born from your ${CHANNELS[p.channel].label.toLowerCase()}. Zoom out with Z to see them.`, { mood: 'happy', priority: 2, cooldown: 999 });
     if (revealed === 3) advisor.say('mindworlds3', 'Three worlds now, each listening to a different part of your mind. Steer them from here.', { mood: 'nervous', priority: 1, cooldown: 999 });
   } else if (kind === 'event' && cosmos.inGalaxy) {
     advisor.say(`gal-${text}`, `${p.name}: ${text}. That was you, my lord.`, { mood: /crash|famine|dark|poor/.test(text) ? 'panic' : 'happy', priority: 1, cooldown: 12 });
+  } else if (kind === 'war') {   // space war (#166): news about your world (tone 1 good, 2 bad, 3 warning)
+    G?.news?.push(text, { tone, source: 'space' });   // on the one news ticker too (#220)
+    advisor.say('space-war', text, { mood: tone === 2 || tone === 3 ? 'panic' : tone === 1 ? 'happy' : 'nervous', priority: tone === 2 || tone === 3 ? 2 : 1, cooldown: 5 });
   }
 };
 
@@ -1922,13 +2001,14 @@ function updateCosmosUi(dt) {
     const mirrored = p.home && !p.autonomous;
     const era = p.pop > 0 ? ERA_LABEL[ERA_NAMES[p.eraIndex]] : 'Barren';
     const owner = gal.attended === p ? `${ownerLabel(p)} · you're here` : ownerLabel(p);
-    const tier = worldMeta(p); // planets (#68): settlement tier and strife
+    const tier = [worldMeta(p), gal.war?.planetMeta(p)].filter(Boolean).join(' · '); // planets (#68): tier and strife; #166: fleet or ruler
     // Your world's card counts the rival peoples sharing it (#212).
     const rivals = p.home && G.rivals ? G.rivals.alive() : 0;
     const shared = rivals ? ` · ${rivals} rival ${rivals === 1 ? 'people' : 'peoples'}` : '';
     return { p, era: p.forming ? 'Forming' : tier ? `${era} · ${tier}` : era, pop: `${mirrored ? `${p.pop} people` : fmtPop(p.pop)} · ${owner}${shared}`, prog: mirrored ? (p.eraIndex + 1) / 4 : p.pop > 0 ? p.progress : 0 };
   });
   renderWorldDetail($('worldDetail'), cosmos.detailPlanet()); // planets (#68): milestones and history
+  renderWarOrders($('warOrders'), gal); // space war (#166): target a world, then raid, bombard or invade
   const key = rows.map((r) => `${r.p.name}|${r.era}|${r.pop}|${Math.round(r.prog * 20)}|${gal.attended === r.p}|${cosmos.target}|${r.p.effect}|${r.p.channel}`).join(';');
   if (key !== lastListKey) {
     lastListKey = key;
@@ -1969,6 +2049,17 @@ $('makePlanet').addEventListener('click', () => {
   lastListKey = '';
   advisor.say('newplanet', `A new planet! I have named it ${p.name}. ${p.pop > 0 ? 'Someone already lives there. They seem nice.' : 'Nobody lives there yet. Send a ship.'}`, { mood: 'happy', priority: 2, cooldown: 6 });
 });
+$('warOrders')?.addEventListener('click', (e) => {   // space war (#166)
+  const b = e.target.closest('.war-order');
+  const war = cosmos.galaxy?.war;
+  if (!b || !G || !war?.target) return;
+  audio.unlock();
+  const why = war.order(war.target, Number(b.dataset.order));
+  if (why) { cosmos.say(why); return; }
+  audio.blip();
+  uiTimer = 0;
+  cosmos.zoomTo(2, G);   // watch the fleet fly
+});
 $('planetList').addEventListener('click', (e) => {
   const b = e.target.closest('.planet-row');
   if (!b || !G || !cosmos.galaxy) return;
@@ -2000,18 +2091,59 @@ $('galaxyBtn').addEventListener('click', () => {
 // back to the emulator without one; newGame() disconnects whatever it isn't given (#185).
 function playSource() { return liveBridge(G?.source, previewSource) || new SimSource(); }
 let settingsUi = null;   // the Settings panel (#186), wired after the camera and debug panels
-// startIndex: Sections start a fresh run at any era.
-function begin(source, { startIndex = 0, mode = 'story', resume = null } = {}) {
+let titleUi = null;      // the title menu, so Back from planet setup returns to New Game
+// startIndex: Sections start a fresh run at any era. setupPlanets: the four worlds shaped on
+// the planet setup screen, with their PPO temperaments.
+function begin(source, { startIndex = 0, mode = 'story', resume = null, setupPlanets = null } = {}) {
   audio.unlock();
   $('titleScreen').hidden = true;
+  $('planetSetup').hidden = true;
   settingsUi?.close();
-  newGame(source, startIndex, { mode, resume });
+  newGame(source, startIndex, { mode, resume, setupPlanets });
   // Settings › Camera: the player asked for the webcam with every game (#186).
   if (settingsUi?.settings.cameraOnStart) window.__moc?.camera?.start?.();
 }
-// New Game opens its step (world size, difficulty, #220); Start begins the run with those choices.
-$('newGameStart').addEventListener('click', () => begin(playSource()));
+// New Game opens its step (world size, difficulty, #220); Start then shapes the four worlds
+// before the run begins.
+$('newGameStart').addEventListener('click', () => openPlanetSetup(playSource()));
 initNewGameOptions($('titleScreen').querySelector('[data-title-view="new"]'));
+
+// The planet setup sits between Start and the home planet. The four worlds are shaped there;
+// Begin then drops the player onto the home planet with the normal campaign untouched.
+let setupSource = null;
+let setupBrain = null;     // reads the player's mind for the four worlds
+function setupSim() { return planetSetup?.isOpen && setupSource?.kind === 'sim' ? setupSource : null; }
+const planetSetup = new PlanetSetup($('planetSetup'), {
+  getBrain: () => {
+    // Shift is the emulated headset's Stress key: full agitation (as in ai/proxyBrain.js). A fresh
+    // brain has no resting baseline yet to read agitation against, so the setup reads the key.
+    const s = setupSim();
+    if (!setupBrain || !s?.input?.panic) return setupBrain;
+    return { calm: setupBrain.calm, focus: setupBrain.focus * 0.4, stress: 1, stats: setupBrain.stats };
+  },
+  isEmulated: () => setupSource?.kind === 'sim',
+  onBegin: (planets) => {
+    const src = setupSource || playSource();
+    setupSource = null;
+    begin(src, { setupPlanets: planets });
+  },
+  onCancel: () => {
+    setupSource = null;
+    planetSetup.close();
+    // Back returns to the New Game step it came from, not the main menu.
+    $('titleScreen').hidden = false;
+    titleUi?.show?.('new');
+  },
+});
+function openPlanetSetup(source) {
+  audio.unlock();
+  setupSource = source;
+  // Before a run the title's preview brain is the one the frame loop updates: read through it.
+  if (!G) { if (previewSource !== source) setGameSource(source); setupBrain = previewBrain; }
+  else setupBrain = new Brain(source);
+  $('titleScreen').hidden = true;
+  planetSetup.open();
+}
 function startGalaxySandbox(source, resume = null) {
   begin(source, { mode: 'galaxy', resume });
   dismissBanner();
@@ -2082,12 +2214,12 @@ $('playBridge').addEventListener('click', async () => {
 });
 // Continue and Load resume a save (src/game/saves.js) through __moc.continueRun, set below.
 try {
-  initTitle(document, {
+  titleUi = initTitle(document, {
     onContinue: (save) => window.__moc?.continueRun?.(save),
     onSection: (i) => begin(playSource(), { startIndex: i }),
     onCalibrate: () => eegPanel?.startWizard('both'),
     headsetLive: () => !!liveBridge(G?.source, previewSource)?.streaming,
-    isBusy: () => !!(settingsUi?.isOpen() || eegPanel?.wiz?.active || $('moveCalibModal')?.hidden === false),
+    isBusy: () => !!(settingsUi?.isOpen() || planetSetup?.isOpen || eegPanel?.wiz?.active || $('moveCalibModal')?.hidden === false),
   });
 } catch (err) {
   console.error('Title menu failed to start; its buttons still work:', err);
@@ -2124,7 +2256,7 @@ window.__moc.saves = {
 // with coach visual demonstration. Face sets mood.
 window.__moc.camera = initCamera({
   getG: () => cosmos.castG(G), // planets (#68): casts and mood reach the world you're on
-  canCast: () => !!G?.scene && !banner && !intro.active && !eegPanel?.wiz?.active && !G.finished && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden,
+  canCast: () => !!G?.scene && !banner && !intro.active && !eegPanel?.wiz?.active && !G.finished && $('titleScreen').hidden && $('planetSetup').hidden && $('failScreen').hidden && $('endScreen').hidden,
   // camera debug (#67): the fingertip aims on the panned surface like the mouse does.
   // Aims are 0..1 of the world; the camera's overlay draws in 0..1 of the screen (#129).
   mapX: (x) => cosmos.mapX(x * W) / cosmos.worldW,

@@ -158,6 +158,7 @@ pub fn update_metrics(w: &mut World, dt: f32) {
             people_goats += a.goats.max(0.0);
         }
         let gini = gini(&mut goats_buf);
+        let off_world = crate::space::colonies(w, f); // planets taken in space (#166)
         let fac = &mut w.factions[f];
         let rate = fac.prod_acc / dt.max(1e-3);
         fac.prod_acc = 0.0;
@@ -171,7 +172,7 @@ pub fn update_metrics(w: &mut World, dt: f32) {
         m.contact = contact > 0;
         m.links = partners * 2 + routes.floor() as u32;
         m.coastal = coastal > 0;
-        m.colonies = colonies;
+        m.colonies = colonies + off_world;
         m.faith = if fw > 0.0 { faith / fw } else { 0.0 };
         m.wealth = people_goats + vgoats + fac.treasury;
         m.production = fac.prod_rate * 60.0;

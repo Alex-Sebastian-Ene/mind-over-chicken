@@ -13,6 +13,8 @@ import { FireballFX } from '../render/fireball.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
 import { eraTuning } from '../game/options.js'; // difficulty (#220)
+import { joyBuff, surpriseFires, surpriseEffect, sparkleCount, JOY_COLORS } from '../camera/mood-actions.js'; // #152
+import { reducedMotion } from '../ui/motion.js';
 
 const ENGINEERS = 10;
 const CITIZENS = 28;
@@ -82,6 +84,8 @@ export class SpaceAge {
     this.t += dt;
     for (const hit of this.fireballs.update(dt)) this.impactFireball(hit);
     this.particles.update(dt);
+    this.flash = Math.max(0, (this.flash || 0) - dt);   // #152: a surprise's flash (main.js caps it)
+    this.joyStep(dt);
     const pad = this.pad, hangar = w.sites.hangar;
 
     if (this.phase === 'build' || this.phase === 'countdown') {
@@ -256,12 +260,7 @@ export class SpaceAge {
       engine.add_billboard(3, this.chicken.x, this.chicken.y, this.chicken.facing || 1, this.chicken.frame || 0, 1);
     }
 
-    // Aim reticle (SPRITE_RETICLE = 13)
-    const aim = this.G.brain?.aim;
-    if (aim) {
-      const p = this.G.world.aimPoint(aim);
-      engine.add_billboard(13, p.x, p.y, 1, 0, 0);
-    }
+    // The aim reticle is drawn once, on top, by main.js (#301).
   }
 
   draw(ctx) {
@@ -331,9 +330,7 @@ export class SpaceAge {
       ctx.fillStyle = '#ffcf4a'; ctx.fillRect(pad.x - bw / 2, pad.y - 34, bw * this.progress, 3);
       label(ctx, pad.x, pad.y - 37, `rocket ${Math.floor(this.progress * 100)}%`, '#f2e8d5', 5);
     }
-    // The aim reticle, on the map at the world point aimed at (3D stands it up as a sprite).
-    const aim = G.brain?.aim;
-    if (aim && !ctx.__project3d) { const p = G.world.aimPoint(aim); drawReticle(ctx, p.x, p.y, this.t, '#ffe066'); }
+    // The aim reticle is drawn once, on top, by main.js (#301).
   }
 
   // Captions and the countdown, fixed to the screen (#129: the map pans under them).
@@ -446,28 +443,52 @@ export class SpaceAge {
     this.particles.burst(60, () => ({ x: cx + rand(-60, 60), y: cy + rand(-100, 26), vx: -4, vy: rand(70, 100), life: rand(0.5, 1), maxLife: 1, size: 1, color: 'rgba(158,201,255,0.75)' }));
   }
 
-  // Face mood. Joy and anger push the crowd's courage up or down, surprise flashes the sky,
-  // sadness dims the launch site.
+  // #152: joy is a continuous buff while you smile and the crowd is still on the ground: its
+  // courage climbs (more volunteers board) and sparkles rise over it.
+  joyStep(dt) {
+    const grounded = !this.done && this.phase !== 'launch' && this.phase !== 'voyage';
+    const joy = grounded ? joyBuff(this.G.mood) : 0;
+    this.joy = joy;
+    if (!joy) return;
+    for (const c of this.citizens) if (c.state !== 'aboard') c.courage = clamp(c.courage + dt * 0.08 * joy);
+    const crowd = this.G.world.sites.crowd;
+    for (let n = sparkleCount(joy, dt, 12); n > 0; n--) {
+      this.particles.add({ x: crowd.x + rand(-22, 22), y: crowd.y - rand(6, 18), vx: rand(-3, 3), vy: rand(-14, -8), life: 1, maxLife: 1, size: 1, color: pick(JOY_COLORS) });
+    }
+  }
+
+  // #152: a surprise is a one-shot: lightning flashes over the sky on screen (capped flash, short
+  // shake, none under reduced motion) and the crowd gasps.
+  surpriseStrike() {
+    const G = this.G, fx = surpriseEffect(reducedMotion());
+    G.audio?.thunder?.();
+    G.shake = Math.max(G.shake || 0, fx.shake);
+    this.flash = Math.max(this.flash || 0, fx.flash);
+    const c = G.camera?.viewCenter?.() || this.pad;   // a flash somewhere in the sky on screen
+    for (let i = 0; i < fx.bolts; i++) {
+      const sx = c.x + rand(-130, 130);
+      this.particles.burst(18, () => ({ x: sx + rand(-4, 4), y: c.y - 90 + rand(0, 50), vx: 0, vy: 0, life: 0.3 + i * 0.1, maxLife: 0.3 + i * 0.1, size: 1, color: '#ffffff' }));
+    }
+    floater(this.particles, c.x, c.y - 40, 'SURPRISE!', '#ffe066', 10);
+  }
+
+  // Face mood. Joy is the continuous buff above (its onset makes the crowd cheer). Surprise fires
+  // once per event (mood.surpriseTriggered), even in flight. Anger lowers courage, sadness dims.
   onMood(mood) {
     const G = this.G;
     if (!G) return;
     this.baseDarkness ??= this.darkness;
     this.darkness = clamp(this.baseDarkness + (mood.dominant === 'sadness' ? 0.3 : 0), 0, 0.9);
-    if (this.done || this.phase === 'launch' || this.phase === 'voyage') return;
+    if (this.done) return;
+    if (surpriseFires(mood)) this.surpriseStrike();
+    if (this.phase === 'launch' || this.phase === 'voyage') return;
     const crowd = G.world.sites.crowd, first = mood.reason === 'change';
     const watching = this.citizens.filter((c) => c.state !== 'aboard');
     if (mood.dominant === 'joy') {
-      for (const c of watching) c.courage = clamp(c.courage + 0.1);
-      if (first) floater(this.particles, crowd.x, crowd.y - 14, 'the crowd cheers', '#9be38a', 6);
+      if (first && joyBuff(mood) > 0) floater(this.particles, crowd.x, crowd.y - 14, 'the crowd cheers', '#9be38a', 7);
     } else if (mood.dominant === 'anger') {
       for (const c of watching) c.courage = clamp(c.courage - 0.06);
       if (first) floater(this.particles, crowd.x, crowd.y - 14, 'uneasy murmurs', '#ff8a9c', 6);
-    } else if (mood.dominant === 'surprise') {
-      G.audio.thunder();
-      G.shake = Math.max(G.shake || 0, 1);
-      const c = G.camera?.viewCenter?.() || this.pad;   // a flash somewhere in the sky on screen
-      const sx = c.x + rand(-130, 130);
-      this.particles.burst(18, () => ({ x: sx + rand(-4, 4), y: c.y - 90 + rand(0, 50), vx: 0, vy: 0, life: 0.3, maxLife: 0.3, size: 1, color: '#ffffff' }));
     }
   }
 }

@@ -10,7 +10,9 @@
 //! map path, writes the whole planet (terrain, territory, villages) as raw RGBA. `--duel`
 //! adds controlled battles showing what terrain and morale do. `--civs N` (#101): the player's
 //! four civilisations are founded at their homelands at once and N − 4 rivals arrive at
-//! staggered times. Default planet 1280×640.
+//! staggered times. `--space N` (#166): the first N living civilisations are put in space at
+//! once, with three planets to strike (their launches are dropped, as if flown), to time the
+//! space programs. Default planet 1280×640.
 
 use std::time::Instant;
 
@@ -24,6 +26,7 @@ fn main() {
     let flag = |name: &str| all.iter().position(|a| a == name);
     let speed: f32 = flag("--speed").and_then(|i| all.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(1.0);
     let civs: usize = flag("--civs").and_then(|i| all.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let in_space: usize = flag("--space").and_then(|i| all.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(0);
     let quiet = flag("--quiet").is_some();
     let duel = flag("--duel").is_some();
     let mut args: Vec<String> = Vec::new();
@@ -33,7 +36,7 @@ fn main() {
             skip = false;
             continue;
         }
-        if a == "--speed" || a == "--civs" {
+        if a == "--speed" || a == "--civs" || a == "--space" {
             skip = true;
             continue;
         }
@@ -78,6 +81,12 @@ fn main() {
             f.id, f.name, f.region, f.start, t.friendliness, t.aggressiveness, t.violence, t.fertility, t.cohesion
         );
     }
+    let spacefarers: Vec<u8> = w.alive_factions().map(|f| f.id).take(in_space).collect();
+    for &f in &spacefarers {
+        w.space.programs[f as usize].forced = true;
+        let t = |body, orbit, garrison, value, kind| space::Target { body, orbit, garrison, value, kind };
+        space::set_targets(&mut w, f as usize, &[t(1, 0.0, 12.0, 5.0, 1), t(2, 80.0, 25.0, 11.0, 1), t(3, 10.0, 6.0, 4.0, 2)]);
+    }
     w.inputs = inputs;
     w.set_speed(speed);
     let frame = 1.0 / 60.0;
@@ -93,6 +102,7 @@ fn main() {
         let before = w.prof;
         let builds = w.paths.builds;
         w.advance(frame);
+        w.space.launches.clear();
         let e = t.elapsed().as_secs_f64() * 1000.0;
         if e > 20.0 && std::env::var("CIV_DEBUG").is_ok() {
             let d: Vec<String> = (0..8).map(|k| format!("{:.1}", w.prof[k] - before[k])).collect();
