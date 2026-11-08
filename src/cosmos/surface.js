@@ -15,6 +15,7 @@ import { label } from '../eras/stone.js';
 import { SimPlanet } from '../ai/planet.js';
 import { AIGod } from '../ai/autopilot.js';
 import { drawHut, drawHouse, drawTower, drawFactory, drawPad, drawPerson, drawBolt, makeBolt, drawReticle } from '../render/sprites.js';
+import { FireballFX } from '../render/fireball.js';
 import { villagerLook, animate } from '../sim/agents.js';
 import { VW, VH, wrapX, wrapDx, wrapY, wrapDy, typeAt, walkableAt, settlementPlan } from './vast.js';
 import { TIERS, CONFLICT, castPlanet, tribeOutcome, easeSplit, tierName } from './planet-sim.js';
@@ -78,6 +79,7 @@ export class PlanetSurface {
     this.sx = Math.round(this.camX); this.sy = Math.round(this.camY);
     this.t = 0; this.ownFlash = 0; this.bolts = []; this.lastBolt = -5; this.strikes = 0;
     this.particles = new Particles();
+    this.fireballs = new FireballFX();
     this.walkers = new Map();
     this.sim = null; this.human = null; this.restartT = 0; this.acc = 0; this.episodes = 0; this.lastOutcome = null;
     this.split = { growth: 0.4, research: 0.4, stability: 0.2 };
@@ -125,6 +127,7 @@ export class PlanetSurface {
     this.t += dt;
     this.ownFlash = Math.max(0, this.ownFlash - dt);
     this.bolts = this.bolts.filter((b) => (b.life -= dt) > 0);
+    for (const hit of this.fireballs.update(dt)) this.impactFireball(hit);
     this.particles.update(dt);
     const sp = this.sim;
     if (sp) {
@@ -549,10 +552,12 @@ export class PlanetSurface {
           }
         }
       }
+      this.fireballs.draw(ctx, { project: (x, y) => [x, y] });
       return;
     }
 
     const sx = this.sx, sy = this.sy;
+    this.fireballs.draw(ctx, { project: (x, y) => [x, y] });
     if (this.sim && this.tribeVisible) {
       for (const o of this.tileOffsets(sx, sy)) {
         ctx.save();
@@ -621,17 +626,28 @@ export class PlanetSurface {
     if (hit) floater(this.particles, w.x, w.y - 8, `lightning on the ${TIERS[hit.size].name.toLowerCase()}!`, '#ffe066', 6);
   }
 
-  // Charged fireball (#291): same impact as the old fireball cast, coloured by mood.
+  // Charged fireball (#291): launch a visible slam, then apply the impact when it lands (#315).
   onFireball(aim, opts = {}) {
     const w = this.screenToWorld(aim);
     const t = this.toTile(w.x, w.y);
-    const r = castPlanet(this.p, 'fireball');
     const color = opts.color || '#ff9a2e';
-    this.particles.burst(18 + Math.round((opts.charge || 1) * 16), () => ({ x: w.x + rand(-20, 20), y: w.y + rand(-12, 12), vx: rand(-3, 3), vy: rand(-14, -4), life: rand(0.4, 0.8), maxLife: 0.8, size: 1, color }));
-    if (r) floater(this.particles, w.x, w.y - 10, r.text, r.good ? '#9be38a' : '#ff8a9c', 7);
-    else floater(this.particles, w.x, w.y - 10, `fireball ${Math.round((opts.charge || 1) * 100)}%`, color, 7);
+    const charge = opts.charge ?? 1;
+    this.fireballs.launch(
+      { x: aim.x * (W - 1), y: aim.y * (H - 1) },
+      { color, charge, meta: { world: w, tile: t } },
+    );
     const scene = this.sim?.scene;
     if (t && scene?.onFireball) scene.onFireball(t, opts);
+  }
+
+  impactFireball({ world, color = '#ff9a2e', charge = 1 }) {
+    const w = world || { x: W / 2, y: H / 2 };
+    const r = castPlanet(this.p, 'fireball');
+    this.particles.burst(28 + Math.round(charge * 26), () => ({ x: w.x + rand(-22, 22), y: w.y + rand(-12, 12), vx: rand(-6, 6), vy: rand(-20, -3), life: rand(0.45, 0.95), maxLife: 0.95, size: 1, color }));
+    this.particles.burst(10 + Math.round(charge * 8), () => ({ x: w.x + rand(-10, 10), y: w.y + rand(-2, 3), vx: rand(-8, 8), vy: rand(-12, -2), g: 20, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color: pick(['#c9c2b0', '#8a7a5a', '#5f5545']) }));
+    if (r) floater(this.particles, w.x, w.y - 10, r.text, r.good ? '#9be38a' : '#ff8a9c', 7);
+    else floater(this.particles, w.x, w.y - 10, `SLAM! ${Math.round(charge * 100)}%`, color, 7);
+    this.ownFlash = Math.max(this.ownFlash, 0.38);
   }
 
   // A camera cast at a screen aim: the whole world feels it; inside the capital the tribe does too.
