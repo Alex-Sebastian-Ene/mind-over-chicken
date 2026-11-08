@@ -1,17 +1,22 @@
-// Pinch movement calibration (#282, #286): live camera with the tracked hand wireframe, a target
-// ghost that sweeps across / up-down / diagonally, and per-axis gains.
-//
-// #286: draw the mirrored webcam frame under the wireframe so the player can line their real hand
-// up; animate the target out and back (figure-eight); capture X and Y separately so up/down and
-// diagonals are calibrated; left hand blue, right hand amber (draw.js).
+// Pinch movement calibration (#282, #286, #288): live camera + wireframe, four cardinal targets
+// per hand. The goal is to learn the player's movement span and align it to left/right/up/down.
+// Head tilt is deliberately not calibrated here — it already works.
 
 import { buildGhostHand } from './coach.js';
 import { drawHand } from './draw.js';
 
 const KEY = 'moc.pinchCalibration';
 const TARGET_SPAN = 0.3;
-const STEP_MS = [8000, 8000, 8000];
-const STEP_IDS = ['left', 'right', 'head'];
+const HANDS = ['left', 'right'];
+const TARGETS = [
+  { id: 'left', label: 'MOVE LEFT', x: 0.22, y: 0.50, arrow: [-1, 0] },
+  { id: 'right', label: 'MOVE RIGHT', x: 0.78, y: 0.50, arrow: [1, 0] },
+  { id: 'up', label: 'MOVE UP', x: 0.50, y: 0.30, arrow: [0, -1] },
+  { id: 'down', label: 'MOVE DOWN', x: 0.50, y: 0.70, arrow: [0, 1] },
+];
+const REACH = 0.14;          // normalized canvas distance that counts as reaching the target
+const HOLD_MS = 350;         // must stay there this long
+const TIMEOUT_MS = 6000;     // skip a direction rather than trapping the player
 
 export function gainFromSpan(span, target = TARGET_SPAN) {
   const s = Number.isFinite(span) ? Math.max(0, span) : 0;
@@ -22,19 +27,17 @@ export function defaultPinchCalibration() {
   return {
     left: { gainX: 1, gainY: 1, spanX: 0, spanY: 0, calibrated: false },
     right: { gainX: 1, gainY: 1, spanX: 0, spanY: 0, calibrated: false },
-    head: { gainX: 1, gainY: 1, spanX: 0, spanY: 0, calibrated: false },
   };
 }
 
 function normalise(raw) {
   const base = defaultPinchCalibration();
   if (!raw || typeof raw !== 'object') return base;
-  for (const k of STEP_IDS) {
+  for (const k of HANDS) {
     const v = raw[k];
     if (!v || typeof v !== 'object') continue;
     const legacy = Number(v.gain);
-    const gx = Number(v.gainX ?? legacy);
-    const gy = Number(v.gainY ?? legacy);
+    const gx = Number(v.gainX ?? legacy), gy = Number(v.gainY ?? legacy);
     base[k] = {
       gainX: Number.isFinite(gx) ? Math.max(0.5, Math.min(2.5, gx)) : 1,
       gainY: Number.isFinite(gy) ? Math.max(0.5, Math.min(2.5, gy)) : 1,
@@ -47,63 +50,26 @@ function normalise(raw) {
 }
 
 export function loadPinchCalibration() {
-  try {
-    return normalise(JSON.parse(localStorage.getItem(KEY) || 'null'));
-  } catch {
-    return defaultPinchCalibration();
-  }
+  try { return normalise(JSON.parse(localStorage.getItem(KEY) || 'null')); }
+  catch { return defaultPinchCalibration(); }
 }
 
 export function savePinchCalibration(cal) {
   try { localStorage.setItem(KEY, JSON.stringify(normalise(cal))); } catch {}
 }
 
-const TITLES = ['LEFT HAND · pinch & sweep', 'RIGHT HAND · pinch & sweep', 'PINCH + TURN / NOD HEAD'];
-const HINTS = [
-  'Pinch your left hand and follow the path: across, up/down, then diagonals. Out and back.',
-  'Pinch your right hand and follow the path: across, up/down, then diagonals. Out and back.',
-  'Keep a hand pinched and turn + nod your head, including diagonals.',
-];
-
-const smooth = (t) => 0.5 - 0.5 * Math.cos(Math.max(0, Math.min(1, t)) * Math.PI);
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
-function drawArrow(ctx, x0, y0, x1, y1, color) {
+function arrow(ctx, x0, y0, x1, y1, color) {
   ctx.strokeStyle = color;
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-  const a = Math.atan2(y1 - y0, x1 - x0), d = 7;
+  const a = Math.atan2(y1 - y0, x1 - x0), d = 10;
   ctx.beginPath();
   ctx.moveTo(x1, y1);
   ctx.lineTo(x1 - Math.cos(a - 0.5) * d, y1 - Math.sin(a - 0.5) * d);
   ctx.lineTo(x1 - Math.cos(a + 0.5) * d, y1 - Math.sin(a + 0.5) * d);
   ctx.closePath(); ctx.fillStyle = color; ctx.fill();
-}
-
-function drawHead(ctx, w, h, yaw, pitch) {
-  const cx = w / 2, cy = h * 0.45 + pitch * h * 0.08, r = Math.min(w, h) * 0.22;
-  ctx.save();
-  ctx.strokeStyle = '#59d8c8';
-  ctx.fillStyle = 'rgba(89,216,200,0.08)';
-  ctx.lineWidth = 1.6;
-  ctx.beginPath(); ctx.ellipse(cx, cy, r * 0.78, r, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  ctx.beginPath(); ctx.arc(cx, cy + r * 0.18, r * 0.55, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
-  const ear = r * 0.78, ox = yaw * r * 0.22;
-  ctx.beginPath(); ctx.arc(cx - ear + ox, cy, r * 0.16, 0, Math.PI * 2); ctx.stroke();
-  ctx.beginPath(); ctx.arc(cx + ear + ox, cy, r * 0.16, 0, Math.PI * 2); ctx.stroke();
-  const ex = yaw * r * 0.28;
-  ctx.fillStyle = '#f4f0e4';
-  for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(cx + s * r * 0.28 + ex, cy - r * 0.12 + pitch * r * 0.12, r * 0.07, 0, Math.PI * 2); ctx.fill(); }
-  const nx = yaw * r * 0.45, ny = pitch * r * 0.16;
-  ctx.strokeStyle = '#ffd166';
-  ctx.beginPath();
-  ctx.moveTo(cx + nx, cy - r * 0.02 + ny);
-  ctx.lineTo(cx + nx - r * 0.12, cy + r * 0.36 + ny);
-  ctx.lineTo(cx + nx + r * 0.14, cy + r * 0.36 + ny);
-  ctx.closePath(); ctx.stroke();
-  ctx.strokeStyle = 'rgba(255,207,74,0.35)';
-  ctx.beginPath(); ctx.arc(cx, cy + r * 0.75, r * 0.8, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
-  ctx.restore();
 }
 
 const emptyCap = () => ({ n: 0, minX: 1, maxX: 0, minY: 1, maxY: 0 });
@@ -116,40 +82,52 @@ const addCap = (c, p) => {
 const spanX = (c) => (c && c.n > 1 ? c.maxX - c.minX : 0);
 const spanY = (c) => (c && c.n > 1 ? c.maxY - c.minY : 0);
 
-function coverRect(video, w, h) {
+// Contain (not cover) so the whole camera frame is visible and all four targets are reachable.
+function frameRect(video, w, h) {
   const vw = video?.videoWidth || 0, vh = video?.videoHeight || 0;
   if (!vw || !vh) return null;
-  const k = Math.max(w / vw, h / vh), dw = vw * k, dh = vh * k;
+  const k = Math.min(w / vw, h / vh), dw = vw * k, dh = vh * k;
   return { ox: (w - dw) / 2, oy: (h - dh) / 2, dw, dh };
 }
 
+function mapPoint(p, rect, w, h) {
+  return { x: (rect.ox + p.x * rect.dw) / w, y: (rect.oy + p.y * rect.dh) / h };
+}
+
 function mapHand(hand, rect, w, h) {
-  return hand.map((p) => ({ x: (rect.ox + p.x * rect.dw) / w, y: (rect.oy + p.y * rect.dh) / h }));
+  return hand.map((p) => mapPoint(p, rect, w, h));
 }
 
 export function initMovementCalibration({
   canvas, statusEl, msgEl, startBtn, skipBtn, resetBtn,
-  getState, onChange,
+  getState, onChange, onComplete,
 }) {
   if (!canvas) return null;
   const ctx = canvas.getContext('2d');
-  let active = false, step = 0, stepStart = 0, flashUntil = 0;
-  let captures = {};
+  let active = false, handIdx = 0, targetIdx = 0, targetStart = 0, holdMs = 0;
+  let captures = { left: emptyCap(), right: emptyCap() };
+  let hits = { left: 0, right: 0 };
+  let complete = false, flashUntil = 0, lastUpdate = 0;
 
   const setStatus = (text) => { if (statusEl && statusEl.textContent !== text) statusEl.textContent = text; };
   const setMsg = (text) => { if (msgEl && msgEl.textContent !== text) msgEl.textContent = text; };
+  const currentHand = () => HANDS[handIdx];
+  const currentTarget = () => TARGETS[Math.min(targetIdx, TARGETS.length - 1)];
 
   function begin() {
     const s = getState();
     if (!s.live) {
       setStatus('camera off');
-      setMsg('Start Camera first, then pinch and follow the path.');
+      setMsg('Start Camera first, then pinch and reach the four targets.');
       flashUntil = performance.now() + 3000;
       return;
     }
-    active = true; step = 0; stepStart = performance.now();
-    captures = Object.fromEntries(STEP_IDS.map((k) => [k, emptyCap()]));
-    setStatus(TITLES[0]); setMsg(HINTS[0]);
+    active = true; complete = false; handIdx = 0; targetIdx = 0;
+    targetStart = performance.now(); holdMs = 0;
+    captures = { left: emptyCap(), right: emptyCap() };
+    hits = { left: 0, right: 0 };
+    setStatus('LEFT HAND · MOVE LEFT');
+    setMsg('Pinch and move your hand to the target.');
     if (skipBtn) skipBtn.disabled = false;
     if (startBtn) startBtn.textContent = 'Restart';
   }
@@ -158,44 +136,50 @@ export function initMovementCalibration({
     active = false;
     if (skipBtn) skipBtn.disabled = true;
     if (startBtn) startBtn.textContent = 'Calibrate';
-    setStatus('idle');
+    setStatus(complete ? 'complete' : 'idle');
   }
 
-  function next() {
-    if (!active) return;
-    if (step < STEP_IDS.length - 1) {
-      step++;
-      stepStart = performance.now();
-      setStatus(TITLES[step]);
-      setMsg(HINTS[step]);
-      return;
+  function nextTarget(now, reached) {
+    if (reached) hits[currentHand()]++;
+    targetIdx++;
+    holdMs = 0;
+    targetStart = now;
+    if (targetIdx >= TARGETS.length) {
+      targetIdx = 0;
+      handIdx++;
+      if (handIdx >= HANDS.length) { finish(); return; }
     }
-    finish();
+    const h = currentHand() === 'left' ? 'LEFT' : 'RIGHT';
+    setStatus(`${h} HAND · ${currentTarget().label}`);
+    setMsg(reached ? 'Good. Next target.' : 'Skipped — keep the hand pinched and move.');
   }
 
   function finish() {
     const out = defaultPinchCalibration();
-    for (const k of STEP_IDS) {
+    for (const k of HANDS) {
       const sx = spanX(captures[k]), sy = spanY(captures[k]);
       out[k] = {
         gainX: sx > 0.01 ? gainFromSpan(sx) : 1,
         gainY: sy > 0.01 ? gainFromSpan(sy) : 1,
         spanX: sx,
         spanY: sy,
-        calibrated: sx > 0.01 && sy > 0.01,
+        calibrated: hits[k] >= 3 && sx > 0.01 && sy > 0.01,
       };
     }
-    active = false;
+    active = false; complete = true;
     if (skipBtn) skipBtn.disabled = true;
     if (startBtn) startBtn.textContent = 'Calibrate';
     if (onChange) onChange(out);
-    setStatus(`calibrated · L ${out.left.gainX.toFixed(1)}/${out.left.gainY.toFixed(1)} · R ${out.right.gainX.toFixed(1)}/${out.right.gainY.toFixed(1)} · H ${out.head.gainX.toFixed(1)}/${out.head.gainY.toFixed(1)}`);
-    setMsg('Saved. Reset restores 1× for every input.');
-    flashUntil = performance.now() + 3500;
+    setStatus(`Calibration complete · L ${out.left.gainX.toFixed(1)}/${out.left.gainY.toFixed(1)} · R ${out.right.gainX.toFixed(1)}/${out.right.gainY.toFixed(1)}`);
+    setMsg('Saved. Closing…');
+    flashUntil = performance.now() + 2500;
+    onComplete?.(out);
   }
 
   function reset() {
-    active = false; captures = {};
+    active = false; complete = false;
+    captures = { left: emptyCap(), right: emptyCap() };
+    hits = { left: 0, right: 0 };
     if (skipBtn) skipBtn.disabled = true;
     if (startBtn) startBtn.textContent = 'Calibrate';
     if (onChange) onChange(defaultPinchCalibration());
@@ -204,7 +188,7 @@ export function initMovementCalibration({
   }
 
   startBtn?.addEventListener('click', begin);
-  skipBtn?.addEventListener('click', next);
+  skipBtn?.addEventListener('click', () => { if (active) nextTarget(performance.now(), false); });
   resetBtn?.addEventListener('click', reset);
   if (skipBtn) skipBtn.disabled = true;
 
@@ -212,95 +196,108 @@ export function initMovementCalibration({
     const w = canvas.width, h = canvas.height;
     const s = getState();
     const video = s.video;
-    const rect = video && video.readyState >= 2 ? coverRect(video, w, h) : null;
+    const rect = video && video.readyState >= 2 ? frameRect(video, w, h) : null;
     ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = '#0b0c16';
     ctx.fillRect(0, 0, w, h);
 
-    // Mirrored camera frame + the player's live hand wireframes.
     if (rect) {
       ctx.save();
       ctx.translate(w, 0); ctx.scale(-1, 1);
       ctx.drawImage(video, rect.ox, rect.oy, rect.dw, rect.dh);
-      for (const side of ['left', 'right']) {
+      for (const side of HANDS) {
         const hand = s.hands?.[side];
         if (!hand?.visible || !hand.landmarks) continue;
-        const isTarget = !active || step === 2 || (side === 'left' ? step === 0 : step === 1);
-        ctx.globalAlpha = isTarget ? 1 : 0.35;
-        drawHand(ctx, mapHand(hand.landmarks, rect, w, h), w, h, {
-          side, pinching: hand.pinching,
-        });
+        ctx.globalAlpha = (active && side !== currentHand()) ? 0.25 : 1;
+        drawHand(ctx, mapHand(hand.landmarks, rect, w, h), w, h, { side, pinching: hand.pinching });
       }
       ctx.globalAlpha = 1;
       ctx.restore();
     } else {
-      for (const side of ['left', 'right']) {
+      for (const side of HANDS) {
         const hand = s.hands?.[side];
         if (hand?.visible && hand.landmarks) {
-          ctx.globalAlpha = (active && step < 2 && side !== (step === 0 ? 'left' : 'right')) ? 0.35 : 1;
+          ctx.globalAlpha = (active && side !== currentHand()) ? 0.25 : 1;
           drawHand(ctx, hand.landmarks, w, h, { side, pinching: hand.pinching });
         }
       }
       ctx.globalAlpha = 1;
     }
 
-    const phase = active ? clamp01((now - stepStart) / STEP_MS[step]) : (now / 3200) % 1;
-    if (active && step === 2) {
-      drawHead(ctx, w, h, Math.sin(phase * Math.PI * 2) * 0.9, Math.sin(phase * Math.PI * 4) * 0.7);
-      drawArrow(ctx, w * 0.12, h * 0.12, w * 0.35, h * 0.12, 'rgba(255,207,74,0.8)');
-      drawArrow(ctx, w * 0.88, h * 0.12, w * 0.65, h * 0.12, 'rgba(255,207,74,0.8)');
-      drawArrow(ctx, w * 0.5, h * 0.04, w * 0.5, h * 0.18, 'rgba(255,207,74,0.5)');
-      drawArrow(ctx, w * 0.5, h * 0.34, w * 0.5, h * 0.2, 'rgba(255,207,74,0.5)');
-      ctx.fillStyle = 'rgba(244,240,228,0.78)';
-      ctx.font = `${Math.max(12, Math.round(w / 60))}px "Pixelify Sans", monospace`; ctx.textAlign = 'center';
-      ctx.fillText('TURN + NOD + DIAGONAL', w / 2, h - 14);
-    } else {
-      // Figure-eight target: across, up/down and diagonals, out and back.
-      const cx = 0.5 + Math.sin(phase * Math.PI * 2) * 0.27;
-      const cy = 0.5 + Math.sin(phase * Math.PI * 4) * 0.16;
-      const dir = active && step === 1 ? 'right' : 'left';
-      ctx.globalAlpha = 0.62;
-      const g = buildGhostHand('pinch', 'pinch', 1, { cx, cy, size: 0.24, mirrorX: dir === 'right' });
-      drawHand(ctx, g, w, h, { pinching: true, held: true, side: dir });
+    if (active) {
+      const t = currentTarget();
+      const tx = t.x * w, ty = t.y * h;
+      arrow(ctx, w * 0.5, h * 0.5, tx, ty, 'rgba(255,207,84,0.45)');
+      ctx.globalAlpha = 0.72;
+      const g = buildGhostHand('pinch', 'pinch', 1, { cx: t.x, cy: t.y, size: 0.22, mirrorX: currentHand() === 'right' });
+      drawHand(ctx, g, w, h, { pinching: true, held: true, side: currentHand() });
       ctx.globalAlpha = 1;
-      drawArrow(ctx, w * 0.15, h * 0.2, w * 0.85, h * 0.2, 'rgba(255,207,84,0.45)');
-      drawArrow(ctx, w * 0.5, h * 0.12, w * 0.5, h * 0.4, 'rgba(255,207,84,0.45)');
-      drawArrow(ctx, w * 0.2, h * 0.75, w * 0.8, h * 0.3, 'rgba(255,207,84,0.3)');
-      ctx.fillStyle = 'rgba(244,240,228,0.78)';
-      ctx.font = `${Math.max(12, Math.round(w / 60))}px "Pixelify Sans", monospace`; ctx.textAlign = 'center';
-      ctx.fillText('PINCH · ACROSS · UP/DOWN · DIAGONAL · OUT & BACK', w / 2, h - 14);
+      ctx.strokeStyle = holdMs >= HOLD_MS ? '#7ee08a' : 'rgba(255,207,74,0.5)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(tx, ty, 20, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, holdMs / HOLD_MS)); ctx.stroke();
+      ctx.fillStyle = '#f4f0e4';
+      ctx.font = `${Math.max(14, Math.round(w / 50))}px "Pixelify Sans", monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`${currentHand().toUpperCase()} HAND · ${t.label}`, w / 2, h * 0.1);
+      // progress dots
+      for (let i = 0; i < TARGETS.length; i++) {
+        ctx.beginPath(); ctx.arc(w * 0.5 + (i - 1.5) * 20, h * 0.16, 5, 0, Math.PI * 2);
+        ctx.fillStyle = i < targetIdx ? '#7ee08a' : i === targetIdx ? '#ffcf4a' : 'rgba(163,166,196,0.4)';
+        ctx.fill();
+      }
+    } else if (complete) {
+      ctx.fillStyle = '#7ee08a';
+      ctx.font = `700 ${Math.max(22, Math.round(w / 28))}px "Pixelify Sans", monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText('CALIBRATION COMPLETE', w / 2, h * 0.5);
+    } else {
+      ctx.globalAlpha = 0.5;
+      const g = buildGhostHand('pinch', 'pinch', 1, { cx: 0.5, cy: 0.5, size: 0.2 });
+      drawHand(ctx, g, w, h, { pinching: true, held: true });
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = 'rgba(244,240,228,0.7)';
+      ctx.font = `${Math.max(14, Math.round(w / 50))}px "Pixelify Sans", monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText('PRESS CALIBRATE', w / 2, h * 0.72);
     }
 
-    const hand = active && step < 2 ? (step === 0 ? s.hands?.left : s.hands?.right) : null;
-    const valid = active && (step < 2
-      ? !!(hand?.visible && hand.pinching && hand.point)
-      : !!(s.multi?.grab?.active && !s.grabbed && (s.brain?.screenAim || s.brain?.aim)));
+    const hand = active ? s.hands?.[currentHand()] : null;
+    const valid = active && !!(hand?.visible && hand.pinching && hand.point);
     ctx.fillStyle = valid ? '#7ee08a' : 'rgba(163,166,196,0.7)';
-    ctx.beginPath(); ctx.arc(10, 10, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(12, 12, 4, 0, Math.PI * 2); ctx.fill();
     if (active) {
-      const left = Math.max(0, (STEP_MS[step] - (now - stepStart)) / 1000);
-      setStatus(`${TITLES[step]} · ${left.toFixed(1)}s`);
-      if (step === 2 && !valid) setMsg('Pinch a hand, then turn/nod your head to capture the tilt.');
-      else setMsg(HINTS[step]);
+      if (!hand?.visible) setMsg(`Show your ${currentHand()} hand to the camera.`);
+      else if (!hand.pinching) setMsg('Pinch to enable the hand target.');
+      else if (holdMs > 0) setMsg('Hold at the target…');
+      else setMsg('Move your pinched hand to the highlighted target.');
+    } else if (complete) {
+      if (now > flashUntil) stop();
     } else if (now > flashUntil) {
       setStatus('idle');
+      setMsg('Press Calibrate, then reach left, right, up and down with each hand.');
     }
   }
 
   function update(now = performance.now()) {
+    const dt = lastUpdate ? Math.min(0.1, (now - lastUpdate) / 1000) : 0.016;
+    lastUpdate = now;
     if (active) {
       const s = getState();
-      const c = captures[STEP_IDS[step]];
-      if (step < 2) {
-        const hand = step === 0 ? s.hands?.left : s.hands?.right;
-        if (hand?.visible && hand.pinching && hand.point) addCap(c, hand.point);
-      } else if (s.multi?.grab?.active && !s.grabbed) {
-        addCap(c, s.brain?.screenAim || s.brain?.aim);
+      const hand = s.hands?.[currentHand()];
+      const rect = s.video && s.video.readyState >= 2 ? frameRect(s.video, canvas.width, canvas.height) : null;
+      let hit = false;
+      if (hand?.visible && hand.pinching && hand.point) {
+        const p = rect ? mapPoint(hand.point, rect, canvas.width, canvas.height) : hand.point;
+        addCap(captures[currentHand()], p);
+        const t = currentTarget();
+        hit = Math.hypot(p.x - t.x, p.y - t.y) <= REACH;
       }
-      if (now - stepStart >= STEP_MS[step]) next();
+      holdMs = hit ? holdMs + dt * 1000 : 0;
+      if (holdMs >= HOLD_MS) nextTarget(now, true);
+      else if (now - targetStart >= TIMEOUT_MS) nextTarget(now, false);
     }
     draw(now);
   }
 
-  return { update, start: begin, next, reset, stop, get active() { return active; } };
+  return { update, start: begin, next: () => nextTarget(performance.now(), false), reset, stop, get active() { return active; } };
 }

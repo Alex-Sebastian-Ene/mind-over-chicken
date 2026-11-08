@@ -13,7 +13,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
   - **Option A (Muse 2 hardware)**: Bluetooth paired. `python bridge/muse_bridge.py --board muse2` running in terminal, showing green stream.
   - **Option B (Emulated Headset fallback)**: Title screen selected as **"Emulated headset (keyboard)"**.
 - [ ] **Webcam**: Camera positioned at eye level with even lighting. Click **"Camera"** on the top bar to open the sidebar, then **"Start Camera"** and allow the permission prompt (status turns green).
-- [ ] **Pinch calibration** (optional): Camera sidebar → **Pinch & Head Calibration** opens a pop-up. Follow the live camera + wireframe through left hand, right hand (across, up/down, diagonals), then pinch + turn/nod head. Gains persist in the browser. Esc closes it.
+- [ ] **Pinch calibration** (optional): Camera sidebar → **Pinch & Head Calibration** opens a pop-up. Follow the live camera + wireframe to the LEFT, RIGHT, UP and DOWN targets with each hand. It auto-advances, saves per-axis gains and closes when complete. Gains persist in the browser. Esc closes it.
 - [ ] **Hotkeys Reference Card**:
   - `Space`: Hold Calm (high alpha)
   - `F`: Hold Focus / Insight. Hold ~2 s (Rain or Calm) to summon rain and put out a forest fire

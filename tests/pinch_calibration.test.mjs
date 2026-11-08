@@ -21,9 +21,10 @@ test('gain is bounded to 0.5..2.5', () => {
   assert.ok(Number.isFinite(gainFromSpan(NaN)));
 });
 
-test('default calibration has three uncalibrated 1x inputs on both axes', () => {
+test('default calibration has left/right hands at 1x on both axes', () => {
   const c = defaultPinchCalibration();
-  for (const k of ['left', 'right', 'head']) {
+  assert.deepEqual(Object.keys(c).sort(), ['left', 'right']);
+  for (const k of ['left', 'right']) {
     assert.equal(c[k].gainX, 1);
     assert.equal(c[k].gainY, 1);
     assert.equal(c[k].spanX, 0);

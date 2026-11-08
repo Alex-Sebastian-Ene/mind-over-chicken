@@ -84,7 +84,7 @@ const TEMPLATE = `
           <span>Pinch / Zoom: <b data-cam-pinch>--</b></span>
         </div>
         <div class="eeg-url-row">
-          <button type="button" class="btn btn-primary btn-small" data-calib-open>🎯 Pinch &amp; Head Calibration</button>
+          <button type="button" class="btn btn-primary btn-small" data-calib-open>🎯 Pinch Movement Calibration</button>
         </div>
       </div>
     </div>
@@ -153,8 +153,8 @@ export function initCamera({
     <div class="calib-wiz-top">
       <div>
         <span class="calib-wiz-step" data-calib-status>idle</span>
-        <h2>Pinch &amp; Head Calibration</h2>
-        <p data-calib-msg>Pinch and follow the wireframe: left hand, right hand, then pinch + head tilt.</p>
+        <h2>Pinch Movement Calibration</h2>
+        <p data-calib-msg>Reach left, right, up and down with each hand. The wizard advances when you hit a target.</p>
       </div>
       <div class="calib-wiz-actions">
         <button type="button" class="btn btn-small" data-calib-close>Close <kbd>Esc</kbd></button>
@@ -238,12 +238,20 @@ export function initCamera({
     resetBtn: calibModal.querySelector('[data-calib-reset]'),
     getState: () => ({ live: !!stream && status === 'on', hands: multi, multi, grabbed, brain: getG()?.brain, video }),
     onChange: (cal) => { pinchCal = cal; savePinchCalibration(cal); },
+    onComplete: () => {
+      clearTimeout(closeTimer);
+      closeTimer = setTimeout(() => {
+        if (!movementCal?.active) { calibModal.hidden = true; }
+      }, 2200);
+    },
   });
+  let closeTimer = 0;
   const openCalib = () => {
     calibModal.hidden = false;
     movementCal?.start?.();
   };
   const closeCalib = () => {
+    clearTimeout(closeTimer);
     movementCal?.stop?.();
     calibModal.hidden = true;
   };
