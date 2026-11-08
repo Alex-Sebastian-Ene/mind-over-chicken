@@ -69,6 +69,7 @@ impl AdvisorDriver {
         self.era = era.to_string();
         self.queue.clear();
         self.current = None;
+        self.cooldowns.clear();
 
         let name = match era {
             "stone" => "Oog · High Priest of the Flame",
@@ -387,5 +388,21 @@ impl HudDriver {
         let _ = (
             calm, calm_thr, focus, focus_thr, stress, blinks,
         );
+    }
+}
+
+#[cfg(test)]
+mod advisor_era_tests {
+    use super::*;
+
+    #[test]
+    fn same_key_lines_fire_again_after_era_change() {
+        let mut a = AdvisorDriver::new();
+        assert!(a.say("intro", "stone", "happy", 2, 999.0));
+        assert!(!a.say("intro", "stone again", "happy", 2, 999.0));
+        a.set_era("industry");
+        assert!(a.say("intro", "industry", "happy", 2, 999.0));
+        a.set_era("space");
+        assert!(a.say("intro", "space", "happy", 2, 999.0));
     }
 }

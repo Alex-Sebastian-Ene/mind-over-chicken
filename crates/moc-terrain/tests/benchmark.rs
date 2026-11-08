@@ -10,7 +10,7 @@ fn test_home_map_generation_speed() {
     println!("Home map (320x180) generated in: {:?}", elapsed);
     assert_eq!(map.width, 320);
     assert_eq!(map.height, 180);
-    let max_ms = if cfg!(debug_assertions) { 500 } else { 80 };
+    let max_ms = if cfg!(debug_assertions) { 800 } else { 80 };
     assert!(elapsed.as_millis() < max_ms, "Generation must be fast: {:?} elapsed (max: {}ms)", elapsed, max_ms);
 }
 

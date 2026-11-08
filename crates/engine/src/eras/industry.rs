@@ -1,4 +1,4 @@
-use super::{BrainInput, Era, EraEvent, Objective, SoundKind, STRESS_LIMIT};
+use super::{BrainInput, Era, EraBillboard, EraEvent, EraLight, Objective, SoundKind, STRESS_LIMIT};
 
 const GDP_TARGET: f32 = 620.0;
 const IPO_HOLD_SECONDS: f32 = 8.0;
@@ -217,6 +217,89 @@ impl Era for IndustryEra {
 
     fn is_failed(&self) -> Option<String> {
         self.failed.clone()
+    }
+
+    fn billboards_3d(&self) -> Vec<EraBillboard> {
+        let mut list = Vec::new();
+
+        // 1. Goats: sprite 2 (grazing around exchange pastures)
+        let goat_coords = [
+            (145.0, 84.0),
+            (152.0, 92.0),
+            (138.0, 96.0),
+            (160.0, 80.0),
+        ];
+        for (i, &(gx, gz)) in goat_coords.iter().enumerate() {
+            let bob = ((self.time * 2.0 + i as f32) as u32) % 2;
+            list.push(EraBillboard {
+                sprite_id: 2,
+                x: gx,
+                z: gz,
+                facing: if i % 2 == 0 { 1 } else { -1 },
+                frame: bob,
+                variant: 0,
+            });
+        }
+
+        // 2. Workers, traders, strikers: sprite 0
+        let worker_coords = [
+            (76.0, 130.0, 0),  // factory picket
+            (82.0, 126.0, 0),
+            (130.0, 95.0, 1),  // exchange floor
+            (136.0, 88.0, 1),
+            (142.0, 102.0, 1),
+        ];
+        for (i, &(wx, wz, role)) in worker_coords.iter().enumerate() {
+            let pose = if self.general_strike > 0.0 && role == 0 {
+                1 // strike / protest
+            } else if self.recessions > 0 && self.crash_cooldown > 0.0 {
+                2 // panic
+            } else {
+                0 // walk
+            };
+            list.push(EraBillboard {
+                sprite_id: 0,
+                x: wx,
+                z: wz,
+                facing: if i % 2 == 0 { 1 } else { -1 },
+                frame: (((self.time * 4.0) as u32) + i as u32) % 2,
+                variant: pose,
+            });
+        }
+
+        // 3. Chicken: sprite 3 (mascot of the exchange)
+        list.push(EraBillboard {
+            sprite_id: 3,
+            x: 132.0,
+            z: 88.0,
+            facing: 1,
+            frame: ((self.time * 4.0) as u32) % 2,
+            variant: 0,
+        });
+
+        list
+    }
+
+    fn lights_3d(&self) -> Vec<EraLight> {
+        let mut list = Vec::new();
+        // Factory furnace light
+        let smog_flicker = (self.time * 5.0).sin() * 2.0;
+        list.push(EraLight {
+            x: 70.0,
+            y: 8.0,
+            z: 126.0,
+            radius: 30.0 + smog_flicker,
+            intensity: 1.4,
+        });
+        // Exchange market lantern
+        list.push(EraLight {
+            x: 134.0,
+            y: 8.0,
+            z: 90.0,
+            radius: 22.0,
+            intensity: 1.2,
+        });
+        list
     }
 }
 

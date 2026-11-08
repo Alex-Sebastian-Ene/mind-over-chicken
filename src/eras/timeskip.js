@@ -128,9 +128,26 @@ export class FarmingToKingdoms {
 
   lights() { return []; }
 
+  draw3d(engine, _dt) {
+    for (const g of this.goats) {
+      engine.add_billboard(2, g.x, g.y, g.facing || 1, 0, 0);
+    }
+    for (const p of this.people) {
+      engine.add_billboard(0, p.x, p.y, p.facing || 1, p.frame || 0, 0);
+    }
+    engine.add_billboard(3, this.chicken.x, this.chicken.y, this.chicken.facing || 1, this.chicken.frame || 0, 0);
+  }
+
   draw(ctx) {
-    ctx.drawImage(this.layer, 0, 0);
-    this.G.world.drawWater(ctx, this.t);
+    const G = this.G;
+    const base = G.render3d ? (G.world?.layers3d?.farming || this.layer) : this.layer;
+    ctx.drawImage(base, 0, 0);
+    if (!G.render3d) this.G.world.drawWater(ctx, this.t);
+    if (G.render3d) {
+      this.particles.draw(ctx);
+      if (this.phase !== 'farming') { ctx.fillStyle = 'rgba(30,18,40,0.45)'; ctx.fillRect(0, 0, W, H); }
+      return;
+    }
     const actors = [];
     for (const g of this.goats) actors.push({ y: g.y, d: () => drawGoat(ctx, g.x, g.y, g) });
     for (const p of this.people) actors.push({ y: p.y, d: () => drawPerson(ctx, p.x, p.y, p) });
