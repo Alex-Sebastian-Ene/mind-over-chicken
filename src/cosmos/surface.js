@@ -391,7 +391,7 @@ export class PlanetSurface {
     if (this.sim) {
       const sc = this.sim.scene;
       if (sc.fire?.lit) {
-        engine.add_3d_light(tx0 + sc.fire.x / 2, 10.0, ty0 + sc.fire.y / 2, 25.0 + sc.fire.heat * 30.0 + Math.sin(this.t * 13) * 1.5, 1.8);
+        engine.add_3d_light(tx0 + sc.fire.x / 2, 10.0, ty0 + sc.fire.y / 2, 20.0 + sc.fire.heat * 22.0 + Math.sin(this.t * 13) * 1.2, 0.9);
       }
       if (sc.bolts) {
         for (const b of sc.bolts) {

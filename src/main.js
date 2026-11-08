@@ -875,7 +875,6 @@ function render() {
     else cosmos.blitView(worldCanvas, low);
   }
   if (!G.render3d) scene.drawScreen?.(lowCtx);
-  if (!windowed && !G.render3d && scene?.phase !== 'voyage') cosmos.applyPan(low);
 
   let cosmic = false;
   if (!G.render3d || z >= 1.0) {

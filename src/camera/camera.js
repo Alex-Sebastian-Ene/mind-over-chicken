@@ -72,6 +72,7 @@ const TEMPLATE = `
       </div>
       <div class="eeg-cursor-controls">
         <div class="eeg-imu-xyz" style="grid-template-columns:1fr">
+          <div><span>Camera Frames</span><b data-cam-rate-video>--</b></div>
           <div><span>Hands Inference</span><b data-cam-rate-hands>--</b></div>
           <div><span>Face Inference</span><b data-cam-rate-face>--</b></div>
         </div>
@@ -194,6 +195,7 @@ export function initCamera({
     startBtn: $('[data-cam-start]'),
     stopBtn: $('[data-cam-stop]'),
     fps: $('[data-cam-fps]'),
+    rateVideo: $('[data-cam-rate-video]'),
     rateHands: $('[data-cam-rate-hands]'),
     rateFace: $('[data-cam-rate-face]'),
     aim: $('[data-cam-aim]'),
@@ -362,7 +364,7 @@ export function initCamera({
     }
     let s;
     try {
-      s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+      s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 } }, audio: false });   // 60 fps where the webcam can: hands track up to MAX_HZ
     } catch (err) {
       if (id === run) setStatus('error', cameraError(err));
       return;
@@ -765,6 +767,7 @@ export function initCamera({
       }
     }
     if (ui.fps) ui.fps.textContent = `${Math.round(frames.fps(now))} fps`;
+    if (ui.rateVideo) ui.rateVideo.textContent = stream && snap?.video?.count ? `${Math.round(snap.video.hz)} fps` : '--';
     if (ui.rateHands) ui.rateHands.textContent = stream && snap ? fmtRate(snap.gesture) : '--';
     if (ui.rateFace) ui.rateFace.textContent = stream && snap ? fmtRate(snap.face) : '--';
 
