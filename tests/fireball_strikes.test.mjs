@@ -11,5 +11,6 @@ test('the Stone Age and Industry fireball impacts strike at the impact point', a
     const body = src.slice(i, src.indexOf('\n  }\n', i));
     assert.match(body, /this\.lastBolt = -Infinity;/, f);
     assert.match(body, /this\.onBlink\((this\.)?G\.world\.aimOf\(x, y\)\)/, f);
+    if (f === 'stone') { assert.match(body, /this\.kill\(p\)/); assert.match(body, /igniteForestFire\(t\)/); assert.match(body, /cooked: true/); }
   }
 });
