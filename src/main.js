@@ -612,7 +612,7 @@ function showFail(reason) {
       } else if (lower.includes('fire')) {
         nextStep = 'Stay calm when the flame begins to fade to rekindle warmth.';
       } else if (lower.includes('starv') || lower.includes('food')) {
-        nextStep = 'Strike mammoths with lightning so hunters can gather meat for the tribe.';
+        nextStep = 'Strike giant chickens with lightning so hunters can gather meat for the tribe.';
       } else if (lower.includes('dark')) {
         nextStep = 'Blink directly on the fire pit to strike and kindle the flame.';
       }

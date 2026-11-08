@@ -21,7 +21,7 @@ export class StoneAge {
     this.intro = {
       title: 'Stone Age',
       goal: `Grow the tribe to ${POP_TARGET} and keep the fire alive with ${CALM_TARGET} calm holds.`,
-      how: [['Blink', 'Throw lightning where you look. Strike the fire pit to light it, strike a mammoth for dinner.'], ['Calm', 'When the flame fades, stay calm for 5 seconds.']],
+      how: [['Blink', 'Throw lightning where you look. Strike the fire pit to light it, strike a giant chicken for dinner.'], ['Calm', 'When the flame fades, stay calm for 5 seconds.']],
     };
     this.powers = ['blink', 'calm'];
     this.darkness = 0.6;
@@ -99,7 +99,7 @@ export class StoneAge {
       G.audio.ignite();
       floater(this.particles, this.fire.x, this.fire.y - 10, first ? 'FIRE!' : 'Relit!', '#ffd166', 8);
       if (first) {
-        G.advisor.say('fire', 'FIRE! You have invented fire! Now blink a mammoth to feed the tribe.', { mood: 'happy', priority: 3, cooldown: 999 });
+        G.advisor.say('fire', 'FIRE! You have invented fire! Now blink a giant chicken to feed the tribe.', { mood: 'happy', priority: 3, cooldown: 999 });
         this.spawnTutorialMammoth();
       } else {
         G.advisor.say('relit', 'The flame lives again. The tribe pretends it was never worried.', { mood: 'happy', priority: 2 });
@@ -111,7 +111,7 @@ export class StoneAge {
         m.alive = false; m.dead = true;
         this.meat.push({ x: m.x, y: m.y, amount: 5, cooked: true, claimed: 0 });
         floater(this.particles, m.x, m.y - 8, 'barbecue', '#ff9a2e', 7);
-        G.advisor.say('bbq', 'Cooked mammoth! Barbecue time. Hunters will carry the meat to the fire.', { mood: 'happy', priority: 2 });
+        G.advisor.say('bbq', 'Roast chicken! Barbecue time. Hunters will carry the meat to the fire.', { mood: 'happy', priority: 2 });
       }
     }
     // People (lightning strikes kill people as well as animals)
@@ -226,7 +226,7 @@ export class StoneAge {
         floater(this.particles, m.x, m.y - 8, 'hunted!', '#f2e8d5', 6);
         if (chance(0.2)) {
           const victim = this.people.find((p) => p.alive && p.target === m);
-          if (victim) { this.kill(victim); G.advisor.say('trample', `${victim.name} was trampled. The tribe agrees it was the mammoth's fault, not yours.`, { priority: 2 }); }
+          if (victim) { this.kill(victim); G.advisor.say('trample', `${victim.name} was trampled. The tribe agrees it was the chicken's fault, not yours.`, { priority: 2 }); }
         }
         this.people.forEach((p) => { if (p.target === m) p.target = null; });
       }
@@ -333,7 +333,7 @@ export class StoneAge {
     walk(c, c.tx, c.ty, 6, dt, w);
 
     // ---- Live reactions ----
-    if ((brain.stress ?? 0) > 0.9) G.advisor.say('stress', 'Your stress is thundering, my lord. Even the mammoths are nervous.', { mood: 'panic', priority: 1, cooldown: 25 });
+    if ((brain.stress ?? 0) > 0.9) G.advisor.say('stress', 'Your stress is thundering, my lord. Even the chickens are nervous.', { mood: 'panic', priority: 1, cooldown: 25 });
 
     // ---- Win / lose ----
     const alive = this.living().length;
@@ -342,10 +342,10 @@ export class StoneAge {
       const reason = !this.fire.everLit
         ? 'The tribe froze in the dark: blink directly on the fire pit to light it.'
         : this.food === 0 && !this.meat.length
-        ? 'The tribe starved: blink to strike mammoths and feed your people.'
+        ? 'The tribe starved: blink to strike giant chickens and feed your people.'
         : !f.lit
         ? 'The fire went out: stay calm when the flame fades to kindle it.'
-        : 'The tribe has perished: keep the fire lit and hunt mammoths for dinner.';
+        : 'The tribe has perished: keep the fire lit and hunt giant chickens for dinner.';
       G.fail(reason);
     }
     const calmTarget = this.G.assistMode ? 1 : CALM_TARGET;
@@ -485,7 +485,7 @@ export class StoneAge {
     const foodHint = !this.fire.lit
       ? 'light fire'
       : this.food < 1 && !this.meat.length
-      ? 'hunt mammoth'
+      ? 'hunt chicken'
       : this.meat.length
       ? 'carry meat'
       : `${Math.floor(this.food)}`;
@@ -602,7 +602,7 @@ export class StoneAge {
       const nearby = this.mammoths.find((m) => m.alive && dist(m.x, m.y, f.x, f.y) < 70);
       if (nearby) {
         const bob = Math.sin(this.t * 5) * 1.5;
-        label(ctx, nearby.x, nearby.y - 14 + bob, 'blink mammoth for food', '#ffd166', 5.5);
+        label(ctx, nearby.x, nearby.y - 14 + bob, 'blink chicken for food', '#ffd166', 5.5);
       }
     }
     if (this.hold.active) {
@@ -645,13 +645,13 @@ export class StoneAge {
     // Check alive mammoths
     for (const m of this.mammoths) {
       if (m.alive && dist(x, y, m.x, m.y - 2) < 10) {
-        this.grabbedEntity = { entity: m, kind: 'mammoth', label: 'Mammoth' };
+        this.grabbedEntity = { entity: m, kind: 'mammoth', label: 'Giant chicken' };
         m.pause = 999;
-        floater(this.particles, m.x, m.y - 8, 'grabbed mammoth!', '#ff9a2e', 6);
-        return { ok: true, label: 'Mammoth', kind: 'mammoth' };
+        floater(this.particles, m.x, m.y - 8, 'grabbed a giant chicken!', '#ff9a2e', 6);
+        return { ok: true, label: 'Giant chicken', kind: 'mammoth' };
       }
     }
-    return { ok: false, reason: 'Pinch over a villager, mammoth, or chicken to grab' };
+    return { ok: false, reason: 'Pinch over a villager or a chicken to grab' };
   }
 
   onGrabMove(aim) {
@@ -757,7 +757,7 @@ export class StoneAge {
           if (!p.colony && (p.state === 'flee' || p.state === 'cower')) p.state = 'idle';
         }
         floater(this.particles, f.x, f.y - 14, 'peace', '#9be38a', 7);
-        G.advisor.say('cast-peace', 'Peace descends. Grug has apologised to the mammoth.', { mood: 'happy', priority: 1, cooldown: 25 });
+        G.advisor.say('cast-peace', 'Peace descends. Grug has apologised to the chicken.', { mood: 'happy', priority: 1, cooldown: 25 });
         break;
       }
     }

@@ -209,7 +209,7 @@ export function easeSplit(split, action, dt, rate = 0.5) {
 }
 
 const FLAVOUR = [
-  ['invented the spear', 'worships a rock', 'met a mammoth'],
+  ['invented the spear', 'worships a rock', 'met a giant chicken'],
   ['domesticated goats', 'invented cheese', 'elected a chicken'],
   ['opened a goat exchange', 'invented the strike', 'built a mill'],
   ['launched a satellite', 'found water on a moon', 'built a goat in orbit'],
