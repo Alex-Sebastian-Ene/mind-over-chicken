@@ -13,3 +13,7 @@ crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 moc-planet = { path = "../moc-planet" }
+
+# Examples and tests only (the env server speaks JSON lines); never in the wasm.
+[dev-dependencies]
+serde_json = "1"

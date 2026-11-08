@@ -67,8 +67,9 @@ test('the village can walk to the pad, and rafts can reach every other continent
 
 test('agents walk and sail across the seams and stay on the map', () => {
   // A strip of land across the east-west seam and of sea across the north-south one.
-  const w = new World(5, { width: 64, height: 48 });
-  w.type.fill(T.DEEP);
+  // A hand-made 64×48 map (the generator needs real sizes): no generation, just tiles.
+  const w = new World(5, { gen: false });
+  Object.assign(w, { width: 64, height: 48, w: 64, type: new Uint8Array(64 * 48).fill(T.DEEP) });
   for (let x = 0; x < 64; x++) w.type[20 * 64 + x] = T.GRASS;
   w.fields = new Map();
   const a = { x: 60, y: 20 };

@@ -92,7 +92,7 @@ export function drawPerson(ctx, x, y, o = {}) {
   px(ctx, x - 2, y, 'rgba(0,0,0,0.3)', 5, 1);
 
   // Dark silhouette backing for crisp readability on any background
-  px(ctx, x - 2, sy - 7, 5, 7, '#120d09');
+  px(ctx, x - 2, sy - 7, '#120d09', 5, 7);
 
   // Legs and boots
   const legStep = (pose === 'walk' && (o.frame % 2 === 1)) ? 1 : 0;

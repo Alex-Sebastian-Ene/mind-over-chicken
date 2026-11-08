@@ -14,7 +14,7 @@ self.onmessage = async (e) => {
     const transfer = [w.h.buffer, w.type.buffer, w.baseType.buffer, w.owner.buffer, w.rgba.buffer];
     if (w.vast) {
       msg.vast = w.vast;
-      transfer.push(w.vast.type.buffer, w.vast.rgba.buffer);
+      transfer.push(w.vast.type.buffer, w.vast.height.buffer, w.vast.rgba.buffer);
     }
     self.postMessage(msg, transfer);
   } catch (err) {

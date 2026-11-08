@@ -36,6 +36,8 @@ pub mod erosion;
 pub mod filter;
 pub mod grid;
 pub mod hydrology;
+pub mod landform;
+pub mod metrics;
 pub mod noise;
 pub mod palette;
 pub mod plates;
@@ -76,7 +78,7 @@ pub struct ErosionParams {
 
 impl Default for ErosionParams {
     fn default() -> Self {
-        ErosionParams { thermal_passes: 3, stream_iters: 3, k: 0.0022, diffuse_passes: 3 }
+        ErosionParams { thermal_passes: 2, stream_iters: 2, k: 0.0028, diffuse_passes: 3 }
     }
 }
 
@@ -98,6 +100,9 @@ pub struct TerrainParams {
     pub land_fraction: f32,
     /// 0: equal continents; 0.5: up to ±50%.
     pub size_spread: f32,
+    /// > 0: continent sizes follow a power law, the k-th largest ∝ (k+1)^-size_power (Alex:
+    /// one or two big continents, a few mid-sized, then islands).
+    pub size_power: f32,
     pub anchor: Option<Anchor>,
     /// Ocean kept between continents, tiles (0: automatic).
     pub gap: f32,
@@ -130,6 +135,31 @@ pub struct TerrainParams {
     pub campaign: bool,
     /// Continents stay out of the middle of the cold belt beyond this coldness (0..1).
     pub cold_limit: f32,
+    /// Never draw the "broken" (inland seas and straits) continent character.
+    pub no_broken: bool,
+    /// Groups the continents bunch into (0: one or two, at random).
+    pub clusters: usize,
+    /// Layout guarantees: a run that misses them (about one in fifty) is redrawn.
+    pub guarantee: Option<Guarantee>,
+}
+
+/// What every map of a preset must have (#129: at least five continents, 45–70% sea; Alex:
+/// uneven sizes). Checked after generation; a miss redraws the layout with a fresh seed.
+#[derive(Clone, Copy, Debug)]
+pub struct Guarantee {
+    pub majors: usize,
+    pub sea: (f32, f32),
+    pub size_cv: f32,
+    /// Largest empty-ocean disc, as a share of the map (continents bunch, leaving open sea).
+    pub open_ocean: f32,
+}
+
+impl Guarantee {
+    pub fn holds(&self, m: &TerrainMap) -> bool {
+        let majors = m.continents.iter().filter(|c| c.major).count();
+        let sea = m.biome.iter().filter(|&&b| !biome::is_land(b)).count() as f32 / m.biome.len().max(1) as f32;
+        majors >= self.majors && sea >= self.sea.0 && sea <= self.sea.1 && m.stats.layout.size_cv > self.size_cv && m.stats.layout.open_ocean > self.open_ocean
+    }
 }
 
 impl TerrainParams {
@@ -144,6 +174,7 @@ impl TerrainParams {
             continent_area: 0.0,
             land_fraction: 0.38,
             size_spread: 0.3,
+            size_power: 0.0,
             anchor: None,
             gap: 0.0,
             seam_margin: 0.0,
@@ -163,6 +194,9 @@ impl TerrainParams {
             min_island: 0.005,
             campaign: false,
             cold_limit: 0.86,
+            no_broken: false,
+            clusters: 0,
+            guarantee: None,
         }
     }
 
@@ -181,16 +215,20 @@ impl TerrainParams {
         let mut p = TerrainParams::base(w, h, seed);
         // Six or seven planned, so at least five major ones survive the crowding (#129).
         p.continents = 6 + (r.f32() < 0.4) as usize;
-        p.land_fraction = r.range(0.34, 0.44);
-        p.size_spread = 0.2;
+        // Small maps lose more land to the coast rules, so they plan a little more of it, and a
+        // gentler size law keeps their smallest continents above the island minimum.
+        let small = k < 1.5;
+        p.land_fraction = if small { r.range(0.44, 0.5) } else { r.range(0.4, 0.48) };
+        p.size_spread = 0.15;
+        p.size_power = if small { r.range(0.85, 1.05) } else { r.range(1.05, 1.35) };
         let m = 14.0 * k;
         // Home lands anywhere away from the seams, so every run's map is laid out differently.
         p.anchor = Some(Anchor { x: w as f32 * r.range(0.2, 0.8), y: h as f32 * r.range(0.3, 0.7), share: r.range(1.3, 1.9), bounds: Some([m, m * 1.1, w as f32 - m, h as f32 - m * 1.1]) });
-        p.gap = 8.0 * k;
+        p.gap = 7.0 * k;
         p.seam_margin = 5.0 * k;
         // A mild world: land may reach well into the cool belt along the top and bottom.
         p.cold_limit = 0.97;
-        p.islands = 0.4;
+        p.islands = 0.8;
         p.plates = (9.0 * k * k.sqrt()).round() as usize;
         p.climate = ClimateParams { warm: 25.0, cold: -5.0, bands: 1.0, moisture: 1.0, lapse: 30.0 };
         p.max_sites = (24.0 * k * k) as usize;
@@ -198,6 +236,9 @@ impl TerrainParams {
         // (< 50 ms for 320×180).
         p.sim_cell = 2;
         p.campaign = true;
+        // Margins inside the acceptance tests' bounds (5+ continents, 45–70% sea, CV > 0.6,
+        // open ocean > 3%).
+        p.guarantee = Some(Guarantee { majors: 5, sea: (0.46, 0.69), size_cv: 0.63, open_ocean: 0.035 });
         p
     }
 
@@ -221,8 +262,9 @@ impl TerrainParams {
         let (w, h) = (640, 360);
         let mut r = Rng::stream(seed, 0x6A1);
         let mut p = TerrainParams::base(w, h, seed);
-        p.continents = 5 + r.below(3);
+        p.continents = 6 + r.below(2);
         p.land_fraction = 0.36;
+        p.size_power = r.range(0.9, 1.15);
         p.anchor = Some(Anchor { x: 160.0 + r.range(-20.0, 20.0), y: 180.0 + r.range(-8.0, 8.0), share: 1.5, bounds: Some([14.0, 104.0, 306.0, 256.0]) });
         p.gap = 10.0;
         p.islands = 0.6;
@@ -236,16 +278,37 @@ impl TerrainParams {
     /// The civ sandbox planet (#101): 3–5 major continents of about 330k land tiles each (10×
     /// the old average), plus island chains, on at least 2560×1280.
     pub fn civ_planet(seed: u32, w: usize, h: usize) -> Self {
+        // As many peoples as the #164 planet sizes give: 8 at 1280×640, 12 at 1920×960, 16 at
+        // 2560×1280, about 20 at 3072×1536.
+        let peoples = (16.0 * ((w * h) as f32 / (2560.0 * 1280.0)).sqrt()).round().max(4.0) as usize;
+        Self::civ_planet_for(seed, w, h, peoples)
+    }
+
+    /// The civ sandbox planet (#101, #164) for `peoples` civilisations: a few more continents
+    /// than peoples, power-law sizes (a few large landmasses where neighbours meet, many
+    /// mid-sized ones, island chains), bunched into three or four groups with open ocean
+    /// between them.
+    pub fn civ_planet_for(seed: u32, w: usize, h: usize, peoples: usize) -> Self {
+        let k = ((w * h) as f32 / (320.0 * 180.0)).sqrt();
         let mut r = Rng::stream(seed, 0xC1F);
         let mut p = TerrainParams::base(w, h, seed);
-        p.continents = 3 + r.below(3);
-        let budget = 0.44 * (w * h) as f32;
-        p.continent_area = (330_000.0f32).min(budget / p.continents as f32);
-        p.size_spread = 0.12;
+        p.continents = peoples.max(4) + 2 + r.below(4);
+        p.land_fraction = r.range(0.32, 0.38);
+        p.size_spread = 0.15;
+        p.size_power = r.range(0.85, 1.1);
+        p.clusters = 3 + r.below(2);
+        // Every continent is somebody's homeland: none is broken up into islands.
+        p.no_broken = true;
         p.islands = 1.0;
-        p.plates = 26;
-        p.gap = 48.0;
-        p.max_sites = 160;
+        p.min_island = 0.0015;
+        p.plates = (3.5 * k).round() as usize + 2 * p.continents / 3;
+        p.gap = 5.0 * k;
+        p.seam_margin = 0.0;
+        p.max_sites = 10 * peoples.max(4);
+        // Simulate on 4×4-tile cells at most, so the biggest planets keep their ranges and rivers.
+        if w % 8 == 0 && h % 8 == 0 && w * h > 240_000 * 4 {
+            p.sim_cell = 4;
+        }
         p
     }
 
@@ -359,7 +422,7 @@ impl ProceduralDiffusion {
         let mut foot = ranges.height.clone();
         grid::blur(sd, &mut foot, (0.05 * scale / csf).max(3.0) as usize);
         for i in 0..n {
-            let strength = 0.6 + 0.4 * inp.uplift[i].min(1.0);
+            let strength = 0.45 + 0.45 * inp.uplift[i].min(1.6);
             h[i] += (ranges.height[i] * 0.74 * strength + foot[i] * 0.2) * self.mountains * inp.land[i];
         }
 
@@ -421,6 +484,12 @@ pub struct Stats {
     pub coast: filter::CleanStats,
     /// The smallest landmass allowed, tiles.
     pub min_island: usize,
+    /// How the continents are laid out and shaped.
+    pub layout: landform::Layout,
+    /// Each planned continent's character.
+    pub characters: Vec<&'static str>,
+    /// Landform and biome shares over the land, and their entropy.
+    pub variety: landform::Variety,
 }
 
 /// A generated map (the name and the first fields follow #112).
@@ -437,6 +506,8 @@ pub struct TerrainMap {
     pub biome: Vec<u8>,
     /// [`climate::relief`] per tile.
     pub relief: Vec<u8>,
+    /// [`landform::class`] per tile.
+    pub landform: Vec<u8>,
     /// Game tile ([`climate::tile`], the JS `T` codes).
     pub types: Vec<u8>,
     /// 1-px rivers.
@@ -601,6 +672,7 @@ impl TerrainMap {
             heights,
             biome: biome_map,
             relief: pick8(&self.relief),
+            landform: pick8(&self.landform),
             types,
             river_mask: pickb(&self.river_mask),
             lake_mask: pickb(&self.lake_mask),
@@ -657,12 +729,29 @@ impl Clock {
 
 /// Generate a map, with the procedural diffusion as the detail stage.
 pub fn generate(p: &TerrainParams) -> TerrainMap {
-    build(p, None)
+    build_checked(p, None)
 }
 
 /// Generate a map with another detail stage (e.g. a learned diffusion model, #110).
 pub fn generate_with(p: &TerrainParams, detail: &dyn ReliefDetail) -> TerrainMap {
-    build(p, Some(detail))
+    build_checked(p, Some(detail))
+}
+
+/// [`build`], redrawn with a fresh seed (up to three times) while the preset's
+/// [`Guarantee`] doesn't hold.
+fn build_checked(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
+    let mut m = build(p, custom);
+    if let Some(g) = p.guarantee {
+        let mut q = p.clone();
+        for k in 1..=3u32 {
+            if g.holds(&m) {
+                break;
+            }
+            q.seed = p.seed.wrapping_add(k.wrapping_mul(0x9E37_79B9));
+            m = build(&q, custom);
+        }
+    }
+    m
 }
 
 fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
@@ -679,7 +768,14 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
     let nc = p.continents.max(1);
     let mean_area = if p.continent_area > 0.0 { p.continent_area } else { p.land_fraction * n_tiles / nc as f32 };
     let mut areas: Vec<f32> = (0..nc).map(|_| mean_area * (1.0 + p.size_spread * rng.range(-1.0, 1.0))).collect();
-    if let Some(a) = &p.anchor {
+    if p.size_power > 0.0 {
+        // Power law: the largest few times the smallest, biggest first (the anchored home).
+        let w: Vec<f32> = (0..nc).map(|k| ((k + 1) as f32).powf(-p.size_power) * rng.range(0.85, 1.15)).collect();
+        let sw: f32 = w.iter().sum();
+        let mut a: Vec<f32> = w.iter().map(|&v| v / sw * mean_area * nc as f32).collect();
+        a.sort_by(|x, y| y.total_cmp(x));
+        areas = a;
+    } else if let Some(a) = &p.anchor {
         areas[0] = mean_area * a.share;
         // The others share what's left of the land budget.
         if nc > 1 && p.continent_area == 0.0 {
@@ -700,8 +796,10 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
         cold_limit: p.cold_limit,
         bands: p.climate.bands,
         roughness: p.roughness,
+        clusters: p.clusters,
     };
-    let gd0 = plates::growth_dims(p.w, p.h, p.wrap_x, 8_000);
+    // ~8000 growth cells on big maps, fewer on small ones (never finer than ~3 tiles).
+    let gd0 = plates::growth_dims(p.w, p.h, p.wrap_x, (n_tiles as usize / 12).clamp(2_000, 8_000));
     let gd = Dims { wrap_y: p.wrap_y, ..gd0 };
     let plates = if p.plates > 0 { p.plates } else { (n_tiles / (scale * scale * 0.4)).round().clamp(6.0, 40.0) as usize };
     let tect = plates::build(p.w, p.h, gd, &plan, plates, seed);
@@ -748,6 +846,35 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
         })
         .collect();
 
+    // Each continent's character (mountainous, arid, wet, broken, highland, plains), drawn at
+    // random each run and spread over its territory (smoothly, across the open sea).
+    let mut chars = landform::characters(nc, p.campaign, !p.no_broken, &mut rng);
+    // Only a big continent can be broken into islands that clear the minimum island size.
+    for (c, ch) in chars.iter_mut().enumerate() {
+        if ch.broken > 0.0 && areas[c] < 12.0 * p.min_island * n_tiles {
+            ch.broken = 0.0;
+        }
+    }
+    let terr_s: Vec<u8> = (0..sd.n())
+        .map(|i| {
+            let (x, y) = sd.xy(i);
+            let gx = ((x as f32 + 0.5) * csf / tect.cell.0) as usize;
+            let gy = ((y as f32 + 0.5) * csf / tect.cell.1) as usize;
+            (territory[gy.min(gd.h - 1) * gd.w + gx.min(gd.w - 1)] as usize).min(nc - 1) as u8
+        })
+        .collect();
+    let char_field = |f: &dyn Fn(&landform::Character) -> f32| {
+        let mut v: Vec<f32> = terr_s.iter().map(|&t| f(&chars[t as usize])).collect();
+        grid::blur(sd, &mut v, 3);
+        v
+    };
+    let ch_mtn = char_field(&|c| c.mountains);
+    let ch_arid = char_field(&|c| c.aridity);
+    let ch_rough = char_field(&|c| c.roughness);
+    let ch_plateau = char_field(&|c| c.plateau);
+    let ch_rugged = char_field(&|c| c.rugged);
+    let ch_broken = char_field(&|c| c.broken);
+
     // ---- 2. base relief (simulation grid) ----
     // Low-frequency noise (warp, coast, the first hill octaves) lives on a grid half the size
     // and is upsampled; only the fine octaves and the ridges are sampled per cell.
@@ -762,6 +889,11 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
     let hills_oct = octs(1.0 / (0.13 * scale), 4, csf).max(2);
     let ridge_n = Fbm::new(&mut rng, 1.0 / (0.16 * scale), octs(1.0 / (0.16 * scale), 4, csf), 0.5);
     let coast_amp = 0.2 * scale * p.roughness.max(0.1);
+    // Region masks: rugged against smooth country, tablelands, and the straits of broken
+    // continents (all large scale, so on the half-size grid too).
+    let rugged_n = Fbm::new(&mut rng, 1.0 / (0.7 * scale), 2, 0.5);
+    let plateau_n = Fbm::new(&mut rng, 1.0 / (0.45 * scale), 3, 0.5);
+    let strait_n = Fbm::new(&mut rng, 1.0 / (0.55 * scale), 3, 0.5);
     let belt_w = 0.075 * scale;
     let n = sd.n();
     let ld = sd.sized(sd.w / lo, sd.h / lo);
@@ -778,25 +910,59 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
     let (warp_x, warp_y) = if lo == 1 { (wxl.clone(), wyl.clone()) } else { (grid::resample(ld, &wxl, sd), grid::resample(ld, &wyl, sd)) };
     let mut coast_l = vec![0.0f32; ld.n()];
     let mut hills_l = vec![0.0f32; ld.n()];
+    let mut rugged_l = vec![0.0f32; ld.n()];
+    let mut plateau_l = vec![0.0f32; ld.n()];
+    let mut strait_l = vec![0.0f32; ld.n()];
     for y in 0..ld.h {
         for x in 0..ld.w {
             let i = y * ld.w + x;
             let wp = tor_l.at(x, y).moved(wxl[i], wyl[i]);
             coast_l[i] = coast_n.sample_octaves(&wp, 0, coast_oct);
             hills_l[i] = hills_n.sample_octaves(&wp, 0, 2);
+            rugged_l[i] = rugged_n.sample(&wp);
+            plateau_l[i] = plateau_n.sample(&wp);
+            strait_l[i] = strait_n.sample(&wp);
         }
     }
-    let (coast_nf, hills_lo) = if lo == 1 { (coast_l, hills_l) } else { (grid::resample(ld, &coast_l, sd), grid::resample(ld, &hills_l, sd)) };
+    let upl = |v: Vec<f32>| if lo == 1 { v } else { grid::resample(ld, &v, sd) };
+    let (coast_nf, hills_lo) = (upl(coast_l), upl(hills_l));
+    let (rugged_f, plateau_f, strait_f) = (upl(rugged_l), upl(plateau_l), upl(strait_l));
+    // Rift valleys along divergent plate boundaries.
+    let div_src: Vec<bool> = (0..gd.n()).map(|i| tect.boundary[i] && tect.conv[i] < -0.15).collect();
+    let (divd_g, _) = grid::distance_carry(gd, &div_src, &tect.conv);
+    let divd = grid::resample(gd, &divd_g.iter().map(|v| v * gcell).collect::<Vec<f32>>(), sd);
     let mut h = vec![0.0f32; n];
     let mut coast = vec![0.0f32; n];
     let mut land_f = vec![0.0f32; n];
+    // The coast field before and after the straits between continents; the shift `lift_sea`
+    // makes the land add up to the plan (crowded continents and straits eat into it).
+    // The channel between two continents varies in width, so its shores wiggle instead of
+    // following the straight territory line.
+    let raw: Vec<f32> = (0..n).map(|i| sdist[i] + coast_nf[i] * coast_amp * ch_rough[i]).collect();
+    let cap: Vec<f32> = (0..n).map(|i| dmid[i] - 0.5 * (strait + 0.12 * scale * (1.0 + strait_f[i] * 1.4).max(0.0))).collect();
+    let broken_cut: Vec<f32> = (0..n).map(|i| if ch_broken[i] > 0.01 { ch_broken[i] * 0.5 * scale * smoothstep(-0.05, -0.45, strait_f[i]) } else { 0.0 }).collect();
+    let coast_at = |i: usize, d: f32| {
+        let c = (raw[i] + d).min(cap[i]);
+        if c > 0.0 { c - broken_cut[i] } else { c }
+    };
+    let want = (areas.iter().sum::<f32>() / n_tiles).min(0.6);
+    let lift_sea = {
+        let frac = |d: f32| (0..n).filter(|&i| coast_at(i, d) > 0.0).count() as f32 / n as f32;
+        let (mut lo, mut hi) = (-0.05 * scale, 0.12 * scale);
+        if frac(0.0) >= want {
+            0.0
+        } else {
+            for _ in 0..14 {
+                let mid = 0.5 * (lo + hi);
+                if frac(mid) < want { lo = mid } else { hi = mid }
+            }
+            hi
+        }
+    };
     for y in 0..sd.h {
         for x in 0..sd.w {
             let i = y * sd.w + x;
-            // The channel between two continents varies in width (0.5×–2.5× `strait`), so its
-            // shores wiggle instead of following the straight territory line.
-            let channel = strait * (1.5 + coast_nf[i] * 1.6).max(0.5);
-            let c = (sdist[i] + coast_nf[i] * coast_amp).min(dmid[i] - channel * 0.5);
+            let c = coast_at(i, lift_sea);
             coast[i] = c;
             let lf = smoothstep(-0.02 * scale, 0.06 * scale, c);
             land_f[i] = lf;
@@ -805,12 +971,23 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
             } else {
                 -0.035 - 0.7 * smoothstep(0.0, 0.11 * scale, -c) + lift[i] * 0.5
             };
+            if c < -0.12 * scale {
+                // Open ocean: no hills, ranges or tablelands to add.
+                h[i] = base;
+                continue;
+            }
             let wp = tor.at(x, y).moved(warp_x[i], warp_y[i]);
             let fine = if c > -0.05 * scale && hills_oct > 2 { hills_n.sample_octaves(&wp, 2, hills_oct) } else { 0.0 };
-            let hills = (hills_lo[i] + fine) * 0.075 * (0.3 + 0.7 * lf);
+            // Rugged regions are hilly, smooth ones plains (so hills aren't everywhere).
+            let rug = (0.2 + 1.6 * smoothstep(-0.35, 0.45, rugged_f[i])) * ch_rugged[i];
+            let hills = (hills_lo[i] + fine) * 0.075 * (0.3 + 0.7 * lf) * rug;
+            // Tablelands: flat high ground with escarpments, away from the coast.
+            let table = ch_plateau[i] * smoothstep(0.12, 0.28, plateau_f[i]) * smoothstep(0.04 * scale, 0.16 * scale, c);
+            // Rifts sink along divergent boundaries inland.
+            let rift = 0.12 * (-(divd[i] / (0.03 * scale)).powi(2)).exp() * smoothstep(0.05 * scale, 0.2 * scale, c);
             let belt = convv[i].max(0.0) * (-(convd[i] / belt_w).powi(2)).exp();
             let ridges = if belt * lf > 0.01 { belt * 0.22 * ridge_n.ridged(&wp) * lf } else { 0.0 };
-            h[i] = base + hills + ridges;
+            h[i] = base + hills + ridges * ch_mtn[i].min(1.4) + table - rift;
         }
     }
     clock.lap("base");
@@ -860,7 +1037,30 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
             }
         }
     }
-    let mut uplift: Vec<f32> = (0..n).map(|i| if corridor[i] { 0.5 + 0.5 * convv[i].clamp(0.0, 1.0) } else { 0.0 }).collect();
+    // Ranges hugging one coast (like the Andes): on some continents, a corridor just inland
+    // along the coast that faces a random direction.
+    for c in 0..nc {
+        let mountainous = chars[c].mountains > 1.2;
+        if !(mountainous || rng.chance(0.4)) {
+            continue;
+        }
+        let (gx, gy) = tect.cores[c];
+        let (cx, cy) = (gx * tect.cell.0 / csf, gy * tect.cell.1 / csf);
+        let th = rng.range(0.0, std::f32::consts::TAU);
+        let (ux, uy) = (th.cos(), th.sin());
+        let r = (areas[c] / std::f32::consts::PI).sqrt() / csf;
+        for i in 0..n {
+            if owner_s[i] != c as u8 || coast[i] < 0.025 * scale || coast[i] > 0.1 * scale {
+                continue;
+            }
+            let (x, y) = sd.xy(i);
+            let (dx, dy) = (sd.dx(cx, x as f32), sd.dy(cy, y as f32));
+            if dx * ux + dy * uy > 0.3 * r {
+                corridor[i] = true;
+            }
+        }
+    }
+    let mut uplift: Vec<f32> = (0..n).map(|i| if corridor[i] { (0.5 + 0.5 * convv[i].clamp(0.0, 1.0)) * ch_mtn[i] } else { 0.0 }).collect();
     clock.lap("uplift");
 
     // ---- 4. islands: a few big ones, in arcs on oceanic convergent boundaries or hotspot
@@ -882,7 +1082,8 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
             let m = p.seam_margin + r * csf + 2.0;
             xt < m || xt > p.w as f32 - m || yt < m || yt > p.h as f32 - m
         };
-        let ocean_cells: Vec<usize> = (0..n).filter(|&i| coast[i] < -far).collect();
+        // Offshore, within reach of a continent: chains and arcs off the coasts.
+        let ocean_cells: Vec<usize> = (0..n).filter(|&i| coast[i] < -far && coast[i] > -0.45 * scale).collect();
         let arcs: Vec<usize> = ocean_cells.iter().copied().filter(|&i| convd[i] < 1.5 * gcell && convv[i] > 0.15).collect();
         let mut placed: Vec<(f32, f32, f32)> = Vec::new(); // x, y, r (cells)
         let mut chain = 0;
@@ -894,16 +1095,16 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
             let start = pool[rng.below(pool.len())];
             let (sx, sy) = sd.xy(start);
             let ang = rng.range(0.0, std::f32::consts::TAU);
-            let len = rng.int(1, 3).min((count - placed.len()) as i32);
+            let len = rng.int(2, 4).min((count - placed.len()) as i32);
             let mut prev: Option<(f32, f32, f32)> = None;
             for k in 0..len {
-                let area = min_island * rng.range(1.8, 3.4);
+                let area = min_island * rng.range(2.4, 4.0);
                 let r = (area / std::f32::consts::PI).sqrt() / csf;
                 let (x, y) = match prev {
                     None => (sx as f32, sy as f32),
                     Some((px, py, pr)) => {
                         let a2 = ang + if arc { 0.35 * k as f32 } else { rng.range(-0.3, 0.3) };
-                        let step = pr + r + rng.range(0.4, 0.9) * r;
+                        let step = pr + r + rng.range(0.25, 0.6) * r;
                         (px + a2.cos() * step, py + a2.sin() * step)
                     }
                 };
@@ -974,7 +1175,7 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
         let wv = noise::coarse_field(sd, p.w, p.h, lo, |q| wob.sample(q));
         for i in 0..n {
             if !ocean_s[i] {
-                moist_s[i] = (moist_s[i] + wv[i] * 0.07).clamp(0.0, 1.0);
+                moist_s[i] = (moist_s[i] + wv[i] * 0.1 - ch_arid[i]).clamp(0.0, 1.0);
             }
         }
     }
@@ -1097,6 +1298,59 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
     let moist_f = up(&moist_s);
     clock.lap("fields");
 
+    // Distances (tiles, simulation grid) to fresh water and to the sea.
+    let fresh_s: Vec<bool> = (0..n).map(|i| river_s[i] || lake_s[i]).collect();
+    let fresh_d: Vec<f32> = grid::distance(sd, &fresh_s).iter().map(|v| v * csf).collect();
+    let sea_d: Vec<f32> = grid::distance(sd, &ocean_s).iter().map(|v| v * csf).collect();
+    let sim_of = |i: usize| -> usize {
+        let (x, y) = full.xy(i);
+        (y as usize / cs).min(sd.h - 1) * sd.w + (x as usize / cs).min(sd.w - 1)
+    };
+    // Basins: low ground well below its surroundings, and rift floors.
+    let basin_s: Vec<bool> = {
+        let mut sm = h.clone();
+        grid::blur(sd, &mut sm, ((0.06 * scale / csf) as usize).clamp(2, 12));
+        (0..n).map(|i| !ocean_s[i] && h[i] < sm[i] - 0.02 && h[i] < bands_low1(&p.bands)).collect()
+    };
+    // Rolling country: low ground that is still steep at the simulation grid's scale.
+    let rolling_s: Vec<bool> = (0..n)
+        .map(|i| {
+            let mut g = 0.0f32;
+            sd.nb4(i, |j| g = g.max((h[i] - h[j]).abs()));
+            !ocean_s[i] && g > 0.036 * csf.sqrt()
+        })
+        .collect();
+    // Deltas: low land round the mouths of the bigger rivers.
+    let mut delta = vec![false; nf];
+    {
+        let rd_ = (0.035 * scale).clamp(3.0, 40.0) as i32;
+        let mut mouths = Vec::new();
+        for i in 0..nf {
+            if river_f[i] {
+                let mut sea = false;
+                full.nb4(i, |j| sea |= ocean_f[j]);
+                if sea {
+                    mouths.push(i);
+                }
+            }
+        }
+        for &m in mouths.iter() {
+            let (mx, my) = full.xy(m);
+            for oy in -rd_..=rd_ {
+                for ox in -rd_..=rd_ {
+                    if ox * ox + oy * oy > rd_ * rd_ {
+                        continue;
+                    }
+                    if let Some(j) = full.idx(mx + ox, my + oy) {
+                        if !ocean_f[j] && !lake_f[j] && hf[j] < p.bands.low[0] {
+                            delta[j] = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ---- 9. biomes, tiles, colour ----
     // The sea-ice edge meanders (floes and bays) rather than following a temperature line.
     let ice_edge = {
@@ -1104,13 +1358,15 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
         noise::coarse_field(full, p.w, p.h, (cs * 2).max(2), |q| f.sample(q) * 7.0)
     };
     let bands = &p.bands;
+    // A shelf at least two tiles wide along every coast.
+    let near_land = grid::dilate(full, &land_m, 2);
     let mut class = vec![0u8; nf];
     for i in 0..nf {
         let v = hf[i];
         let (b, r) = if ocean_f[i] {
             let b = if temp_f[i] + ice_edge[i] < -13.0 {
                 biome::SEA_ICE
-            } else if v > -bands.shelf {
+            } else if v > -bands.shelf || near_land[i] {
                 biome::SHELF
             } else {
                 biome::OCEAN
@@ -1133,6 +1389,15 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
             if r == relief::LOW && v < bands.beach && t > 1.0 && b != biome::ICE && near(full, &ocean_f, i, 2) {
                 b = biome::BEACH;
             }
+            // Wetlands: flat, wet low ground by fresh water or the sea, and wet deltas.
+            if r == relief::LOW && t > 2.0 && b != biome::DESERT && b != biome::ICE {
+                let si = sim_of(i);
+                let m = moist_f[i] + ice_edge[i] * 0.01;
+                let by_water = fresh_d[si] <= (0.02 * scale).max(3.0) || sea_d[si] <= (0.015 * scale).max(2.0);
+                if (v < bands.low[0] + 0.01 && m > 0.6 && by_water) || (delta[i] && m > 0.4) {
+                    b = biome::MARSH;
+                }
+            }
             (b, r)
         };
         class[i] = palette::class_of(b, r);
@@ -1149,14 +1414,23 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
         }
     };
     let class0 = class.clone();
-    filter::despeckle(full, &mut class, |i, v| kind(v) == kind(class0[i]), 24);
+    filter::despeckle(full, &mut class, |i, v| kind(v) == kind(class0[i]), 40);
     let shade = palette::hillshade(full, &hf, 3.0 * cs.max(1) as f32);
     let mut paint_idx: Vec<u16> = (0..nf)
         .map(|i| {
             let c = class[i];
             let (b, r) = (palette::class_biome(c), palette::class_relief(c));
             let s = if biome::is_land(b) && b != biome::ICE { shade[i] } else { 1 };
-            palette::paint_index(c, palette::step_of(b, r, hf[i], bands), s)
+            let mut st = palette::step_of(b, r, hf[i], bands);
+            if b == biome::DESERT && r == relief::LOW {
+                // Dune ridges: a coherent ripple across sand seas (crests ~2 tiles wide).
+                let (x, y) = full.xy(i);
+                let ph = (x as f32 * 0.88 + y as f32 * 0.47) * std::f32::consts::TAU / 6.0 + ice_edge[i] * 0.45;
+                if ph.sin() > 0.35 {
+                    st = 3;
+                }
+            }
+            palette::paint_index(c, st, s)
         })
         .collect();
     filter::despeckle(full, &mut paint_idx, |i, v| (v / 12) as u8 == class[i], 24);
@@ -1169,9 +1443,58 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
     // ---- 10. continents and sites ----
     let major_min = (0.35 * areas.iter().cloned().fold(f32::INFINITY, f32::min)) as usize;
     let (cont_id, continents) = sites::continents(full, &biome_map, major_min);
-    let fresh_s: Vec<bool> = (0..n).map(|i| river_s[i] || lake_s[i]).collect();
-    let fresh_d: Vec<f32> = grid::distance(sd, &fresh_s).iter().map(|v| v * csf).collect();
-    let sea_d: Vec<f32> = grid::distance(sd, &ocean_s).iter().map(|v| v * csf).collect();
+    // Landform classes and the variety they add up to.
+    let landform_map: Vec<u8> = {
+        use landform::class::*;
+        let coast_reach = (0.06 * scale).max(4.0);
+        (0..nf)
+            .map(|i| {
+                let (b, r) = (biome_map[i], relief_map[i]);
+                if !biome::is_land(b) {
+                    return WATER;
+                }
+                let si = sim_of(i);
+                let cid = cont_id[i] as usize;
+                if r >= relief::MOUNTAIN {
+                    MOUNTAINS
+                } else if r == relief::HILL || rolling_s[si] {
+                    HILLS
+                } else if b == biome::TUNDRA || b == biome::ICE {
+                    COLD
+                } else if b == biome::DESERT {
+                    DESERT
+                } else if delta[i] {
+                    DELTA
+                } else if b == biome::MARSH {
+                    WETLAND
+                } else if cid > 0 && !continents[cid - 1].major {
+                    ISLAND
+                } else if basin_s[si] {
+                    BASIN
+                } else if hf[i] >= bands.low[1] {
+                    PLATEAU
+                } else if sea_d[si] <= coast_reach && hf[i] < bands.low[0] {
+                    COASTAL
+                } else {
+                    PLAINS
+                }
+            })
+            .collect()
+    };
+    let variety = {
+        let mut lf = vec![0usize; landform::class::COUNT];
+        let mut bc = vec![0usize; biome::COUNT];
+        for i in 0..nf {
+            if landform_map[i] != landform::class::WATER {
+                lf[landform_map[i] as usize] += 1;
+                bc[biome_map[i] as usize] += 1;
+            }
+        }
+        lf[0] = 0;
+        let (landform_share, landform_entropy) = landform::shares(&lf);
+        let (biome_share, biome_entropy) = landform::shares(&bc);
+        landform::Variety { landform_share, biome_share, landform_entropy, biome_entropy, characters: chars.iter().map(|c| c.name).collect() }
+    };
     let (region, region_size) = sites::regions(full, &tiles);
     let site_list = sites::rank(
         &sites::SiteInput { d: full, height: &hf, biome: &biome_map, tiles: &tiles, continent: &cont_id, fresh_dist: &fresh_d, sea_dist: &sea_d, cell: cs, sim_w: sd.w, max_sites: p.max_sites },
@@ -1189,7 +1512,11 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
     // Output heights: sea level at `sea_level`, peaks at 1, sea floor at 0.
     let sl = p.sea_level;
     let height: Vec<f32> = hf.iter().map(|&v| if v >= 0.0 { sl + (1.0 - sl) * v.min(1.0) } else { sl * (1.0 + v.max(-1.0)) }).collect();
-    let stats = Stats { stages: clock.stages, sim_cell: cs, dla_nodes: info.dla_nodes, coast: coast_stats, min_island: min_island as usize };
+    let majors: Vec<(usize, usize, f32, f32)> = continents.iter().filter(|c| c.major).map(|c| (c.id, c.area, c.cx, c.cy)).collect();
+    let mut layout = landform::layout(full, &cont_id, &majors);
+    let land_mask: Vec<bool> = biome_map.iter().map(|&b| biome::is_land(b)).collect();
+    (layout.straight_strips, layout.max_strip_linearity) = metrics::strips(full, &land_mask);
+    let stats = Stats { stages: clock.stages, sim_cell: cs, dla_nodes: info.dla_nodes, coast: coast_stats, min_island: min_island as usize, layout, characters: chars.iter().map(|c| c.name).collect(), variety };
     TerrainMap {
         seed,
         width: p.w,
@@ -1200,6 +1527,7 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
         heights: height,
         biome: biome_map,
         relief: relief_map,
+        landform: landform_map,
         types: tiles,
         river_mask: river_f,
         lake_mask: lake_f,
@@ -1215,6 +1543,10 @@ fn build(p: &TerrainParams, custom: Option<&dyn ReliefDetail>) -> TerrainMap {
         sim: SimInfo { w: sd.w, h: sd.h, cell: cs, height: h, recv: dr.recv, river: river_s, lake: lake_s, ocean: ocean_s, dla: info.dla, corridor: info.corridor },
         stats,
     }
+}
+
+fn bands_low1(b: &Bands) -> f32 {
+    b.low[1]
 }
 
 /// Average `cs`×`cs` blocks of the full grid down to the simulation grid.

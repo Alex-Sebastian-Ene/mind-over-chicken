@@ -86,32 +86,36 @@ impl Perlin {
         if y0 > z0 { ry += 1 } else { rz += 1 }
         if y0 > w0 { ry += 1 } else { rw += 1 }
         if z0 > w0 { rz += 1 } else { rw += 1 }
-        let c = |r: u8, n: u8| if r >= n { 1.0f32 } else { 0.0 };
+        // Corner offsets as integers (for the hash) and floats (for the distances).
+        let c = |r: u8, n: u8| (r >= n) as usize;
         let (i1, j1, k1, l1) = (c(rx, 3), c(ry, 3), c(rz, 3), c(rw, 3));
         let (i2, j2, k2, l2) = (c(rx, 2), c(ry, 2), c(rz, 2), c(rw, 2));
         let (i3, j3, k3, l3) = (c(rx, 1), c(ry, 1), c(rz, 1), c(rw, 1));
         let p = &self.perm;
         let (ii, jj, kk, ll) = ((i as i32 & 255) as usize, (j as i32 & 255) as usize, (k as i32 & 255) as usize, (l as i32 & 255) as usize);
         // `& 511` keeps every index provably inside the 512-entry table (no bounds checks).
-        let h = |a: f32, b: f32, cc: f32, d: f32| -> u8 {
-            let q = p[(ll + d as usize) & 511] as usize;
-            let q = p[(kk + cc as usize + q) & 511] as usize;
-            let q = p[(jj + b as usize + q) & 511] as usize;
-            p[(ii + a as usize + q) & 511]
+        let h = |a: usize, b: usize, cc: usize, d: usize| -> u8 {
+            let q = p[(ll + d) & 511] as usize;
+            let q = p[(kk + cc + q) & 511] as usize;
+            let q = p[(jj + b + q) & 511] as usize;
+            p[(ii + a + q) & 511]
         };
-        let mut n = 0.0f32;
-        let mut corner = |gx: f32, gy: f32, gz: f32, gw: f32, hh: u8| {
+        #[inline(always)]
+        fn corner(gx: f32, gy: f32, gz: f32, gw: f32, hh: u8) -> f32 {
             let t = 0.6 - gx * gx - gy * gy - gz * gz - gw * gw;
             if t > 0.0 {
                 let t2 = t * t;
-                n += t2 * t2 * grad(hh, gx, gy, gz, gw);
+                t2 * t2 * grad(hh, gx, gy, gz, gw)
+            } else {
+                0.0
             }
-        };
-        corner(x0, y0, z0, w0, h(0.0, 0.0, 0.0, 0.0));
-        corner(x0 - i1 + G4, y0 - j1 + G4, z0 - k1 + G4, w0 - l1 + G4, h(i1, j1, k1, l1));
-        corner(x0 - i2 + 2.0 * G4, y0 - j2 + 2.0 * G4, z0 - k2 + 2.0 * G4, w0 - l2 + 2.0 * G4, h(i2, j2, k2, l2));
-        corner(x0 - i3 + 3.0 * G4, y0 - j3 + 3.0 * G4, z0 - k3 + 3.0 * G4, w0 - l3 + 3.0 * G4, h(i3, j3, k3, l3));
-        corner(x0 - 1.0 + 4.0 * G4, y0 - 1.0 + 4.0 * G4, z0 - 1.0 + 4.0 * G4, w0 - 1.0 + 4.0 * G4, h(1.0, 1.0, 1.0, 1.0));
+        }
+        let f = |v: usize| v as f32;
+        let mut n = corner(x0, y0, z0, w0, h(0, 0, 0, 0));
+        n += corner(x0 - f(i1) + G4, y0 - f(j1) + G4, z0 - f(k1) + G4, w0 - f(l1) + G4, h(i1, j1, k1, l1));
+        n += corner(x0 - f(i2) + 2.0 * G4, y0 - f(j2) + 2.0 * G4, z0 - f(k2) + 2.0 * G4, w0 - f(l2) + 2.0 * G4, h(i2, j2, k2, l2));
+        n += corner(x0 - f(i3) + 3.0 * G4, y0 - f(j3) + 3.0 * G4, z0 - f(k3) + 3.0 * G4, w0 - f(l3) + 3.0 * G4, h(i3, j3, k3, l3));
+        n += corner(x0 - 1.0 + 4.0 * G4, y0 - 1.0 + 4.0 * G4, z0 - 1.0 + 4.0 * G4, w0 - 1.0 + 4.0 * G4, h(1, 1, 1, 1));
         n * 27.0
     }
 }

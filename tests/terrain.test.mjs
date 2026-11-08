@@ -74,6 +74,28 @@ test('every run is a different world: land masks overlap little (IoU < 0.5)', ()
   }
 });
 
+test('the world is a torus: lookups and walking wrap across both seams (#111)', () => {
+  const w = new World((Math.random() * 1e9) >>> 0, { width: 640, height: 360 });
+  const W = w.width, H = w.height;
+  for (const [x, y] of [[0, 0], [5, 17], [639, 359], [320, 1]]) {
+    assert.equal(w.get(x - W, y), w.get(x, y));
+    assert.equal(w.get(x, y + H), w.get(x, y));
+    assert.equal(w.typeAt(x + W, y - H), w.typeAt(x, y));
+  }
+  // A strip of grass across the east–west seam and one across the north–south seam, sea
+  // everywhere else: each end is reachable only across its seam.
+  w.type.fill(T.DEEP);
+  for (let x = W - 6; x < W + 6; x++) w.type[100 * W + ((x % W) + W) % W] = T.GRASS;
+  for (let y = H - 6; y < H + 6; y++) w.type[(((y % H) + H) % H) * W + 200] = T.GRASS;
+  w.fields = new Map();
+  const ew = w.field(W - 6, 100);   // quantised to a 3 px grid, still on the strip
+  assert.ok(ew[100 * W + 4] >= 0, 'walk east across the seam');
+  const ns = w.field(200, H - 6);
+  assert.ok(ns[4 * W + 200] >= 0, 'walk south across the seam');
+  const sea = w.seaField(10, 10);
+  assert.ok(sea[(H - 1) * W + (W - 1)] >= 0 && sea[(H - 1) * W + (W - 1)] <= 20, 'boats cross the corner seam the short way');
+});
+
 test('a galaxy planet: 640×360 surface with its 320×180 capital', () => {
   const p = World.planet((Math.random() * 1e9) >>> 0, 'desert');
   assert.equal(p.width, 320);

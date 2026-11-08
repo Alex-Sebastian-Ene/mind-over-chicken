@@ -441,6 +441,11 @@ pub fn wants(w: &World, f: &Faction) -> [f32; CATS] {
     s[Cat::Faith as usize] = 0.03 + 0.12 * (1.0 - m.faith) + 0.04 * calmish;
     s[Cat::Order as usize] = 0.03 + 0.2 * (1.0 - m.stability);
     s[Cat::Haul as usize] = if f.villages > 1 { 0.05 } else { 0.01 };
+    // #100: a war council sets the share under arms itself (`politics::Policy::mobilise`).
+    if let Some(share) = w.policy.as_ref().and_then(|p| p.mobilise(f.id)) {
+        let others: f32 = s.iter().enumerate().filter(|&(c, _)| c != Cat::Fight as usize).map(|(_, x)| *x).sum();
+        s[Cat::Fight as usize] = others * share / (1.0 - share).max(0.05) + if f.fortify_t > 0.0 { 0.15 } else { 0.0 };
+    }
     s
 }
 

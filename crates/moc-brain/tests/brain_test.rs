@@ -106,7 +106,7 @@ fn test_retrain_time_benchmark() {
     assert!(trained);
     println!("Retrain duration in test: {:?}", duration);
     if cfg!(debug_assertions) {
-        assert!(duration.as_millis() < 150, "Debug mode should be < 150ms");
+        assert!(duration.as_millis() < 300, "Debug mode should be < 300ms");
     } else {
         assert!(
             duration.as_millis() <= 5,

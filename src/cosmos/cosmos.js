@@ -412,6 +412,11 @@ export class Cosmos extends ZoomState {
       const p = this.galaxy.hit(x, y);
       if (p && p.forming) { this.say(p.mindSlot && !this.galaxy.mindReady ? 'Still reading your mind. Keep playing.' : 'Still forming. Give it a second.'); return null; }
       if (p) { this.focusPlanet(p, G); return p; }
+    } else if (this.z > 0.5 && this.z <= 1.5) {
+      if (Math.hypot(x - CENTER.x, y - CENTER.y) <= BIG_R && this.canLand()) {
+        this.zoomIn(G);
+        return this.world();
+      }
     }
     return null;
   }

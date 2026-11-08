@@ -94,7 +94,9 @@ pub fn despeckle<T: Copy + Eq>(d: Dims, c: &mut [T], allowed: impl Fn(usize, T) 
             for slot in cand.iter().take(k) {
                 let v = slot.0.unwrap();
                 c[i] = v;
-                let score = slot.1 as i32 * 4 + if in_block(d, c, i) { 2 } else { 0 } + if v == old { 1 } else { 0 };
+                // A class that makes a 2×2 block here always wins (so tiles where several
+                // classes meet still settle); then the most common; then keeping the old one.
+                let score = if in_block(d, c, i) { 1000 } else { 0 } + slot.1 as i32 * 4 + if v == old { 1 } else { 0 };
                 if score > best_score {
                     best_score = score;
                     best = Some(v);
@@ -264,7 +266,10 @@ pub fn clean(d: Dims, land: &mut [bool], height: &[f32], min_island: usize, min_
     }
     let (band, in_band) = coast_band(d, land, 4);
     let mut eroded = vec![false; d.n()];
-    for round in 0..6 {
+    // Three rounds of opening, diagonal fixes and sliver fills, then opening and diagonal
+    // fixes alone until nothing changes: those only remove land, so they converge, and the
+    // coast ends with no threads and no diagonal-only joins.
+    for round in 0..16 {
         let mut changed = 0;
         // 2. opening: keep land only inside a 3×3 block of land. (`eroded` is only computed
         // inside the band; outside it every tile is surrounded by its own kind.)
@@ -307,8 +312,11 @@ pub fn clean(d: Dims, land: &mut [bool], height: &[f32], min_island: usize, min_
                 changed += 1;
             }
         }
-        if round == 5 {
-            break;
+        if round >= 3 {
+            if changed == 0 {
+                break;
+            }
+            continue;
         }
         // 4. water slivers: fill water that isn't in any 2×2 of water.
         for &i in band.iter() {
