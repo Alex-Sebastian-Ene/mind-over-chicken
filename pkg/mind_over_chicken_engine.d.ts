@@ -263,11 +263,7 @@ export class RustBrain {
     blinks(): number;
     calm(): number;
     focus(): number;
-    /**
-     * One headset frame: EEG bands, blink, head tilt, motion and contact quality. There is no
-     * heart-rate argument: the game does not read heart rate (#99, #153).
-     */
-    ingest(delta: number, theta: number, alpha: number, beta: number, gamma: number, blink: boolean, tilt_x: number, tilt_y: number, motion: number, quality: number): boolean;
+    ingest(delta: number, theta: number, alpha: number, beta: number, gamma: number, blink: boolean, hr: number, tilt_x: number, tilt_y: number, motion: number, quality: number): boolean;
     constructor();
     retrain(): boolean;
     set_cue(cue_id: number): void;
@@ -312,11 +308,7 @@ export class RustEmotionTracker {
     [Symbol.dispose](): void;
     constructor(calibrate_seconds: number);
     reset(): void;
-    /**
-     * Arguments follow `INPUTS` in src/camera/emotion.js. Returns
-     * `[dominant, joy, anger, surprise, sadness, neutral, intensity, face, event, surpriseTriggered, calibrating]`.
-     */
-    update_direct(has_face: boolean, mouth_smile_left: number, mouth_smile_right: number, brow_down_left: number, brow_down_right: number, mouth_press_left: number, mouth_press_right: number, jaw_open: number, brow_inner_up: number, brow_outer_up_left: number, brow_outer_up_right: number, eye_wide_left: number, eye_wide_right: number, mouth_frown_left: number, mouth_frown_right: number, dt: number): Array<any>;
+    update_direct(has_face: boolean, mouth_smile_left: number, mouth_smile_right: number, brow_down_left: number, brow_down_right: number, mouth_press_left: number, mouth_press_right: number, jaw_open: number, brow_inner_up: number, eye_wide_left: number, eye_wide_right: number, mouth_frown_left: number, mouth_frown_right: number, dt: number): Array<any>;
 }
 
 /**
@@ -353,6 +345,10 @@ export class RustGalaxy {
     planet_pos_y(idx: number): number;
     planet_progress(idx: number): number;
     set_attended(planet_idx: number): void;
+    ship_count(): number;
+    ship_from(idx: number): number;
+    ship_t(idx: number): number;
+    ship_to(idx: number): number;
     step(dt: number, calm: number, focus: number, stress: number, blinks_last_10s: number, blinks_total: number): void;
 }
 
@@ -413,11 +409,6 @@ export class RustSimSource {
     blink(): void;
     constructor(seed: number);
     set_input(calm: boolean, focus: boolean, panic: boolean): void;
-    /**
-     * The last frame emitted over `dt`, as `SIM_FRAME_LEN` numbers: delta, theta, alpha, beta,
-     * gamma, blink (0 or 1), tilt x, tilt y, motion, quality. All zeros when no frame was due
-     * (quality 0). No heart rate (#153).
-     */
     step(dt: number): Float32Array;
 }
 
@@ -767,7 +758,7 @@ export interface InitOutput {
     readonly rustbrain_blinks: (a: number) => number;
     readonly rustbrain_calm: (a: number) => number;
     readonly rustbrain_focus: (a: number) => number;
-    readonly rustbrain_ingest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
+    readonly rustbrain_ingest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => number;
     readonly rustbrain_new: () => number;
     readonly rustbrain_retrain: (a: number) => number;
     readonly rustbrain_set_cue: (a: number, b: number) => void;
@@ -785,7 +776,7 @@ export interface InitOutput {
     readonly rustcastcontroller_update: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly rustemotiontracker_new: (a: number) => number;
     readonly rustemotiontracker_reset: (a: number) => void;
-    readonly rustemotiontracker_update_direct: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number) => any;
+    readonly rustemotiontracker_update_direct: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => any;
     readonly rustfingercontroller_new: () => number;
     readonly rustfingercontroller_reset: (a: number) => void;
     readonly rustfingercontroller_update: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => any;
@@ -806,6 +797,10 @@ export interface InitOutput {
     readonly rustgalaxy_planet_pos_y: (a: number, b: number) => number;
     readonly rustgalaxy_planet_progress: (a: number, b: number) => number;
     readonly rustgalaxy_set_attended: (a: number, b: number) => void;
+    readonly rustgalaxy_ship_count: (a: number) => number;
+    readonly rustgalaxy_ship_from: (a: number, b: number) => number;
+    readonly rustgalaxy_ship_t: (a: number, b: number) => number;
+    readonly rustgalaxy_ship_to: (a: number, b: number) => number;
     readonly rustgalaxy_step: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly rustimutracker_add_calib_point: (a: number, b: number, c: number) => void;
     readonly rustimutracker_aim_x: (a: number) => number;
@@ -903,10 +898,11 @@ export interface InitOutput {
     readonly moc_brain_get_agitation: (a: number) => number;
     readonly moc_brain_get_calm: (a: number) => number;
     readonly moc_brain_get_focus: (a: number) => number;
+    readonly moc_brain_get_hr_delta: (a: number) => number;
     readonly moc_brain_get_model_accuracy: (a: number) => number;
     readonly moc_brain_get_model_trust: (a: number, b: number) => number;
     readonly moc_brain_get_stress: (a: number) => number;
-    readonly moc_brain_ingest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
+    readonly moc_brain_ingest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => number;
     readonly moc_brain_new: () => number;
     readonly moc_brain_set_cue: (a: number, b: number) => void;
     readonly moc_brain_update: (a: number, b: number) => number;
@@ -918,8 +914,8 @@ export interface InitOutput {
     readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
     readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
     readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__279: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__280: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__283: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__284: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
