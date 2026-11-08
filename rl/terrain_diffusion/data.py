@@ -85,6 +85,14 @@ def make_pair(metres: torch.Tensor, stats: dict, gen: torch.Generator | None = N
     dev = metres.device
     h = metres_to_game(metres.float())
     u = lambda lo, hi: lo + (hi - lo) * torch.rand(b, device=dev, generator=gen)  # noqa: E731
+    if augment:
+        # The game's coarse maps are not blurred real DEMs: vary the relief amplitude and add a
+        # gentle low-frequency wobble. Applied to the terrain itself (not just the condition),
+        # so the target residual stays pure detail and never asks the model to undo something
+        # it cannot see.
+        gain = u(0.85, 1.15)[:, None, None, None]
+        wobble = blur(torch.randn(h.shape, device=dev, generator=gen), 6.0) * 6.0 * u(0.0, 0.02)[:, None, None, None]
+        h = h * gain + wobble
     sigma = u(0.6, 3.0) if augment else torch.full((b,), 1.5, device=dev)
     coarse = coarse_like(h, sigma)
     land = coarse_like((h > 0).float(), sigma).clamp(0, 1)
@@ -95,11 +103,6 @@ def make_pair(metres: torch.Tensor, stats: dict, gen: torch.Generator | None = N
     rough = coarse_like(rough, sigma).clamp(0, 1)
     c_in = coarse
     if augment:
-        # The game's coarse map is not a blurred real DEM: perturb it a little so the model
-        # does not rely on exact low-pass structure.
-        gain = u(0.9, 1.1)[:, None, None, None]
-        wobble = blur(torch.randn(h.shape, device=dev, generator=gen), 6.0) * 6.0
-        c_in = coarse * gain + wobble * u(0.0, 0.02)[:, None, None, None]
         uplift = (uplift + 0.05 * (torch.rand(b, 1, 1, 1, device=dev, generator=gen) - 0.5)).clamp(0, 1)
         rough = (rough + 0.05 * (torch.rand(b, 1, 1, 1, device=dev, generator=gen) - 0.5)).clamp(0, 1)
     cond = torch.cat(

@@ -8,7 +8,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=24G
-#SBATCH --time=04:00:00
+#SBATCH --time=02:00:00
 #SBATCH --signal=B:USR1@300
 #SBATCH --output=/scratch/ase1g23/moc_diffusion/logs/%x-%j.out
 set -euo pipefail
