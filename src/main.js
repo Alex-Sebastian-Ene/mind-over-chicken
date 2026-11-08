@@ -266,7 +266,13 @@ try {
   getBrain: () => G?.brain || previewBrain,
   onConnectBridge: async (url) => {
     const src = new BridgeSource(url);
-    await src.connect();
+    try {
+      await src.connect();
+      await src.waitForFrame();   // swap only to a headset that is sending EEG (#174)
+    } catch (err) {
+      src.disconnect();           // no reconnect loop behind a failed attempt
+      throw err;
+    }
     setGameSource(src);
   },
   onDisconnectBridge: () => {
@@ -1653,17 +1659,43 @@ $('playCiv').addEventListener('click', () => {
   document.body.dataset.era = scene.era;
   startIntro(scene, -1);
 });
+// Connect a real headset (#174): the run starts on its first EEG frame, not when the socket
+// opens. While it waits the button cancels; after a failure it retries.
+let bridgeWait = null;
 $('playBridge').addEventListener('click', async () => {
-  const url = $('bridgeUrl').value.trim() || 'ws://localhost:8765';
+  const btn = $('playBridge');
   const status = $('bridgeStatus');
+  if (bridgeWait) {
+    const s = bridgeWait;
+    bridgeWait = null;
+    s.disconnect();
+    btn.textContent = 'Connect';
+    status.textContent = 'Cancelled.';
+    return;
+  }
+  const url = $('bridgeUrl').value.trim() || 'ws://localhost:8765';
   status.textContent = `Connecting to ${url}…`;
   const src = new BridgeSource(url);
+  bridgeWait = src;
+  btn.textContent = 'Cancel';
   try {
     await src.connect();
-    status.textContent = 'Connected.';
+    if (bridgeWait !== src) return;
+    status.textContent = 'Bridge connected. Waiting for the first EEG from the headset…';
+    await src.waitForFrame(10000);
+    if (bridgeWait !== src) return;
+    bridgeWait = null;
+    btn.textContent = 'Connect';
+    status.textContent = src.status;
     begin(src);
   } catch (err) {
-    status.textContent = `${err.message}. Start the bridge with: python bridge/muse_bridge.py --board muse2 (or --board synthetic to test).`;
+    if (bridgeWait !== src) return;   // cancelled
+    bridgeWait = null;
+    src.disconnect();
+    btn.textContent = 'Retry';
+    status.textContent = src.connected || /EEG/.test(err.message)
+      ? `${err.message}. Is the Muse on, charged and paired with the bridge? Retry, or play with the emulated headset.`
+      : `${err.message}. Start the bridge with: python bridge/muse_bridge.py --board muse2 (or --board synthetic to test).`;
   }
 });
 
