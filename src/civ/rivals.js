@@ -361,7 +361,7 @@ const MOOD = { [TONE.bad]: 'panic', [TONE.warn]: 'nervous', [TONE.good]: 'happy'
 
 // What a rival line does to the scene: food, people hurt, the goat market; and the words.
 // Returns what was applied (for tests and the log).
-export function applyRivalLine(line, { scene, advisor, hud } = {}) {
+export function applyRivalLine(line, { scene, advisor, news } = {}) {
   const done = { food: 0, hurt: 0, market: 0, said: false };
   if (line.food && Number.isFinite(scene?.food)) {
     const before = scene.food;
@@ -381,15 +381,15 @@ export function applyRivalLine(line, { scene, advisor, hud } = {}) {
   }
   if (line.market && Number.isFinite(scene?.price)) {
     scene.price = Math.max(2, scene.price * (1 + line.market));
-    if (Array.isArray(scene.headlines) && line.text) scene.headlines.push(line.text.toUpperCase());
     done.market = line.market;
   }
   if (line.say && advisor?.say) {
     advisor.say(line.key || `rival-${line.kind}`, line.say, { mood: MOOD[line.tone] || 'nervous', priority: line.priority || 2, cooldown: line.cooldown || 12 });
     done.said = true;
   }
-  if (line.text && hud?.showCause && line.kind !== RIVAL.WORLD) {
-    hud.showCause(line.text, { ms: 3600, tone: line.tone === TONE.bad ? 'bad' : line.tone === TONE.warn ? 'warn' : 'ok' });
+  // The news ticker (#220): what touches you, and the world's big turns (a rival's new age).
+  if (line.text && news?.push && (line.kind !== RIVAL.WORLD || line.n === 2)) {
+    done.news = news.push(line.text, { tone: line.market ? 'market' : line.tone, source: 'rivals' });
   }
   return done;
 }

@@ -132,6 +132,7 @@ export class PlanetSurface {
     for (const hit of this.fireballs.update(dt)) this.impactFireball(hit);
     this.particles.update(dt);
     const sp = this.sim;
+    if (sp?.G) sp.G.handInput = this.handInput;   // Rain spell: the capital tribe needs the palm state
     if (sp) {
       if (sp.outcome) {
         sp.advance(dt);   // the tribe keeps living (dancing, or not) for a moment
@@ -210,13 +211,23 @@ export class PlanetSurface {
     }
     const placed = [];
     const n = BUILDINGS[size];
+    // Scatter the buildings in a loose cluster instead of on tidy concentric rings: the angle
+    // is free and the radius is biased towards the middle, so the village still reads as one
+    // place while avoiding the ringed look. A little spacing stops the sprites piling up.
+    const spreadX = (s.capital ? 15 : 9) + size * 3;
+    const spreadY = spreadX * (s.capital ? 0.62 : 0.7);
     for (let i = 0; i < n; i++) {
-      const ring = i < 6 ? 0 : i < 14 ? 1 : 2;
-      const inRing = [6, 8, 10][ring], k = i - [0, 6, 14][ring];
-      const a = (k / inRing) * Math.PI * 2 + ring * 0.4 + rng() * 0.3;
-      const rx = (s.capital ? 11 : 6) + ring * 7, ry = (s.capital ? 7 : 4) + ring * 5;
-      const x = wrapX(Math.round(s.x + Math.cos(a) * rx)), y = Math.round(s.y + Math.sin(a) * ry);
-      if (!walkableAt(v, x, y)) continue;
+      let x = 0, y = 0, clear = false;
+      for (let tries = 0; tries < 14 && !clear; tries++) {
+        const a = rng() * Math.PI * 2;
+        const r = Math.pow(rng(), 1.35);     // usually near the centre, sometimes out at the edge
+        const innerX = s.capital ? 6 : 4, innerY = innerX * (spreadY / spreadX);
+        x = wrapX(Math.round(s.x + Math.cos(a) * (innerX + r * (spreadX - innerX))));
+        y = Math.round(s.y + Math.sin(a) * (innerY + r * (spreadY - innerY)));
+        clear = walkableAt(v, x, y)
+          && !placed.some((b) => Math.abs(wrapDx(x - b.x)) < 4 && Math.abs(y - b.y) < 3);
+      }
+      if (!clear) continue;
       const kind = era === 'stone' ? 'hut' : era === 'farming' ? (size >= 2 && i % 3 === 0 ? 'house' : 'hut') : era === 'space' && size >= 2 && i % 3 === 0 ? 'tower' : 'house';
       placed.push({ kind, x, y, h: 7 + Math.floor(rng() * 7), roof: pick(ROOFS[era] || ROOFS.farming) });
     }
