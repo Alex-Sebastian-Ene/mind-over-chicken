@@ -114,6 +114,8 @@ export class Civ {
 
   // ---- founding the civilisations one at a time (#98; the flow lives in Rust, setup.rs) ----
   get setupPhase() { return this.ex.civ_setup_phase(this.w); }
+  // Seeding window progress, 0..1 (the 5 s mind read for the civilisation being founded, #88).
+  get setupProgress() { return this.ex.civ_setup_progress ? this.ex.civ_setup_progress(this.w) : 0; }
   setupHover(x, y) { return this.ex.civ_setup_hover(this.w, x, y) > 0; }
   setupClick(x, y) { return this.ex.civ_setup_click(this.w, x, y); }
   setupEnter() { return this.ex.civ_setup_enter(this.w); }
