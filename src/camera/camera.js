@@ -4,7 +4,8 @@
 //   Hands: MediaPipe Gesture Recognizer (numHands=2, #118) →
 //          1. One-hand pinch grabs & relocates living entities under the cursor (#120)
 //          2. Two-hand pinch distance continuously zooms in/out & freezes on release (#119)
-//          3. Three core moves (#122): Pinch (1), Open Palm / Calm (2), Closed Fist / Strike (3)
+//          3. Three core moves (#122): Pinch (1), Open Palm / Calm (2), Fireball (3): fist charges,
+//             opening the hand releases it (#150); there is no separate fist Strike (#159)
 //   Face:  MediaPipe Face Landmarker blendshapes → Joy (continuous) + Surprise (debounced event) (#117).
 //   Coach: Collapsible bottom panel with procedural 21-landmark ghost hands (#123).
 //
@@ -53,7 +54,7 @@ const TEMPLATE = `
       <strong data-cam-state>Camera off</strong>
       <span class="eeg-qual" data-cam-mode>Idle</span>
     </div>
-    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam for hands and face: pinch-grab creatures, two-hand pinch-zoom, palm to calm, fist to strike; your expression sets the mood. The webcam does not track your head: the cursor follows the EEG headset's head pose, or the mouse. Frames never leave this device.</p>
+    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam for hands and face: pinch-grab creatures, two-hand pinch-zoom, palm to calm, close your fist then open it to throw a fireball; your expression sets the mood. The webcam does not track your head: the cursor follows the EEG headset's head pose, or the mouse. Frames never leave this device.</p>
     <div class="eeg-url-row">
       <button type="button" class="btn btn-primary btn-small" data-cam-start>Start Camera</button>
       <button type="button" class="btn btn-small" data-cam-stop disabled>Stop &amp; Clear</button>
@@ -94,7 +95,7 @@ const TEMPLATE = `
       <h3>Core Hand Moves (Keys 1–3)</h3>
       <span class="eeg-qual" data-cam-last>Ready</span>
     </div>
-    <p class="eeg-msg" data-cam-now>Aim with the headset or mouse. Pinch=Grab (1), Palm=Calm (2), Fist=Strike (3).</p>
+    <p class="eeg-msg" data-cam-now>Aim with the headset or mouse. Pinch=Grab (1), Palm=Calm (2), Fist→Open=Fireball (hold 3, release).</p>
     <div class="cam-spells" role="group" aria-label="Core moves, keys 1 to 3">
       ${SPELLS.map((s) => `<button type="button" class="cam-spell" data-spell="${s.id}" aria-label="${s.name} (key ${s.key})" title="${s.name} · key ${s.key}. ${s.hint}">
         <svg class="cam-ring" viewBox="0 0 36 36" aria-hidden="true"><circle class="cam-ring-track" cx="18" cy="18" r="16"/><circle class="cam-ring-hold" cx="18" cy="18" r="16" pathLength="100"/><circle class="cam-ring-cd" cx="18" cy="18" r="16" pathLength="100"/></svg>
@@ -213,7 +214,8 @@ export function initCamera({
   let finger = null;
   let multi = null;
   let grabbed = null;          // { label, kind, at } when holding a living entity (#120)
-  let armed = 'fist';
+  let armed = 'fireball';
+  let keyCharge = null;        // { id, code, at }: key 3 held to charge a fireball, released to throw (#150)
   let mood = neutralMood();
   let moodScene = null, moodSent = null, strongPending = false, surprisePending = false;
   let advisorAt = -Infinity;
@@ -441,7 +443,7 @@ export function initCamera({
     if (via !== 'gesture' && !casts.trigger(id, now)) return false;
     const aim = { x: G.brain.aim.x, y: G.brain.aim.y };
     try {
-      if ((id === 'fist' || id === 'fireball') && scene.onBlink && !scene.onCast) {
+      if (id === 'fireball' && scene.onBlink && !scene.onCast) {
         G.hud?.flashBlink?.();
         scene.onBlink(aim);
       } else {
@@ -459,7 +461,7 @@ export function initCamera({
     pings.push({ ...aim, at: now, glyph: SPELL_BY_ID[id].glyph });
     coach?.flash(`${SPELL_BY_ID[id].glyph} ${SPELL_BY_ID[id].name}!`, 'ok', 1600);
     if (id === 'palm') G.hud?.showCause?.('🖐️ Your open palm spread calm across the land');
-    else if (id === 'fist') G.hud?.showCause?.('✊ Your closed fist called down a strike');
+    else if (id === 'fireball') G.hud?.showCause?.('🔥 You opened your fist and hurled a fireball');
     return true;
   }
 
@@ -468,8 +470,20 @@ export function initCamera({
     if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
     const spell = spellForKeyCode(e.code);
     if (!spell) return;
+    // Charge moves (#150): key down charges like a closed fist, key up throws like opening it.
+    if (spell.release) {
+      if (canCast()) { keyCharge = { id: spell.id, code: e.code, at: performance.now() }; e.preventDefault(); }
+      return;
+    }
     if (cast(spell.id, 'key')) e.preventDefault();
   });
+  window.addEventListener('keyup', (e) => {
+    if (!keyCharge || e.code !== keyCharge.code) return;
+    const { id } = keyCharge;
+    keyCharge = null;
+    if (cast(id, 'key')) e.preventDefault();
+  });
+  window.addEventListener('blur', () => { keyCharge = null; });
   for (const s of SPELLS) ui.spells[s.id]?.addEventListener('click', () => cast(s.id, 'tap'));
 
   // ---------- mood (#117: Joy continuous + Surprise debounced event) ----------
@@ -585,7 +599,7 @@ export function initCamera({
         }
       }
 
-      // 3. Palm (Calm) & Fist (Strike) gesture holds (#122) — suppressed while pinching or grabbing
+      // 3. Palm (Calm) hold and fist-to-open Fireball (#122, #150) — suppressed while pinching or grabbing
       const suppressCast = multi.suppressCasts || finger.suppress;
       hold = suppressCast ? casts.update('None', 0, now) : casts.update(gesture.name, gesture.score, now);
       if (hold.cast) cast(hold.cast, 'gesture', now);
@@ -676,14 +690,18 @@ export function initCamera({
     const recent = lastCast && now - lastCast.at < 1400 ? SPELL_BY_ID[lastCast.id] : null;
     if (recent) return `Move: ${fmt(recent)}!`;
     const aimBy = aimSource(getG(), now).short;
-    if (!(stream && engine)) return `Aim with the ${aimBy}. Press 1 (Grab), 2 (Calm), or 3 (Strike).`;
+    if (keyCharge) return `🔥 Charging a fireball… release 3 to throw`;
+    if (!(stream && engine)) return `Aim with the ${aimBy}. Press 1 (Grab), 2 (Calm), or hold 3 and release (Fireball).`;
     const g = GESTURE_LABEL[gesture.name] || gesture.name;
-    if (hold.held) {
+    if (hold.armed && !hold.held) return `🔥 ${SPELL_BY_ID[hold.armed].name} charged · open your hand to throw`;
+    if (hold.held && SPELL_BY_ID[hold.held]) {
       const s = SPELL_BY_ID[hold.held];
       const cd = casts.cooldownLeft(s.id, now);
-      return cd > 0 ? `${g}: ${s.name} ready in ${(cd / 1000).toFixed(1)} s` : `${g}: hold for ${s.name}…`;
+      if (cd > 0) return `${g}: ${s.name} ready in ${(cd / 1000).toFixed(1)} s`;
+      if (s.release) return hold.armed ? `${g}: ${s.name} charged · open your hand to throw` : `${g}: charging ${s.name}…`;
+      return `${g}: hold for ${s.name}…`;
     }
-    return hand ? `Hand: ${g} · ${aimBy} aims` : 'Show 1 hand to grab/calm/strike, or 2 hands to pinch-zoom.';
+    return hand ? `Hand: ${g} · ${aimBy} aims` : 'Show 1 hand to grab, calm or throw, or 2 hands to pinch-zoom.';
   }
 
   function fmtRate(r) {
@@ -765,9 +783,11 @@ export function initCamera({
       const el = ui.spells[s.id];
       if (!el) continue;
       const cd = casts.cooldownFrac(s.id, now);
-      const isHeld = hold.held === s.id || (s.id === 'pinch' && !!grabbed);
+      const keyHeld = keyCharge?.id === s.id;
+      const isHeld = keyHeld || hold.held === s.id || (s.id === 'pinch' && !!grabbed);
+      const progress = keyHeld ? clamp((now - keyCharge.at) / casts.holdMs) : grabbed && s.id === 'pinch' ? 1 : hold.progress;
       el.style.setProperty('--cd', cd.toFixed(3));
-      el.style.setProperty('--hold', (isHeld ? (grabbed ? 1 : hold.progress) : 0).toFixed(3));
+      el.style.setProperty('--hold', (isHeld ? progress : 0).toFixed(3));
       el.classList.toggle('is-cooling', cd > 0);
       el.classList.toggle('is-held', isHeld);
     }
@@ -777,7 +797,11 @@ export function initCamera({
     while (pings.length && now - pings[0].at > PING_MS) pings.shift();
     const G = getG();
     const tracking = !!(stream && (hand || multi?.left || multi?.right) && G?.brain && canCast());
-    const holding = tracking && hold.held && hold.progress > 0;
+    // What to ring at the reticle: a gesture hold, or key 3 held to charge a fireball (#150).
+    const charge = keyCharge && G?.brain
+      ? { id: keyCharge.id, progress: clamp((now - keyCharge.at) / casts.holdMs) }
+      : tracking && hold.held && SPELL_BY_ID[hold.held] && hold.progress > 0 ? { id: hold.held, progress: hold.progress } : null;
+    const holding = !!charge;
     const carrying = !!grabbed && !!G?.brain;
     if (!pings.length && !holding && !carrying) {
       if (fxDirty) { fxCtx.clearRect(0, 0, fx.width, fx.height); fxDirty = false; }
@@ -808,11 +832,19 @@ export function initCamera({
         glyphAt('🤏', x, y - 11 * u, 8 * u);
       }
       if (holding) {
-        const s = SPELL_BY_ID[hold.held];
+        const s = SPELL_BY_ID[charge.id];
         if (s) {
           const cooling = casts.cooldownLeft(s.id, now) > 0;
+          const fire = !!s.release;
+          if (fire && !cooling && charge.progress >= 1) {
+            // Charged: a pulsing orange glow until the hand opens.
+            fxCtx.globalAlpha = 0.25 + 0.15 * Math.sin(now / 90);
+            fxCtx.fillStyle = '#ff9a2e';
+            fxCtx.beginPath(); fxCtx.arc(x, y, 12 * u, 0, Math.PI * 2); fxCtx.fill();
+            fxCtx.globalAlpha = 1;
+          }
           ring(x, y, 11 * u, 1, 'rgba(242,232,213,0.25)');
-          ring(x, y, 11 * u, cooling ? 1 - casts.cooldownFrac(s.id, now) : hold.progress, cooling ? 'rgba(255,207,74,0.5)' : '#59d8c8', 2 * u);
+          ring(x, y, 11 * u, cooling ? 1 - casts.cooldownFrac(s.id, now) : charge.progress, cooling ? 'rgba(255,207,74,0.5)' : fire ? '#ff9a2e' : '#59d8c8', 2 * u);
           fxCtx.globalAlpha = cooling ? 0.5 : 1;
           glyphAt(s.glyph, x, y - 14 * u, 8 * u);
           fxCtx.globalAlpha = 1;
@@ -856,8 +888,9 @@ export function initCamera({
       rightVisible: !!multi?.right?.visible,
       bothPinched: !!multi?.bothPinched,
       grabActive: !!grabbed || !!multi?.grab?.active,
-      heldMove: hold.held,
-      holdProgress: hold.progress,
+      heldMove: keyCharge ? keyCharge.id : hold.held,
+      armedMove: hold.armed,
+      holdProgress: keyCharge ? clamp((performance.now() - keyCharge.at) / casts.holdMs) : hold.progress,
       pinchStrength: finger?.pinching ? 1 : 0,
       statusText: nowText(now),
     });

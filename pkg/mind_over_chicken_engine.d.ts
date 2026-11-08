@@ -283,7 +283,9 @@ export class RustCalibration {
 }
 
 /**
- * Standalone WebAssembly Cast Controller for camera god powers (#33, #108)
+ * Standalone WebAssembly Cast Controller for camera god powers (#33, #108). The browser's
+ * src/camera/casts.js runs this: the three core moves, with the fist-to-open fireball (#150, #159).
+ * `update` returns [held, progress, cast, aiming, armed].
  */
 export class RustCastController {
     free(): void;

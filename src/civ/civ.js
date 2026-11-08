@@ -18,7 +18,7 @@ export const EVENT = {
 };
 // News line tones (Rust `news::TONE_*`).
 export const TONE = { info: 0, good: 1, bad: 2, warn: 3 };
-export const CAST = { fireball: 1, spawn: 2, peace: 3, disaster: 4, bless: 5, rain: 6, palm: 3, fist: 1 };
+export const CAST = { fireball: 1, spawn: 2, peace: 3, disaster: 4, bless: 5, rain: 6, palm: 3 };
 export const SEED_SOURCE = ['the run seed', 'calibration', 'your mind', 'rebellion'];
 
 export function loadCivModule() {

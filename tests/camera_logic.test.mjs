@@ -1,118 +1,25 @@
-// camera (#33, #117, #122): unit tests for the camera logic under the 3 core moves and joy+surprise emotion model.
+// camera (#33, #117, #122): unit tests for the camera spell table and the joy+surprise emotion model.
 // Run: node --test tests/camera_logic.test.mjs
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CastController } from '../src/camera/casts.js';
-import { SPELLS, ADVANCED_SPELLS, SPELL_BY_ID, spellForKeyCode } from '../src/camera/spells.js';
+import { SPELLS, SPELL_BY_ID, spellForKeyCode } from '../src/camera/spells.js';
 import { EMOTIONS, EmotionTracker, emotionsFromBlendshapes, rawEmotions, blendshapeMap } from '../src/camera/emotion.js';
 
-// Feed a gesture at 30 fps from t0 for ms milliseconds; return the casts that fired.
-function hold(c, gesture, t0, ms, score = 0.9, step = 1000 / 30) {
-  const casts = [];
-  let last;
-  for (let t = t0; t <= t0 + ms; t += step) {
-    last = c.update(gesture, score, t);
-    if (last.cast) casts.push({ id: last.cast, t });
-  }
-  return { casts, last };
-}
-
-// ---------- spells (#122) ----------
-test('three core moves (keys 1–3) replace the 7-spell row', () => {
+// ---------- spells (#122, #150, #159) ----------
+// The cast debounce, cooldown and fist-to-open fireball tests run against both the JS controller
+// and the wasm one the browser uses: tests/camera_casts.test.mjs.
+test('three core moves (keys 1–3): Grab, Calm, Fireball; no Strike and no legacy casts', () => {
   assert.equal(SPELLS.length, 3);
   assert.deepEqual(SPELLS.map((s) => s.key), [1, 2, 3]);
-  assert.deepEqual(SPELLS.map((s) => s.id), ['pinch', 'palm', 'fist']);
+  assert.deepEqual(SPELLS.map((s) => s.id), ['pinch', 'palm', 'fireball']);
   assert.equal(spellForKeyCode('Digit1').id, 'pinch');
   assert.equal(spellForKeyCode('Digit2').id, 'palm');
-  assert.equal(spellForKeyCode('Digit3').id, 'fist');
+  assert.equal(spellForKeyCode('Digit3').id, 'fireball');
   assert.equal(spellForKeyCode('Digit4'), null);
-
-  // Advanced legacy spells are preserved in ADVANCED_SPELLS and SPELL_BY_ID
-  assert.ok(ADVANCED_SPELLS.length >= 7);
-  assert.ok(SPELL_BY_ID.fireball);
-  assert.ok(SPELL_BY_ID.peace);
-  assert.ok(SPELL_BY_ID.rain);
-});
-
-test('gesture to core cast mapping matches the issue table', () => {
-  const c = new CastController();
-  assert.equal(c.spellFor('Open_Palm'), 'palm');
-  assert.equal(c.spellFor('Closed_Fist'), 'fist');
-  assert.equal(c.spellFor('None'), null);
-});
-
-// ---------- debounce ----------
-test('a gesture must be held ~300 ms before it casts', () => {
-  const c = new CastController();
-  const short = hold(c, 'Closed_Fist', 0, 250);
-  assert.equal(short.casts.length, 0);
-  assert.ok(short.last.progress > 0.7 && short.last.progress < 1, `progress ${short.last.progress}`);
-  const r = c.update('Closed_Fist', 0.9, 300);
-  assert.equal(r.cast, 'fist');
-});
-
-test('casts once per hold, even when the hold outlasts the cooldown', () => {
-  const c = new CastController();
-  const { casts } = hold(c, 'Open_Palm', 0, 20000);
-  assert.equal(casts.length, 1);
-  assert.equal(casts[0].id, 'palm');
-  assert.ok(casts[0].t >= 300 && casts[0].t < 340);
-});
-
-test('low-confidence gestures are ignored', () => {
-  const c = new CastController();
-  assert.equal(hold(c, 'Closed_Fist', 0, 1000, 0.3).casts.length, 0);
-});
-
-test('short tracking dropouts do not break a hold, longer ones do', () => {
-  const c = new CastController({ graceMs: 150 });
-  c.update('Open_Palm', 0.9, 0);
-  c.update('Open_Palm', 0.9, 150);
-  c.update('None', 0, 200);           // 50 ms dropout
-  assert.equal(c.update('Open_Palm', 0.9, 310).cast, 'palm');
-
-  const d = new CastController({ graceMs: 150 });
-  d.update('Open_Palm', 0.9, 0);
-  d.update('Open_Palm', 0.9, 150);
-  d.update('None', 0, 200);
-  d.update('None', 0, 400);           // 250 ms since last seen: hold dropped
-  assert.equal(d.update('Open_Palm', 0.9, 420).cast, null);
-  assert.equal(d.update('Open_Palm', 0.9, 720).cast, 'palm');
-});
-
-test('switching gestures restarts the hold', () => {
-  const c = new CastController();
-  c.update('Open_Palm', 0.9, 0);
-  c.update('Open_Palm', 0.9, 200);
-  assert.equal(c.update('Closed_Fist', 0.9, 250).cast, null);
-  assert.equal(c.update('Closed_Fist', 0.9, 500).cast, null);
-  assert.equal(c.update('Closed_Fist', 0.9, 560).cast, 'fist');
-});
-
-// ---------- cooldowns ----------
-test('each spell has its own cooldown', () => {
-  const c = new CastController();
-  assert.equal(hold(c, 'Closed_Fist', 0, 400).casts.length, 1);
-  c.update('None', 0, 600);
-  assert.equal(hold(c, 'Open_Palm', 700, 400).casts.length, 1);
-  c.update('None', 0, 1200);
-  const again = hold(c, 'Closed_Fist', 1300, 1000);
-  assert.equal(again.casts.length, 1);
-  assert.ok(again.casts[0].t >= 300 + SPELL_BY_ID.fist.cooldown, `fired at ${again.casts[0].t}`);
-});
-
-test('keyboard casts share the cooldowns', () => {
-  const c = new CastController();
-  assert.equal(c.trigger('palm', 0), true);
-  assert.equal(c.trigger('palm', 1000), false);
-  assert.ok(Math.abs(c.cooldownFrac('palm', 0) - 1) < 1e-9);
-  assert.ok(c.cooldownFrac('palm', SPELL_BY_ID.palm.cooldown / 2) > 0.49);
-  assert.equal(c.cooldownLeft('palm', SPELL_BY_ID.palm.cooldown), 0);
-  assert.equal(c.trigger('palm', SPELL_BY_ID.palm.cooldown), true);
-  c.trigger('palm', 0);
-  assert.equal(hold(c, 'Open_Palm', 10, 1000).casts.length, 0);
-  assert.equal(c.trigger('nonsense', 0), false);
+  assert.equal(SPELL_BY_ID.fireball.gesture, 'Closed_Fist');
+  assert.equal(SPELL_BY_ID.fireball.release, 'Open_Palm');
+  for (const id of ['fist', 'point', 'spawn', 'rain', 'bless', 'disaster', 'peace']) assert.equal(SPELL_BY_ID[id], undefined, id);
 });
 
 // ---------- emotions (#117: joy and surprise only) ----------

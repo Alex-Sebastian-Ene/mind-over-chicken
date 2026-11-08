@@ -200,7 +200,7 @@ export function initDebug({ getG, camera }) {
     const heldCd = held ? s.cooldowns.find((c) => c.id === held.id) : null;
     el.hold.style.width = pct(held ? s.hold.progress : 0);
     set(el.holdText, held ? (heldCd.left > 0 ? `${held.glyph} ready in ${secs(heldCd.left)}` : `${held.glyph} ${held.name} ${pct(s.hold.progress)}`) : '–');
-    const armed = SPELL_BY_ID[s?.armed || 'fist'] || SPELL_BY_ID.fist;
+    const armed = SPELL_BY_ID[s?.armed || 'fireball'] || SPELL_BY_ID.fireball;
     const pinchTxt = s?.hands?.bothPinched
       ? `2H zoom ×${(s.hands.zoomFactor || 1).toFixed(2)} (dist ${(s.hands.distance || 0).toFixed(2)})`
       : s?.grabbed

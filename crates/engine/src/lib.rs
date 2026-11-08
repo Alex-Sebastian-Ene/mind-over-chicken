@@ -1543,7 +1543,9 @@ pub fn walk_field(types: &[u8], width: u32, height: u32, tx: i32, ty: i32, sea: 
     f
 }
 
-/// Standalone WebAssembly Cast Controller for camera god powers (#33, #108)
+/// Standalone WebAssembly Cast Controller for camera god powers (#33, #108). The browser's
+/// src/camera/casts.js runs this: the three core moves, with the fist-to-open fireball (#150, #159).
+/// `update` returns [held, progress, cast, aiming, armed].
 #[wasm_bindgen]
 pub struct RustCastController {
     inner: camera::casts::CastController,
@@ -1573,6 +1575,7 @@ impl RustCastController {
         arr.push(&JsValue::from_f64(u.progress));
         arr.push(&JsValue::from(u.cast.map(|s| s.as_str())));
         arr.push(&JsValue::from_bool(u.aiming));
+        arr.push(&JsValue::from(u.armed.map(|s| s.as_str())));
         arr
     }
 

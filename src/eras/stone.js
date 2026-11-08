@@ -700,7 +700,6 @@ export class StoneAge {
         G.advisor.say('cast-palm', 'Your open palm calms the tribe and soothes the fire.', { mood: 'happy', priority: 1, cooldown: 20 });
         break;
       }
-      case 'fist':
       case 'fireball': this.onBlink(aim); break;
       case 'spawn': {
         // Open palm: a cooked haunch drops where you aim and the tribe carries it to the fire.

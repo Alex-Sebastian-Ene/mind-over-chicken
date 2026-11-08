@@ -384,7 +384,7 @@ export class CivSandbox {
     const p = this.aimPlanet(aim);
     const n = civ.cast(kind, p.x, p.y);
     const say = G.advisor.say.bind(G.advisor);
-    if (spell === 'fist' || spell === 'fireball') { this.flash = 0.4; G.audio?.thunder?.(); G.shake = Math.max(G.shake || 0, 1.2); }
+    if (spell === 'fireball') { this.flash = 0.4; G.audio?.thunder?.(); G.shake = Math.max(G.shake || 0, 1.2); }
     if (spell === 'palm' || spell === 'peace') { G.audio?.good?.(); say('civ-cast-peace', n ? `Peace! ${n} war${n === 1 ? '' : 's'} ended near your hand.` : 'Peace descends. Nobody was fighting there, but they appreciate it.', { mood: 'happy', priority: 2, cooldown: 15 }); }
     if (spell === 'disaster') { this.flash = 0.5; G.audio?.thunder?.(); G.shake = Math.max(G.shake || 0, 2); say('civ-cast-storm', 'A storm! That will settle a few arguments. And a few villages.', { mood: 'panic', priority: 2, cooldown: 15 }); }
     if (spell === 'spawn') { G.audio?.coin?.(); say('civ-cast-food', 'Food from the sky. Nobody will ask questions.', { mood: 'happy', priority: 1, cooldown: 15 }); }
