@@ -22,6 +22,23 @@ function paintIcon(canvas, icon) {
 }
 
 const POWER_UNLOCK = { blink: 'stone', calm: 'stone', focus: 'kingdoms', stress: 'industry' };
+const ERA_ORDER = ['stone', 'farming', 'kingdoms', 'industry', 'space'];
+
+// What each power tile is in a scene (#178): 'on' (in scene.powers: it changes this scene),
+// 'off' (unlocked but does nothing here: shown disabled, not focusable) or 'hidden' (the campaign
+// hasn't reached it yet, POWER_UNLOCK). Scenes outside the campaign order (the galaxy, the
+// sandboxes, other worlds) count as having everything unlocked.
+export function tileStates(scene) {
+  const powers = scene?.powers || [];
+  const at = ERA_ORDER.indexOf(scene?.era);
+  const out = {};
+  for (const [k, era] of Object.entries(POWER_UNLOCK)) {
+    if (powers.includes(k)) out[k] = 'on';
+    else if (at >= 0 && ERA_ORDER.indexOf(era) > at) out[k] = 'hidden';
+    else out[k] = 'off';
+  }
+  return out;
+}
 
 let rustEngine = null;
 
@@ -50,8 +67,13 @@ export class Hud {
 
   setScene(scene) {
     this.eraChip.textContent = scene.label;
+    const states = tileStates(scene);
     for (const [k, el] of Object.entries(this.powers)) {
-      el.classList.toggle('is-active', scene.powers.includes(k));
+      const s = states[k];
+      el.classList.toggle('is-active', s === 'on');
+      el.hidden = s === 'hidden';
+      el.disabled = s !== 'on';   // a tile that does nothing here can't be pressed or focused
+      el.title = s === 'off' ? 'Not used in this era' : '';
     }
   }
 
@@ -131,7 +153,7 @@ export class Hud {
     const weights = m.weights();
     const wRows = weights.map(({ c, w }) => `<tr><th>${c}</th>${w.map((x) => `<td class="${x >= 0 ? 'pos' : 'neg'}">${x.toFixed(1)}</td>`).join('')}</tr>`).join('');
     this.modelBody.innerHTML = `
-      <p class="model-lede">Trained silently on the moments the game asked you to relax, look around and do sums. There was no calibration screen.</p>
+      <p class="model-lede">Trained silently on the moments the game asked you to relax, look around and concentrate. There was no calibration screen.</p>
       <dl class="model-stats">
         <div><dt>Rest windows</dt><dd>${m.count('rest')}</dd></div>
         <div><dt>Calm windows</dt><dd>${m.count('calm')}</dd></div>

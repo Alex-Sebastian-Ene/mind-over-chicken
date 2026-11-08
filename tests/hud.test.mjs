@@ -45,3 +45,39 @@ test('the model panel renders in the WebGL build instead of throwing every frame
     setRustHudEngine(null);
   }
 });
+
+// #178: per era, every visible tile changes the scene; the rest are disabled or not yet unlocked.
+test('power tiles per era: on, disabled or hidden', async () => {
+  const { tileStates } = await import('../src/ui/hud.js');
+  const { StoneAge } = await import('../src/eras/stone.js');
+  const { Industry } = await import('../src/eras/industry.js');
+  const { SpaceAge } = await import('../src/eras/space.js');
+  const { FarmingToKingdoms, InfoAge } = await import('../src/eras/timeskip.js');
+  const row = (s) => { const t = tileStates(s); return ['blink', 'calm', 'focus', 'stress'].map((k) => t[k]).join(' '); };
+  //                                        blink   calm    focus   stress
+  assert.equal(row(new StoneAge()),          'on on hidden hidden');
+  assert.equal(row(new FarmingToKingdoms()), 'off off on hidden');
+  assert.equal(row(new Industry()),          'off on off on');
+  assert.equal(row(new InfoAge()),           'off off off off');
+  assert.equal(row(new SpaceAge()),          'off on on on');
+  // Outside the campaign (galaxy, sandboxes, other worlds) nothing is locked.
+  assert.equal(row({ powers: ['blink', 'calm', 'focus', 'stress'] }), 'on on on on');
+  assert.equal(row({ era: 'surface', powers: [] }), 'off off off off');
+  // Every 'on' tile is a power the scene lists.
+  for (const s of [new StoneAge(), new FarmingToKingdoms(), new Industry(), new InfoAge(), new SpaceAge()]) {
+    const t = tileStates(s);
+    for (const k of Object.keys(t)) assert.equal(t[k] === 'on', s.powers.includes(k), `${s.id} ${k}`);
+  }
+});
+
+test('setScene disables and hides the tiles that do nothing', () => {
+  const doc = fakeDoc();
+  const hud = new Hud(doc);
+  hud.setScene({ label: 'Era III · Industry', era: 'industry', powers: ['stress', 'calm'] });
+  const tile = (k) => doc.querySelector(`[data-power="${k}"]`);
+  assert.deepEqual(['blink', 'calm', 'focus', 'stress'].map((k) => [tile(k).disabled, tile(k).hidden]), [[true, false], [false, false], [true, false], [false, false]]);
+  assert.equal(tile('calm').classList.contains('is-active'), true);
+  hud.setScene({ label: 'Era I', era: 'stone', powers: ['blink', 'calm'] });
+  assert.equal(tile('stress').hidden, true);
+  assert.equal(tile('blink').disabled, false);
+});

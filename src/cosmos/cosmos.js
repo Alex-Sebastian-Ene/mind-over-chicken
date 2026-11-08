@@ -193,7 +193,7 @@ export class Cosmos extends ZoomState {
     if (!scene) return galaxyHud;
     let h = this.homeHuds.get(scene);
     if (!h || h.base !== scene.label) {
-      h = { base: scene.label, label: `${scene.label} · your world`, powers: scene.powers, objectives: () => scene.objectives() };
+      h = { base: scene.label, label: `${scene.label} · your world`, era: scene.era, powers: scene.powers, objectives: () => scene.objectives() };
       this.homeHuds.set(scene, h);
     }
     return h;

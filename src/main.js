@@ -52,8 +52,10 @@ import { SimPlanet } from './ai/planet.js';
 import { AIGod } from './ai/autopilot.js';
 import { observe, decodeAction, scriptedAction, BOLT_COOLDOWN } from './ai/observe.js';
 import { loading } from './ui/loading.js'; // loading screen
+import { panelHotkey } from './ui/hotkeys.js'; // E / C / Shift+C sidebars (#211)
 import { engineFailToShow } from './ui/fail.js';
 import { frameLoop } from './ui/loop.js';
+import { dayNight } from './render/daynight.js';
 import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
 import { mirrorHud } from './ui/hud-mirror.js';
 
@@ -230,7 +232,8 @@ cosmos.setViewCamera(viewCam);
 // A scene with its own camera (the civ sandbox's planet) takes every pan: drag, keys, wheel.
 cosmos.panSink = (dx, dy) => { if (G?.scene?.panBy) { G.scene.panBy(dx, dy); return true; } return false; };
 // What the HUD shows while you look at the galaxy.
-const galaxyHudScene = { label: 'Galaxy', powers: ['calm', 'focus', 'stress'], objectives: () => cosmos.galaxy?.objectives() || [] };
+// Blinks raise storms on the galaxy's blink world, so Lightning is a power there too (#178).
+const galaxyHudScene = { label: 'Galaxy', powers: ['blink', 'calm', 'focus', 'stress'], objectives: () => cosmos.galaxy?.objectives() || [] };
 let hudScene = null;
 let G = null;
 let previewSource = null;
@@ -882,12 +885,11 @@ function render() {
             engine.add_3d_light(l.x, 10.0, l.y, l.r, 1.2);
           }
         }
-        // Directional sun rotates with day/night
-        const sunAngle = (G.runTime || 0) * 0.15;
-        const sunX = Math.cos(sunAngle);
-        const sunY = 0.85;
-        const sunZ = Math.sin(sunAngle);
-        engine.render_3d(0.016, sunX, sunY, sunZ, dark, flash, fade, sx, sy, screen.width, screen.height);
+        // Day and night (#201): the sun rises and sets; after dusk the moonlit night shading takes
+        // over. An era's own darkness (dark) still wins. Off the surface the night must not dim space.
+        const dn = dayNight(G.runTime || 0, dark);
+        const night3d = z > 0.001 || scene.phase === 'voyage' ? dark : dn.night;
+        engine.render_3d(0.016, dn.sun.x, dn.sun.y, dn.sun.z, night3d, flash, fade, sx, sy, screen.width, screen.height);
 
         // Continuous overlay blend between 3D planet view and 3D map view
         if (z > 0.001) {
@@ -1375,8 +1377,11 @@ window.addEventListener('keydown', (e) => {
   if (gate === 'hold') return;
   if (banner && e.code !== 'Enter') return;
   if (e.code === 'KeyM') { toggleModel(); return; }
-  if (e.code === 'KeyE') { eegPanel?.toggle(); return; }
-  if (e.code === 'KeyC') { eegPanel?.calibrateCenter(); return; }
+  // E / C toggle the EEG / Camera sidebars; Shift+C re-centres the EEG head pose (#211).
+  const panelKey = panelHotkey(e);   // ` stays a Camera alias in camera/debug.js
+  if (panelKey === 'eeg') { eegPanel?.toggle(); return; }
+  if (panelKey === 'camera') { e.preventDefault(); window.__moc?.camera?.togglePanel(); return; }
+  if (panelKey === 'eegCenter') { e.preventDefault(); eegPanel?.calibrateCenter(); return; }
   if (e.code === 'KeyT') { toggle3D(); return; }
   if (e.code === 'KeyG') { toggleAIGod(); return; }
   if (G && (e.code === 'KeyZ' || e.code === 'Minus' || e.code === 'NumpadSubtract')) { zoomOutFromSurface(); return; }
@@ -1416,6 +1421,7 @@ document.querySelectorAll('[data-power]').forEach((tile) => {
   const map = { calm: 'calm', focus: 'focus', stress: 'panic' };
   tile.addEventListener('pointerdown', (e) => {
     audio.unlock();
+    if (tile.disabled) return;   // not a power in this era (#178)
     const s = sim(); if (!s) return;
     if (power === 'blink') { s.blink(); return; }
     s.input[map[power]] = true;
