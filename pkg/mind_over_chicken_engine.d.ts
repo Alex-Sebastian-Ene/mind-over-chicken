@@ -9,6 +9,7 @@ export class Engine {
     add_custom_billboard(x: number, y: number, z: number, w: number, h: number, u0: number, v0: number, u1: number, v1: number): void;
     add_light(x: number, y: number, radius: number, intensity: number): void;
     advisor_say(key: string, text: string, mood: string, priority: number, cooldown: number): boolean;
+    advisor_set_era(era: string): void;
     audio_play(sound: string): void;
     audio_toggle(): boolean;
     audio_unlock(): void;
@@ -16,6 +17,7 @@ export class Engine {
     bind_dom_shell(): void;
     clear_3d_billboards(): void;
     draw_chicken(x: number, y: number, facing: number, frame: number, halo: boolean): void;
+    draw_era_3d(): void;
     draw_fire(x: number, y: number, heat: number, t: number): void;
     draw_goat(x: number, y: number, facing: number): void;
     draw_lightning(tx: number, ty: number, seed: number, alpha: number): void;
@@ -43,10 +45,12 @@ export class Engine {
      */
     static generate_civ_terrain(seed: number, width: number, height: number): Uint8Array;
     /**
-     * Generate realistic procedural terrain using moc-terrain (#109).
-     * Updates the engine's internal heightmap, 3D relief mesh, and base pixel texture.
+     * Generate a home world with moc-terrain (#109) and make it the engine's: heights, tiles,
+     * colours, sites and the 3D relief. `width`/`height` 0 (or left out) mean the engine's
+     * 320×180; the engine only draws worlds of its own size, so another size only updates the
+     * 3D mesh (until the game supports bigger maps, #129).
      */
-    generate_terrain(seed: number): void;
+    generate_terrain(seed: number, width: number, height: number): void;
     get_camera_distance(): number;
     get_camera_pitch(): number;
     get_camera_target_x(): number;
@@ -89,6 +93,8 @@ export class Engine {
     init_3d(): void;
     init_world(seed: number): void;
     is_3d_mode(): boolean;
+    is_game_era_complete(): boolean;
+    is_game_era_failed(): string | undefined;
     is_game_failed(): string | undefined;
     is_game_finished(): boolean;
     is_terrain_reachable(x: number, y: number): boolean;
@@ -353,18 +359,85 @@ export class RustSimSource {
 }
 
 /**
- * Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109, #19, #128)
+ * A generated world for JS (#109, from #112): the JS `World` is a thin wrapper that fills its
+ * arrays from this. `new(seed)` is the 320×180 home world; `home(seed, w, h)` any size;
+ * `planet(seed, biome)` a galaxy planet's 640×360 surface with its 320×180 capital (the AI
+ * tribe's world) cut from it at (0, 90). Accessors without `surface_` describe the world (the
+ * capital for a planet); `surface_*` describe the whole surface.
  */
 export class RustWorldGen {
     free(): void;
     [Symbol.dispose](): void;
+    biomes(): Uint8Array;
     continents_json(): string;
+    has_surface(): boolean;
+    height(): number;
+    /**
+     * Heights 0..1, sea level 0.33 (like the old maps, so the 3D water level is unchanged).
+     */
     heights(): Float32Array;
+    /**
+     * A home world of any size (0 × 0: the game's 320×180) for a planet biome (temperate,
+     * desert, ice, jungle, alien).
+     */
+    static home(seed: number, width: number, height: number, biome: string): RustWorldGen;
+    lakes(): Uint8Array;
+    /**
+     * Generation time, ms.
+     */
+    ms(): number;
+    /**
+     * The 320×180 home world.
+     */
     constructor(seed: number);
+    /**
+     * Campaign landmass per tile (index into `continents_json`), 255 for none.
+     */
+    owner(): Uint8Array;
+    /**
+     * A galaxy planet: its 640×360 surface, and the 320×180 capital at (0, 90) as the world.
+     */
+    static planet(seed: number, biome: string): RustWorldGen;
+    /**
+     * The base colour layer, RGBA.
+     */
     rgba(): Uint8Array;
+    rivers(): Uint8Array;
     sites_json(): string;
+    stats_json(): string;
+    surface_height(): number;
+    surface_heights(): Float32Array;
+    /**
+     * The surface's landmasses and settlement spots (capital first, then nearest first), as
+     * the galaxy's surface view expects them: {tile, continents, spots}.
+     */
+    surface_json(): string;
+    surface_rgba(): Uint8Array;
+    surface_stats_json(): string;
+    surface_types(): Uint8Array;
+    surface_width(): number;
+    /**
+     * Game tiles (the JS `T` codes).
+     */
     types(): Uint8Array;
+    width(): number;
 }
+
+/**
+ * The era's land use (farms, roads, paving: tiles whose type differs from the base type)
+ * painted over the base colour layer, in a planet biome's colours.
+ */
+export function paint_land_use(base: Uint8Array | number[], types: Uint8Array | number[], base_types: Uint8Array | number[], width: number, biome: string): Uint8Array;
+
+export function rust_animate_agent(clock: number, dt: number, rate: number): Float32Array;
+
+export function rust_villager_look(era: string, seed: number): Array<any>;
+
+/**
+ * Walking distance (8-neighbour steps, no wrap) from every tile to (tx, ty) over walkable
+ * tiles, or over water with `sea`; -1 where unreachable. The JS `World.field`/`seaField`.
+ */
+export function walk_field(types: Uint8Array | number[], width: number, height: number, tx: number, ty: number, sea: boolean): Int16Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -388,6 +461,7 @@ export interface InitOutput {
     readonly engine_add_custom_billboard: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
     readonly engine_add_light: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly engine_advisor_say: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
+    readonly engine_advisor_set_era: (a: number, b: number, c: number) => void;
     readonly engine_audio_play: (a: number, b: number, c: number) => void;
     readonly engine_audio_toggle: (a: number) => number;
     readonly engine_audio_unlock: (a: number) => void;
@@ -395,6 +469,7 @@ export interface InitOutput {
     readonly engine_bind_dom_shell: (a: number) => [number, number];
     readonly engine_clear_3d_billboards: (a: number) => void;
     readonly engine_draw_chicken: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly engine_draw_era_3d: (a: number) => void;
     readonly engine_draw_fire: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly engine_draw_goat: (a: number, b: number, c: number, d: number) => void;
     readonly engine_draw_lightning: (a: number, b: number, c: number, d: number, e: number) => void;
@@ -414,7 +489,7 @@ export interface InitOutput {
     readonly engine_game_start_era: (a: number, b: number) => void;
     readonly engine_game_tick: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly engine_generate_civ_terrain: (a: number, b: number, c: number) => [number, number];
-    readonly engine_generate_terrain: (a: number, b: number) => [number, number];
+    readonly engine_generate_terrain: (a: number, b: number, c: number, d: number) => [number, number];
     readonly engine_get_camera_distance: (a: number) => number;
     readonly engine_get_camera_pitch: (a: number) => number;
     readonly engine_get_camera_target_x: (a: number) => number;
@@ -457,6 +532,8 @@ export interface InitOutput {
     readonly engine_init_3d: (a: number) => [number, number];
     readonly engine_init_world: (a: number, b: number) => void;
     readonly engine_is_3d_mode: (a: number) => number;
+    readonly engine_is_game_era_complete: (a: number) => number;
+    readonly engine_is_game_era_failed: (a: number) => [number, number];
     readonly engine_is_game_failed: (a: number) => [number, number];
     readonly engine_is_game_finished: (a: number) => number;
     readonly engine_is_terrain_reachable: (a: number, b: number, c: number) => number;
@@ -476,6 +553,7 @@ export interface InitOutput {
     readonly engine_set_terrain_biome: (a: number, b: number, c: number) => void;
     readonly engine_upload_canvas: (a: number, b: any) => [number, number];
     readonly engine_zoom_camera: (a: number, b: number) => void;
+    readonly paint_land_use: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number];
     readonly pointergesture_down: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly pointergesture_is_panning: (a: number) => number;
     readonly pointergesture_moved: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
@@ -484,6 +562,8 @@ export interface InitOutput {
     readonly pointergesture_pan_dx: (a: number) => number;
     readonly pointergesture_pan_dy: (a: number) => number;
     readonly pointergesture_up: (a: number, b: number, c: number) => number;
+    readonly rust_animate_agent: (a: number, b: number, c: number) => any;
+    readonly rust_villager_look: (a: number, b: number, c: number) => any;
     readonly rustaipolicy_act: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly rustaipolicy_new: () => number;
     readonly rustaipolicy_probs: (a: number, b: number, c: number) => any;
@@ -587,12 +667,31 @@ export interface InitOutput {
     readonly rustsimsource_new: (a: number) => number;
     readonly rustsimsource_set_input: (a: number, b: number, c: number, d: number) => void;
     readonly rustsimsource_step: (a: number, b: number) => any;
+    readonly rustworldgen_biomes: (a: number) => any;
     readonly rustworldgen_continents_json: (a: number) => [number, number];
+    readonly rustworldgen_has_surface: (a: number) => number;
+    readonly rustworldgen_height: (a: number) => number;
     readonly rustworldgen_heights: (a: number) => any;
+    readonly rustworldgen_home: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly rustworldgen_lakes: (a: number) => any;
+    readonly rustworldgen_ms: (a: number) => number;
     readonly rustworldgen_new: (a: number) => number;
+    readonly rustworldgen_owner: (a: number) => any;
+    readonly rustworldgen_planet: (a: number, b: number, c: number) => number;
     readonly rustworldgen_rgba: (a: number) => any;
+    readonly rustworldgen_rivers: (a: number) => any;
     readonly rustworldgen_sites_json: (a: number) => [number, number];
+    readonly rustworldgen_stats_json: (a: number) => [number, number];
+    readonly rustworldgen_surface_height: (a: number) => number;
+    readonly rustworldgen_surface_heights: (a: number) => any;
+    readonly rustworldgen_surface_json: (a: number) => [number, number];
+    readonly rustworldgen_surface_rgba: (a: number) => any;
+    readonly rustworldgen_surface_stats_json: (a: number) => [number, number];
+    readonly rustworldgen_surface_types: (a: number) => any;
+    readonly rustworldgen_surface_width: (a: number) => number;
     readonly rustworldgen_types: (a: number) => any;
+    readonly rustworldgen_width: (a: number) => number;
+    readonly walk_field: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly moc_brain_free: (a: number) => void;
     readonly moc_brain_get_agitation: (a: number) => number;
     readonly moc_brain_get_calm: (a: number) => number;

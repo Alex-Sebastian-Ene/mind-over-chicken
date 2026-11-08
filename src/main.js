@@ -2,17 +2,33 @@
 
 import { W, H, clamp } from './sim/util.js';
 import { World, setRustWorldGen } from './world/terrain.js';
-import { SimSource, BridgeSource } from './brain/sources.js';
+import { SimSource, BridgeSource, setRustSimSource } from './brain/sources.js';
 import { Brain, setRustBrain } from './brain/brain.js';
-import { Advisor } from './ui/advisor.js';
-import { Hud } from './ui/hud.js';
+import { Advisor, setRustAdvisorEngine } from './ui/advisor.js';
+import { Hud, setRustHudEngine } from './ui/hud.js';
 import { EegPanel } from './ui/eeg-panel.js';
 import { Audio } from './audio.js';
 import { StoneAge } from './eras/stone.js';
 import { FarmingToKingdoms, InfoAge } from './eras/timeskip.js';
 import { Industry } from './eras/industry.js';
 import { SpaceAge } from './eras/space.js';
-import initEngine, { Engine, RustImuTracker, RustBlinkClassifier, PointerGesture, RustWorldGen, RustCastController, RustFingerController, RustEmotionTracker, RustGalaxy, RustAiPolicy, RustBrain, RustSimSource, RustCalibration } from '../pkg/mind_over_chicken_engine.js';
+import initEngine, {
+  Engine,
+  RustImuTracker,
+  RustBlinkClassifier,
+  PointerGesture,
+  RustWorldGen,
+  RustCastController,
+  RustFingerController,
+  RustEmotionTracker,
+  RustGalaxy,
+  RustAiPolicy,
+  RustBrain,
+  RustSimSource,
+  RustCalibration,
+  rust_villager_look,
+  rust_animate_agent,
+} from '../pkg/mind_over_chicken_engine.js';
 import { Cosmos } from './cosmos/cosmos.js';
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel, setRustGalaxy } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
@@ -20,13 +36,15 @@ import { setRustCastController } from './camera/casts.js';
 import { setRustFingerController } from './camera/fingers.js';
 import { setRustEmotionTracker } from './camera/emotion.js';
 import { setRustAiPolicy } from './ai/policy.js';
+import { setRustAgentHelpers } from './sim/agents.js';
 import { initDebug } from './camera/debug.js'; // camera debug (#67)
-import { Calibration, readCalibrationConfig } from './brain/calibration.js'; // calibration (#54)
+import { Calibration, readCalibrationConfig, setRustCalibration } from './brain/calibration.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
 import { CivSandbox } from './civ/sandbox.js'; // civ (#50)
 import { worldMeta, renderWorldDetail } from './cosmos/panel.js'; // planets (#68)
 import { SimPlanet } from './ai/planet.js';
 import { AIGod } from './ai/autopilot.js';
+import { loading } from './ui/loading.js'; // loading screen
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
 // mind read uses the same window.
@@ -84,6 +102,7 @@ function panMap(dx, dy) {
 }
 
 try {
+  loading.start('engine', 'Starting the game engine', { blocking: true }); // loading screen
   await initEngine();
   setRustWorldGen(RustWorldGen);
   setRustCastController(RustCastController);
@@ -92,11 +111,23 @@ try {
   setRustGalaxy(RustGalaxy);
   setRustAiPolicy(RustAiPolicy);
   setRustBrain(RustBrain);
+  setRustSimSource(RustSimSource);
+  setRustCalibration(RustCalibration);
+  setRustAgentHelpers(rust_villager_look, rust_animate_agent);
   gesture = new PointerGesture(6);
   BridgeSource.setWasmClasses(RustImuTracker, RustBlinkClassifier);
   engine = new Engine('screen');
+  try {
+    engine.bind_dom_shell();
+    setRustAdvisorEngine(engine);
+    setRustHudEngine(engine);
+  } catch (err) {
+    console.warn('Rust DOM shell binding failed:', err);
+  }
+  loading.done('engine');
 } catch (err) {
   console.error('Failed to initialize Rust WebGL engine:', err);
+  loading.fail('engine', 'no WebGL here: using the 2D fallback');
 }
 // Without WebGL, fall back to a plain 2D upscale so the game still shows.
 const fallback2d = engine ? null : screen.getContext('2d');
@@ -200,7 +231,18 @@ let lastTs = 0;
 
 // ---------- AI god (PPO) ----------
 let aiPlanet = null;
+function resetAIGod() {
+  if (!aiPlanet) return;
+  aiPlanet.attachHuman(null);
+  aiPlanet = null;
+  const btn = $('aiGodBtn');
+  if (btn) {
+    btn.textContent = 'AI God: OFF';
+    btn.setAttribute('aria-pressed', 'false');
+  }
+}
 function toggleAIGod() {
+  if (!G || !$('titleScreen').hidden) return;
   if (aiPlanet) {
     aiPlanet.attachHuman(null);
     aiPlanet = null;
@@ -227,12 +269,13 @@ function newGame(source, startIndex = 0) {
   previewSource = null;
   previewBrain = null;
   if (G?.source && G.source !== source) G.source.disconnect();
+  resetAIGod();
   const brain = new Brain(source);
   if (aiPlanet) aiPlanet.attachHuman(brain);
   cosmos.reset();
   G = {
     world: new World(),
-    brain, source, advisor, hud, audio,
+    brain, source, advisor, hud, audio, engine,
     calibration: new Calibration(calibConfig), // calibration (#54)
     scene: null, sceneIndex: startIndex, runTime: 0, shake: 0,
     stats: { lightning: 0, smitten: 0, births: 0, deaths: 0, recessions: 0, restarts: 0 },
@@ -321,15 +364,29 @@ function showBanner(scene, i) {
     li.append(b, document.createTextNode(` ${v}`));
     return li;
   }));
+  const go = $('bannerGo');
+  if (go) go.innerHTML = 'Begin <kbd>Enter</kbd>';
   el.hidden = false;
   banner = { t: 0, manual: (i === 0) };
   G.brain.setCue(null);
 }
 
+function showControlsFromFail() {
+  if (!G?.scene?.intro) return;
+  $('failScreen').hidden = true;
+  showBanner(G.scene, G.sceneIndex);
+  banner.manual = true;
+  banner.fromFail = true;
+  const go = $('bannerGo');
+  if (go) go.innerHTML = 'Back <kbd>Esc</kbd>';
+}
+
 function dismissBanner() {
   if (!banner) return;
+  const fromFail = banner.fromFail;
   banner = null;
   $('banner').hidden = true;
+  if (fromFail) { $('failScreen').hidden = false; return; }
   // Re-arm the scene's calibration cue after the pause.
   if (G.scene.id === 'stone' || G.scene.id === 'industry') G.brain.setCue(G.scene.hold?.active || G.scene.ipo?.state === 'active' ? 'calm' : 'rest');
 }
@@ -400,8 +457,16 @@ function quitToTitle() {
   failTimer = null;
   $('failScreen').hidden = true;
   $('banner').hidden = true;
+  $('endScreen').hidden = true;
   banner = null;
-  G.scene = null;
+  pendingScene = null;
+  resetAIGod();
+  const keep = G?.source?.kind === 'bridge' && G.source.connected ? G.source : null;
+  if (G?.source && G.source !== keep) G.source.disconnect();
+  G = null;
+  hudScene = null;
+  fade = 0;
+  setGameSource(keep);
   $('titleScreen').hidden = false;
 }
 
@@ -486,9 +551,12 @@ function render() {
   if (engine) {
     try {
       if (surface && G.render3d) {
+        engine.begin_frame();
         engine.upload_canvas(low);
         G.world?.draw3d?.(engine);
-        if (scene.draw3d) {
+        if (typeof engine.draw_era_3d === 'function' && !G.sandbox && G.scene?.era) {
+          engine.draw_era_3d();
+        } else if (scene.draw3d) {
           scene.draw3d(engine, 0.016);
         } else if (scene.lights) {
           for (const l of scene.lights()) {
@@ -562,6 +630,15 @@ function frame(ts) {
     if (engine) {
       const b = G.brain;
       engine.game_tick(dt, b.calm || 0, b.focus || 0, b.stress ?? 0, b.stats?.blinks || 0);
+      if (engine.is_game_era_complete?.() && !pendingScene && !G.finished) {
+        G.complete(1.5);
+      }
+      if (engine.is_game_era_failed?.() && $('failScreen').hidden && !G.finished) {
+        const failReason = engine.is_game_era_failed();
+        if (failReason) {
+          showFail(failReason);
+        }
+      }
     }
     if (banner) {
       banner.t += dt;
@@ -573,10 +650,10 @@ function frame(ts) {
       G.runTime += dt;
       G.calibration?.update(dt, G.brain, G.mood);
       if (aiPlanet) aiPlanet.update(dt);
-      G.scene.update(dt);
+      G.scene?.update(dt);
     } else if (!$('endScreen').hidden) {
       if (aiPlanet) aiPlanet.update(dt);
-      G.scene.update(dt);
+      G.scene?.update(dt);
     }
     if (pendingScene != null) {
       pendingTimer -= dt;
@@ -607,6 +684,11 @@ setInterval(() => { if (performance.now() - lastFrameAt > 45) frame(); }, 33);
 // ---------- input ----------
 function sim() { return G?.source?.kind === 'sim' ? G.source : null; }
 
+function isEegLive() {
+  const src = G?.source;
+  return !!(src && src.kind === 'bridge' && src.connected && src.streaming && src.lastFrameAt > 0 && (performance.now() - src.lastFrameAt < 3000));
+}
+
 function aimFromEvent(e) {
   const r = screen.getBoundingClientRect();
   return { x: clamp((e.clientX - r.left) / r.width), y: clamp((e.clientY - r.top) / r.height) };
@@ -615,7 +697,8 @@ function aimFromEvent(e) {
 function worldFromEvent(e) { const a = aimFromEvent(e); return { x: a.x * W, y: a.y * H }; }
 // Aim on the surface: in 3D mode, raycast from screen to terrain; in 2D, screen → map position.
 function surfaceAim(e) {
-  if (engine && engine.is_3d_mode() && !cosmos.active) {
+  if (cosmos.active) return aimFromEvent(e);
+  if (engine && engine.is_3d_mode()) {
     const r = screen.getBoundingClientRect();
     const sx = e.clientX - r.left;
     const sy = e.clientY - r.top;
@@ -627,6 +710,17 @@ function surfaceAim(e) {
   const a = aimFromEvent(e);
   return { x: cosmos.mapX(a.x * W) / W, y: a.y };
 }
+
+function followCursorAim(e) {
+  if (!G?.brain || isEegLive()) return;
+  const a = surfaceAim(e);
+  G.brain.aim.x = a.x;
+  G.brain.aim.y = a.y;
+  const s = sim();
+  if (s) s.setAim(a.x, a.y);
+  G.scene?.setAim?.(a.x, a.y);
+}
+window.addEventListener('pointermove', followCursorAim, { passive: true });
 let panDrag = null;
 let orbitDrag = null;
 // ---------- 3D camera <-> globe hand-off ----------
@@ -682,6 +776,7 @@ function stepCam3dTween() {
 }
 
 screen.addEventListener('pointermove', (e) => {
+  followCursorAim(e);
   if (G && cosmos.active) { const p = worldFromEvent(e); cosmos.pointerMove(e.pointerId, p.x, p.y, G); return; }
   if (orbitDrag && orbitDrag.id === e.pointerId) {
     const dx = e.clientX - orbitDrag.x;
@@ -713,6 +808,21 @@ screen.addEventListener('pointermove', (e) => {
   s.setAim(a.x, a.y);
   G.brain.aim.x = a.x; G.brain.aim.y = a.y;
 });
+function triggerAimClick(e) {
+  if (!G) return;
+  const a = surfaceAim(e);
+  G.brain.aim.x = a.x;
+  G.brain.aim.y = a.y;
+  const s = sim();
+  if (s) {
+    s.setAim(a.x, a.y);
+    s.blink();
+  } else if (!isEegLive()) {
+    G.brain.stats.blinks++;
+    G.brain.blinkListeners.forEach((fn) => fn(G.brain.aim));
+  }
+}
+
 screen.addEventListener('pointerdown', (e) => {
   audio.unlock();
   if (banner) { dismissBanner(); return; }
@@ -745,29 +855,23 @@ screen.addEventListener('pointerdown', (e) => {
     panDrag = { id: e.pointerId, x: q.x, y: q.y };
     return;
   }
-  const s = sim();
   if (gesture && G && e.button === 0) {
     try { screen.setPointerCapture?.(e.pointerId); } catch {}
     const q0 = worldFromEvent(e);
     gesture.down(e.pointerId, e.clientX, e.clientY, q0.x, q0.y);
     grab3d = in3dSurface() ? groundAt(e) : null;
-    if (s) { const a = surfaceAim(e); s.setAim(a.x, a.y); G.brain.aim.x = a.x; G.brain.aim.y = a.y; }
+    const a = surfaceAim(e);
+    G.brain.aim.x = a.x; G.brain.aim.y = a.y;
+    const s = sim();
+    if (s) s.setAim(a.x, a.y);
     return; // the blink happens on release, if Rust says it was a tap
   }
-  if (!s) return;
-  const a = surfaceAim(e);
-  s.setAim(a.x, a.y);
-  G.brain.aim.x = a.x; G.brain.aim.y = a.y;
-  s.blink();
+  triggerAimClick(e);
 });
 const endPointer = (e) => {
   if (gesture?.owns(e.pointerId)) {
-    const s = sim();
-    if (gesture.up(e.pointerId, e.type === 'pointercancel') && s && G) {
-      const a = surfaceAim(e);
-      s.setAim(a.x, a.y);
-      G.brain.aim.x = a.x; G.brain.aim.y = a.y;
-      s.blink();
+    if (gesture.up(e.pointerId, e.type === 'pointercancel') && G) {
+      triggerAimClick(e);
     }
     return;
   }
@@ -806,8 +910,7 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyA') { e.preventDefault(); toggleAssistMode(); return; }
     if (e.key === '?' || e.code === 'KeyH') {
       e.preventDefault();
-      $('failScreen').hidden = true;
-      if (G?.scene?.intro) showBanner(G.scene, G.sceneIndex);
+      showControlsFromFail();
       return;
     }
     if (e.code === 'Escape' || e.code === 'KeyQ') {
@@ -816,8 +919,16 @@ window.addEventListener('keydown', (e) => {
       return;
     }
   }
-  if (e.code === 'KeyM') { toggleModel(); return; }
   if (e.code === 'Escape' && eegPanel?.wiz?.active) { eegPanel?.closeWizard(); return; }
+  if (eegPanel?.wiz?.active) return;
+  if (banner?.fromFail) {
+    if (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Backspace') { e.preventDefault(); dismissBanner(); }
+    return;
+  }
+  const overlay = !G || !$('titleScreen').hidden || !$('failScreen').hidden || !$('endScreen').hidden;
+  if (overlay) return;
+  if (banner && e.code !== 'Enter') return;
+  if (e.code === 'KeyM') { toggleModel(); return; }
   if (e.code === 'KeyE') { eegPanel?.toggle(); return; }
   if (e.code === 'KeyC') { eegPanel?.calibrateCenter(); return; }
   if (e.code === 'KeyT') { toggle3D(); return; }
@@ -901,10 +1012,7 @@ $('soundBtn').addEventListener('click', () => {
 $('bannerGo').addEventListener('click', dismissBanner);
 $('retryBtn').addEventListener('click', retryEra);
 $('assistBtn')?.addEventListener('click', toggleAssistMode);
-$('showHowBtn')?.addEventListener('click', () => {
-  $('failScreen').hidden = true;
-  if (G?.scene?.intro) showBanner(G.scene, G.sceneIndex);
-});
+$('showHowBtn')?.addEventListener('click', showControlsFromFail);
 $('quitTitleBtn')?.addEventListener('click', quitToTitle);
 $('biometricFeedbackBtn')?.addEventListener('click', () => {
   $('biometricFeedbackAck').hidden = false;
@@ -1063,7 +1171,7 @@ $('playBridge').addEventListener('click', async () => {
 // Debug handle for the console (and for automated playtests).
 window.__moc = { get G() { return G; }, startScene: (i) => startScene(i), cosmos, get engine() { return engine; } };
 
-// camera (#33, #116–#123): opt-in webcam. Hands perform actions (pinch-grab, 2-hand zoom, palm, fist, wave)
+// camera (#33, #116–#123): opt-in webcam. Hands perform actions (pinch-grab, 2-hand zoom, palm, fist)
 // with coach visual demonstration. Face sets mood.
 window.__moc.camera = initCamera({
   getG: () => cosmos.castG(G), // planets (#68): casts and mood reach the world you're on
@@ -1071,16 +1179,43 @@ window.__moc.camera = initCamera({
   // camera debug (#67): the fingertip aims on the panned surface like the mouse does.
   mapX: (x) => cosmos.mapX(x * W) / W,
   screenX: (x) => ((((x * W + cosmos.panX) % W) + W) % W) / W,
-  onZoomDelta: (delta) => {
-    // Two-hand continuous pinch zoom (#119)
-    try {
-      cosmos.onWheel?.({ deltaY: -delta * 120, preventDefault() {} });
-    } catch {}
+  onZoomDelta: (delta, factor) => {
+    // Two-hand continuous pinch zoom: delta > 0 is zoom in (hands spread), delta < 0 is zoom out (hands together)
+    if (!G) return;
+    if (in3dSurface()) {
+      cam3dTween = null;
+      if (delta < 0 && engine.get_camera_distance() >= CAM3D.topDown - 0.5) {
+        cosmos.zoomOut(G);
+        return;
+      }
+      const step = 1 - Math.max(-0.25, Math.min(0.25, delta * 2.5));
+      zoom3dBy(step);
+      return;
+    }
+    // Cosmos zoom (surface <-> globe <-> galaxy): wheel negative zooms in, positive zooms out
+    cosmos.wheel(-delta * 750, G);
   },
-  onWave: (dir) => {
-    // Open-hand wave orbits camera (#121)
-    if (cosmos.mode === 'planet' || cosmos.mode === 'vast') {
-      cosmos.panX += dir * 40;
+  onGrabMove: ({ dx, dy, active, started, released, aim }) => {
+    // One-hand pinch grab & move the globe or world view
+    if (!G) return;
+    if (cosmos.active || cosmos.z > 0.4) {
+      if (active) {
+        // In normalized hand space (-1..1). Moving hand right rotates globe right.
+        const spin = -dx * 3.5;
+        cosmos.rot += spin;
+        cosmos.spinVel = spin / 0.033;
+      }
+      return;
+    }
+    if (in3dSurface()) {
+      if (active && (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001)) {
+        engine.orbit_camera(-dx * 3.5, dy * 3.5);
+        cam3dBase = null;
+      }
+      return;
+    }
+    if (active && (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001)) {
+      panMap(-dx * W * 1.5, -dy * H * 1.5);
     }
   },
 });

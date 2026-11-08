@@ -3,8 +3,7 @@
 //   Hands: MediaPipe Gesture Recognizer (numHands=2, #118) →
 //          1. One-hand pinch grabs & relocates living entities under the head cursor (#120)
 //          2. Two-hand pinch distance continuously zooms in/out & freezes on release (#119)
-//          3. Open-hand wave orbits the 3D camera / cycles planets (#121)
-//          4. Three core moves (#122): Pinch (1), Open Palm / Calm (2), Closed Fist / Strike (3)
+//          3. Three core moves (#122): Pinch (1), Open Palm / Calm (2), Closed Fist / Strike (3)
 //   Face:  MediaPipe Face Landmarker blendshapes → Joy (continuous) + Surprise (debounced event) (#117).
 //   Coach: Collapsible bottom panel with procedural 21-landmark ghost hands (#123).
 //
@@ -51,7 +50,7 @@ const TEMPLATE = `
       <strong data-cam-state>Camera off</strong>
       <span class="eeg-qual" data-cam-mode>Idle</span>
     </div>
-    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam: head cursor aims; hands pinch-grab creatures, two-hand pinch-zoom, wave to orbit, palm to calm, fist to strike. Frames never leave this device.</p>
+    <p class="eeg-msg" data-cam-msg role="status">Opt-in webcam: head cursor aims; hands pinch-grab creatures, two-hand pinch-zoom, palm to calm, fist to strike. Frames never leave this device.</p>
     <div class="eeg-url-row">
       <button type="button" class="btn btn-primary btn-small" data-cam-start>Start Camera</button>
       <button type="button" class="btn btn-small" data-cam-stop disabled>Stop &amp; Clear</button>
@@ -137,7 +136,7 @@ export function initCamera({
   mapX = (x) => x,
   screenX = (x) => x,
   onZoomDelta = null,
-  onWave = null,
+  onGrabMove = null,
   getContext = () => 'surface',
   onStatusChange = null,
 } = {}) {
@@ -245,7 +244,7 @@ export function initCamera({
   }
   function setMsg(msg) {
     if (!ui.msg) return;
-    ui.msg.textContent = msg || 'Opt-in webcam: head cursor aims; hands grab, zoom, wave, calm and strike.';
+    ui.msg.textContent = msg || 'Opt-in webcam: head cursor aims; hands grab, zoom, calm and strike.';
   }
 
   function togglePanel(force) {
@@ -443,6 +442,9 @@ export function initCamera({
       } else {
         scene.onCast?.(id, aim);
       }
+      if (G.engine?.game_on_cast) {
+        G.engine.game_on_cast(id, aim.x * 320, aim.y * 180);
+      }
     } catch (err) { console.error('[camera] cast failed:', err); }
     G.stats.casts = (G.stats.casts || 0) + 1;
     if (SPELL_BY_ID[id].aimed) armed = id;
@@ -532,7 +534,7 @@ export function initCamera({
       aspect: handAspect,
     });
 
-    // Multi-hand tracker: 2-hand continuous zoom (#118, #119), 1-hand grab (#120), wave orbit (#121)
+    // Multi-hand tracker: 2-hand continuous zoom (#118, #119), 1-hand grab (#120)
     multi = multiHand.update({ hands: rawHands, now, aspect: handAspect });
 
     if (live) {
@@ -544,22 +546,27 @@ export function initCamera({
         onZoomDelta(multi.zoomDelta, multi.zoomFactor);
       }
 
-      // 2. One-hand pinch grab at head reticle (#120)
+      // 2. One-hand pinch grab at head reticle (#120) & Globe/World movement
       if (multi.grab.started) {
         tryGrabStart(G, now);
-      } else if (multi.grab.active && grabbed) {
-        G.scene?.onGrabMove?.({ x: G.brain.aim.x, y: G.brain.aim.y });
+        if (!grabbed && onGrabMove) {
+          onGrabMove({ dx: 0, dy: 0, started: true, active: true, aim: G.brain.aim, grab: multi.grab });
+        }
+      } else if (multi.grab.active) {
+        if (grabbed) {
+          G.scene?.onGrabMove?.({ x: G.brain.aim.x, y: G.brain.aim.y });
+        } else if (onGrabMove) {
+          onGrabMove({ dx: multi.grab.dx, dy: multi.grab.dy, started: false, active: true, aim: G.brain.aim, grab: multi.grab });
+        }
       } else if (multi.grab.released || multi.grab.cancelled) {
-        tryGrabEnd(G, now, !!multi.grab.cancelled);
+        if (grabbed) {
+          tryGrabEnd(G, now, !!multi.grab.cancelled);
+        } else if (onGrabMove) {
+          onGrabMove({ dx: 0, dy: 0, released: true, cancelled: !!multi.grab.cancelled, active: false, aim: G.brain.aim, grab: multi.grab });
+        }
       }
 
-      // 3. Open-hand wave orbit (#121)
-      if (multi.wave && onWave) {
-        onWave(multi.wave, multi.waveVel);
-        coach?.flash(`👋 Wave ${multi.wave} · camera orbited`, 'ok', 1400);
-      }
-
-      // 4. Palm (Calm) & Fist (Strike) gesture holds (#122) — suppressed while pinching, grabbing, or waving
+      // 3. Palm (Calm) & Fist (Strike) gesture holds (#122) — suppressed while pinching or grabbing
       const suppressCast = multi.suppressCasts || finger.suppress;
       hold = suppressCast ? casts.update('None', 0, now) : casts.update(gesture.name, gesture.score, now);
       if (hold.cast) cast(hold.cast, 'gesture', now);
@@ -839,7 +846,6 @@ export function initCamera({
         distance: multi?.distance ?? null,
         pinchStart: multi?.pinchStart ?? null,
         zoomFactor: multi?.zoomFactor ?? 1,
-        wave: multi?.wave || null,
       },
       grabbed: grabbed ? { ...grabbed } : null,
       finger: finger && { mode: finger.mode, ratio: finger.ratio, reach: finger.reach, pinching: finger.pinching, progress: finger.progress, suppress: finger.suppress, tip: finger.tip },

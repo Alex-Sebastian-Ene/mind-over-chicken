@@ -13,6 +13,7 @@ import { Galaxy, ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, drawPlanetBolt } from '
 import { label } from '../eras/stone.js';
 import { ZoomState } from './zoom.js';
 import { tierName } from './planet-sim.js';
+import { drawReticle } from '../render/sprites.js';
 
 const CENTER = { x: W / 2, y: H / 2 };
 const BIG_R = 74;
@@ -205,19 +206,16 @@ export class Cosmos extends ZoomState {
     const look = this.focusLook(G);
     const z = this.z;
     if (z <= 1) {
-      const e = ease(z);
-      const fa = 1 - smoothstep(0.3, 0.75, z);
-      if (fa > 0) {
-        const s = 1 - 0.78 * e;
-        ctx.globalAlpha = fa;
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(this.flat, Math.round(CENTER.x - W * s / 2), Math.round(CENTER.y - H * s / 2), Math.round(W * s), Math.round(H * s));
-        ctx.globalAlpha = 1;
-      }
+      // #138: one continuous move. The flat map shrinks and curls onto a sphere (its rows bend
+      // in toward the poles), the real globe fades in at the same apparent size, and then the
+      // globe settles to its resting size. The globe used to grow from a small dot while the
+      // map shrank, so the two never lined up.
+      const bigR = lerp(BIG_R * 1.25, BIG_R, smoothstep(0.35, 1, z));
+      const fa = 1 - smoothstep(0.42, 0.66, z);
+      if (fa > 0) this.drawCurledMap(ctx, smoothstep(0, 0.6, z), fa, bigR, look.atmosphere);
       const face = this.faceRot();
       const rot = face + wrapAngle(this.rot - face) * smoothstep(0.55, 1, z);
-      const bigR = lerp(30, BIG_R, e);
-      if (look.tex) this.globe.draw(ctx, look.tex, CENTER.x, CENTER.y, bigR, { rot, alpha: smoothstep(0.2, 0.6, z), light: SUN, atmosphere: look.atmosphere });
+      if (look.tex) this.globe.draw(ctx, look.tex, CENTER.x, CENTER.y, bigR, { rot, alpha: smoothstep(0.4, 0.62, z), light: SUN, atmosphere: look.atmosphere });
       const lp = look.planet;
       if (lp && lp.flash > 0) drawPlanetBolt(ctx, CENTER.x, CENTER.y, bigR, lp.storms + 1, Math.min(1, lp.flash * 2) * smoothstep(0.5, 0.9, z));
       this.drawMoon(ctx, z);
@@ -234,6 +232,75 @@ export class Cosmos extends ZoomState {
       gal.drawPlanet(ctx, this.globe, fp, lerp(CENTER.x, q.x, e), lerp(CENTER.y, q.y, e), lerp(BIG_R, fp.size, e), G.scene?.layer || G.world.layers.stone, G.world.structures, 1, { rot, light: L, tilt: lerp(0.32, 0.3, e) });
     }
     return true;
+  }
+
+  // The flat surface wrapping onto a sphere (#138). As `curl` goes 0 -> 1 the view's columns
+  // bend to longitudes and its rows to latitudes (up to ~77 degrees each way), its outline
+  // narrows from the full screen to a circle of radius `R` (the globe's size at the hand-over)
+  // and sun-side shading fades in, so the real globe can cross-fade in on top without a jump.
+  // Two passes of strip copies (columns, then rows) keep it on the GPU path: a per-pixel
+  // version needed a pixel read-back of the frame, which cost ~12 ms.
+  drawCurledMap(ctx, curl, alpha, R, atmosphere = [110, 175, 255]) {
+    if (!this.curlBuf) {
+      const mk = () => { const cv = Object.assign(document.createElement('canvas'), { width: W, height: H }); const cx = cv.getContext('2d'); cx.imageSmoothingEnabled = false; return { cv, cx }; };
+      this.curlBuf = { a: mk(), b: mk() };
+    }
+    const { a, b } = this.curlBuf;
+    const EDGE = 1.35;                                  // latitude/longitude the map's edges reach
+    const ang = EDGE * curl, sA = Math.sin(ang), bent = ang > 1e-3;
+    const warp = (n) => (bent ? Math.asin(Math.max(-1, Math.min(1, n * sA))) / ang : n); // screen -> map, -1..1
+    const rim = R * Math.sin(EDGE);
+    const hw = lerp(W / 2, rim, curl), hh = lerp(H / 2, rim, curl);
+    // Pass 1: columns. Destination column x (as -1..1 across the width) samples map column warp(x).
+    a.cx.clearRect(0, 0, W, H);
+    const CS = 2;
+    for (let x = 0; x < W; x += CS) {
+      const u0 = (warp((x / W) * 2 - 1) + 1) * 0.5 * W;
+      const u1 = (warp(((x + CS) / W) * 2 - 1) + 1) * 0.5 * W;
+      a.cx.drawImage(this.flat, u0, 0, Math.max(0.5, u1 - u0), H, x, 0, CS, H);
+    }
+    // Pass 2: rows. Destination row y (as -1..1 down the outline) samples row warp(y) of pass 1,
+    // squeezed to that latitude's width.
+    b.cx.clearRect(0, 0, W, H);
+    const RS = 2;
+    const top = Math.max(0, Math.floor(CENTER.y - hh)), bot = Math.min(H, Math.ceil(CENTER.y + hh));
+    for (let y = top; y < bot; y += RS) {
+      const n0 = (y - CENTER.y) / hh, n1 = (y + RS - CENTER.y) / hh;
+      const nm = Math.max(-1, Math.min(1, (n0 + n1) / 2));
+      const v0 = (warp(Math.max(-1, n0)) + 1) * 0.5 * H, v1 = (warp(Math.min(1, n1)) + 1) * 0.5 * H;
+      const half = hw * Math.sqrt(Math.max(0, 1 - (nm * sA) ** 2)); // hw * cos(latitude)
+      if (half < 0.5 || v1 - v0 <= 0) continue;
+      b.cx.drawImage(a.cv, 0, v0, W, v1 - v0, Math.round(CENTER.x - half), y, Math.round(half * 2), RS);
+    }
+    // Sun-side shading: a radial falloff from the lit side, only where the map is drawn.
+    const shade = 0.78 * curl;
+    if (shade > 0.01) {
+      const Ln = Math.hypot(SUN[0], SUN[1], SUN[2]);
+      const gx = CENTER.x + (SUN[0] / Ln) * hw * 0.75, gy = CENTER.y + (SUN[1] / Ln) * hh * 0.75;
+      const g = b.cx.createRadialGradient(gx, gy, 0, gx, gy, Math.max(hw, hh) * 2.1);
+      g.addColorStop(0, `rgba(255,250,230,${0.12 * curl})`);
+      g.addColorStop(0.35, 'rgba(0,0,0,0)');
+      g.addColorStop(0.75, `rgba(2,4,18,${shade * 0.75})`);
+      g.addColorStop(1, `rgba(2,4,18,${shade})`);
+      b.cx.globalCompositeOperation = 'source-atop';
+      b.cx.fillStyle = g;
+      b.cx.fillRect(0, 0, W, H);
+      b.cx.globalCompositeOperation = 'source-over';
+    }
+    ctx.globalAlpha = alpha;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(b.cv, 0, 0);
+    // A thin atmosphere rim hugging the outline as it becomes round.
+    const glow = smoothstep(0.3, 0.9, curl) * alpha;
+    if (glow > 0.01) {
+      ctx.strokeStyle = `rgb(${atmosphere[0]},${atmosphere[1]},${atmosphere[2]})`;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = glow * 0.7;
+      ctx.beginPath(); ctx.ellipse(CENTER.x, CENTER.y, hw + 1, hh + 1, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = glow * 0.3;
+      ctx.beginPath(); ctx.ellipse(CENTER.x, CENTER.y, hw + 2.5, hh + 2.5, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
   }
 
   // A tiny moon orbiting the big globe at level 1.
@@ -272,6 +339,9 @@ export class Cosmos extends ZoomState {
     }
     if (this.galaxy && z > 1.2) this.galaxy.drawOverlay(ctx, { alpha: smoothstep(1.3, 1.9, z), hover: this.hover });
     if (this.toast) { ctx.globalAlpha = Math.min(1, this.toast.t); label(ctx, CENTER.x, 30, this.toast.text, '#ffd166', 6); ctx.globalAlpha = 1; }
+    if (G?.brain?.aim) {
+      drawReticle(ctx, G.brain.aim.x * (W - 1), G.brain.aim.y * (H - 1), this.time, '#ffe066');
+    }
   }
 
   // ---- input (coordinates in world pixels) ----

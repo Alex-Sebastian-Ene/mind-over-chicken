@@ -282,18 +282,25 @@ impl Engine {
         Ok(())
     }
 
-    /// Generate realistic procedural terrain using moc-terrain (#109).
-    /// Updates the engine's internal heightmap, 3D relief mesh, and base pixel texture.
-    pub fn generate_terrain(&mut self, seed: u32) -> Result<(), JsValue> {
-        let map = moc_terrain::TerrainMap::generate_home_world(seed);
-        if let Some(t) = &mut self.terrain {
-            t.h.copy_from_slice(&map.heights);
-            t.tile_type.copy_from_slice(&map.types);
-            t.pixels.copy_from_slice(&map.rgba);
+    /// Generate a home world with moc-terrain (#109) and make it the engine's: heights, tiles,
+    /// colours, sites and the 3D relief. `width`/`height` 0 (or left out) mean the engine's
+    /// 320×180; the engine only draws worlds of its own size, so another size only updates the
+    /// 3D mesh (until the game supports bigger maps, #129).
+    pub fn generate_terrain(&mut self, seed: u32, width: u32, height: u32) -> Result<(), JsValue> {
+        let (w, h) = if width == 0 || height == 0 { (W, H) } else { (width as usize, height as usize) };
+        let map = moc_terrain::generate(&moc_terrain::TerrainParams::home_world_sized(seed, w, h));
+        if (w, h) == (W, H) {
+            let mut t = Terrain::new_empty(seed);
+            t.apply_map(&map);
+            t.bake_era(self.current_era);
+            self.terrain = Some(t);
         }
         if let Some(r3d) = &mut self.renderer_3d {
-            let mesh = TerrainMesh::build(&map.heights, W, H, W as f32, H as f32, 24.0, 0.33);
+            let mesh = TerrainMesh::build(&map.heights, w, h, w as f32, h as f32, 24.0, 0.33);
             r3d.upload_mesh(&mesh);
+            if let Some(t) = &self.terrain {
+                r3d.upload_terrain_texture(&t.pixels, W as i32, H as i32);
+            }
         }
         Ok(())
     }
@@ -973,6 +980,8 @@ impl Engine {
         if let Some(t) = &mut self.terrain {
             t.biome = biome;
             t.palette = terrain::BiomePalette::for_biome(biome);
+            // The planet's climate and colours change the land itself (moc-terrain).
+            t.generate();
             t.bake_era(self.game.era_index as u8);
             if let Some(r3d) = &mut self.renderer_3d {
                 r3d.upload_terrain_texture(&t.pixels, 320, 180);
@@ -1082,6 +1091,17 @@ impl Engine {
         self.dispatch_era_events(&events);
     }
 
+    pub fn draw_era_3d(&mut self) {
+        let lights = self.game.lights_3d();
+        for l in lights {
+            self.add_3d_light(l.x, l.y, l.z, l.radius, l.intensity);
+        }
+        let billboards = self.game.billboards_3d();
+        for b in billboards {
+            self.add_billboard(b.sprite_id, b.x, b.z, b.facing, b.frame, b.variant);
+        }
+    }
+
     fn dispatch_era_events(&mut self, events: &[eras::EraEvent]) {
         for ev in events {
             match ev {
@@ -1122,6 +1142,10 @@ impl Engine {
         cooldown: f32,
     ) -> bool {
         self.advisor.say(key, text, mood, priority, cooldown)
+    }
+
+    pub fn advisor_set_era(&mut self, era: &str) {
+        self.advisor.set_era(era);
     }
 
     pub fn get_game_era_index(&self) -> usize {
@@ -1171,42 +1195,263 @@ impl Engine {
     pub fn get_game_restarts_stat(&self) -> u32 {
         self.game.stats.restarts
     }
+
+    pub fn is_game_era_complete(&self) -> bool {
+        self.game.era.is_complete()
+    }
+
+    pub fn is_game_era_failed(&self) -> Option<String> {
+        self.game.era.is_failed()
+    }
 }
 
-/// Standalone WebAssembly World Generator providing zero-copy buffers to JS (#109, #19, #128)
+#[wasm_bindgen]
+pub fn rust_villager_look(era: &str, seed: u32) -> js_sys::Array {
+    let mut rng = crate::terrain::Mulberry32::new(seed);
+    let look = crate::agents::villager_look(era, &mut rng);
+    let arr = js_sys::Array::new();
+    let to_hex = |c: (u8, u8, u8)| format!("#{:02x}{:02x}{:02x}", c.0, c.1, c.2);
+    arr.push(&JsValue::from_str(&to_hex(look.shirt)));
+    arr.push(&JsValue::from_str(&to_hex(look.hair)));
+    arr.push(&JsValue::from_str(&to_hex(look.skin)));
+    arr
+}
+
+#[wasm_bindgen]
+pub fn rust_animate_agent(clock: f32, dt: f32, rate: f32) -> js_sys::Float32Array {
+    let arr = js_sys::Float32Array::new_with_length(2);
+    let new_clock = clock + dt * rate;
+    let frame = new_clock.floor();
+    arr.set_index(0, new_clock);
+    arr.set_index(1, frame);
+    arr
+}
+
+/// A generated world for JS (#109, from #112): the JS `World` is a thin wrapper that fills its
+/// arrays from this. `new(seed)` is the 320×180 home world; `home(seed, w, h)` any size;
+/// `planet(seed, biome)` a galaxy planet's 640×360 surface with its 320×180 capital (the AI
+/// tribe's world) cut from it at (0, 90). Accessors without `surface_` describe the world (the
+/// capital for a planet); `surface_*` describe the whole surface.
 #[wasm_bindgen]
 pub struct RustWorldGen {
-    terrain: crate::terrain::Terrain,
+    map: moc_terrain::TerrainMap,
+    surface: Option<moc_terrain::TerrainMap>,
+    ms: f64,
+}
+
+fn now_ms() -> f64 {
+    js_sys::Date::now()
+}
+
+fn bools(v: &[bool]) -> js_sys::Uint8Array {
+    let b: Vec<u8> = v.iter().map(|&x| x as u8).collect();
+    js_sys::Uint8Array::from(&b[..])
+}
+
+/// Island sizes (landmasses that aren't major continents), landform and biome shares, as JSON.
+fn stats_json(m: &moc_terrain::TerrainMap) -> String {
+    let mut isl: Vec<usize> = m.continents.iter().filter(|c| !c.major).map(|c| c.area).collect();
+    isl.sort();
+    let land = m.biome.iter().filter(|&&b| moc_terrain::climate::biome::is_land(b)).count().max(1);
+    let water = m.width * m.height - land;
+    let majors = m.continents.iter().filter(|c| c.major).count();
+    format!(
+        "{{\"width\":{},\"height\":{},\"land\":{},\"seaShare\":{:.3},\"continents\":{},\"islands\":{},\"islandMin\":{},\"islandMedian\":{},\"islandMax\":{},\"minIsland\":{}}}",
+        m.width,
+        m.height,
+        land,
+        water as f32 / (m.width * m.height) as f32,
+        majors,
+        isl.len(),
+        isl.first().copied().unwrap_or(0),
+        isl.get(isl.len() / 2).copied().unwrap_or(0),
+        isl.last().copied().unwrap_or(0),
+        m.stats.min_island
+    )
 }
 
 #[wasm_bindgen]
 impl RustWorldGen {
+    /// The 320×180 home world.
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Self {
-        Self {
-            terrain: crate::terrain::Terrain::new(seed),
+        Self::home(seed, 0, 0, "temperate")
+    }
+
+    /// A home world of any size (0 × 0: the game's 320×180) for a planet biome (temperate,
+    /// desert, ice, jungle, alien).
+    pub fn home(seed: u32, width: u32, height: u32, biome: &str) -> RustWorldGen {
+        let t0 = now_ms();
+        let (w, h) = if width == 0 || height == 0 { (W, H) } else { (width as usize, height as usize) };
+        let mut p = moc_terrain::TerrainParams::home_world_sized(seed, w, h);
+        p.set_biome(biome);
+        let map = moc_terrain::generate(&p);
+        RustWorldGen { map, surface: None, ms: now_ms() - t0 }
+    }
+
+    /// A galaxy planet: its 640×360 surface, and the 320×180 capital at (0, 90) as the world.
+    pub fn planet(seed: u32, biome: &str) -> RustWorldGen {
+        let t0 = now_ms();
+        let surface = moc_terrain::TerrainMap::generate_planet_surface(seed, biome);
+        let map = surface.crop(0, 90, W, H, true);
+        RustWorldGen { map, surface: Some(surface), ms: now_ms() - t0 }
+    }
+
+    /// Generation time, ms.
+    pub fn ms(&self) -> f64 {
+        self.ms
+    }
+    pub fn width(&self) -> u32 {
+        self.map.width as u32
+    }
+    pub fn height(&self) -> u32 {
+        self.map.height as u32
+    }
+    /// Heights 0..1, sea level 0.33 (like the old maps, so the 3D water level is unchanged).
+    pub fn heights(&self) -> js_sys::Float32Array {
+        js_sys::Float32Array::from(&self.map.heights[..])
+    }
+    /// Game tiles (the JS `T` codes).
+    pub fn types(&self) -> js_sys::Uint8Array {
+        js_sys::Uint8Array::from(&self.map.types[..])
+    }
+    /// The base colour layer, RGBA.
+    pub fn rgba(&self) -> js_sys::Uint8Array {
+        js_sys::Uint8Array::from(&self.map.rgba[..])
+    }
+    pub fn biomes(&self) -> js_sys::Uint8Array {
+        js_sys::Uint8Array::from(&self.map.biome[..])
+    }
+    pub fn rivers(&self) -> js_sys::Uint8Array {
+        bools(&self.map.river_mask)
+    }
+    pub fn lakes(&self) -> js_sys::Uint8Array {
+        bools(&self.map.lake_mask)
+    }
+    /// Campaign landmass per tile (index into `continents_json`), 255 for none.
+    pub fn owner(&self) -> js_sys::Uint8Array {
+        js_sys::Uint8Array::from(&self.map.owner()[..])
+    }
+    pub fn sites_json(&self) -> String {
+        self.map.sites_json()
+    }
+    pub fn continents_json(&self) -> String {
+        self.map.continents_json()
+    }
+    pub fn stats_json(&self) -> String {
+        stats_json(&self.map)
+    }
+
+    pub fn has_surface(&self) -> bool {
+        self.surface.is_some()
+    }
+    pub fn surface_width(&self) -> u32 {
+        self.surface.as_ref().map(|s| s.width as u32).unwrap_or(0)
+    }
+    pub fn surface_height(&self) -> u32 {
+        self.surface.as_ref().map(|s| s.height as u32).unwrap_or(0)
+    }
+    pub fn surface_types(&self) -> js_sys::Uint8Array {
+        js_sys::Uint8Array::from(self.surface.as_ref().map(|s| &s.types[..]).unwrap_or(&[]))
+    }
+    pub fn surface_heights(&self) -> js_sys::Float32Array {
+        js_sys::Float32Array::from(self.surface.as_ref().map(|s| &s.heights[..]).unwrap_or(&[]))
+    }
+    pub fn surface_rgba(&self) -> js_sys::Uint8Array {
+        js_sys::Uint8Array::from(self.surface.as_ref().map(|s| &s.rgba[..]).unwrap_or(&[]))
+    }
+    pub fn surface_stats_json(&self) -> String {
+        self.surface.as_ref().map(stats_json).unwrap_or_else(|| "{}".into())
+    }
+    /// The surface's landmasses and settlement spots (capital first, then nearest first), as
+    /// the galaxy's surface view expects them: {tile, continents, spots}.
+    pub fn surface_json(&self) -> String {
+        let Some(s) = &self.surface else { return "{}".into() };
+        let (tx, ty) = (0i32, 90i32);
+        let d = s.dims();
+        let cap = self.map.campaign_sites.as_ref().map(|c| (c.village.0 as i32 + tx, c.village.1 as i32 + ty)).unwrap_or((W as i32 / 2, ty + H as i32 / 2));
+        let mut conts = Vec::new();
+        for (k, c) in s.continents.iter().enumerate() {
+            let v = s.sites.iter().find(|q| q.continent == k).map(|q| (q.x, q.y)).unwrap_or((c.cx as i32, c.cy as i32));
+            conts.push(format!(
+                "{{\"id\":\"c{}\",\"cx\":{:.1},\"cy\":{:.1},\"rx\":{:.1},\"ry\":{:.1},\"area\":{},\"village\":{{\"x\":{},\"y\":{}}}}}",
+                k, c.cx, c.cy, c.bw as f32 * 0.5, c.bh as f32 * 0.5, c.area, v.0, v.1
+            ));
+        }
+        // Spots: the capital, then the ranked sites, spread out, nearest the capital first.
+        let mut spots: Vec<(i32, i32, usize)> = Vec::new();
+        let cap_c = s.continent[d.idx(cap.0, cap.1).unwrap_or(0)] as usize;
+        let mut rest: Vec<(i32, i32, usize)> = Vec::new();
+        for q in s.sites.iter() {
+            let far = |a: &(i32, i32, usize)| d.dist2(a.0 as f32, a.1 as f32, q.x as f32, q.y as f32) > 26.0 * 26.0;
+            if d.dist2(cap.0 as f32, cap.1 as f32, q.x as f32, q.y as f32) > 26.0 * 26.0 && rest.iter().all(far) {
+                rest.push((q.x, q.y, q.continent + 1));
+            }
+        }
+        rest.sort_by(|a, b| d.dist2(cap.0 as f32, cap.1 as f32, a.0 as f32, a.1 as f32).total_cmp(&d.dist2(cap.0 as f32, cap.1 as f32, b.0 as f32, b.1 as f32)));
+        spots.push((cap.0, cap.1, cap_c));
+        spots.extend(rest);
+        let spots: Vec<String> = spots
+            .iter()
+            .enumerate()
+            .map(|(k, &(x, y, c))| {
+                let cont = if k == 0 { "home".to_string() } else if c == 0 { "sea".to_string() } else { format!("c{}", c - 1) };
+                format!("{{\"x\":{},\"y\":{},\"cont\":\"{}\"{}}}", x, y, cont, if k == 0 { ",\"capital\":true" } else { "" })
+            })
+            .collect();
+        format!("{{\"tile\":{{\"x\":{},\"y\":{}}},\"continents\":[{}],\"spots\":[{}]}}", tx, ty, conts.join(","), spots.join(","))
+    }
+}
+
+/// The era's land use (farms, roads, paving: tiles whose type differs from the base type)
+/// painted over the base colour layer, in a planet biome's colours.
+#[wasm_bindgen]
+pub fn paint_land_use(base: &[u8], types: &[u8], base_types: &[u8], width: u32, biome: &str) -> Vec<u8> {
+    let b = match biome {
+        "desert" => terrain::BiomeType::Desert,
+        "ice" => terrain::BiomeType::Ice,
+        "jungle" => terrain::BiomeType::Jungle,
+        "alien" => terrain::BiomeType::Alien,
+        _ => terrain::BiomeType::Temperate,
+    };
+    terrain::paint_land_use(base, types, base_types, width as usize, &terrain::BiomePalette::for_biome(b))
+}
+
+/// Walking distance (8-neighbour steps, no wrap) from every tile to (tx, ty) over walkable
+/// tiles, or over water with `sea`; -1 where unreachable. The JS `World.field`/`seaField`.
+#[wasm_bindgen]
+pub fn walk_field(types: &[u8], width: u32, height: u32, tx: i32, ty: i32, sea: bool) -> Vec<i16> {
+    let (w, h) = (width as i32, height as i32);
+    let mut f = vec![-1i16; types.len()];
+    if w <= 0 || h <= 0 || types.len() < (w * h) as usize {
+        return f;
+    }
+    // The map is a torus (#111): the target and every step wrap both ways.
+    let (tx, ty) = (tx.rem_euclid(w), ty.rem_euclid(h));
+    let ok = |t: u8| if sea { t <= terrain::T_SHALLOW } else { t >= terrain::T_SAND && t != terrain::T_MOUNTAIN && t != terrain::T_SNOW };
+    let mut q = std::collections::VecDeque::new();
+    let s0 = (ty * w + tx) as usize;
+    f[s0] = 0;
+    q.push_back(s0);
+    while let Some(i) = q.pop_front() {
+        let (x, y) = ((i as i32) % w, (i as i32) / w);
+        let d = f[i].saturating_add(1);
+        for oy in -1..=1 {
+            for ox in -1..=1 {
+                if ox == 0 && oy == 0 {
+                    continue;
+                }
+                let (nx, ny) = ((x + ox).rem_euclid(w), (y + oy).rem_euclid(h));
+                let j = (ny * w + nx) as usize;
+                if f[j] != -1 || !ok(types[j]) {
+                    continue;
+                }
+                f[j] = d;
+                q.push_back(j);
+            }
         }
     }
-
-    pub fn heights(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.terrain.h[..])
-    }
-
-    pub fn types(&self) -> js_sys::Uint8Array {
-        js_sys::Uint8Array::from(&self.terrain.tile_type[..])
-    }
-
-    pub fn rgba(&self) -> js_sys::Uint8Array {
-        js_sys::Uint8Array::from(&self.terrain.pixels[..])
-    }
-
-    pub fn sites_json(&self) -> String {
-        self.terrain.sites_json()
-    }
-
-    pub fn continents_json(&self) -> String {
-        self.terrain.continents_json()
-    }
+    f
 }
 
 /// Standalone WebAssembly Cast Controller for camera god powers (#33, #108)
@@ -1724,5 +1969,29 @@ impl RustCalibration {
         let t = moc_brain::calibration::traits_from_features(&features);
         let out = [t.friendliness, t.aggressiveness, t.violence];
         js_sys::Float32Array::from(&out[..])
+    }
+}
+
+#[cfg(test)]
+mod walk_field_tests {
+    use super::*;
+
+    #[test]
+    fn walk_field_wraps_both_ways_on_the_torus() {
+        // A 10×6 sea with one walkable row; the BFS from x=1 reaches x=9 the short way, across
+        // the east-west seam (2 steps, not 8), and a target off the map wraps onto it (#111).
+        let (w, h) = (10usize, 6usize);
+        let mut types = vec![terrain::T_DEEP; w * h];
+        for x in 0..w {
+            types[2 * w + x] = terrain::T_GRASS;
+        }
+        let f = walk_field(&types, w as u32, h as u32, 1, 2, false);
+        assert_eq!(f[2 * w + 9], 2);
+        assert_eq!(f[2 * w + 5], 4);
+        let g = walk_field(&types, w as u32, h as u32, 11, 2 + h as i32, false);
+        assert_eq!(g, f);
+        // Over water the seam wraps north-south too.
+        let s = walk_field(&types, w as u32, h as u32, 0, 0, true);
+        assert_eq!(s[5 * w], 1);
     }
 }

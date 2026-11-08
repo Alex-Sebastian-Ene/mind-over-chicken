@@ -11,3 +11,13 @@ members = [
     "crates/moc-diffusion",
 ]
 resolver = "2"
+
+# Terrain generation is heavy arithmetic: keep it optimised in debug and test builds too, so
+# `cargo test` checks the real generation times (#109).
+[profile.dev.package.moc-terrain]
+opt-level = 3
+
+# One codegen unit for the terrain generator in release (wasm included): better inlining in
+# its hot loops for a few seconds more of compile time.
+[profile.release.package.moc-terrain]
+codegen-units = 1

@@ -1,4 +1,4 @@
-// camera (#67, #116, #118, #119, #120, #121): finger, two-hand, pinch-grab, continuous zoom & wave actions.
+// camera (#67, #116, #118, #119, #120): finger, two-hand, pinch-grab and continuous zoom actions.
 // Pure logic, no DOM, so Node can unit-test it.
 //
 //   OneEuroFilter / PointFilter  low-latency smoothing (Casiez et al., CHI 2012)
@@ -6,9 +6,8 @@
 //   HandRange                    learns reachable fingertip bounds
 //   pinchMetrics / PinchDetector thumb tip (4) to index tip (8), relative to hand size, with hysteresis
 //   FingerController             single-hand controller (supports both head-cursor-only grab mode and point/pinch)
-//   WaveDetector                 quantizes horizontal/vertical open-hand wave over ~250 ms with ~400 ms cooldown (#121)
 //   MultiHandTracker             stable two-hand identity (left/right), continuous two-hand pinch zoom (#118, #119),
-//                                one-hand pinch grab (#120), and wave orbit (#121).
+//                                one-hand pinch grab (#120).
 
 import { clamp } from '../sim/util.js';
 
@@ -162,73 +161,13 @@ export function setRustFingerController(cls) {
   RustFingerControllerClass = cls;
 }
 
-// ---------- Wave / swipe detector (#121) ----------
-// Detects a horizontal (or vertical) open-hand wave over ~250 ms with ~400 ms cooldown.
-export class WaveDetector {
-  constructor({ windowMs = 250, cooldownMs = 400, minDispX = 0.14, minDispY = 0.16, maxCrossRatio = 0.65 } = {}) {
-    Object.assign(this, { windowMs, cooldownMs, minDispX, minDispY, maxCrossRatio });
-    this.reset();
-  }
-
-  reset() {
-    this.samples = [];
-    this.cooldownUntil = -Infinity;
-  }
-
-  // hand: 21 landmarks, suppressed: true when pinching/zooming/fist.
-  // Returns { wave: 'left' | 'right' | 'up' | 'down' | null, vx, vy }.
-  update(hand, now, { suppressed = false, gestureName = 'None' } = {}) {
-    if (!hand || hand.length < 21 || suppressed || gestureName === 'Closed_Fist') {
-      if (!hand || suppressed) this.samples.length = 0;
-      return { wave: null, vx: 0, vy: 0 };
-    }
-    // Check that fingers are generally open (index & middle extended)
-    const palmLen = Math.hypot(hand[9].x - hand[0].x, hand[9].y - hand[0].y);
-    const midExt = Math.hypot(hand[12].x - hand[0].x, hand[12].y - hand[0].y) / Math.max(palmLen, 1e-5);
-    if (midExt < 1.35) {
-      this.samples.length = 0;
-      return { wave: null, vx: 0, vy: 0 };
-    }
-    // Mirrored x so moving hand right in front of webcam is +x
-    const x = 1 - (hand[0].x + hand[9].x) * 0.5;
-    const y = (hand[0].y + hand[9].y) * 0.5;
-    this.samples.push({ x, y, t: now });
-    while (this.samples.length && now - this.samples[0].t > this.windowMs) {
-      this.samples.shift();
-    }
-    if (this.samples.length < 2 || now < this.cooldownUntil) {
-      return { wave: null, vx: 0, vy: 0 };
-    }
-    const first = this.samples[0];
-    const dt = (now - first.t) / 1000;
-    if (dt < 0.06) return { wave: null, vx: 0, vy: 0 };
-    const dx = x - first.x;
-    const dy = y - first.y;
-    const vx = dx / dt;
-    const vy = dy / dt;
-    const ax = Math.abs(dx), ay = Math.abs(dy);
-    let wave = null;
-    if (ax >= this.minDispX && ay <= ax * this.maxCrossRatio) {
-      wave = dx > 0 ? 'right' : 'left';
-    } else if (ay >= this.minDispY && ax <= ay * this.maxCrossRatio) {
-      wave = dy > 0 ? 'down' : 'up';
-    }
-    if (wave) {
-      this.cooldownUntil = now + this.cooldownMs;
-      this.samples.length = 0;
-    }
-    return { wave, vx, vy };
-  }
-}
-
-// ---------- Multi-hand plumbing + two-hand pinch zoom + one-hand grab (#118, #119, #120, #121) ----------
+// ---------- Multi-hand plumbing + two-hand pinch zoom + one-hand grab (#118, #119, #120) ----------
 export class MultiHandTracker {
   constructor({
     lossMs = 300,
     grabCooldownMs = 400,
     zoomDeadZone = 0.015,
     pinch = {},
-    wave = {},
   } = {}) {
     this.lossMs = lossMs;
     this.grabCooldownMs = grabCooldownMs;
@@ -236,7 +175,6 @@ export class MultiHandTracker {
     this.leftPinch = new PinchDetector({ ...pinch, lossMs });
     this.rightPinch = new PinchDetector({ ...pinch, lossMs });
     this.distFilter = new OneEuroFilter({ minCutoff: 1.5, beta: 6 });
-    this.waveDetector = new WaveDetector(wave);
     this.reset();
   }
 
@@ -244,13 +182,12 @@ export class MultiHandTracker {
     this.leftPinch.reset();
     this.rightPinch.reset();
     this.distFilter.reset();
-    this.waveDetector.reset();
     this.slots = { left: null, right: null };
     this.zoomActive = false;
     this.pinchStart = null;
     this.lastDistance = null;
     this.frozenZoom = 1;
-    this.grabState = { active: false, side: null, cooldownUntil: -Infinity };
+    this.grabState = { active: false, side: null, cooldownUntil: -Infinity, lastPoint: null };
   }
 
   // Assigns detected hands to stable { left, right } slots (#118).
@@ -333,7 +270,7 @@ export class MultiHandTracker {
     return { left: nextL, right: nextR };
   }
 
-  // Updates multi-hand state, two-hand continuous zoom (#119), one-hand pinch grab (#120), and wave (#121).
+  // Updates multi-hand state, two-hand continuous zoom (#119), and one-hand pinch grab (#120).
   update({ hands = [], now = 0, aspect = 4 / 3 } = {}) {
     const { left: curL, right: curR } = this.assignHands(hands, now, aspect);
 
@@ -397,46 +334,55 @@ export class MultiHandTracker {
     }
 
     // One-hand pinch grab (#120) — suppressed while two-hand zoom is active or cooling down
-    const grab = { active: false, started: false, released: false, cancelled: false, side: null };
+    const grab = { active: false, started: false, released: false, cancelled: false, side: null, dx: 0, dy: 0, point: null };
     if (!bothPinched && !this.zoomActive) {
       const activeSide = evL.active ? 'left' : evR.active ? 'right' : null;
       const ev = activeSide === 'left' ? evL : activeSide === 'right' ? evR : (this.grabState.side === 'left' ? evL : evR);
+      const activeHand = activeSide === 'left' ? curL : activeSide === 'right' ? curR : (this.grabState.side === 'left' ? curL : curR);
       if (!this.grabState.active) {
         if (activeSide && (evL.started || evR.started) && now >= this.grabState.cooldownUntil) {
           this.grabState.active = true;
           this.grabState.side = activeSide;
+          this.grabState.lastPoint = activeHand ? { ...activeHand.point } : null;
           grab.active = true;
           grab.started = true;
           grab.side = activeSide;
+          grab.point = activeHand ? { ...activeHand.point } : null;
         }
       } else {
         const s = this.grabState.side;
         const curEv = s === 'left' ? evL : evR;
+        const curHand = s === 'left' ? curL : curR;
         if (curEv.active) {
           grab.active = true;
           grab.side = s;
+          if (curHand && this.grabState.lastPoint) {
+            grab.dx = curHand.point.x - this.grabState.lastPoint.x;
+            grab.dy = curHand.point.y - this.grabState.lastPoint.y;
+            this.grabState.lastPoint = { ...curHand.point };
+            grab.point = { ...curHand.point };
+          } else if (curHand) {
+            this.grabState.lastPoint = { ...curHand.point };
+            grab.point = { ...curHand.point };
+          }
         } else if (curEv.released) {
           this.grabState.active = false;
           this.grabState.side = null;
+          this.grabState.lastPoint = null;
           this.grabState.cooldownUntil = now + this.grabCooldownMs;
           grab.released = true;
           grab.side = s;
         } else if (curEv.cancelled) {
           this.grabState.active = false;
           this.grabState.side = null;
+          this.grabState.lastPoint = null;
           grab.cancelled = true;
           grab.side = s;
         }
       }
     }
 
-    // Wave / swipe (#121) — uses whichever visible hand is open, suppressed while pinching or zooming
-    const primary = curR || curL;
     const anyPinching = evL.active || evR.active || this.leftPinch.closedAt != null || this.rightPinch.closedAt != null;
-    const waveOut = this.waveDetector.update(primary?.landmarks || null, now, {
-      suppressed: bothPinched || anyPinching || grab.active || grab.released,
-      gestureName: primary?.name || 'None',
-    });
 
     return {
       left: leftState,
@@ -448,9 +394,7 @@ export class MultiHandTracker {
       zoomFactor,
       zoomDelta,
       grab,
-      wave: waveOut.wave,
-      waveVel: { vx: waveOut.vx, vy: waveOut.vy },
-      suppressCasts: bothPinched || anyPinching || grab.active || grab.released || !!waveOut.wave,
+      suppressCasts: bothPinched || anyPinching || grab.active || grab.released,
     };
   }
 }

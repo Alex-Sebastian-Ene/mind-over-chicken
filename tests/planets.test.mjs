@@ -9,8 +9,12 @@ import {
   trackCampaignPop,
 } from '../src/cosmos/planet-sim.js';
 import { ZoomState } from '../src/cosmos/zoom.js';
-import { World } from '../src/world/terrain.js';
-import { buildVast, settlementPlan, VW, VH, TILE, wrapX } from '../src/cosmos/vast.js';
+import { Galaxy, FORM_SECONDS } from '../src/cosmos/galaxy.js';
+import { World, initTerrainSync } from '../src/world/terrain.js';
+import { settlementPlan, VW, VH, TILE, wrapX } from '../src/cosmos/vast.js';
+
+// The worlds come from Rust (#109): load the engine wasm once.
+initTerrainSync(readFileSync(new URL('../pkg/mind_over_chicken_engine_bg.wasm', import.meta.url)));
 
 const W = 320, H = 180;
 const calmFx = (o = {}) => brainEffects({ calm: 0.2, focus: 0.2, stress: 0, blinksLast10s: 0, ...o });
@@ -259,6 +263,70 @@ test('README §4: no research branches or evolution in the progression code', ()
 
 const planet = (o = {}) => ({ name: 'Lumen', home: false, forming: false, surfaceReady: true, ...o });
 
+// #138: the zoom follows a critically damped spring, so it eases out of rest, eases in to the
+// new level, never overshoots and lands exactly; retargeting mid-flight keeps z continuous.
+const record = (z, frames, dt = 1 / 60) => { const zs = [z.z]; for (let i = 0; i < frames; i++) { z.update(dt); zs.push(z.z); } return zs; };
+
+test('zoom eases in and out of each level without overshooting', () => {
+  const z = new ZoomState();
+  z.zoomTo(1);
+  const zs = record(z, 120);
+  const v = zs.slice(1).map((x, i) => (x - zs[i]) * 60);
+  for (let i = 1; i < zs.length; i++) assert.ok(zs[i] >= zs[i - 1] - 1e-12, `monotone at frame ${i}`);
+  assert.ok(Math.max(...zs) <= 1, 'never overshoots the target');
+  assert.equal(z.z, 1, 'lands exactly on the level');
+  assert.equal(z.vz, 0, 'and comes to rest');
+  const peak = Math.max(...v);
+  assert.ok(v[0] < peak * 0.3, `starts from rest (first ${v[0].toFixed(2)} vs peak ${peak.toFixed(2)})`);
+  assert.ok(v.indexOf(peak) >= 6, 'and builds up speed over several frames');
+  const settle = zs.findIndex((x) => x >= 0.99);
+  assert.ok(settle > 40 && settle < 90, `takes about a second (${settle} frames to 99%)`);
+  const tail = v.slice(settle - 5, settle);
+  assert.ok(tail.every((x) => x < peak * 0.3), 'and slows down before arriving');
+  for (let i = 1; i < v.length - 1; i++) assert.ok(Math.abs(v[i] - v[i - 1]) < 1.2, `no velocity jump at frame ${i}`);
+});
+
+test('changing the target mid-zoom keeps the motion continuous', () => {
+  const z = new ZoomState();
+  z.zoomTo(2);
+  const out = record(z, 20);
+  const before = z.vz;
+  z.zoomTo(0);
+  const back = record(z, 180);
+  const zs = [...out, ...back.slice(1)];
+  const v = zs.slice(1).map((x, i) => (x - zs[i]) * 60);
+  assert.ok(before > 0 && v[20] > 0, 'keeps its momentum for a moment instead of reversing instantly');
+  for (let i = 1; i < v.length; i++) assert.ok(Math.abs(v[i] - v[i - 1]) < 2, `velocity changes smoothly at frame ${i}`);
+  assert.ok(Math.max(...zs) < 2, 'turned round before reaching the galaxy');
+  assert.equal(z.z, 0);
+  assert.equal(z.vz, 0);
+});
+
+test('reversing a fast zoom glides instead of stopping dead', () => {
+  const z = new ZoomState();
+  z.zoomTo(2);
+  const out = record(z, 14);          // well on the way out, moving fast
+  z.zoomTo(1);                        // back in one level while z is still below 1
+  const back = record(z, 240);
+  const zs = [...out, ...back.slice(1)];
+  const v = zs.slice(1).map((x, i) => (x - zs[i]) * 60);
+  for (let i = 1; i < v.length; i++) assert.ok(Math.abs(v[i] - v[i - 1]) < 2, `velocity changes smoothly at frame ${i}`);
+  assert.ok(Math.max(...zs) < 1.5, 'only a small overshoot');
+  assert.equal(z.z, 1);
+  assert.equal(z.vz, 0);
+});
+
+test('zoom stays within 0..2 and ignores bad frame times', () => {
+  const z = new ZoomState();
+  z.zoomTo(2);
+  z.update(NaN); z.update(-1);
+  assert.equal(z.z, 0, 'a bad dt does not move it');
+  for (let i = 0; i < 10; i++) z.update(5); // a long stall is clamped to 50 ms steps
+  assert.ok(z.z > 0 && z.z <= 2);
+  for (let i = 0; i < 200; i++) z.update(0.05);
+  assert.equal(z.z, 2);
+});
+
 test('galaxy → globe → surface on another world, and back out', () => {
   const z = new ZoomState();
   z.homeRef = { name: 'Home', home: true };
@@ -349,15 +417,17 @@ test('a world that loses its surface pushes the view back to its globe', () => {
 
 // ---------- vaster worlds ----------
 
-test('vast surfaces: 4× the area, the capital is the AI world unchanged, more continents', () => {
-  const world = new World(4242, { biome: 'jungle' });
-  const v = buildVast(world, 4242);
+test('vast surfaces: 4× the area, the capital is the AI world cut from it, more continents', () => {
+  const world = World.planet(4242, 'jungle');
+  const v = world.vast;
   assert.equal(VW * VH, 4 * W * H);
+  assert.equal(v.w * v.h, VW * VH);
   assert.equal(v.type.length, VW * VH);
+  assert.deepEqual(v.tile, TILE);
   for (const [x, y] of [[0, 0], [100, 90], [319, 179], [200, 40]]) {
     assert.equal(v.type[(y + TILE.y) * VW + wrapX(x + TILE.x)], world.baseType[y * W + x], `capital pixel ${x},${y}`);
   }
-  assert.ok(v.continents.length >= world.continents.length + 4, `continents: ${v.continents.length}`);
+  assert.ok(v.continents.length >= 4, `continents: ${v.continents.length}`);
   assert.ok(v.spots[0].capital);
   assert.equal(v.spots[0].x, wrapX(world.sites.village.x + TILE.x));
   assert.ok(v.spots.length >= 8);
@@ -405,4 +475,33 @@ test('a new campaign run starts the home population again', () => {
   const p = { home: true, eraIndex: 3, pop: 120, peakPop: 120 };
   trackCampaignPop(p, { eraIndex: 0, pop: 12 }); p.eraIndex = 0;
   assert.equal(p.pop, 12);
+});
+
+// Worlds form one at a time, FORM_SECONDS each: the next one waits its turn, and its map is only
+// generated when that turn comes.
+test('new worlds form one by one, FORM_SECONDS each', async () => {
+  assert.equal(FORM_SECONDS, 4);
+  const g = new Galaxy();
+  const err = console.error; console.error = () => {}; // PlanetSurface needs a DOM; the galaxy catches that
+  try {
+    const [a, b] = ['Avalon', 'Brume'].map((name) => g.makePlanet({ name, inhabited: false }));
+    assert.ok(a.forming && b.forming && a.formQueued && b.formQueued, 'both wait in the queue');
+    let t = 0;
+    const tick = async (sec) => { for (const end = t + sec - 1e-9; t < end; t += 0.1) { g.stepForming(0.1); await new Promise((r) => setImmediate(r)); } };
+    await tick(0.5);
+    assert.ok(a.forming && !a.formQueued, 'the first starts forming');
+    assert.ok(b.formQueued && !b.world, 'the second waits, with no map yet');
+    assert.ok(g.formProgress(a) > 0.1 && g.formProgress(b) === 0);
+    await tick(3.2);
+    assert.ok(a.forming, 'still forming before its 4 seconds are up');
+    await tick(0.5);
+    assert.ok(!a.forming && a.world && a.alive, 'formed after 4 seconds');
+    assert.ok(b.forming && !b.formQueued, 'then the next one starts');
+    await tick(3.5);
+    assert.ok(b.forming, 'which takes its own 4 seconds');
+    await tick(0.6);
+    assert.ok(!b.forming && b.world, 'and then forms');
+    assert.equal(g.formSlot, null);
+    assert.equal(g.formQueue.length, 0);
+  } finally { console.error = err; }
 });

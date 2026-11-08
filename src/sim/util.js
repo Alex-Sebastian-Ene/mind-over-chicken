@@ -5,6 +5,11 @@
 export const W = 320;   // world width in pixels
 export const H = 180;   // world height in pixels
 
+// The map is a torus (#111): wrap a coordinate into [0, size), and the shorter signed way
+// round from b to a.
+export const wrap = (v, size) => { const r = v % size; return r < 0 ? r + size : r; };
+export const wrapDelta = (a, b, size) => { let d = (a - b) % size; if (d > size / 2) d -= size; else if (d < -size / 2) d += size; return d; };
+
 export const clamp = (v, lo = 0, hi = 1) => (v < lo ? lo : v > hi ? hi : v);
 export const lerp = (a, b, t) => a + (b - a) * t;
 export const smooth = (current, target, rate, dt) => current + (target - current) * (1 - Math.exp(-rate * dt));
