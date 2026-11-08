@@ -127,7 +127,7 @@ pub fn draw_exchange(buf: &mut [u8], x: i32, y: i32) {
     fill_rect(buf, x - 6, y - 7, 13, 1, 0xd8, 0xd0, 0xbd, 255);
     fill_rect(buf, x - 4, y - 8, 9, 1, 0xd8, 0xd0, 0xbd, 255);
     fill_rect(buf, x - 2, y - 9, 5, 1, 0xd8, 0xd0, 0xbd, 255);
-    put_pixel(buf, x, y - 8, 0xf2, 0xc1, 0x4e, 255); // golden goat
+    put_pixel(buf, x, y - 8, 0xf2, 0xc1, 0x4e, 255); // golden egg
 }
 
 pub fn draw_hangar(buf: &mut [u8], x: i32, y: i32) {
@@ -242,12 +242,17 @@ pub fn draw_mammoth(buf: &mut [u8], x: i32, y: i32, facing: i32, frame: u32, dea
     put_pixel(buf, m(1 - step, 1), y - 1, or.0, or.1, or.2, 255);
 }
 
+/// The livestock sprite (SPRITE_GOAT): a brown hen now, as in src/render/sprites.js `drawHen`.
+/// The herd was goats once; the sacred chicken is the white one, `draw_chicken`.
 pub fn draw_goat(buf: &mut [u8], x: i32, y: i32, facing: i32) {
-    fill_rect(buf, x - 1, y - 2, 3, 1, 0xef, 0xe8, 0xdc, 255);
-    let hx = if facing > 0 { x + 2 } else { x - 2 };
-    put_pixel(buf, hx, y - 3, 0xcf, 0xc6, 0xb8, 255);
-    put_pixel(buf, x - 1, y - 1, 0x7a, 0x6a, 0x58, 255);
-    put_pixel(buf, x + 1, y - 1, 0x7a, 0x6a, 0x58, 255);
+    let f = if facing > 0 { 1 } else { -1 };
+    fill_rect(buf, x - 1, y - 3, 3, 2, 0xb0, 0x70, 0x3a, 255); // body
+    put_pixel(buf, x - 2 * f, y - 4, 0x7f, 0x4a, 0x22, 255); // tail
+    put_pixel(buf, x + f, y - 4, 0xb0, 0x70, 0x3a, 255); // head
+    put_pixel(buf, x + f, y - 5, 0xe5, 0x39, 0x35, 255); // comb
+    put_pixel(buf, x + 2 * f, y - 4, 0xf6, 0xa6, 0x23, 255); // beak
+    put_pixel(buf, x - 1, y - 1, 0xf6, 0xa6, 0x23, 255); // legs
+    put_pixel(buf, x + 1, y - 1, 0xf6, 0xa6, 0x23, 255);
 }
 
 pub fn draw_chicken(buf: &mut [u8], x: i32, y: i32, facing: i32, frame: u32, halo: bool) {
@@ -622,7 +627,7 @@ pub fn create_sprite_atlas() -> Vec<u8> {
     draw_chicken(&mut temp, cx, cy, 1, 0, false);
     copy_cell(&mut atlas, &temp, 7, 0, 31);
 
-    // Row 1: Chicken halo, Mammoths, Goats
+    // Row 1: Chicken halo, Mammoths, hens (SPRITE_GOAT)
     temp.fill(0);
     draw_chicken(&mut temp, cx, cy, 1, 0, true);
     copy_cell(&mut atlas, &temp, 0, 1, 31);

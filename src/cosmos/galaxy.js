@@ -2,7 +2,7 @@
 // first ten seconds of play. Each of those worlds listens mainly to ONE brain channel, so you
 // steer different civilisations with different mental states:
 //   calm  → harvests and growth        focus → research and era progress
-//   stress → its goat market's booms and crashes    blink → storms and lightning
+//   stress → its chicken market's booms and crashes    blink → storms and lightning
 // Every world still feels a little of every channel. They run on their own in fast-forward
 // (Stone Age → Space Age in about a minute); space-faring worlds send ships to settle barren ones.
 //
@@ -413,7 +413,7 @@ export class Galaxy {
         p.effect = {
           calm: `Calm ${pct(fx.calm)} → growth`,
           focus: `Focus ${pct(fx.focus)} → research`,
-          stress: `Stress ${pct(fx.stress)} → goat index ${p.market?.toFixed(0) || 100}`,
+          stress: `Stress ${pct(fx.stress)} → chicken index ${p.market?.toFixed(0) || 100}`,
           blink: `Blinks ${(fx.blinksLast10s || 0)}/10s`,
           mixed: `Calm & focus blend`,
         }[p.channel || 'mixed'];
@@ -478,8 +478,8 @@ export class Galaxy {
     const colour = { era: '#ffd166', good: '#59d8c8', bad: '#ff8a9c', flavour: '#f2e8d5', tier: '#9be38a', setback: '#ff8a9c', milestone: '#ffd166', conflict: '#ff5a72', truce: '#9be38a' };
     for (const ev of events) {
       if (ev.kind === 'launch-ready') { this.launch(p); continue; }
-      const goodColour = ev.text === 'goat boom' ? '#7ee08a' : ev.text === 'breakthrough' ? '#ffcf4a' : colour.good;
-      const badColour = ev.text === 'goat crash' ? '#ff5a72' : colour.bad;
+      const goodColour = ev.text === 'chicken boom' ? '#7ee08a' : ev.text === 'breakthrough' ? '#ffcf4a' : colour.good;
+      const badColour = ev.text === 'chicken crash' ? '#ff5a72' : colour.bad;
       this.pushLabel(p, { text: ev.text, t: ev.kind === 'flavour' ? 2.6 : 3, color: ev.kind === 'good' ? goodColour : ev.kind === 'bad' ? badColour : colour[ev.kind] || '#f2e8d5' });
       if (ev.kind === 'era') this.note(p, `${p.name} reached the ${ev.text}.`);
       if (ev.kind === 'good' || ev.kind === 'bad') { this.note(p, `${p.name}: ${ev.text}, thanks to ${ev.cause}.`); this.onEvent?.(p, ev.text, 'event'); }
@@ -490,7 +490,7 @@ export class Galaxy {
     p.effect = {
       calm: `Calm ${pct(fx.calm)} → growth ${signed(growth * 100, 1)}%/s`,
       focus: `Focus ${pct(fx.focus)} → research ×${research.toFixed(1)}`,
-      stress: `Stress ${pct(fx.stress)} → goat index ${p.market.toFixed(0)}`,
+      stress: `Stress ${pct(fx.stress)} → chicken index ${p.market.toFixed(0)}`,
       blink: `Blinks ${(fx.blinkRate * 10).toFixed(0)}/10s → ${p.storms} storms`,
       mixed: `Growth ${signed(growth * 100, 1)}%/s · research ×${research.toFixed(1)}`,
     }[p.channel || 'mixed'];
