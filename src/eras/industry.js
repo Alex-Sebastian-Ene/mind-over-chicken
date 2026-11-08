@@ -395,27 +395,7 @@ export class Industry {
   drawOverlay(ctx) {
     const G = this.G;
     this.particles.drawText(ctx);
-    // Goat index chart
-    const x0 = W - 92, y0 = 6, cw = 86, ch = 38;
-    ctx.fillStyle = 'rgba(14,15,26,0.82)'; ctx.fillRect(x0, y0, cw, ch);
-    ctx.strokeStyle = 'rgba(242,232,213,0.15)'; ctx.lineWidth = 0.4; ctx.strokeRect(x0, y0, cw, ch);
-    const hist = this.history.slice(-140);
-    if (hist.length > 2) {
-      const lo = Math.min(...hist, this.value) * 0.95, hi = Math.max(...hist, this.value) * 1.05;
-      const yOf = (v) => y0 + ch - 4 - ((v - lo) / (hi - lo)) * (ch - 14);
-      ctx.strokeStyle = 'rgba(255,207,74,0.35)'; ctx.setLineDash([1.5, 1.5]);
-      ctx.beginPath(); ctx.moveTo(x0 + 2, yOf(this.value)); ctx.lineTo(x0 + cw - 2, yOf(this.value)); ctx.stroke(); ctx.setLineDash([]);
-      const up = hist[hist.length - 1] >= hist[Math.max(0, hist.length - 25)];
-      ctx.strokeStyle = up ? '#7ee08a' : '#ff5a72'; ctx.lineWidth = 0.8;
-      ctx.beginPath();
-      hist.forEach((v, i) => { const x = x0 + 2 + (i / 139) * (cw - 4); i ? ctx.lineTo(x, yOf(v)) : ctx.moveTo(x, yOf(v)); });
-      ctx.stroke();
-      ctx.textAlign = 'left'; ctx.font = '5px "Pixelify Sans", monospace'; ctx.fillStyle = '#f2e8d5';
-      ctx.fillText(`GOAT INDEX  ${this.price.toFixed(1)} ${up ? '▲' : '▼'}`, x0 + 3, y0 + 7);
-      ctx.fillStyle = 'rgba(255,207,74,0.8)'; ctx.textAlign = 'right';
-      ctx.fillText('fair value', x0 + cw - 3, yOf(this.value) - 1.5);
-    }
-    // IPO ring over the exchange
+    // IPO ring over the exchange (world-anchored)
     const ex = G.world.sites.exchange;
     if (this.ipo.state === 'active') {
       const p = this.ipo.progress / IPO_SECONDS;
@@ -425,14 +405,82 @@ export class Industry {
       label(ctx, ex.x, ex.y - 21, `IPO · keep stress under ${Math.round((this.ipo.limit ?? STRESSED) * 100)}%`, '#ff8a9c', 6);
     }
     if (this.agents.some((a) => a.state === 'strike' || a.state === 'riot')) label(ctx, G.world.sites.picket.x, G.world.sites.picket.y + 12, 'picket line', '#f2e8d5', 5);
-    // Ticker tape
-    ctx.fillStyle = 'rgba(14,15,26,0.85)'; ctx.fillRect(0, H - 8, W, 8);
-    ctx.font = '5px "Pixelify Sans", monospace'; ctx.textAlign = 'left'; ctx.fillStyle = '#ffcf4a';
+    const aim = G.brain?.aim;
+    if (aim) drawReticle(ctx, aim.x * (W - 1), aim.y * (H - 1), this.t, '#ffe066');
+  }
+
+  // Dedicated screen UI overlay: stays perfectly static in screen space above the 3D/2D world.
+  drawScreenUI(ctx) {
+    const G = this.G;
+    // Floating Goat Index Window
+    const cw = 90, ch = 42;
+    const x0 = this.goatWindowX ?? (W - cw - 6);
+    const y0 = this.goatWindowY ?? 6;
+
+    // Drop shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(x0 + 1.5, y0 + 1.5, cw, ch);
+
+    // Window frame & body
+    ctx.fillStyle = 'rgba(12, 15, 26, 0.92)';
+    ctx.fillRect(x0, y0, cw, ch);
+    ctx.strokeStyle = 'rgba(255, 207, 74, 0.35)';
+    ctx.lineWidth = 0.5;
+    ctx.strokeRect(x0, y0, cw, ch);
+
+    // Title bar header
+    ctx.fillStyle = 'rgba(255, 207, 74, 0.12)';
+    ctx.fillRect(x0, y0, cw, 8);
+    ctx.font = '5px "Pixelify Sans", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ffcf4a';
+    ctx.fillText('GOAT INDEX · MARKET', x0 + 3, y0 + 6);
+
+    const hist = this.history.slice(-140);
+    if (hist.length > 2) {
+      const lo = Math.min(...hist, this.value) * 0.95, hi = Math.max(...hist, this.value) * 1.05;
+      const graphTop = y0 + 9, graphH = ch - 11;
+      const yOf = (v) => graphTop + graphH - 4 - ((v - lo) / (hi - lo)) * (graphH - 10);
+
+      // Fair value line
+      ctx.strokeStyle = 'rgba(255,207,74,0.35)';
+      ctx.setLineDash([1.5, 1.5]);
+      ctx.beginPath();
+      ctx.moveTo(x0 + 2, yOf(this.value));
+      ctx.lineTo(x0 + cw - 2, yOf(this.value));
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const up = hist[hist.length - 1] >= hist[Math.max(0, hist.length - 25)];
+      ctx.strokeStyle = up ? '#7ee08a' : '#ff5a72';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      hist.forEach((v, i) => {
+        const x = x0 + 2 + (i / 139) * (cw - 4);
+        i ? ctx.lineTo(x, yOf(v)) : ctx.moveTo(x, yOf(v));
+      });
+      ctx.stroke();
+
+      ctx.textAlign = 'left';
+      ctx.font = '5px "Pixelify Sans", monospace';
+      ctx.fillStyle = '#f2e8d5';
+      ctx.fillText(`${this.price.toFixed(1)} ${up ? '▲' : '▼'}`, x0 + cw - 28, y0 + 6);
+      ctx.fillStyle = 'rgba(255,207,74,0.75)';
+      ctx.textAlign = 'right';
+      ctx.fillText('fair val', x0 + cw - 3, yOf(this.value) - 1.5);
+    }
+
+    // Ticker tape across the screen bottom
+    ctx.fillStyle = 'rgba(14, 15, 26, 0.88)';
+    ctx.fillRect(0, H - 8, W, 8);
+    ctx.font = '5px "Pixelify Sans", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ffcf4a';
     const text = this.headlines.slice(-5).join('   ·   ');
     const tw = ctx.measureText(text).width;
     if (this.tickerX < -tw) this.tickerX = W;
     ctx.fillText(text, this.tickerX, H - 2.2);
-    const aim = G.brain?.aim;
+  }
     if (aim) drawReticle(ctx, aim.x * (W - 1), aim.y * (H - 1), this.t, '#ffe066');
   }
 

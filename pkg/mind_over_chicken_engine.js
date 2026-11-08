@@ -33,6 +33,18 @@ export class Engine {
         wasm.engine_add_billboard(this.__wbg_ptr, sprite_id, x, z, facing, frame, variant);
     }
     /**
+     * @param {number} sprite_id
+     * @param {number} x
+     * @param {number} y
+     * @param {number} z
+     * @param {number} facing
+     * @param {number} frame
+     * @param {number} variant
+     */
+    add_billboard_y(sprite_id, x, y, z, facing, frame, variant) {
+        wasm.engine_add_billboard_y(this.__wbg_ptr, sprite_id, x, y, z, facing, frame, variant);
+    }
+    /**
      * @param {number} x
      * @param {number} y
      * @param {number} z
@@ -2732,12 +2744,12 @@ function __wbg_get_imports() {
         },
         __wbindgen_generic_0000000000000003: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("PointerEvent")], shim_idx: 6, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__225);
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__226);
             return ret;
         },
         __wbindgen_generic_0000000000000004: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 6, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__226);
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__227);
             return ret;
         },
         __wbindgen_generic_0000000000000005: function(arg0) {
@@ -2780,12 +2792,12 @@ function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_
     wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_(arg0, arg1, arg2);
 }
 
-function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__225(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__225(arg0, arg1, arg2);
-}
-
 function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__226(arg0, arg1, arg2) {
     wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__226(arg0, arg1, arg2);
+}
+
+function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__227(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__227(arg0, arg1, arg2);
 }
 
 function wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_(arg0, arg1, arg2) {

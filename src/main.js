@@ -77,18 +77,34 @@ function groundAt(e) {
 }
 function grabPan3d(e) {
   if (!grab3d) return false;
-  // Over hills, moving the camera changes which slope the ray hits, so refine a few times until
-  // the grabbed ground point is back under the cursor (each pass is one cheap Rust raycast).
+  const scene = cosmos?.viewScene?.(G) || G?.scene;
+  if (scene && typeof scene.centerColumn === 'function') {
+    const g = groundAt(e);
+    if (!g) return true;
+    let dx = grab3d.x - g.x;
+    dx = ((dx + W * 1.5) % W) - W / 2;
+    const dz = grab3d.z - g.z;
+    if (Math.abs(dx) > 0.05 || Math.abs(dz) > 0.05) {
+      if (scene.panBy) {
+        scene.panBy(dx, dz);
+      } else if (scene.pan) {
+        scene.pan(dx * 2, dz * 2);
+      }
+      const cx = scene.centerColumn();
+      const vh = scene.v?.h ?? (scene.civ ? H : 360);
+      const cz = scene.civ ? (H / 2) : clamp(((scene.camY ?? 0) + H / 2) / vh * H, 10, H - 10);
+      engine.set_camera_target(cx, cz);
+    }
+    cam3dBase = null;
+    return true;
+  }
   for (let pass = 0; pass < 3; pass++) {
     const g = groundAt(e);
     if (!g) break;
-    // Wrap-aware east–west difference, then move the camera by it (x is owned by the planet pan).
     let dx = grab3d.x - g.x; dx = ((dx + W * 1.5) % W) - W / 2;
     const dz = grab3d.z - g.z;
     if (Math.abs(dx) < 0.05 && Math.abs(dz) < 0.05) break;
     if (dx) cosmos.pan(-dx);
-    // Apply now, not at the next frame: a fast mouse sends several moves per frame, and each one
-    // must raycast against the camera it already moved.
     engine.set_camera_target(cosmos.mapX(W / 2), clamp(engine.get_camera_target_z() + dz, 0, H - 1));
   }
   cam3dBase = null;
@@ -96,8 +112,9 @@ function grabPan3d(e) {
 }
 function panMap(dx, dy) {
   if (G?.scene?.panBy) { G.scene.panBy(dx, dy); return; }
+  const scene = cosmos?.viewScene?.(G) || G?.scene;
   cosmos.pan(dx, dy);
-  if (dy && in3dSurface()) {
+  if (dy && in3dSurface() && (!scene || typeof scene.centerColumn !== 'function')) {
     engine.set_camera_target(engine.get_camera_target_x(), clamp(engine.get_camera_target_z() - dy, 0, H - 1));
   }
   cam3dBase = null;
@@ -132,7 +149,9 @@ try {
   loading.fail('engine', 'no WebGL here: using the 2D fallback');
 }
 
+let jsLoopRunning = true;
 export async function startRustApp() {
+  jsLoopRunning = false;
   await initEngine();
   const app = new RustApp('screen');
   initCameraAdapter(app);
@@ -142,9 +161,6 @@ export async function startRustApp() {
 }
 if (typeof window !== 'undefined') {
   window.startRustApp = startRustApp;
-  if (window.location && window.location.search && window.location.search.includes('rust=1')) {
-    startRustApp().catch((err) => console.error('Failed to auto-start RustApp:', err));
-  }
 }
 // Without WebGL, fall back to a plain 2D upscale so the game still shows.
 const fallback2d = engine ? null : screen.getContext('2d');
@@ -543,8 +559,11 @@ function render() {
   globalThis.__moc_render3d = G.render3d;
   if (G.render3d) {
     // The 3D camera follows the same east–west pan as the 2D map (A/D, Shift+scroll, drag).
-    if (scene && scene !== G.scene && typeof scene.centerColumn === 'function') {
-      engine.set_camera_target(W / 2, H / 2);
+    if (scene && typeof scene.centerColumn === 'function') {
+      const cx = scene.centerColumn();
+      const vh = scene.v?.h ?? (scene.civ ? H : 360);
+      const cz = scene.civ ? (H / 2) : clamp(((scene.camY ?? 0) + H / 2) / vh * H, 10, H - 10);
+      engine.set_camera_target(cx, cz);
     } else {
       engine.set_camera_target(cosmos.mapX(W / 2), engine.get_camera_target_z());
     }
@@ -561,7 +580,7 @@ function render() {
   const z = cosmos.z || 0;
   const surface = !cosmic || z < 0.3;
   const k = cosmic ? Math.max(0, 1 - z / 0.3) : 1;
-  const dark = (scene.darkness || 0) * k;
+  const dark = scene.phase === 'voyage' ? 0 : (scene.darkness || 0) * k;
   const flash = (scene.flash || 0) * k;
   const shakeAmount = G.shake ? (G.shake * 0.008) : 0;
   const sx = shakeAmount ? (Math.random() - 0.5) * shakeAmount : 0;
@@ -576,12 +595,12 @@ function render() {
         sync3dWorldMesh(scene);
         engine.begin_frame();
         engine.upload_canvas(low);
-        if (scene === G.scene) {
+        if (scene === G.scene && !G.sandbox && !(scene instanceof CivSandbox) && !scene?.civ && scene?.era) {
           G.world?.draw3d?.(engine);
-          if (typeof engine.draw_era_3d === 'function' && !G.sandbox && G.scene?.era) {
-            engine.draw_era_3d();
-          } else if (scene.draw3d) {
+          if (scene.draw3d) {
             scene.draw3d(engine, 0.016);
+          } else if (typeof engine.draw_era_3d === 'function') {
+            engine.draw_era_3d();
           }
         } else if (scene?.draw3d) {
           scene.draw3d(engine, 0.016);
@@ -640,6 +659,7 @@ function render() {
   textCtx.setTransform(K, 0, 0, K, 0, 0);
   textCtx.globalAlpha = visible;
   if (cosmic) cosmos.overlay(textCtx, G);
+  scene.drawScreenUI?.(textCtx);
   textCtx.globalAlpha = 1;
 }
 
@@ -705,7 +725,11 @@ function frame(ts) {
   eegPanel?.update();
   render();
 }
-function rafLoop() { frame(); requestAnimationFrame(rafLoop); }
+function rafLoop() {
+  if (!jsLoopRunning) return;
+  frame();
+  requestAnimationFrame(rafLoop);
+}
 setInterval(() => { if (performance.now() - lastFrameAt > 45) frame(); }, 33);
 
 // ---------- input ----------
@@ -761,19 +785,46 @@ let cam3dBase = null;   // the player's own angle when the tip-over began
 let cam3dTween = null;  // a keyboard/button zoom-out animates the tip-over, then hands over
 let current3dWorldKey = '';
 function sync3dWorldMesh(scene) {
-  if (!engine) return;
-  const isOther = scene && scene !== G?.scene && typeof scene.getVisibleHeightmap === 'function';
-  const world = isOther ? scene.world : G?.world;
+  if (!engine || !scene) return;
+  if (scene instanceof CivSandbox || scene?.civ) {
+    const key = `civ_${scene.seed || 0}_${Math.round(scene.civ?.camX || 0)}_${Math.round(scene.civ?.camY || 0)}`;
+    if (key === current3dWorldKey) return;
+    current3dWorldKey = key;
+    const h = scene.getVisibleHeightmap?.();
+    if (h && engine.set_heightmap) {
+      try { engine.set_heightmap(h); } catch (e) { console.warn('set_heightmap failed:', e); }
+    }
+    if (engine.set_backdrop) {
+      engine.set_backdrop(24, 52, 98);
+    }
+    return;
+  }
+  if (typeof scene.getGlobeHeightmap === 'function' || typeof scene.getVisibleHeightmap === 'function') {
+    const sId = scene.p?.name || scene.p?.id || scene.seed || scene.id || 'other';
+    const key = `other_${sId}`;
+    if (key === current3dWorldKey) return;
+    current3dWorldKey = key;
+
+    const h = scene.getGlobeHeightmap?.() || scene.getVisibleHeightmap?.();
+    if (h && engine.set_heightmap) {
+      try { engine.set_heightmap(h); } catch (e) { console.warn('set_heightmap failed:', e); }
+    }
+    const world = scene.world || G?.world;
+    const deep = world?.palette?.[0]?.[0] || [11, 16, 32];
+    if (engine.set_backdrop) {
+      engine.set_backdrop(deep[0], deep[1], deep[2]);
+    }
+    return;
+  }
+
+  const world = G?.world;
   if (!world) return;
-  const qx = Math.round((scene.sx || 0) / 2) * 2;
-  const qy = Math.round((scene.sy || 0) / 2) * 2;
-  const key = isOther ? `${world.seed}_${qx}_${qy}` : `${world.seed}`;
+  const key = `home_${world.seed}`;
   if (key === current3dWorldKey) return;
   current3dWorldKey = key;
 
-  const h = isOther ? scene.getVisibleHeightmap() : world.h;
-  if (h && engine.set_heightmap) {
-    try { engine.set_heightmap(h); } catch (e) { console.warn('set_heightmap failed:', e); }
+  if (world.h && engine.set_heightmap) {
+    try { engine.set_heightmap(world.h); } catch (e) { console.warn('set_heightmap failed:', e); }
   }
   const deep = world.palette?.[0]?.[0];
   if (deep && engine.set_backdrop) {
@@ -781,9 +832,16 @@ function sync3dWorldMesh(scene) {
   }
 }
 
-// 3D world: enabled whenever looking at any planet's surface at z <= 0.
+// 3D world: enabled whenever looking at home or other planet's surface at z <= 0.
 function in3dSurface() {
-  return !!(engine && engine.is_3d_mode() && !cosmos.active && !((cosmos.z || 0) > 0));
+  const scene = cosmos?.viewScene?.(G) || G?.scene;
+  if (scene?.phase === 'voyage') return false;
+  return Boolean(
+    engine &&
+    engine.is_3d_mode() &&
+    !cosmos.active &&
+    !((cosmos.z || 0) > 0)
+  );
 }
 function applyCam3dBlend() {
   const d = engine.get_camera_distance();
@@ -943,9 +1001,18 @@ screen.addEventListener('wheel', (e) => {
   if (horizontal && !cosmos.active) { cosmos.pan(-(e.shiftKey ? e.deltaY : e.deltaX) * 0.15); return; }
   if (in3dSurface()) {
     cam3dTween = null;
+    const scene = cosmos?.viewScene?.(G) || G?.scene;
     // Already looking straight down at the whole map: the next notch hands over to the globe.
-    if (e.deltaY > 0 && engine.get_camera_distance() >= CAM3D.topDown - 0.5) { cosmos.zoomOut(G); return; }
+    if (e.deltaY > 0 && engine.get_camera_distance() >= CAM3D.topDown - 0.5 && !(scene instanceof CivSandbox) && !scene?.civ) {
+      cosmos.zoomOut(G);
+      return;
+    }
     zoom3dBy(e.deltaY > 0 ? 1.1 : 0.91);
+    return;
+  }
+  const scene = cosmos?.viewScene?.(G) || G?.scene;
+  if (scene instanceof CivSandbox || scene?.civ) {
+    scene.onWheel?.(e.deltaY);
     return;
   }
   cosmos.wheel(e.deltaY, G);
@@ -1300,5 +1367,10 @@ function start(data = {}) {
   autoConnectBridge();
 }
 document.fonts?.load('16px "Pixelify Sans"').finally?.(() => {});
-if (window.claude?.hot?.ready) window.claude.hot.ready(start);
-else start(window.claude?.hot?.data ?? {});
+if (typeof window !== 'undefined' && window.location?.search?.includes('rust=1')) {
+  startRustApp().catch((err) => console.error('Failed to auto-start RustApp:', err));
+} else if (window.claude?.hot?.ready) {
+  window.claude.hot.ready(start);
+} else {
+  start(window.claude?.hot?.data ?? {});
+}

@@ -207,7 +207,7 @@ export class StoneAge {
       m.pause -= dt;
       if (m.pause <= 0 && walk(m, m.tx, m.ty, 4, dt, w)) {
         const v = w.sites.village;
-        const p = w.randomLand(m.x, m.y, 6, 22, (x, y) => dist(x, y, v.x, v.y) > 32);
+        const p = w.randomLand(m.x, m.y, 6, 22, (x, y) => dist(x, y, v.x, v.y) > 32 && w.walkable(x, y) && w.reachable(x, y));
         m.tx = p.x; m.ty = p.y; m.pause = rand(0.5, 2.5);
       }
       const hunters = this.people.filter((p) => p.alive && p.target === m && dist(p.x, p.y, m.x, m.y) < 6).length;

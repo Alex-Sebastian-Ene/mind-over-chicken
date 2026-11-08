@@ -170,6 +170,8 @@ impl Engine {
     pub fn set_camera_target(&mut self, tx: f32, tz: f32) {
         self.camera_3d.target.x = tx;
         self.camera_3d.target.z = tz;
+        let h_norm = self.get_terrain_height_at(tx.rem_euclid(W as f32), tz.rem_euclid(H as f32));
+        self.camera_3d.target.y = (h_norm * 24.0).max(7.92);
     }
 
     pub fn get_camera_target_x(&self) -> f32 {
@@ -339,66 +341,47 @@ impl Engine {
         frame: u32,
         variant: u32,
     ) {
+        self.add_billboard_y(sprite_id, x, 0.0, z, facing, frame, variant);
+    }
+
+    pub fn add_billboard_y(
+        &mut self,
+        sprite_id: u32,
+        x: f32,
+        y: f32,
+        z: f32,
+        facing: i32,
+        frame: u32,
+        variant: u32,
+    ) {
         let map_w = W as f32;
         let map_h = H as f32;
         let wx = x.rem_euclid(map_w);
         let wz = z.rem_euclid(map_h);
         let h_norm = self.get_terrain_height_at(wx, wz);
 
-        // Never let land entities (villagers, mammoths, chickens, goats, fires) stand or walk on water
-        let is_land_entity = matches!(
-            sprite_id,
-            sprites::SPRITE_VILLAGER
-                | sprites::SPRITE_MAMMOTH
-                | sprites::SPRITE_CHICKEN
-                | sprites::SPRITE_GOAT
-                | sprites::SPRITE_FIRE
-        );
-        let (wx, wz, h_norm) = if is_land_entity && h_norm < 0.33 {
-            // Find nearest land point on the coast
-            let mut best_x = wx;
-            let mut best_z = wz;
-            let mut best_h = h_norm;
-            'search_land: for r in 1..=8 {
-                let rf = r as f32;
-                for &(dx, dz) in &[
-                    (rf, 0.0), (-rf, 0.0), (0.0, rf), (0.0, -rf),
-                    (rf * 0.707, rf * 0.707), (-rf * 0.707, rf * 0.707),
-                    (rf * 0.707, -rf * 0.707), (-rf * 0.707, -rf * 0.707),
-                ] {
-                    let tx = (wx + dx).rem_euclid(map_w);
-                    let tz = (wz + dz).rem_euclid(map_h);
-                    let th = self.get_terrain_height_at(tx, tz);
-                    if th >= 0.33 {
-                        best_x = tx;
-                        best_z = tz;
-                        best_h = th;
-                        break 'search_land;
-                    }
-                }
+        let ground_y = (h_norm * 24.0).max(7.92) + 0.15; // Ground elevation or at water level (7.92)
+        let center = [wx, ground_y + y, wz];
+        let ground_center = [wx, ground_y, wz];
+
+        // Soft ground contact shadow beneath entities, trees, and structures (fades out as entity ascends)
+        let shadow_variant = if y < 15.0 {
+            match sprite_id {
+                sprites::SPRITE_VILLAGER | sprites::SPRITE_CHICKEN | sprites::SPRITE_GOAT => Some(0),
+                sprites::SPRITE_MAMMOTH
+                | sprites::SPRITE_HUT
+                | sprites::SPRITE_HOUSE
+                | sprites::SPRITE_TOWER
+                | sprites::SPRITE_ROCKET
+                | sprites::SPRITE_TREE => Some(1),
+                sprites::SPRITE_FACTORY
+                | sprites::SPRITE_EXCHANGE
+                | sprites::SPRITE_HANGAR
+                | sprites::SPRITE_PAD => Some(2),
+                _ => None,
             }
-            (best_x, best_z, best_h)
         } else {
-            (wx, wz, h_norm)
-        };
-
-        let ground_y = (h_norm * 24.0).max(7.92) + 0.15; // Slightly above ground so feet never clip into slopes
-        let center = [wx, ground_y, wz];
-
-        // Soft ground contact shadow beneath entities, trees, and structures
-        let shadow_variant = match sprite_id {
-            sprites::SPRITE_VILLAGER | sprites::SPRITE_CHICKEN | sprites::SPRITE_GOAT => Some(0),
-            sprites::SPRITE_MAMMOTH
-            | sprites::SPRITE_HUT
-            | sprites::SPRITE_HOUSE
-            | sprites::SPRITE_TOWER
-            | sprites::SPRITE_ROCKET
-            | sprites::SPRITE_TREE => Some(1),
-            sprites::SPRITE_FACTORY
-            | sprites::SPRITE_EXCHANGE
-            | sprites::SPRITE_HANGAR
-            | sprites::SPRITE_PAD => Some(2),
-            _ => None,
+            None
         };
 
         if let Some(sv) = shadow_variant {
@@ -406,22 +389,22 @@ impl Engine {
             let shw = s_entry.world_w * 0.5;
             let shd = s_entry.world_h * 0.5;
             let s_tl = BillboardVertex {
-                center,
+                center: ground_center,
                 offset: [-shw, 0.02, -shd],
                 uv: [s_entry.u0, s_entry.v0],
             };
             let s_bl = BillboardVertex {
-                center,
+                center: ground_center,
                 offset: [-shw, 0.02, shd],
                 uv: [s_entry.u0, s_entry.v1],
             };
             let s_tr = BillboardVertex {
-                center,
+                center: ground_center,
                 offset: [shw, 0.02, -shd],
                 uv: [s_entry.u1, s_entry.v0],
             };
             let s_br = BillboardVertex {
-                center,
+                center: ground_center,
                 offset: [shw, 0.02, shd],
                 uv: [s_entry.u1, s_entry.v1],
             };
