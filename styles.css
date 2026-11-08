@@ -1205,6 +1205,13 @@ body[data-era="title"] .coach-panel { display: none !important; }
   font: 13px var(--pixel); color: var(--bone); text-align: center; pointer-events: none;
 }
 .cause-toast[data-tone="wait"] { color: var(--focus); }
+.cause-toast[data-tone="joy"] { color: var(--good); }
+.cause-toast[data-tone="surprise"] { color: var(--focus); border-color: var(--focus); }
+/* #152: the joy buff and the surprise cooldown, in the top bar while a mood is live. */
+.mood-chip { font: 12px var(--pixel); white-space: nowrap; padding: 1px 6px; border: 1px solid var(--line); border-radius: 3px; color: var(--muted); }
+.mood-chip[data-tone="joy"] { color: var(--good); border-color: color-mix(in srgb, var(--good) 55%, var(--line)); }
+.mood-chip[data-tone="surprise"] { color: var(--focus); border-color: var(--focus); }
+.mood-chip[hidden] { display: none; }
 .cause-toast[hidden] { display: none; }
 .loading-pill {
   position: absolute; right: 8px; bottom: 8px; z-index: 30;
