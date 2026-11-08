@@ -194,7 +194,7 @@ export class FarmingToKingdoms {
         const left = clamp(1 - this.pt / 4.4);
         ctx.fillStyle = '#b5543a'; ctx.fillRect(x0 + 16, y0 + 62, (w - 32) * left, 2);
       }
-      if (this.G.source.kind === 'sim' && !this.reveal) label(ctx, W / 2, y0 + h + 14, 'Emulated headset: hold F (or the Inspire tile) to concentrate', '#ffcf4a', 5);
+      if (this.G.source.kind === 'sim' && !this.reveal) label(ctx, W / 2, y0 + h + 14, 'Emulated headset: hold F to concentrate', '#ffcf4a', 5);
     }
     if (this.phase === 'done') {
       label(ctx, W / 2, 70, 'Writing. Law. Taxes.', '#f2e8d5', 12);
@@ -203,6 +203,12 @@ export class FarmingToKingdoms {
   }
 
   // ---- camera (#33): the montage has no gameplay to change, so casts and moods show a label. ----
+  onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
+    if (!this.G) return;
+    const p = this.G.world.aimPoint(aim);
+    floater(this.particles, p.x, p.y - 6, `fireball ${Math.round(charge * 100)}%`, color, 6);
+  }
+
   onCast(spell, aim) {
     const text = MONTAGE_CASTS[spell];
     if (!text || !this.G) return;
@@ -263,6 +269,12 @@ export class InfoAge {
   }
 
   // ---- camera (#33): this short bridge draws no particles, so the advisor reads the label out. ----
+  onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
+    if (!this.G) return;
+    const p = this.G.world.aimPoint(aim);
+    floater(this.particles, p.x, p.y - 6, `fireball ${Math.round(charge * 100)}%`, color, 6);
+  }
+
   onCast(spell) {
     const text = MONTAGE_CASTS[spell];
     if (text) this.G?.advisor.say(`cast-info-${spell}`, `Even in the montage: ${text}.`, { priority: 2, cooldown: 2 });

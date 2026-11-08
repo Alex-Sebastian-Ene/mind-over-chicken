@@ -58,9 +58,9 @@ export const COACH_MOVES = [
   {
     id: 'pinch_grab',
     title: 'Pinch Grab',
-    key: '1',
+    key: '',
     glyph: '🤏',
-    instruction: 'Pinch to pick up a living creature under the cursor, move the cursor (headset or mouse), release to drop.',
+    instruction: 'Pinch to grab a living creature under the cursor (move the cursor, release to drop). Nothing to grab? Move your hand to pan the map; head motion tilts the 3D view.',
     contexts: ['surface', 'civ'],
     sample(phase) {
       // 0..0.25 close into pinch, 0.25..0.75 hold pinch & glide horizontally, 0.75..1.0 open to drop
@@ -98,28 +98,25 @@ export const COACH_MOVES = [
     },
   },
   {
-    id: 'palm_calm',
-    title: 'Open Palm · Calm',
-    key: '2',
-    glyph: '🖐️',
-    instruction: 'Hold an open palm (or press 2) to calm fear, broker peace and bless the land.',
-    contexts: ['surface', 'civ'],
-    coachHidden: true,
-    sample(phase) {
-      const k = clamp(phase / 0.35);
-      return [{ hand: buildGhostHand('open', 'open', k, { cx: 0.5, cy: 0.78, size: 0.27 }), state: { held: phase > 0.25 } }];
-    },
-  },
-  {
-    id: 'fist_strike',
-    title: 'Closed Fist · Strike',
+    id: 'charged_fireball',
+    title: 'Charged Fireball',
     key: '3',
-    glyph: '✊',
-    instruction: 'Hold a closed fist (or press 3) to strike lightning at the cursor.',
+    glyph: '🔥',
+    instruction: 'Hold a fist, pull it back, then thrust forward and open your hand. Or hold 3 and release.',
     contexts: ['surface', 'civ'],
     sample(phase) {
-      const k = phase < 0.3 ? phase / 0.3 : phase > 0.8 ? 1 - (phase - 0.8) / 0.2 : 1;
-      return [{ hand: buildGhostHand('open', 'fist', k, { cx: 0.5, cy: 0.76, size: 0.27 }), state: { held: k > 0.75 } }];
+      const at = { cx: 0.5, cy: 0.72, size: 0.28 };
+      if (phase < 0.3) return [{ hand: buildGhostHand('open', 'fist', phase / 0.3, at), state: {} }];
+      if (phase < 0.65) {
+        const k = (phase - 0.3) / 0.35;
+        return [{ hand: buildGhostHand('fist', 'fist', 1, { ...at, size: 0.28 - 0.06 * k }), state: { held: true } }];
+      }
+      if (phase < 0.8) {
+        const k = (phase - 0.65) / 0.15;
+        return [{ hand: buildGhostHand('fist', 'fist', 1, { ...at, size: 0.22 + 0.12 * k }), state: { held: true } }];
+      }
+      const k = (phase - 0.8) / 0.2;
+      return [{ hand: buildGhostHand('fist', 'open', k, at), state: {} }];
     },
   },
 ];
@@ -153,7 +150,7 @@ const TEMPLATE = `
   </div>
 `;
 
-export function initCoach({ getContext = () => 'surface', onCastMove = null } = {}) {
+export function initCoach({ getContext = () => 'surface' } = {}) {
   const panel = document.getElementById('coachPanel');
   if (!panel) return null;
   panel.innerHTML = TEMPLATE;
@@ -255,28 +252,30 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
     if (move.id === 'two_hand_zoom') {
       ctx.fillText('←  PINCH & SPREAD  →', w / 2, 16);
     } else if (move.id === 'pinch_grab') {
-      ctx.fillText('PINCH · MOVE CURSOR · DROP', w / 2, 16);
+      ctx.fillText('PINCH · HAND PANS · HEAD TILTS', w / 2, 16);
+    } else if (move.id === 'charged_fireball') {
+      ctx.fillText(phase < 0.65 ? 'FIST · PULL BACK' : phase < 0.8 ? 'THRUST' : 'OPEN PALM', w / 2, 16);
     }
   }
 
   function update(now = performance.now(), state = {}) {
     const context = getContext() || 'surface';
 
-    if (state.bothPinched) selectMove('two_hand_zoom');
+    if (state.fireball === 'charging' || state.fireball === 'primed') selectMove('charged_fireball');
+    else if (state.bothPinched) selectMove('two_hand_zoom');
     else if (state.grabActive) selectMove('pinch_grab');
-    else if (state.heldMove === 'fist') selectMove('fist_strike');
 
     const handCount = (state.leftVisible ? 1 : 0) + (state.rightVisible ? 1 : 0);
     dotEl.dataset.ok = state.live ? (handCount > 0 ? '1' : 'wait') : '0';
     liveEl.textContent = !state.live
-      ? 'Camera off · Keys 1–3 active'
+      ? 'Camera off · pinch and two-hand zoom need the camera'
       : handCount === 2
         ? '2 hands tracked'
         : handCount === 1
           ? '1 hand tracked'
           : 'Show hand(s) to camera';
 
-    const strength = clamp(state.holdProgress || state.pinchStrength || 0);
+    const strength = clamp(state.pinchStrength || 0);
     meterEl.style.width = `${Math.round(strength * 100)}%`;
 
     if (flashState && now < flashState.until) {

@@ -400,11 +400,13 @@ test('MultiHandTracker: two-hand pinch continuous zoom freezes on unpinch or han
 });
 
 // ---------- Coach ghost hand keyframes (#123) ----------
-test('Coach: procedural 21-landmark ghost hands and keyframes exist for all moves', () => {
-  assert.ok(COACH_MOVES.length >= 4);
+test('Coach: procedural 21-landmark ghost hands and keyframes exist for the movement moves', () => {
+  assert.equal(COACH_MOVES.length, 3);
   assert.ok(!COACH_MOVES.some((m) => m.id === 'wave_orbit'));
-  assert.equal(COACH_CARDS.length, COACH_MOVES.length - 1);
+  assert.equal(COACH_CARDS.length, COACH_MOVES.length);
   assert.ok(!COACH_CARDS.some((m) => m.id === 'palm_calm'));
+  assert.ok(!COACH_CARDS.some((m) => m.id === 'fist_strike'));
+  assert.deepEqual(COACH_CARDS.map((m) => m.id), ['pinch_grab', 'two_hand_zoom', 'charged_fireball']);
   for (const move of COACH_MOVES) {
     const ghosts = move.sample(0.5);
     assert.ok(ghosts.length >= 1 && ghosts.length <= 2);

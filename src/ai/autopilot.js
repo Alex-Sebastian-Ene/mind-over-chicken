@@ -39,16 +39,25 @@ export function autopilotStep(planet, policy = null, { greedy = true } = {}) {
 }
 
 export class AIGod {
-  constructor({ url, greedy = true, policy = null } = {}) {
+  // onStatus(mode, error): 'ppo' once the trained policy is in, 'scripted' if it failed to load
+  // or was refused (#181: that fallback used to be a console line only, so the player thought
+  // the PPO god was playing). `mode` is 'loading' until then.
+  constructor({ url, greedy = true, policy = null, onStatus = null } = {}) {
     this.greedy = greedy;
     this.policy = policy;
     this.error = null;
     this.timer = 0;
     this.last = null;
+    this.mode = policy ? 'ppo' : 'loading';
     if (!policy) {
       sharedPolicy(url)
-        .then((p) => { this.policy = p; })
-        .catch((e) => { this.error = e; console.warn('AI god: policy unavailable, playing the scripted god.', e); });
+        .then((p) => { this.policy = p; this.mode = 'ppo'; onStatus?.('ppo', null); })
+        .catch((e) => {
+          this.error = e;
+          this.mode = 'scripted';
+          console.warn('AI god: policy unavailable, playing the scripted god.', e);
+          onStatus?.('scripted', e);
+        });
     }
   }
 

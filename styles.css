@@ -559,6 +559,36 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
   padding: 12px 14px;
   box-shadow: 0 20px 60px -10px rgba(0, 0, 0, 0.9);
 }
+/* #90: reduced motion (Settings, or the system setting) stops CSS animations and transitions. */
+body[data-reduced-motion="1"] *, body[data-reduced-motion="1"] *::before, body[data-reduced-motion="1"] *::after {
+  animation-duration: 0.001ms !important; animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important; scroll-behavior: auto !important;
+}
+.set-keys { margin: 0 0 4px; font-size: 12px; line-height: 1.6; }
+/* ---------- settings panel (#186, #89): above every overlay, it can open from the title ---------- */
+.settings-panel {
+  position: fixed; z-index: 56;
+  top: 8px; right: max(8px, env(safe-area-inset-right, 0px));
+  width: min(380px, calc(100vw - 16px)); max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  background: rgba(14, 16, 30, 0.98);
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 12px 14px;
+  box-shadow: 0 20px 60px -10px rgba(0, 0, 0, 0.9);
+}
+.settings-panel header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+.settings-panel h2 { margin: 0; font: 700 20px var(--pixel); }
+.set-group { border-top: 1px solid var(--line); padding: 8px 0 4px; }
+.set-group h3 { margin: 0 0 6px; font: 600 14px var(--pixel); color: var(--muted); }
+.set-row { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 6px; font-size: 13px; cursor: pointer; }
+.set-row small { display: block; color: var(--muted); font-size: 11px; }
+.set-range { align-items: center; justify-content: space-between; }
+.set-range input[type="range"] { flex: 1; }
+.set-range input[type="number"] { width: 64px; }
+.set-note { margin: 0 0 4px; font-size: 11px; color: var(--muted); }
+.set-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.settings-panel footer { border-top: 1px solid var(--line); padding-top: 8px; }
+.cam-live { color: var(--alarm); border-color: color-mix(in srgb, var(--alarm) 55%, var(--line)); }
 /* "See the model of you" on the end screen (z 50) opens it above that overlay, not behind it (#173). */
 body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
 .model-panel header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -626,6 +656,33 @@ body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
 .cam-msg { margin: 0; font-size: 12px; line-height: 1.35; color: var(--bone); }
 .cam-panel[data-state="error"] [data-cam-msg] { color: #ffb3c0; }
 .cam-body { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px; align-items: start; }
+.cam-fireball {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 4px;
+}
+.cam-fb-orb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ff9a2e;
+  box-shadow: 0 0 10px #ff9a2e;
+  flex: none;
+}
+.cam-fb-meter {
+  flex: 1;
+  height: 6px;
+  border: 1px solid var(--line);
+  background: var(--ink);
+}
+.cam-fb-meter > i {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: #ff9a2e;
+  transition: width 0.1s linear;
+}
 .cam-view {
   position: relative;
   aspect-ratio: 4 / 3;
@@ -650,30 +707,6 @@ body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
 .cam-panel[data-mood="surprise"] [data-emotion="surprise"],
 .cam-panel[data-mood="sadness"] [data-emotion="sadness"] { color: var(--bone); font-weight: 700; }
 .cam-now { margin: 0; font: 12px/1.3 var(--pixel); min-height: 1.3em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cam-spells { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
-.cam-spell {
-  --cd: 0;
-  --hold: 0;
-  position: relative;
-  aspect-ratio: 1;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-}
-.cam-ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
-.cam-ring circle { fill: none; stroke-width: 3; }
-.cam-ring .cam-ring-track { fill: var(--panel-2); stroke: var(--line); }
-.cam-ring .cam-ring-hold { stroke: var(--calm); stroke-dasharray: 100; stroke-dashoffset: calc(100 - var(--hold) * 100); }
-.cam-ring .cam-ring-cd { stroke: var(--focus); stroke-dasharray: 100; stroke-dashoffset: calc(100 - var(--cd) * 100); }
-.cam-spell:hover .cam-ring-track { stroke: var(--muted); }
-.cam-spell.is-held .cam-ring-track { stroke: var(--calm); }
-.cam-glyph { position: relative; font-size: 15px; line-height: 1; }
-.cam-spell.is-cooling .cam-glyph { opacity: 0.45; filter: grayscale(1); }
-.cam-spell kbd { position: absolute; right: -3px; bottom: -3px; font-size: 9px; padding: 0 2px; }
 .cam-privacy { margin: 0; font-size: 11px; color: var(--muted); }
 .cam-fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 
@@ -682,8 +715,6 @@ body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
   .bar-tools:has(.cam-btn) { flex-wrap: wrap; row-gap: 6px; }
   .cam-panel { position: static; width: auto; margin-top: 8px; }
   .cam-body { grid-template-columns: minmax(0, 40%) minmax(0, 1fr); }
-  .cam-spells { max-width: 380px; }
-  .cam-glyph { font-size: 18px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1160,6 +1191,15 @@ body[data-era="title"] .coach-panel { display: none !important; }
 .ls-step.is-run::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--focus); animation: ls-blink 0.9s steps(2) infinite; }
 .ls-hint { margin: 0; min-height: 1.2em; font-size: 12px; color: var(--muted); text-align: center; }
 @keyframes ls-blink { to { opacity: 0.2; } }
+/* #177: what a camera action just did, top centre of the map. */
+.cause-toast {
+  position: absolute; left: 50%; top: 8px; z-index: 22; transform: translateX(-50%);
+  max-width: min(80%, 520px); margin: 0; padding: 4px 12px;
+  background: rgba(14, 16, 30, 0.9); border: 1px solid var(--line); border-radius: 12px;
+  font: 13px var(--pixel); color: var(--bone); text-align: center; pointer-events: none;
+}
+.cause-toast[data-tone="wait"] { color: var(--focus); }
+.cause-toast[hidden] { display: none; }
 .loading-pill {
   position: absolute; right: 8px; bottom: 8px; z-index: 30;
   max-width: 70%; padding: 4px 10px;

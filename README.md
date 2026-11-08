@@ -19,7 +19,7 @@ This README is the canonical specification. If the code or an issue disagrees wi
 | **Calibration** | The 10-second window is a placeholder for the dummy run. The window must be configurable, and the dummy run uses a **random setup** instead of a real seed. | Canonical placeholder |
 | **Ambient modulation** | EEG/facial signals driving global temperament, chaos, and weather. | Deferred; not important for the current milestone |
 | **Gesture UI** | Hand gestures selecting menus and navigating the UI. | Deferred |
-| **God powers** | Deliberate blinks throw lightning; hand-gesture casts throw a fireball, spawn resources, bring rain, bless, trigger natural disasters and make peace (keys 1–7 without a webcam). | In scope (decided on #55) |
+| **God powers** | Deliberate blinks throw lightning; hand gestures grab/move and two-hand zoom. The old hand/keyboard spell casts were removed (#261). | In scope (updated) |
 
 ---
 
@@ -59,7 +59,7 @@ Continuously maps live EEG activity and facial expressions into global world var
 
 * Target design: hand gestures select and activate spells and target locations in the world.
 * Target design: head tracking (accelerometer plus gyroscope), facial focus, and hand gestures navigate the UI.
-* **Current milestone:** head tracking and facial/biometric signals are required, and hand-gesture spellcasting is in; gesture-driven UI navigation is **deferred**.
+* **Current milestone:** head tracking and facial/biometric signals are required; hand input is movement only (pinch + hand pans, pinch + head motion tilts the 3D view; two-hand zoom), and gesture-driven UI navigation is **deferred**.
 
 ---
 
@@ -84,11 +84,14 @@ The Rust/Wasm simulation loop and world rules.
 
 ### 4.3 World actions (god powers)
 
-* **Spawn Resources:** drop resources at a targeted location.
-* **Send Fireball:** launch a destructive fireball at a targeted location.
-* **Natural Disasters:** trigger global or localized environmental events.
+* **Blink lightning:** deliberate blinks strike at the head cursor. In the galaxy/globe a blink is a world click: it selects a planet or lands, never a UI control.
+* **Calm / focus / stress:** EEG bands (and the keyboard fallback) drive the era mechanics.
+* **Pinch grab & two-hand zoom:** hand input moves living entities and the camera. The Camera sidebar has a guided pinch movement calibration with the live camera and hand wireframe: left, right, up and down targets for each hand, auto-advancing and auto-closing when complete. Per-axis gains persist per browser; head tilt is not calibrated because it already works.
+* **Charged fireball (#291):** hold a fist, pull it back, then thrust forward and open the palm; or hold `3` and release. Colour follows mood: joy red, surprise blue, neutral ember. This is the one deliberate hand cast.
+* **Rain or Calm:** the Insight/focus signal held for ~2 s summons rain, putting out forest fires and the Stone campfire.
+* **Forest fires:** lightning aimed at a tree starts a fire that spreads to nearby trees.
 
-**Status: implemented** (#33; decided on #55). Hand gestures cast them through the camera (keys 1–7 without a webcam), aimed with the fingertip or head tracking; deliberate blinks throw lightning.
+**Status:** the old hand-gesture and keyboard spell set (bounty, rain, bless, disaster, peace, point) was removed in #261. The single deliberate charged fireball is the exception (#291).
 
 ---
 
@@ -126,7 +129,7 @@ Tracked in #55.
 
 ## 7. Current build status
 
-The Rust/Wasm engine and WebGL renderer are landing under #17; the JavaScript game shell remains playable while the port reaches parity. The current build has three entry points: the five-scene campaign, the galaxy sandbox (home world plus three brain-seeded worlds), and the four-civilisation sandbox on one planet (`src/civ/`). The four-civ sandbox implements the canonical world model; the campaign is still the default button. Camera face mood and hand-gesture casts are active; gyroscope fusion and the configurable calibration seed are in. Treat the build as a reference implementation, not as the specification.
+The Rust/Wasm engine and WebGL renderer are landing under #17; the JavaScript game shell remains playable while the port reaches parity. The current build has three entry points: the five-scene campaign, the galaxy sandbox (home world plus three brain-seeded worlds), and the four-civilisation sandbox on one planet (`src/civ/`). The four-civ sandbox implements the canonical world model; the campaign is still the default button. Camera face mood and hand grab/zoom are active; gyroscope fusion and the configurable calibration seed are in. Treat the build as a reference implementation, not as the specification.
 
 ---
 

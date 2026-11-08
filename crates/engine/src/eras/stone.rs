@@ -24,6 +24,8 @@ pub struct StoneMammoth {
     pub alive: bool,
     pub facing: i32,
     pub frame: u32,
+    pub min_x: f32,
+    pub max_x: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -79,13 +81,21 @@ impl StoneAge {
         }
 
         let mut mammoths = Vec::with_capacity(4);
-        for i in 0..4 {
+        let configs = [
+            (60.0, 110.0, 52.0, 115.0),
+            (110.0, 122.0, 85.0, 155.0),
+            (135.0, 105.0, 105.0, 170.0),
+            (155.0, 95.0, 120.0, 185.0),
+        ];
+        for &(x, y, min_x, max_x) in &configs {
             mammoths.push(StoneMammoth {
-                x: 60.0 + (i as f32) * 50.0,
-                y: 110.0 + (i as f32) * 12.0,
+                x,
+                y,
                 alive: true,
                 facing: 1,
                 frame: 0,
+                min_x,
+                max_x,
             });
         }
 
@@ -262,13 +272,15 @@ impl Era for StoneAge {
             });
         }
 
-        // Mammoths graze slowly
+        // Mammoths graze slowly within island pasture bounds
         for (i, m) in self.mammoths.iter_mut().enumerate() {
             if m.alive {
-                m.x += (if m.facing > 0 { 3.0 } else { -3.0 }) * dt;
-                if m.x > 270.0 {
+                m.x += (if m.facing > 0 { 2.5 } else { -2.5 }) * dt;
+                if m.x >= m.max_x {
+                    m.x = m.max_x;
                     m.facing = -1;
-                } else if m.x < 45.0 {
+                } else if m.x <= m.min_x {
+                    m.x = m.min_x;
                     m.facing = 1;
                 }
                 m.frame = (((self.time * 2.5) as u32) + i as u32) % 2;
@@ -598,5 +610,26 @@ mod tests {
         let events = stone.on_blink(px, py);
         assert!(!stone.people[0].alive, "Direct lightning strike must smite/kill villager");
         assert!(events.contains(&EraEvent::StatAddSmitten));
+    }
+
+    #[test]
+    fn test_stone_age_mammoths_remain_on_pastures_and_never_teleport() {
+        let mut stone = StoneAge::new();
+        let brain = BrainInput::default();
+
+        // Simulate 200 ticks of mammoth grazing
+        for _ in 0..200 {
+            stone.update(0.1, &brain);
+            for (i, m) in stone.mammoths.iter().enumerate() {
+                assert!(
+                    m.x >= m.min_x && m.x <= m.max_x,
+                    "Mammoth {} x coordinate ({}) wandered outside pasture bounds [{}, {}]",
+                    i,
+                    m.x,
+                    m.min_x,
+                    m.max_x
+                );
+            }
+        }
     }
 }

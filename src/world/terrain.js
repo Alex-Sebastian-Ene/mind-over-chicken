@@ -156,7 +156,12 @@ export class World {
       const px = this.wrapX(Math.round(x + Math.cos(a) * r)), py = this.wrapY(Math.round(y + Math.sin(a) * r));
       if (this.walkable(px, py) && (!pred || pred(px, py))) return { x: px, y: py };
     }
-    return this.nearestWalkable(x, y);
+    const near = this.nearestWalkable(x, y);
+    if (!pred || pred(near.x, near.y)) return near;
+    if (this.sites?.village && (!pred || pred(this.sites.village.x, this.sites.village.y))) {
+      return { ...this.sites.village };
+    }
+    return near;
   }
 
   // Era-specific land use. Called once per era before painting.
@@ -371,14 +376,20 @@ export class World {
   }
 
   // Animated water glints, drawn every frame on top of the baked layer.
+  // A few glints that fade in and out at fixed spots, each on its own slow phase. They used to be
+  // a fresh random scatter every half second, which read as arrays of white pixels popping up
+  // on the sea (Alex). Same density per pixel of sea on any world size (#129).
   drawWater(ctx, time) {
-    const rng = mulberry32((Math.floor(time * 2) * 7919) ^ this.seed);
-    ctx.fillStyle = 'rgba(170, 205, 240, 0.55)';
-    // As many glints per pixel of sea on a bigger world as on the 320×180 one (#129).
-    const n = Math.round((70 * this.width * this.height) / (W * H));
+    const rng = mulberry32(this.seed ^ 0x2545f491);
+    const n = Math.round((24 * this.width * this.height) / (W * H));
     for (let i = 0; i < n; i++) {
       const x = Math.floor(rng() * this.width), y = Math.floor(rng() * this.height);
-      if (this.typeAt(x, y) <= T.SHALLOW) ctx.fillRect(x, y, 2, 1);
+      const phase = rng() * Math.PI * 2, speed = 0.5 + rng() * 0.7;
+      if (this.typeAt(x, y) > T.SHALLOW) continue;
+      const a = Math.max(0, Math.sin(time * speed + phase)) * 0.3;
+      if (a < 0.03) continue;
+      ctx.fillStyle = `rgba(170, 205, 240, ${a.toFixed(3)})`;
+      ctx.fillRect(x, y, 2, 1);
     }
   }
 }
