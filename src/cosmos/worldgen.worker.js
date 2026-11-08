@@ -1,19 +1,20 @@
-// Generates a World off the main thread (~150 ms each) so new planets never stall the game.
-// With `vast`, it also builds and paints the planet's vaster surface around it (#68, ~250 ms).
-import { World } from '../world/terrain.js';
-import { buildVast, paintVast } from './vast.js';
+// Generates a World off the main thread so new planets never stall the game. With `vast`, the
+// World is a galaxy planet: its 640×360 surface (#68) and the 320×180 capital cut from it, all
+// generated in Rust (crates/moc-terrain via the engine wasm, #109).
+import { World, initTerrain } from '../world/terrain.js';
 
-self.onmessage = (e) => {
-  const { id, seed, biome, vast } = e.data;
+const ready = initTerrain();
+
+self.onmessage = async (e) => {
+  const { id, seed, biome, vast, width, height } = e.data;
   try {
-    const w = new World(seed, { biome });
-    const msg = { id, seed: w.seed, biome: w.biome, h: w.h, type: w.type, baseType: w.baseType, owner: w.owner, sites: w.sites, continents: w.continents };
-    const transfer = [w.h.buffer, w.type.buffer, w.baseType.buffer, w.owner.buffer];
-    if (vast) {
-      const v = buildVast(w, seed);
-      const rgba = paintVast(v, w.biome, seed);
-      msg.vast = { w: v.w, h: v.h, tile: v.tile, type: v.type, height: v.height, continents: v.continents, spots: v.spots, rgba };
-      transfer.push(v.type.buffer, v.height.buffer, rgba.buffer);
+    await ready;
+    const w = vast ? World.planet(seed, biome) : new World(seed, { biome, width, height });
+    const msg = { id, seed: w.seed, biome: w.biome, width: w.width, height: w.height, h: w.h, type: w.type, baseType: w.baseType, owner: w.owner, rgba: w.rgba, sites: w.sites, continents: w.continents, stats: w.stats };
+    const transfer = [w.h.buffer, w.type.buffer, w.baseType.buffer, w.owner.buffer, w.rgba.buffer];
+    if (w.vast) {
+      msg.vast = w.vast;
+      transfer.push(w.vast.type.buffer, w.vast.height.buffer, w.vast.rgba.buffer);
     }
     self.postMessage(msg, transfer);
   } catch (err) {
