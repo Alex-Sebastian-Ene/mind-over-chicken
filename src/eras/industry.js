@@ -481,8 +481,6 @@ export class Industry {
     if (this.tickerX < -tw) this.tickerX = W;
     ctx.fillText(text, this.tickerX, H - 2.2);
   }
-    if (aim) drawReticle(ctx, aim.x * (W - 1), aim.y * (H - 1), this.t, '#ffe066');
-  }
 
   // ---- camera (#33): hand casts and face mood. Extra inputs on top of the brain, never instead of it. ----
 
