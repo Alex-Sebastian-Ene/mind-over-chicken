@@ -24,6 +24,7 @@ import { loading } from '../ui/loading.js';
 import { label } from '../eras/stone.js';
 import { SIM, TEMPERAMENT, ERAS, newPlanetState, brainEffects, stepPlanet, blinkPlanet, arriveShip, newMind, stepMind, logHistory, reachMilestone, trackCampaignPop } from './planet-sim.js';
 import { PlanetSurface } from './surface.js';
+import { SpaceWarView } from './space-war.js';   // #166: the interplanetary war (Rust)
 
 export const ERA_NAMES = ['stone', 'farming', 'industry', 'space'];
 export const ERA_LABEL = { stone: 'Stone Age', farming: 'Farming', industry: 'Industry', space: 'Space Age' };
@@ -88,6 +89,8 @@ export class Galaxy {
     this.viewing = null;   // the world whose surface is on screen (#68): its tribe runs every frame
     this.surfaceTurn = 0;
     this.onEvent = null;   // (planet, text, kind) → main.js forwards to the advisor
+    // #166: fleets, raids, bombardments and invasions between space-capable worlds (Rust).
+    this.war = this.wasm?.war_sync ? new SpaceWarView(this, this.wasm) : null;
   }
 
   addHome(world, { autonomous = false } = {}) {
@@ -438,6 +441,7 @@ export class Galaxy {
       }
       this.ships = this.ships.filter((s) => !s.done);
     }
+    this.war?.update(dt, fx);   // the space war (#166), after the ships
   }
 
   // The first ten seconds of play decide what the three mind-worlds become.
@@ -556,6 +560,7 @@ export class Galaxy {
         ctx.fillRect(Math.round(sp.x), Math.round(sp.y), 1, 1);
       }
     }
+    this.war?.draw(ctx, alpha);
     ctx.globalAlpha = 1;
   }
 
@@ -611,6 +616,7 @@ export class Galaxy {
         ctx.globalAlpha = alpha;
       });
     }
+    this.war?.drawOverlay(ctx, alpha);
     ctx.globalAlpha = 1;
   }
 
@@ -623,6 +629,7 @@ export class Galaxy {
       { label: 'Mind read', value: this.mind.done ? 'yes' : `${Math.max(0, Math.ceil(SIM.MIND_SECONDS - this.mind.t))}s`, done: this.mind.done },
       { label: 'Space-faring', value: `${spacefaring}`, plain: true },
       { label: 'Population', value: fmtPop(pop), plain: true },
+      ...(this.war?.objectives() || []),
     ];
   }
 }

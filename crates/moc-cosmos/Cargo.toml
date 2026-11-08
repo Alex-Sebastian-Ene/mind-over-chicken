@@ -13,5 +13,8 @@ crate-type = ["cdylib", "rlib"]
 wasm-bindgen = { version = "0.2", optional = true }
 
 [features]
-default = []
+default = ["ffi"]
+# The plain extern "C" galaxy API (src/wasm_api.rs). moc-civ uses the war rules without it (#166),
+# so its WebAssembly module doesn't export a second galaxy.
+ffi = []
 wasm = ["wasm-bindgen"]

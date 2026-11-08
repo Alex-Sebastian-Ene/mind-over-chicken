@@ -235,6 +235,43 @@ export class Civ {
     return Object.fromEntries(keys.map((k, i) => [k, s[i]]));
   }
 
+  // ---- the space age (#166; Rust space.rs). The galaxy's war is src/cosmos/space-war.js. ----
+  // Every civilisation's space program: [{ id, active, fleet, cap, shields, defences, garrison,
+  // tier, next, colonies, stance, production, knowledge, resources, launches, lost, temper }].
+  spaceInfo() {
+    const n = this.slots, s = this.ex.civ_space_stride();
+    const v = new Float32Array(this.mem, this.ex.civ_space_info_ptr(this.w), n * s).slice();
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const o = i * s;
+      out.push({ id: i, active: v[o] > 0, fleet: v[o + 1], cap: v[o + 2], shields: v[o + 3], defences: v[o + 4], garrison: v[o + 5], tier: v[o + 6], next: v[o + 7],
+        colonies: v[o + 8], stance: v[o + 9], production: v[o + 10], knowledge: v[o + 11], resources: v[o + 12], launches: v[o + 13], lost: v[o + 14], temper: v[o + 15] });
+    }
+    return out;
+  }
+  // Fleets launched since the last call: [{ civ, body, order, strength, motive }] (then cleared).
+  spaceLaunches() {
+    const n = this.ex.civ_space_launch_count(this.w);
+    if (!n) return [];
+    const v = new Float32Array(this.mem, this.ex.civ_space_launches_ptr(this.w), n * 5).slice();
+    this.ex.civ_space_launches_clear(this.w);
+    const out = [];
+    for (let o = 0; o < v.length; o += 5) out.push({ civ: v[o], body: v[o + 1], order: v[o + 2], strength: v[o + 3], motive: v[o + 4] });
+    return out;
+  }
+  // The planets civilisation f may strike: the galaxy's flat list, 5 floats each.
+  setSpaceTargets(f, t) {
+    this.ex.civ_space_targets_clear(this.w, f);
+    for (let o = 0; o + 5 <= t.length; o += 5) this.ex.civ_space_target_add(this.w, f, t[o], t[o + 1], t[o + 2], t[o + 3], t[o + 4]);
+  }
+  // What the galaxy did to civilisation f: [loot, knowledge, hits, shields lost, colonies ±, ships home, colony economy].
+  spaceResult(f, r) {
+    if (!r || !r.some((x) => x !== 0)) return;
+    this.ex.civ_space_result(this.w, f, r[0], r[1], r[2], r[3], r[4] | 0, r[5], r[6]);
+  }
+  // Test / ?debug hook: civilisation f in space whatever its age.
+  debugSpace(f, on = true) { return this.ex.civ_debug_space(this.w, f, on ? 1 : 0) > 0; }
+
   warState(a, b) { return this.ex.civ_war_state(this.w, a, b); }
   tension(a, b) { return this.ex.civ_tension(this.w, a, b); }
   ownerAt(x, y) { return this.ex.civ_owner_at(this.w, x, y); }

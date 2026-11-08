@@ -101,7 +101,9 @@ export class Cosmos extends ZoomState {
     this.galaxy.addHome(G.world, { autonomous: autonomousHome });
     // Three more worlds take shape from the player's first ten seconds of brain data.
     this.galaxy.addMindWorlds();
-    this.galaxy.onEvent = (p, text, kind) => this.onEvent?.(p, text, kind);
+    this.galaxy.onEvent = (p, text, kind, tone) => this.onEvent?.(p, text, kind, tone);
+    // The space war presses your world as hard as the difficulty says (#220: Easy 0.5, Hard 1.6).
+    this.galaxy.war?.setPlayerPressure(G.difficulty?.space?.pressure ?? 1);
     return this.galaxy;
   }
 
@@ -470,6 +472,7 @@ export class Cosmos extends ZoomState {
     const r = super.focusPlanet(p);
     if (r.refused) { this.say(r.refused); return; }
     this.rot = this.galaxy ? this.galaxy.time * p.spin + p.phase : this.rot;
+    if (this.galaxy?.war && !this.isCampaign(p)) this.galaxy.war.target = p;   // #166: the orders' target
   }
 
   // Continuous (#143): every wheel delta moves the zoom (a mouse notch of 100 is 0.4 of a level;
