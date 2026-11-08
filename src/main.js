@@ -58,6 +58,7 @@ import { panelHotkey } from './ui/hotkeys.js'; // E / C / Shift+C sidebars (#211
 import { engineFailToShow } from './ui/fail.js';
 import { frameLoop } from './ui/loop.js';
 import { dayNight } from './render/daynight.js';
+import { surfaceMaxDistance } from './render/surface-zoom.js';
 import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
 import { mirrorHud } from './ui/hud-mirror.js';
 import { createRivals, playerState, applyRivalLine } from './civ/rivals.js'; // rivals on the home world (#212)
@@ -1036,7 +1037,8 @@ function render() {
       // Continuous camera zoom between orbit and ground
       const k = clamp(z / 0.75);
       const groundDist = CAM3D.blendFrom;
-      const targetDist = groundDist + (CAM3D.topDown - groundDist) * k;
+      const wide = camMax() > CAM3D.topDown + 1 ? camMax() : 0;   // a big home world: stay wide
+      const targetDist = wide || groundDist + (CAM3D.topDown - groundDist) * k;
       const targetPitch = 1.05 + (CAM3D.topPitch - 1.05) * k;
       if (typeof engine.set_camera_distance === 'function') {
         engine.set_camera_distance(targetDist);
@@ -1428,6 +1430,13 @@ let orbitDrag = null;
 // 90 / tan(15 deg) + 7.92 = 344. The world is bigger (#129), but the camera target is the centre of
 // the 2D window, so the top-down 3D frame is exactly the 2D view at hand-over.
 const CAM3D = { blendFrom: 300, topDown: 344, topPitch: 1.55 };
+// The farthest the camera pulls back on this surface before the globe: further on bigger home
+// worlds (src/render/surface-zoom.js); other worlds and the civ sandbox keep their 320×180 frame.
+function camMax() {
+  const scene = cosmos?.viewScene?.(G) || G?.scene;
+  if (cosmos?.surfaceInView || scene instanceof CivSandbox || scene?.civ) return CAM3D.topDown;
+  return surfaceMaxDistance(G?.world?.width);
+}
 let cam3dBase = null;   // the player's own angle when the tip-over began
 let cam3dTween = null;  // a keyboard/button zoom-out animates the tip-over, then hands over
 let current3dWorldKey = '';
@@ -1508,7 +1517,7 @@ function applyCam3dBlend() {
 }
 function zoom3dBy(f) {
   const d = engine.get_camera_distance();
-  engine.zoom_camera(Math.min(CAM3D.topDown, d * f) / d);
+  engine.zoom_camera(Math.min(camMax(), d * f) / d);
   applyCam3dBlend();
 }
 function zoomOutFromSurface() {
@@ -1520,8 +1529,8 @@ function zoomOutFromSurface() {
   }
   if (!in3dSurface()) { cosmos.zoomOut(G); return; }
   const d = engine.get_camera_distance();
-  if (d < CAM3D.topDown - 4) {
-    cam3dTween = { from: d, t0: performance.now(), dur: reducedMotion() ? 1 : 300 };   // #90: a cut, not a sweep
+  if (d < camMax() - 4) {
+    cam3dTween = { from: d, to: camMax(), t0: performance.now(), dur: reducedMotion() ? 1 : 300 };   // #90: a cut, not a sweep
   } else {
     cosmos.zoomOut(G);
   }
@@ -1543,7 +1552,7 @@ function stepCam3dTween() {
   if (!cam3dTween) return;
   const k = clamp((performance.now() - cam3dTween.t0) / cam3dTween.dur);
   const d = engine.get_camera_distance();
-  engine.zoom_camera((cam3dTween.from + (CAM3D.topDown - cam3dTween.from) * k) / d);
+  engine.zoom_camera((cam3dTween.from + ((cam3dTween.to ?? CAM3D.topDown) - cam3dTween.from) * k) / d);
   applyCam3dBlend();
   if (k >= 1) { cam3dTween = null; cosmos.zoomOut(G); }
 }
@@ -1679,7 +1688,7 @@ screen.addEventListener('wheel', (e) => {
     const scene = cosmos?.viewScene?.(G) || G?.scene;
     // Already looking straight down at the whole map: scrolling on carries on into the globe,
     // continuously (#143).
-    if (e.deltaY > 0 && engine.get_camera_distance() >= CAM3D.topDown - 0.5 && !(scene instanceof CivSandbox) && !scene?.civ) {
+    if (e.deltaY > 0 && engine.get_camera_distance() >= camMax() - 0.5 && !(scene instanceof CivSandbox) && !scene?.civ) {
       cosmos.wheel(wheelAmount(e), G);
       return;
     }
@@ -2126,7 +2135,7 @@ window.__moc.camera = initCamera({
     if (!G) return;
     if (in3dSurface() && (cosmos?.z || 0) <= 0.01) {
       cam3dTween = null;
-      if (delta < 0 && engine.get_camera_distance() >= CAM3D.topDown - 0.5) {
+      if (delta < 0 && engine.get_camera_distance() >= camMax() - 0.5) {
         cosmos.zoomOut(G);
         return;
       }
