@@ -41,7 +41,7 @@ Entry conditions are in `data/ages.json` (e.g. Kingdoms: population 80, 5 settle
   Some ages have alternative conditions (`"any"`) for exactly this.
 - **Collapse.** Stability below 0.15 for 30 s, or population below 60% of the age's entry level, drops a civilisation back one age: a Dark Age. Its buildings go dormant and its jobs stop until it climbs back.
 - **Crises are emergent.** Plague spreads along trade routes, ore wars start over hills, and revolutions come from inequality. The player's signals tilt them but don't script them.
-- **Daily life.** Agents sleep at night, eat at the hearth or market, hold festivals when the player is joyful, mourn their dead, form families, make friends and rivals across civilisations, and migrate when hungry or at war.
+- **Daily life.** Agents sleep at night, eat at the hearth or market, hold festivals when the player is joyful, mourn their dead, form families, make friends and rivals across civilisations, and migrate when hungry or at war. A person lives 3–5 in-game days (240–400 s at 80 s a day; `world::lifespan` in `crates/moc-civ/src/world.rs`), a full belly lasts 50 s and an empty one kills in 40 s (`STARVE_HP_RATE`); past 60% of their own lifespan people are old and plague hits them twice as hard. The Stone Age tribe's hunger clock is `STONE_HUNGER` in `src/eras/stone.js` (#298).
 
 ## Conflict
 Fights are **agent against agent** and come out of the simulation. They also happen **inside a single civilisation**: a civilisation alone on its planet still has clans, rebels and lords who fight. The full model is under `conflict` in `data/ages.json`.

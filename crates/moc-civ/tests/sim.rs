@@ -124,7 +124,9 @@ fn agents_starve_without_food_and_the_civilisation_dies_out() {
     w.food.t.iter_mut().for_each(|t| *t = 1e9); // no regrowth
     let (f, v) = civ(&mut w, 100, 160, 4, Job::Forage, traits(0.3, 0.6));
     w.villages[v as usize].food = 0.0;
-    run(&mut w, 100.0);
+    // A full belly lasts 50 s and an empty one kills in 40 s (#298): most are dead by ~100 s;
+    // the sand's trickle of food into the larder keeps the last alive to ~200 s, no longer.
+    run(&mut w, 300.0);
     assert!(w.agents.iter().all(|a| a.faction != f), "everyone starved");
     assert!(w.stats.starved >= 4, "starved {}", w.stats.starved);
     assert!(!w.factions[f as usize].alive);
