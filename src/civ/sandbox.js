@@ -18,6 +18,7 @@
 import { W, H, clamp } from '../sim/util.js';
 import { makeBolt, drawBolt, drawReticle } from '../render/sprites.js';
 import { createCiv, EVENT, CAST, TONE, SETUP } from './civ.js';
+import { calibrationTraits, calibrationLine } from './calibration-traits.js';
 
 const DAY = 80;            // seconds per day–night cycle (DAY_SECONDS in the Rust sim)
 const PAN_SPEED = 140;     // planet pixels per second
@@ -218,6 +219,16 @@ export class CivSandbox {
     if (!civ) return;
     const G = this.G, b = G.brain;
     this.t += dt;
+    // Calibration → your civilisation (#190), once founding is over so it never fights the
+    // 5 s seeding windows; the log says what was applied.
+    if (!this.calibApplied && civ.setupPhase === SETUP.done && G.calibration?.done) {
+      this.calibApplied = true;
+      const t = calibrationTraits(G.calibration.result);
+      if (t && civ.setPlayerTraits(t.friendliness, t.aggressiveness, t.violence)) {
+        this.log.unshift({ text: calibrationLine(t), t: this.t, tone: TONE.info });
+        if (this.log.length > 4) this.log.length = 4;
+      }
+    }
 
     // Camera: keys.
     let px = 0, py = 0;
@@ -366,6 +377,18 @@ export class CivSandbox {
     if (!g) return;
     this.grabbedEntity = null;
     if (cancelled && this.civ) this.civ.moveAgent(g.agent, g.p0.x, g.p0.y);
+  }
+
+  // Charged fireball (#291): a bright hit at the cursor.
+  onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
+    const G = this.G;
+    if (!G) return;
+    const p = this.aimPlanet(aim);
+    this.flash = 0.4;
+    G.audio?.thunder?.();
+    G.shake = Math.max(G.shake || 0, 1.2);
+    if (this.particles) this.particles.burst(16 + Math.round(charge * 16), () => ({ x: p.x, y: p.y, vx: rand(-30, 30), vy: rand(-40, 5), g: 50, life: rand(0.4, 0.7), maxLife: 0.7, size: 1, color }));
+    this.G.advisor?.say('civ-fireball', `A fireball! ${Math.round(charge * 100)}% charged and very visible.`, { mood: 'panic', priority: 2, cooldown: 8 });
   }
 
   // camera (#49): hand casts. aim is 0..1 like the brain's.

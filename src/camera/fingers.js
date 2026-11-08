@@ -112,6 +112,7 @@ export function pinchMetrics(hand, aspect = 4 / 3) {
   return {
     ratio: dist3(hand[4], hand[8], aspect) / size,
     reach: dist3(hand[0], hand[8], aspect) / Math.max(dist3(hand[0], hand[5], aspect), 1e-6),
+    size,
     point: { x: (hand[4].x + hand[8].x) / 2, y: (hand[4].y + hand[8].y) / 2 },
     wrist: { x: hand[0].x, y: hand[0].y },
     palm: { x: (hand[0].x + hand[9].x) / 2, y: (hand[0].y + hand[9].y) / 2 },
@@ -174,7 +175,7 @@ export class MultiHandTracker {
     this.zoomDeadZone = zoomDeadZone;
     this.leftPinch = new PinchDetector({ ...pinch, lossMs });
     this.rightPinch = new PinchDetector({ ...pinch, lossMs });
-    this.distFilter = new OneEuroFilter({ minCutoff: 1.5, beta: 6 });
+    this.distFilter = new OneEuroFilter({ minCutoff: 1.5, beta: 10 });   // beta 6 → 10: zoom follows fast spreads with less lag
     this.reset();
   }
 
