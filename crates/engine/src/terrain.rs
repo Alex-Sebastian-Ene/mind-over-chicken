@@ -1,7 +1,9 @@
 // Multi-continent planetary terrain with biome palettes, era repainting,
 // and cached BFS distance fields for land walkers and boats.
 //
-// Port of `src/world/terrain.js` into pure Rust for the engine crate.
+// Port of `src/world/terrain.js` into pure Rust for the engine crate. The land itself (heights,
+// tiles, the base colour layer, continents, harbours and campaign sites) comes from
+// `moc-terrain` (#109); this module adds the eras' land use, structures and distance fields.
 
 use crate::sprites::*;
 use std::collections::HashMap;
@@ -14,6 +16,7 @@ pub const T_SHALLOW: u8 = 1;
 pub const T_SAND: u8 = 2;
 pub const T_GRASS: u8 = 3;
 pub const T_FOREST: u8 = 4;
+#[allow(dead_code)]
 pub const T_HILL: u8 = 5;
 pub const T_MOUNTAIN: u8 = 6;
 pub const T_SNOW: u8 = 7;
@@ -162,6 +165,7 @@ pub struct Continent {
 }
 
 #[derive(Clone, Copy, Default, Debug)]
+#[allow(dead_code)] // mirrors the JS `World.sites`
 pub struct Sites {
     pub village: Point,
     pub pad: Point,
@@ -210,62 +214,6 @@ impl Mulberry32 {
     }
 }
 
-pub struct ValueNoise {
-    grid: [f32; 33 * 33],
-}
-
-impl ValueNoise {
-    pub fn new(rng: &mut Mulberry32) -> Self {
-        let mut grid = [0.0f32; 33 * 33];
-        for val in grid.iter_mut() {
-            *val = rng.next();
-        }
-        Self { grid }
-    }
-
-    #[inline]
-    fn at(&self, x: i32, y: i32) -> f32 {
-        let gx = ((x % 33) + 33) % 33;
-        let gy = ((y % 33) + 33) % 33;
-        self.grid[(gy * 33 + gx) as usize]
-    }
-
-    #[inline]
-    fn sm(t: f32) -> f32 {
-        t * t * (3.0 - 2.0 * t)
-    }
-
-    pub fn value(&self, x: f32, y: f32) -> f32 {
-        let xi = x.floor() as i32;
-        let yi = y.floor() as i32;
-        let xf = Self::sm(x - xi as f32);
-        let yf = Self::sm(y - yi as f32);
-
-        let v00 = self.at(xi, yi);
-        let v10 = self.at(xi + 1, yi);
-        let v01 = self.at(xi, yi + 1);
-        let v11 = self.at(xi + 1, yi + 1);
-
-        let top = v00 + (v10 - v00) * xf;
-        let bot = v01 + (v11 - v01) * xf;
-        top + (bot - top) * yf
-    }
-
-    pub fn noise(&self, x: f32, y: f32, octaves: usize) -> f32 {
-        let mut sum = 0.0;
-        let mut amp = 0.5;
-        let mut freq = 1.0;
-        let mut norm = 0.0;
-        for _ in 0..octaves {
-            sum += amp * self.value(x * freq, y * freq);
-            norm += amp;
-            amp *= 0.5;
-            freq *= 2.0;
-        }
-        sum / norm
-    }
-}
-
 pub struct Terrain {
     pub seed: u32,
     pub biome: BiomeType,
@@ -278,6 +226,8 @@ pub struct Terrain {
     pub sites: Sites,
     pub trees: Vec<TreeInfo>,
     pub structures: Vec<StructureInfo>,
+    /// The base colour layer from moc-terrain (coherent fields, no per-tile random colour).
+    pub base_pixels: Vec<u8>,
     pub pixels: Vec<u8>,       // 320x180x4 RGBA base landscape
     pub pixels_2d: Vec<u8>,    // 320x180x4 RGBA 2D fallback with flat buildings & tree crowns
     pub cached_fields: HashMap<i32, Vec<i16>>,
@@ -288,9 +238,21 @@ impl Terrain {
         Self::with_biome(seed, BiomeType::Temperate)
     }
 
+    /// A terrain with nothing generated yet (fill it with `apply_map`).
+    pub fn new_empty(seed: u32) -> Self {
+        Self::empty(seed, BiomeType::Temperate)
+    }
+
     pub fn with_biome(seed: u32, biome: BiomeType) -> Self {
+        let mut t = Self::empty(seed, biome);
+        t.generate();
+        t.bake_era(0); // Stone Age default
+        t
+    }
+
+    fn empty(seed: u32, biome: BiomeType) -> Self {
         let palette = BiomePalette::for_biome(biome);
-        let mut t = Self {
+        Self {
             seed,
             biome,
             palette,
@@ -302,257 +264,65 @@ impl Terrain {
             sites: Sites::default(),
             trees: Vec::new(),
             structures: Vec::new(),
+            base_pixels: vec![0u8; W * H * 4],
             pixels: vec![0u8; W * H * 4],
             pixels_2d: vec![0u8; W * H * 4],
             cached_fields: HashMap::new(),
-        };
-        t.generate();
-        t.bake_era(0); // Stone Age default
-        t
+        }
     }
 
     pub fn generate(&mut self) {
-        let mut rng = Mulberry32::new(self.seed);
-        let noise = ValueNoise::new(&mut rng);
-        let mut moist_rng = Mulberry32::new(self.seed ^ 0x9e3779b9);
-        let moist = ValueNoise::new(&mut moist_rng);
-
-        // Three continents: home continent fills the left two thirds; two smaller continents sit across the sea.
-        let cont_specs = [
-            ("home", 124.0f32, 96.0f32, 98.0f32, 66.0f32),
-            ("north", 268.0 + rng.next() * 10.0, 48.0 + rng.next() * 8.0, 40.0 + rng.next() * 6.0, 30.0 + rng.next() * 4.0),
-            ("south", 266.0 + rng.next() * 10.0, 138.0 + rng.next() * 6.0, 38.0 + rng.next() * 6.0, 26.0 + rng.next() * 4.0),
-        ];
-
-        let cx = cont_specs[0].1;
-        let cy = cont_specs[0].2;
-
-        self.sites.village = Point { x: 116, y: 100 };
-        self.sites.pad = Point { x: 198, y: 104 };
-        let v = self.sites.village;
-        let p = self.sites.pad;
-
-        let ridge_a = Point {
-            x: (cx - 48.0 + rng.next() * 10.0).round() as i32,
-            y: (cy - 30.0 + rng.next() * 8.0).round() as i32,
+        let biome = match self.biome {
+            BiomeType::Desert => "desert",
+            BiomeType::Ice => "ice",
+            BiomeType::Jungle => "jungle",
+            BiomeType::Alien => "alien",
+            BiomeType::Temperate => "temperate",
         };
-        let ridge_b = Point {
-            x: (cx + 36.0 + rng.next() * 10.0).round() as i32,
-            y: (cy - 38.0 + rng.next() * 6.0).round() as i32,
-        };
-        self.sites.ridge = ridge_a;
+        let mut p = moc_terrain::TerrainParams::home_world_sized(self.seed, W, H);
+        p.set_biome(biome);
+        self.apply_map(&moc_terrain::generate(&p));
+    }
 
-        for y in 0..H {
-            for x in 0..W {
-                let mut best = -9.0f32;
-                let mut second = -9.0f32;
-                let mut owner = 0u8;
-
-                for (i, (_, ccx, ccy, crx, cry)) in cont_specs.iter().enumerate() {
-                    let rx = (x as f32 - ccx) / crx;
-                    let ry = (y as f32 - ccy) / cry;
-                    let b = 1.0 - (rx * rx + ry * ry);
-                    if b > best {
-                        second = best;
-                        best = b;
-                        owner = i as u8;
-                    } else if b > second {
-                        second = b;
-                    }
-                }
-
-                let idx = y * W + x;
-                self.owner[idx] = owner;
-
-                let mut h = best * 0.56 + (noise.noise(x as f32 / 24.0, y as f32 / 24.0, 4) - 0.5) * 0.56 + 0.12;
-                // Strait of open water between neighbouring continents
-                if best - second < 0.22 && second > -1.2 {
-                    h = h.min(0.2 + (best - second) * 0.4);
-                }
-
-                let dx_a = x as f32 - ridge_a.x as f32;
-                let dy_a = y as f32 - ridge_a.y as f32;
-                h += 0.3 * (-((dx_a * dx_a + dy_a * dy_a) / (2.0 * 16.0 * 16.0))).exp();
-
-                let dx_b = x as f32 - ridge_b.x as f32;
-                let dy_b = y as f32 - ridge_b.y as f32;
-                h += 0.2 * (-((dx_b * dx_b + dy_b * dy_b) / (2.0 * 11.0 * 11.0))).exp();
-
-                // Flatten meadow for village and coastal plain for pad
-                let dv = (((x as i32 - v.x).pow(2) + (y as i32 - v.y).pow(2)) as f32).sqrt();
-                if dv < 30.0 {
-                    let factor = ((dv - 18.0) / 12.0).clamp(0.0, 1.0);
-                    h = 0.5 + (h - 0.5) * factor;
-                }
-
-                let dp = (((x as i32 - p.x).pow(2) + (y as i32 - p.y).pow(2)) as f32).sqrt();
-                if dp < 18.0 {
-                    let factor = ((dp - 10.0) / 8.0).clamp(0.0, 1.0);
-                    h = 0.47 + (h - 0.47) * factor;
-                }
-
-                // Walkable corridor from village to pad
-                let p_vx = (p.x - v.x) as f32;
-                let p_vy = (p.y - v.y) as f32;
-                let len_sq = p_vx * p_vx + p_vy * p_vy;
-                let t_line = (((x as f32 - v.x as f32) * p_vx + (y as f32 - v.y as f32) * p_vy) / len_sq).clamp(0.0, 1.0);
-                let lx = v.x as f32 + p_vx * t_line;
-                let ly = v.y as f32 + p_vy * t_line + (t_line * 9.0 + self.seed as f32).sin() * 5.0;
-                let dl = ((x as f32 - lx).powi(2) + (y as f32 - ly).powi(2)).sqrt();
-                if dl < 4.0 {
-                    h = h.clamp(0.42, 0.66);
-                }
-
-                // Small settlement meadows on other continents
-                for (_, ccx, ccy, _, _) in cont_specs.iter().skip(1) {
-                    let dc = ((x as f32 - ccx).powi(2) + (y as f32 - ccy).powi(2)).sqrt();
-                    if dc < 12.0 {
-                        let factor = ((dc - 6.0) / 6.0).clamp(0.0, 1.0);
-                        h = 0.48 + (h - 0.48) * factor;
-                    }
-                }
-
-                self.h[idx] = h;
-
-                let ty = if h < 0.24 {
-                    T_DEEP
-                } else if h < 0.33 {
-                    T_SHALLOW
-                } else if h < 0.37 {
-                    T_SAND
-                } else if h < 0.66 {
-                    if moist.noise(x as f32 / 18.0, y as f32 / 18.0, 4) > 0.56 && dv > 26.0 && dp > 16.0 && dl > 4.0 {
-                        T_FOREST
-                    } else {
-                        T_GRASS
-                    }
-                } else if h < 0.76 {
-                    T_HILL
-                } else if h < 0.90 {
-                    T_MOUNTAIN
-                } else {
-                    T_SNOW
-                };
-                self.tile_type[idx] = ty;
-            }
-        }
-        self.base_type = self.tile_type.clone();
-
-        // Cave: walking from village toward ridgeA until HILL
-        self.sites.cave = Point { x: v.x - 20, y: v.y - 20 };
-        self.sites.cave_mouth = self.sites.cave;
-        for i in 0..=200 {
-            let t = i as f32 / 200.0;
-            let cx_pos = (v.x as f32 + (ridge_a.x as f32 - v.x as f32) * t).round() as i32;
-            let cy_pos = (v.y as f32 + (ridge_a.y as f32 - v.y as f32) * t).round() as i32;
-            if self.get(cx_pos, cy_pos) >= T_HILL {
-                let back = (i as i32 - 3).max(0) as f32 / 200.0;
-                self.sites.cave = Point {
-                    x: (v.x as f32 + (ridge_a.x as f32 - v.x as f32) * back).round() as i32,
-                    y: (v.y as f32 + (ridge_a.y as f32 - v.y as f32) * back).round() as i32,
-                };
-                self.sites.cave_mouth = Point { x: cx_pos, y: cy_pos };
-                break;
-            }
-        }
-
-        self.sites.fire = v;
-        self.sites.factory = self.nearest_walkable(v.x - 46, v.y + 26, 60);
-        self.sites.exchange = self.nearest_walkable(v.x + 18, v.y - 10, 60);
-        self.sites.picket = self.nearest_walkable(self.sites.factory.x + 2, self.sites.factory.y + 9, 60);
-        self.sites.hangar = self.nearest_walkable(p.x - 26, p.y + 10, 60);
-        self.sites.crowd = self.nearest_walkable(p.x - 30, p.y - 10, 60);
-
-        // Build continents structure
-        self.continents.clear();
-        for (i, (id, ccx, ccy, crx, cry)) in cont_specs.iter().enumerate() {
-            let village = if i == 0 {
-                v
-            } else {
-                self.nearest_walkable(*ccx as i32, *ccy as i32, 60)
+    /// Take a generated home world (it must be W×H) as this terrain.
+    pub fn apply_map(&mut self, map: &moc_terrain::TerrainMap) {
+        assert_eq!((map.width, map.height), (W, H), "the engine's world is {W}x{H}");
+        self.h.copy_from_slice(&map.heights);
+        self.base_type.copy_from_slice(&map.types);
+        self.tile_type.copy_from_slice(&map.types);
+        self.base_pixels.copy_from_slice(&map.rgba);
+        self.owner = map.owner().iter().map(|&o| if o == 255 { 0 } else { o }).collect();
+        let pt = |p: (usize, usize)| Point { x: p.0 as i32, y: p.1 as i32 };
+        let pi = |p: (i32, i32)| Point { x: p.0, y: p.1 };
+        if let Some(s) = &map.campaign_sites {
+            self.sites = Sites {
+                village: pt(s.village),
+                pad: pt(s.pad),
+                ridge: pt(s.ridge),
+                cave: pt(s.cave),
+                cave_mouth: pt(s.cave_mouth),
+                fire: pt(s.fire),
+                factory: pt(s.factory),
+                exchange: pt(s.exchange),
+                picket: pt(s.picket),
+                hangar: pt(s.hangar),
+                crowd: pt(s.crowd),
             };
-            self.continents.push(Continent {
-                id: id.to_string(),
-                cx: *ccx,
-                cy: *ccy,
-                rx: *crx,
-                ry: *cry,
-                village,
-                harbor: HarborSite::default(),
-                home_harbor: HarborSite::default(),
-            });
         }
-
-        let home_v = self.continents[0].village;
-        for i in 1..self.continents.len() {
-            let target_v = self.continents[i].village;
-            let harbor = self.coast_toward(target_v, home_v, true);
-            let home_harbor = self.coast_toward(home_v, target_v, false);
-            self.continents[i].harbor = harbor;
-            self.continents[i].home_harbor = home_harbor;
-        }
+        let hb = |h: &Option<((i32, i32), (i32, i32))>| h.map(|(l, d)| HarborSite { land: pi(l), dock: pi(d) }).unwrap_or_default();
+        self.continents = map
+            .game_continents
+            .iter()
+            .map(|c| Continent { id: c.id.clone(), cx: c.cx, cy: c.cy, rx: c.rx, ry: c.ry, village: pi(c.village), harbor: hb(&c.harbor), home_harbor: hb(&c.home_harbor) })
+            .collect();
+        self.cached_fields.clear();
     }
 
-    pub fn coast_toward(&self, from: Point, to: Point, external_pred: bool) -> HarborSite {
-        let dx = (to.x - from.x) as f32;
-        let dy = (to.y - from.y) as f32;
-        let n = (dx * dx + dy * dy).sqrt().ceil() as i32;
-        let mut last = from;
-
-        for i in 0..=n {
-            let t = if n > 0 { i as f32 / n as f32 } else { 0.0 };
-            let x = (from.x as f32 + dx * t).round() as i32;
-            let y = (from.y as f32 + dy * t).round() as i32;
-            if self.is_water(x, y) {
-                return HarborSite {
-                    land: last,
-                    dock: Point { x, y },
-                };
-            }
-            let pred_ok = if external_pred {
-                self.get_owner(x, y) != 0
-            } else {
-                self.get_owner(x, y) == 0
-            };
-            if self.walkable(x, y) && pred_ok {
-                last = Point { x, y };
-            }
-        }
-
-        HarborSite {
-            land: last,
-            dock: self.nearest_water(last.x, last.y, 30),
-        }
-    }
-
-    pub fn nearest_water(&self, x: i32, y: i32, max_r: i32) -> Point {
-        for r in 1..=max_r {
-            for dy in -r..=r {
-                for dx in -r..=r {
-                    if dx.abs().max(dy.abs()) == r && self.is_water(x + dx, y + dy) {
-                        return Point { x: x + dx, y: y + dy };
-                    }
-                }
-            }
-        }
-        Point { x, y }
-    }
-
-    #[inline]
     pub fn get(&self, x: i32, y: i32) -> u8 {
         if x < 0 || y < 0 || x >= W as i32 || y >= H as i32 {
             T_DEEP
         } else {
             self.tile_type[(y as usize) * W + (x as usize)]
-        }
-    }
-
-    #[inline]
-    pub fn get_owner(&self, x: i32, y: i32) -> u8 {
-        if x < 0 || y < 0 || x >= W as i32 || y >= H as i32 {
-            0
-        } else {
-            self.owner[(y as usize) * W + (x as usize)]
         }
     }
 
@@ -563,10 +333,6 @@ impl Terrain {
     }
 
     #[inline]
-    pub fn is_water(&self, x: i32, y: i32) -> bool {
-        self.get(x, y) <= T_SHALLOW
-    }
-
     pub fn nearest_walkable(&self, x: i32, y: i32, max_r: i32) -> Point {
         for r in 0..=max_r {
             for dy in -r..=r {
@@ -964,91 +730,9 @@ impl Terrain {
             }
         }
 
-        // 2. Base landscape texture for 3D WebGL upload (no baked flat buildings)
-        let mut color_rng = Mulberry32::new(self.seed + 3);
-        for y in 0..H {
-            for x in 0..W {
-                let i = y * W + x;
-                let t = self.tile_type[i];
-                let (mut r, mut g, mut b) = if t == T_FARM {
-                    self.palette.farm[(y >> 1) % 2]
-                } else {
-                    match t {
-                        T_DEEP => {
-                            let idx = (color_rng.next() * 2.0) as usize % 2;
-                            self.palette.deep[idx]
-                        }
-                        T_SHALLOW => {
-                            let idx = (color_rng.next() * 2.0) as usize % 2;
-                            self.palette.shallow[idx]
-                        }
-                        T_SAND => {
-                            let idx = (color_rng.next() * 2.0) as usize % 2;
-                            self.palette.sand[idx]
-                        }
-                        T_GRASS => {
-                            let idx = (color_rng.next() * self.palette.grass.len() as f32) as usize % self.palette.grass.len();
-                            self.palette.grass[idx]
-                        }
-                        T_FOREST => {
-                            let idx = (color_rng.next() * self.palette.forest.len() as f32) as usize % self.palette.forest.len();
-                            self.palette.forest[idx]
-                        }
-                        T_HILL => {
-                            let idx = (color_rng.next() * 2.0) as usize % 2;
-                            self.palette.hill[idx]
-                        }
-                        T_MOUNTAIN => {
-                            let idx = (color_rng.next() * self.palette.mountain.len() as f32) as usize % self.palette.mountain.len();
-                            self.palette.mountain[idx]
-                        }
-                        T_SNOW => {
-                            let idx = (color_rng.next() * 2.0) as usize % 2;
-                            self.palette.snow[idx]
-                        }
-                        T_ROAD => {
-                            let idx = (color_rng.next() * 2.0) as usize % 2;
-                            self.palette.road[idx]
-                        }
-                        T_PAVED => {
-                            let idx = (color_rng.next() * 2.0) as usize % 2;
-                            self.palette.paved[idx]
-                        }
-                        _ => (0, 0, 0),
-                    }
-                };
-
-                // Relief shading
-                if t >= T_SAND && t != T_ROAD && t != T_PAVED && t != T_FARM {
-                    let h_left = if x > 0 { self.h[i - 1] } else { self.h[i] };
-                    let h_up = if y > 0 { self.h[i - W] } else { self.h[i] };
-                    let dx = self.h[i] - h_left;
-                    let dy = self.h[i] - h_up;
-                    let shade = (1.0 + (dx + dy) * 7.0).clamp(0.78, 1.20);
-                    r = ((r as f32) * shade).min(255.0) as u8;
-                    g = ((g as f32) * shade).min(255.0) as u8;
-                    b = ((b as f32) * shade).min(255.0) as u8;
-                }
-
-                // Foam on shallow water adjacent to sand
-                if t == T_SHALLOW && (
-                    self.get(x as i32 + 1, y as i32) == T_SAND
-                    || self.get(x as i32 - 1, y as i32) == T_SAND
-                    || self.get(x as i32, y as i32 + 1) == T_SAND
-                    || self.get(x as i32, y as i32 - 1) == T_SAND
-                ) {
-                    r = self.palette.foam.0;
-                    g = self.palette.foam.1;
-                    b = self.palette.foam.2;
-                }
-
-                let p_idx = i * 4;
-                self.pixels[p_idx] = r;
-                self.pixels[p_idx + 1] = g;
-                self.pixels[p_idx + 2] = b;
-                self.pixels[p_idx + 3] = 255;
-            }
-        }
+        // 2. Base landscape texture for 3D WebGL upload (no baked flat buildings): the base
+        // colour layer, with the era's land use (farms, roads, paving) painted over it.
+        self.pixels = paint_land_use(&self.base_pixels, &self.tile_type, &self.base_type, W, &self.palette);
 
         // Cave mouth on 3D landscape
         if era <= 1 {
@@ -1089,85 +773,56 @@ impl Terrain {
         }
     }
 
-    pub fn sites_json(&self) -> String {
-        let s = &self.sites;
-        format!(
-            "{{\"village\":{{\"x\":{},\"y\":{}}},\"pad\":{{\"x\":{},\"y\":{}}},\"ridge\":{{\"x\":{},\"y\":{}}},\"cave\":{{\"x\":{},\"y\":{}}},\"caveMouth\":{{\"x\":{},\"y\":{}}},\"fire\":{{\"x\":{},\"y\":{}}},\"factory\":{{\"x\":{},\"y\":{}}},\"exchange\":{{\"x\":{},\"y\":{}}},\"picket\":{{\"x\":{},\"y\":{}}},\"hangar\":{{\"x\":{},\"y\":{}}},\"crowd\":{{\"x\":{},\"y\":{}}}}}",
-            s.village.x, s.village.y,
-            s.pad.x, s.pad.y,
-            s.ridge.x, s.ridge.y,
-            s.cave.x, s.cave.y,
-            s.cave_mouth.x, s.cave_mouth.y,
-            s.fire.x, s.fire.y,
-            s.factory.x, s.factory.y,
-            s.exchange.x, s.exchange.y,
-            s.picket.x, s.picket.y,
-            s.hangar.x, s.hangar.y,
-            s.crowd.x, s.crowd.y,
-        )
-    }
+}
 
-    pub fn continents_json(&self) -> String {
-        let items: Vec<String> = self.continents.iter().map(|c| {
-            format!(
-                "{{\"id\":\"{}\",\"cx\":{},\"cy\":{},\"rx\":{},\"ry\":{},\"village\":{{\"x\":{},\"y\":{}}}}}",
-                c.id, c.cx, c.cy, c.rx, c.ry, c.village.x, c.village.y
-            )
-        }).collect();
-        format!("[{}]", items.join(","))
+/// The base colour layer with land use painted on: tiles whose type differs from the base
+/// type get farm (striped), road or paving colours; everything else keeps the terrain's.
+pub fn paint_land_use(base: &[u8], types: &[u8], base_types: &[u8], w: usize, pal: &BiomePalette) -> Vec<u8> {
+    let mut out = base.to_vec();
+    for (i, (&t, &b)) in types.iter().zip(base_types.iter()).enumerate() {
+        if t == b {
+            continue;
+        }
+        let (x, y) = (i % w, i / w);
+        let c = match t {
+            T_FARM => pal.farm[(y >> 1) % 2],
+            T_ROAD => pal.road[(x + y) % 2],
+            T_PAVED => pal.paved[(x + y) % 2],
+            _ => continue,
+        };
+        out[i * 4] = c.0;
+        out[i * 4 + 1] = c.1;
+        out[i * 4 + 2] = c.2;
+        out[i * 4 + 3] = 255;
     }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // The land comes from moc-terrain (#109): random each run, at least five continents on
+    // the home world (#129), 45–70% sea. (Same-seed determinism isn't a feature any more,
+    // per Alex: "remove the deterministic feature for now".)
     #[test]
-    fn test_three_continents_and_water_distribution() {
-        let t = Terrain::new(42);
-        assert_eq!(t.continents.len(), 3, "must generate exactly 3 continents");
-        assert_eq!(t.continents[0].id, "home");
-        assert_eq!(t.continents[1].id, "north");
-        assert_eq!(t.continents[2].id, "south");
-
-        // Verify land/sea distribution per Alex's spec in PR #128:
-        // Deep ~63%, Shallow ~8%, Land ~29%
-        let mut deep = 0;
-        let mut shallow = 0;
-        let mut land = 0;
-        for &tile in &t.base_type {
-            if tile == T_DEEP {
-                deep += 1;
-            } else if tile == T_SHALLOW {
-                shallow += 1;
-            } else {
-                land += 1;
+    fn test_continents_and_water_distribution() {
+        for seed in [42u32, 7, 2026] {
+            let t = Terrain::new(seed);
+            assert!(t.continents.len() >= 3, "home and at least two landmasses boats reach, got {}", t.continents.len());
+            assert_eq!(t.continents[0].id, "home");
+            let total = (W * H) as f32;
+            let deep = t.base_type.iter().filter(|&&k| k == T_DEEP).count() as f32 / total;
+            let sea = t.base_type.iter().filter(|&&k| k <= T_SHALLOW).count() as f32 / total;
+            assert!((0.45..=0.70).contains(&sea), "sea share {sea:.2}");
+            assert!(deep > 0.3, "deep water {deep:.2}");
+            assert!(t.walkable(t.sites.village.x, t.sites.village.y));
+            assert!(t.walkable(t.sites.pad.x, t.sites.pad.y));
+            for c in t.continents.iter().skip(1) {
+                assert!(t.get(c.harbor.dock.x, c.harbor.dock.y) <= T_SHALLOW, "{} dock on water", c.id);
+                assert!(t.walkable(c.village.x, c.village.y), "{} village on land", c.id);
             }
         }
-
-        let total = (W * H) as f32;
-        let deep_pct = deep as f32 / total;
-        let shallow_pct = shallow as f32 / total;
-        let land_pct = land as f32 / total;
-
-        assert!(deep_pct > 0.50 && deep_pct < 0.75, "deep water should be ~63%, got {:.2}%", deep_pct * 100.0);
-        assert!(shallow_pct > 0.04 && shallow_pct < 0.16, "shallow water should be ~8%, got {:.2}%", shallow_pct * 100.0);
-        assert!(land_pct > 0.20 && land_pct < 0.40, "land should be ~29%, got {:.2}%", land_pct * 100.0);
-
-        // Verify sites
-        assert_eq!(t.sites.village, Point { x: 116, y: 100 });
-        assert_eq!(t.sites.pad, Point { x: 198, y: 104 });
-        assert!(t.walkable(t.sites.village.x, t.sites.village.y));
-        assert!(t.walkable(t.sites.pad.x, t.sites.pad.y));
-    }
-
-    #[test]
-    fn test_determinism_same_seed_same_tiles() {
-        let t1 = Terrain::new(12345);
-        let t2 = Terrain::new(12345);
-        assert_eq!(t1.base_type, t2.base_type);
-        assert_eq!(t1.h, t2.h);
-        assert_eq!(t1.owner, t2.owner);
     }
 
     #[test]
