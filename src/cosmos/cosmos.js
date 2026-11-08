@@ -99,10 +99,17 @@ export class Cosmos extends ZoomState {
     this.galaxy = new Galaxy();
     // A sandbox home runs on its own, on a mirror of the same world (built off-thread), so the paused game's map is untouched.
     this.galaxy.addHome(G.world, { autonomous: autonomousHome });
-    // Three more worlds take shape from the player's first ten seconds of brain data.
-    this.galaxy.addMindWorlds();
-    // The worlds shaped on the setup screen keep their PPO temperament.
-    if (setupPlanets?.length) this.galaxy.addSetupPlanets(setupPlanets);
+    if (setupPlanets?.length) {
+      // The four worlds the setup screen read from the player's mind replace the three that the
+      // first ten seconds of play would make (Alex: no second reading, no remade worlds). The Rust
+      // galaxy only has the home and three mind slots, so this galaxy runs on the JS sim alone.
+      this.galaxy.wasm = null;
+      this.galaxy.mind.done = true;
+      this.galaxy.addSetupPlanets(setupPlanets);
+    } else {
+      // Three more worlds take shape from the player's first ten seconds of brain data.
+      this.galaxy.addMindWorlds();
+    }
     this.galaxy.onEvent = (p, text, kind) => this.onEvent?.(p, text, kind);
     return this.galaxy;
   }

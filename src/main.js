@@ -403,6 +403,7 @@ function updateAIGodAutopilot(dt) {
 // (src/game/saves.js): its world seed and size, stats, run time, calibration seed and brain model.
 // setupPlanets: the four worlds shaped before a new story run (their PPO temperaments).
 function newGame(source, startIndex = 0, { mode = 'story', resume = null, setupPlanets = null } = {}) {
+  if (!setupPlanets && Array.isArray(resume?.setupPlanets) && resume.setupPlanets.length) setupPlanets = resume.setupPlanets;
   if (previewSource && previewSource !== source) previewSource.disconnect();
   previewSource = null;
   previewBrain = null;
@@ -496,8 +497,8 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null, setupP
   // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
   G.camera = cosmos;          // the eras ask it where the screen is (#129)
   cosmos.attachWorld(G.world); // the camera looks at the village
-  // The worlds shaped on the setup screen join the galaxy now; the home campaign still starts
-  // exactly where it did before. Home + three mind worlds + these four fit the galaxy's limit.
+  // The four worlds read on the setup screen join the galaxy now, in place of the three mind
+  // worlds; the home campaign still starts exactly where it did before.
   cosmos.ensureGalaxy(G, { setupPlanets: G.setupPlanets });
   brain.onTrained = () => {};
   $('endScreen').hidden = true;
@@ -1268,6 +1269,10 @@ function frame(ts) {
     $('sourceStatus').textContent = previewSource.status;
     $('sourceStatus').dataset.ok = previewSource.connected ? '1' : '0';
   }
+  if (planetSetup?.isOpen) {
+    if (G && setupBrain && setupBrain !== G.brain) setupBrain.update(dt);   // no preview loop mid-run
+    planetSetup.update(dt);
+  }
   eegPanel?.update();
   syncCameraIndicator(document);   // "● Camera on" in the top bar while the webcam runs (#89)
   render();
@@ -1727,7 +1732,10 @@ window.addEventListener('keydown', (e) => {
   // The setup screen owns the keyboard while it is open: Escape goes back to the title, and no
   // game hotkey fires behind it.
   if (planetSetup?.isOpen) {
-    if (e.code === 'Escape') { e.preventDefault(); planetSetup.cancel(); }
+    if (e.code === 'Escape') { e.preventDefault(); planetSetup.cancel(); return; }
+    const s = setupSim();
+    if (s && KEYS[e.code]) { s.input[KEYS[e.code]] = true; e.preventDefault(); }
+    if (s && e.code === 'KeyB' && !e.repeat) s.blink();
     return;
   }
   if (e.target?.closest?.('input, select, textarea')) return;
@@ -1826,7 +1834,7 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => {
   if (e.code === 'Digit3' || e.code === 'Numpad3') { window.__moc?.camera?.fireballKeyUp?.(); return; }
-  const s = sim(); if (!s) return;
+  const s = sim() || setupSim(); if (!s) return;
   if (KEYS[e.code]) s.input[KEYS[e.code]] = false;
 });
 window.addEventListener('blur', () => { const s = sim(); if (s) Object.keys(s.input).forEach((k) => (s.input[k] = false)); });
@@ -1905,7 +1913,7 @@ $('endModelBtn').addEventListener('click', toggleModel);
 let revealed = 0;
 cosmos.onEvent = (p, text, kind) => {
   if (kind === 'born') patchSave({ galaxy: galaxySummary(cosmos.galaxy) });   // the save names the worlds born
-  if (kind === 'born' && p.mindSlot) {
+  if (kind === 'born' && (p.mindSlot || (p.setup && CHANNELS[p.channel]))) {
     revealed++;
     audio.good();
     if (revealed === 1) advisor.say('mindworlds', `My lord, your thoughts are making worlds. ${p.name} was born from your ${CHANNELS[p.channel].label.toLowerCase()}. Zoom out with Z to see them.`, { mood: 'happy', priority: 2, cooldown: 999 });
@@ -2031,7 +2039,11 @@ initNewGameOptions($('titleScreen').querySelector('[data-title-view="new"]'));
 // The planet setup sits between Start and the home planet. The four worlds are shaped there;
 // Begin then drops the player onto the home planet with the normal campaign untouched.
 let setupSource = null;
+let setupBrain = null;     // reads the player's mind for the four worlds
+function setupSim() { return planetSetup?.isOpen && setupSource?.kind === 'sim' ? setupSource : null; }
 const planetSetup = new PlanetSetup($('planetSetup'), {
+  getBrain: () => setupBrain,
+  isEmulated: () => setupSource?.kind === 'sim',
   onBegin: (planets) => {
     const src = setupSource || playSource();
     setupSource = null;
@@ -2048,6 +2060,9 @@ const planetSetup = new PlanetSetup($('planetSetup'), {
 function openPlanetSetup(source) {
   audio.unlock();
   setupSource = source;
+  // Before a run the title's preview brain is the one the frame loop updates: read through it.
+  if (!G) { if (previewSource !== source) setGameSource(source); setupBrain = previewBrain; }
+  else setupBrain = new Brain(source);
   $('titleScreen').hidden = true;
   planetSetup.open();
 }

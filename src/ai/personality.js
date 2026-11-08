@@ -2,9 +2,9 @@
 //
 // The Stone Age PPO policy (rl/, src/ai/policy.js) picks one of five actions every decision:
 // wait, strike the fire, hunt a mammoth, stay calm, or strike at random. Its exported weights
-// are fixed, but a world can lean on them: the setup screen gives each new planet a
-// temperament (friendliness, aggressiveness, violence), and traitWeights() turns that
-// temperament into multipliers on the policy's action probabilities. AIGod wraps the shared
+// are fixed, but a world can lean on them: the setup screen reads the player's mind once per
+// world and turns that reading into a temperament (friendliness, aggressiveness, violence);
+// traitWeights() turns the temperament into multipliers on the policy's action probabilities. AIGod wraps the shared
 // policy with those multipliers (weightedPolicy in policy.js), so every world keeps the same
 // trained brain but expresses a different personality.
 //
@@ -55,10 +55,10 @@ export const BIOME_LABELS = {
 export const BIOME_COLORS = {
   temperate: '#6cbf84',
   jungle: '#59d8a0',
-  desert: '#d9a05b',
+  desert: '#e3c86a',
   ice: '#9fc7f0',
-  alien: '#b58cff',
-  forming: '#8a7f8f',
+  alien: '#c4e86b',
+  forming: '#7f9a94',
 };
 
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -114,51 +114,87 @@ export function personalityLabel(traits = {}) {
   return 'Balanced';
 }
 
-// The four worlds the player shapes before the home planet. Names and biomes are fixed so the
-// player can tell them apart; the starting temperaments are archetypes rather than all-random.
+// The four worlds the player's mind makes before the home planet (Alex: "the 4 should only read
+// emotions rather than by doing it via sliders"). Each world is one reading of a few seconds:
+// the strongest feeling in it picks the world's channel and biome, and the mix sets its
+// temperament. Names stay fixed so the four can be told apart.
 export const SETUP_NAMES = ['Henhaven', 'Cluckturn', 'Roostia', 'Yolkos'];
-const SETUP_ARCHETYPES = [
-  { friendliness: 0.72, aggressiveness: 0.28, violence: 0.18 },
-  { friendliness: 0.38, aggressiveness: 0.72, violence: 0.46 },
-  { friendliness: 0.5, aggressiveness: 0.42, violence: 0.66 },
-  { friendliness: 0.62, aggressiveness: 0.48, violence: 0.3 },
-];
-const SETUP_BIOMES = ['temperate', 'desert', 'jungle', 'ice'];
-
 export const SETUP_COUNT = 4;
+export const READ_SECONDS = 4;
 
-// Fresh setup state. `rng` only jitters the archetypes, so a run stays recognisable while two
-// openings do not feel identical.
-export function defaultSetupPlanets(count = SETUP_COUNT, rng = Math.random) {
-  const n = Math.max(1, Math.min(count, SETUP_NAMES.length));
-  return Array.from({ length: n }, (_, i) => {
-    const base = SETUP_ARCHETYPES[i % SETUP_ARCHETYPES.length];
-    const jitter = () => (rng() - 0.5) * 0.16;
-    return {
-      id: `setup-${i}`,
-      name: SETUP_NAMES[i],
-      biome: SETUP_BIOMES[i % SETUP_BIOMES.length],
-      size: 9 + (i % 3),
-      traits: clampTraits({
-        friendliness: base.friendliness + jitter(),
-        aggressiveness: base.aggressiveness + jitter(),
-        violence: base.violence + jitter(),
-      }),
-    };
+export const MOOD_CHANNELS = ['calm', 'focus', 'stress', 'blink'];
+// The same channel → biome mapping as the galaxy's mind worlds (CHANNELS in cosmos/galaxy.js).
+export const MOOD_BIOME = { calm: 'temperate', focus: 'alien', stress: 'desert', blink: 'ice' };
+export const MOOD_LABEL = { calm: 'Calm', focus: 'Focus', stress: 'Stress', blink: 'Blinks' };
+
+const blinkLevel = (blinks) => clamp01((Number(blinks) || 0) / 4);
+
+// Temperament from a reading: calm makes a world friendly, focus and stress make it bold, stress
+// and a flurry of blinks make it reckless.
+export function moodTraits({ calm = 0, focus = 0, stress = 0, blinks = 0 } = {}) {
+  const c = clamp01(calm), f = clamp01(focus), st = clamp01(stress), b = blinkLevel(blinks);
+  return clampTraits({
+    friendliness: 0.15 + 0.85 * c - 0.35 * st,
+    aggressiveness: 0.1 + 0.6 * f + 0.55 * st,
+    violence: 0.05 + 0.8 * st + 0.25 * b,
   });
 }
 
-// Re-roll temperaments (and biomes) without losing the four worlds' identities.
-export function rerollSetupPlanets(planets, rng = Math.random) {
-  return planets.map((p, i) => ({
-    ...p,
-    biome: BIOMES[Math.floor(rng() * BIOMES.length)] || p.biome,
-    traits: clampTraits({
-      friendliness: rng(),
-      aggressiveness: rng(),
-      violence: rng(),
-    }),
-  }));
+// The feeling that led the reading, and how strongly.
+export function moodChannel({ calm = 0, focus = 0, stress = 0, blinks = 0 } = {}) {
+  const scores = { calm: clamp01(calm), focus: clamp01(focus), stress: clamp01(stress), blink: blinkLevel(blinks) };
+  let channel = 'calm';
+  for (const k of MOOD_CHANNELS) if (scores[k] > scores[channel]) channel = k;
+  return { channel, strength: scores[channel] };
+}
+
+// One world from one reading. `rating` is the card's big number: how strongly the feeling held.
+export function planetFromMood(mood = {}, index = 0) {
+  const { channel, strength } = moodChannel(mood);
+  return {
+    id: `setup-${index}`,
+    name: SETUP_NAMES[index] || `World ${index + 1}`,
+    biome: MOOD_BIOME[channel],
+    channel,
+    size: 9 + (index % 3),
+    traits: moodTraits(mood),
+    mood: {
+      calm: round3(clamp01(mood.calm ?? 0)),
+      focus: round3(clamp01(mood.focus ?? 0)),
+      stress: round3(clamp01(mood.stress ?? 0)),
+      blinks: Math.max(0, Math.round(Number(mood.blinks) || 0)),
+    },
+    rating: Math.round(40 + 59 * strength),
+  };
+}
+
+// A reading in progress: the time-weighted mean of calm, focus and stress, and the blinks in it.
+export class MoodReading {
+  constructor(seconds = READ_SECONDS) {
+    this.seconds = seconds;
+    this.t = 0;
+    this.sum = { calm: 0, focus: 0, stress: 0 };
+    this.blinks0 = null;
+    this.blinks = 0;
+  }
+  add(dt, brain) {
+    if (this.done) return this;
+    const d = Math.max(0, Math.min(Number(dt) || 0, 0.25));   // a stalled frame doesn't swamp it
+    this.t += d;
+    this.sum.calm += clamp01(brain?.calm ?? 0) * d;
+    this.sum.focus += clamp01(brain?.focus ?? 0) * d;
+    this.sum.stress += clamp01(brain?.stress ?? 0) * d;
+    const b = Number(brain?.stats?.blinks) || 0;
+    if (this.blinks0 === null) this.blinks0 = b;
+    this.blinks = Math.max(0, b - this.blinks0);
+    return this;
+  }
+  get progress() { return Math.min(1, this.t / this.seconds); }
+  get done() { return this.t >= this.seconds; }
+  get mood() {
+    const n = this.t || 1;
+    return { calm: this.sum.calm / n, focus: this.sum.focus / n, stress: this.sum.stress / n, blinks: this.blinks };
+  }
 }
 
 // The options Galaxy.makePlanet needs. traitWeights is attached here so every consumer computes
@@ -170,6 +206,7 @@ export function toPlanetOptions(planets = []) {
       name: p.name || SETUP_NAMES[i] || `World ${i + 1}`,
       biome: BIOMES.includes(p.biome) ? p.biome : 'temperate',
       size: Number.isFinite(p.size) ? p.size : 9,
+      channel: MOOD_CHANNELS.includes(p.channel) ? p.channel : 'mixed',
       traits,
       ppoWeights: traitWeights(traits),
       setup: true,
