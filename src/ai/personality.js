@@ -174,6 +174,22 @@ export function planetFromMood(mood = {}, index = 0) {
   };
 }
 
+// The world cards read your face when the camera sees one (Alex: "link the world creation to the
+// actual expression of the person rather than simulation"). A smile reads as calm, anger and
+// surprise as stress, surprise as focus. Null when no expression is showing, so the headset (or its
+// emulator) is read instead.
+export function faceFeeling(face) {
+  if (!face) return null;
+  const v = (k) => clamp01(Number(face[k]) || 0);
+  const joy = v('joy'), surprise = v('surprise'), anger = v('anger'), sadness = v('sadness');
+  if (Math.max(joy, surprise, anger, sadness) < 0.05) return null;
+  return {
+    calm: clamp01(0.2 + joy * 0.8 - anger * 0.5 - surprise * 0.2),
+    focus: clamp01(0.25 + surprise * 0.6 + sadness * 0.2 - joy * 0.15),
+    stress: clamp01(anger * 0.9 + surprise * 0.45 + sadness * 0.3),
+  };
+}
+
 // A reading in progress: the time-weighted mean of calm, focus and stress, and the blinks in it.
 export class MoodReading {
   constructor(seconds = READ_SECONDS) {
