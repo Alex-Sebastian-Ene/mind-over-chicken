@@ -35,7 +35,7 @@ pub struct App {
     pub last_ts: f64,
     pub running: bool,
     pub aim: [f32; 2],
-    pub sun_angle: f32,
+    pub run_time: f32,
 }
 
 impl App {
@@ -61,7 +61,7 @@ impl App {
             last_ts: 0.0,
             running: true,
             aim: [160.0, 90.0],
-            sun_angle: 0.0,
+            run_time: 0.0,
         })
     }
 
@@ -112,19 +112,19 @@ impl App {
         // 5. 3D era billboards & lights
         self.engine.draw_era_3d();
 
-        // 6. 3D WebGL scene rendering
-        self.sun_angle += dt * 0.15;
-        let sun_x = self.sun_angle.cos();
-        let sun_y = 0.85;
-        let sun_z = self.sun_angle.sin();
-        let dark = self.engine.get_game_darkness();
+        // 6. 3D WebGL scene rendering with dynamic diurnal day/night cycle (#201)
+        self.run_time += dt;
+        let (sun_dir, total_night) = Engine::day_night_state(
+            self.run_time,
+            self.engine.get_game_darkness(),
+        );
 
         self.engine.render_3d(
             dt,
-            sun_x,
-            sun_y,
-            sun_z,
-            dark,
+            sun_dir.x,
+            sun_dir.y,
+            sun_dir.z,
+            total_night,
             0.0,
             0.0,
             0.0,

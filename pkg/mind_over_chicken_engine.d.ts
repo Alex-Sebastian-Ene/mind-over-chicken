@@ -17,6 +17,12 @@ export class Engine {
     begin_frame(): void;
     bind_dom_shell(): void;
     clear_3d_billboards(): void;
+    /**
+     * Computes the dynamic diurnal sun direction vector and night darkness factor
+     * from elapsed time (in seconds) and baseline era darkness.
+     * Returns [sun_x, sun_y, sun_z, total_night].
+     */
+    compute_day_night(time: number, era_darkness: number): Float32Array;
     draw_chicken(x: number, y: number, facing: number, frame: number, halo: boolean): void;
     draw_era_3d(): void;
     draw_fire(x: number, y: number, heat: number, t: number): void;
@@ -558,6 +564,8 @@ export function paint_land_use(base: Uint8Array | number[], types: Uint8Array | 
 
 export function rust_animate_agent(clock: number, dt: number, rate: number): Float32Array;
 
+export function rust_compute_day_night(time: number, era_darkness: number): Float32Array;
+
 export function rust_villager_look(era: string, seed: number): Array<any>;
 
 /**
@@ -598,6 +606,7 @@ export interface InitOutput {
     readonly engine_begin_frame: (a: number) => void;
     readonly engine_bind_dom_shell: (a: number) => [number, number];
     readonly engine_clear_3d_billboards: (a: number) => void;
+    readonly engine_compute_day_night: (a: number, b: number, c: number) => [number, number];
     readonly engine_draw_chicken: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly engine_draw_era_3d: (a: number) => void;
     readonly engine_draw_fire: (a: number, b: number, c: number, d: number, e: number) => void;
@@ -702,6 +711,7 @@ export interface InitOutput {
     readonly pointergesture_pan_dy: (a: number) => number;
     readonly pointergesture_up: (a: number, b: number, c: number) => number;
     readonly rust_animate_agent: (a: number, b: number, c: number) => any;
+    readonly rust_compute_day_night: (a: number, b: number) => any;
     readonly rust_villager_look: (a: number, b: number, c: number) => any;
     readonly rustaipolicy_act: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly rustaipolicy_new: () => number;
@@ -890,10 +900,10 @@ export interface InitOutput {
     readonly moc_sim_free: (a: number) => void;
     readonly moc_sim_new: (a: number) => number;
     readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__277: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__278: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__279: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_d0cceb78ed04714a___convert__closures_____invoke___web_sys_59d49fe0f565343e___features__gen_WheelEvent__WheelEvent______true__280: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

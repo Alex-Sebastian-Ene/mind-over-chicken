@@ -79,6 +79,7 @@ pub struct WebGl3DRenderer {
     pub u_water_light_pos: WebGlUniformLocation,
     pub u_water_light_rad: WebGlUniformLocation,
     pub u_water_light_int: WebGlUniformLocation,
+    pub u_water_world_h: Option<WebGlUniformLocation>,
 
     // Billboard uniforms
     pub u_billboard_vp: WebGlUniformLocation,
@@ -206,13 +207,12 @@ varying vec2 v_texCoord;
 varying vec3 v_worldPos;
 
 void main() {
-    vec3 pos = a_position;
-    // Two-octave animated 3D wave ripples
-    float w1 = sin(pos.x * 0.14 + u_time * 2.4) * cos(pos.z * 0.14 + u_time * 1.9) * 0.36;
-    float w2 = sin(pos.x * 0.28 - u_time * 3.1) * cos(pos.z * 0.24 + u_time * 2.7) * 0.14;
-    pos.y += w1 + w2;
+    vec3 wpos = a_position + vec3(u_offsetX, 0.0, u_offsetZ);
+    // Two-octave animated 3D wave ripples using world position for seamless torus wrapping
+    float w1 = sin(wpos.x * 0.14 + u_time * 2.4) * cos(wpos.z * 0.14 + u_time * 1.9) * 0.36;
+    float w2 = sin(wpos.x * 0.28 - u_time * 3.1) * cos(wpos.z * 0.24 + u_time * 2.7) * 0.14;
+    wpos.y += w1 + w2;
 
-    vec3 wpos = pos + vec3(u_offsetX, 0.0, u_offsetZ);
     v_worldPos = wpos;
     v_texCoord = a_texCoord;
     gl_Position = u_viewProjection * vec4(wpos, 1.0);
@@ -229,6 +229,7 @@ uniform vec3 u_sunDir;
 uniform vec3 u_camPos;
 uniform float u_night;
 uniform float u_time;
+uniform float u_worldH;
 uniform int u_lightCount;
 uniform vec3 u_lightPos[16];
 uniform float u_lightRad[16];
@@ -240,8 +241,10 @@ void main() {
     vec3 dayWaterShallow = vec3(0.12, 0.42, 0.58);
     vec3 nightWater = vec3(0.02, 0.05, 0.14);
 
-    // Depth / latitude variation
-    float depthGrad = clamp(abs(v_worldPos.z - 90.0) / 90.0, 0.0, 1.0);
+    // Depth / latitude variation with seamless torus wrapping
+    float halfH = max(1.0, u_worldH * 0.5);
+    float wz = mod(mod(v_worldPos.z, u_worldH) + u_worldH, u_worldH);
+    float depthGrad = clamp(abs(wz - halfH) / halfH, 0.0, 1.0);
     vec3 baseWater = mix(dayWaterShallow, dayWaterDeep, depthGrad * 0.8 + 0.2);
     vec3 col = mix(baseWater, nightWater, u_night);
 
@@ -554,6 +557,7 @@ impl WebGl3DRenderer {
         let u_water_light_int = gl
             .get_uniform_location(&water_program, "u_lightInt")
             .ok_or("Missing u_lightInt in water shader")?;
+        let u_water_world_h = gl.get_uniform_location(&water_program, "u_worldH");
 
         // Billboard uniform locations
         let u_billboard_vp = gl
@@ -637,6 +641,7 @@ impl WebGl3DRenderer {
             u_water_light_pos,
             u_water_light_rad,
             u_water_light_int,
+            u_water_world_h,
             u_billboard_vp,
             u_billboard_cam_right,
             u_billboard_cam_up,
@@ -900,6 +905,9 @@ impl WebGl3DRenderer {
         gl.uniform3fv_with_f32_array(Some(&self.u_water_light_pos), &pos_arr);
         gl.uniform1fv_with_f32_array(Some(&self.u_water_light_rad), &rad_arr);
         gl.uniform1fv_with_f32_array(Some(&self.u_water_light_int), &int_arr);
+        if let Some(loc) = self.u_water_world_h.as_ref() {
+            gl.uniform1f(Some(loc), self.world_h);
+        }
 
         gl.enable(WebGlRenderingContext::BLEND);
         gl.blend_func(

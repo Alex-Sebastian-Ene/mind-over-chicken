@@ -1232,12 +1232,43 @@ impl Engine {
         self.game.era.darkness()
     }
 
+    /// Computes the dynamic diurnal sun direction vector and night darkness factor
+    /// from elapsed time (in seconds) and baseline era darkness.
+    /// Returns [sun_x, sun_y, sun_z, total_night].
+    pub fn compute_day_night(&self, time: f32, era_darkness: f32) -> Vec<f32> {
+        let (sun, total_night) = Self::day_night_state(time, era_darkness);
+        vec![sun.x, sun.y, sun.z, total_night]
+    }
+
     pub fn is_game_era_complete(&self) -> bool {
         self.game.era.is_complete()
     }
 
     pub fn is_game_era_failed(&self) -> Option<String> {
         self.game.era.is_failed()
+    }
+}
+
+// Rust-internal Engine helpers not exported across WASM
+impl Engine {
+    /// Computes the dynamic diurnal sun direction vector and night darkness factor
+    /// from elapsed time (in seconds) and baseline era darkness.
+    /// Returns (Vec3, total_night).
+    pub fn day_night_state(time: f32, era_darkness: f32) -> (Vec3, f32) {
+        // Initial offset 1.05 rad places world in bright morning at T=0
+        let phase = 1.05 + time * 0.0785; // ~80 second diurnal cycle
+        let sun_x = phase.cos();
+        let sun_y = phase.sin();
+        let sun_z = (phase * 0.7).cos() * 0.35;
+
+        // Twilight transitions as sun approaches and crosses the horizon
+        // sun_y >= 0.15: day (diurnal = 0.0)
+        // -0.15 < sun_y < 0.15: sunset / sunrise twilight transition
+        // sun_y <= -0.15: night (diurnal = 1.0)
+        let diurnal_night = ((0.15 - sun_y) / 0.30).clamp(0.0, 1.0);
+        let total_night = era_darkness.max(diurnal_night).clamp(0.0, 1.0);
+
+        (Vec3::new(sun_x, sun_y, sun_z), total_night)
     }
 }
 
@@ -1260,6 +1291,17 @@ pub fn rust_animate_agent(clock: f32, dt: f32, rate: f32) -> js_sys::Float32Arra
     let frame = new_clock.floor();
     arr.set_index(0, new_clock);
     arr.set_index(1, frame);
+    arr
+}
+
+#[wasm_bindgen]
+pub fn rust_compute_day_night(time: f32, era_darkness: f32) -> js_sys::Float32Array {
+    let (sun, total_night) = Engine::day_night_state(time, era_darkness);
+    let arr = js_sys::Float32Array::new_with_length(4);
+    arr.set_index(0, sun.x);
+    arr.set_index(1, sun.y);
+    arr.set_index(2, sun.z);
+    arr.set_index(3, total_night);
     arr
 }
 
@@ -2061,5 +2103,27 @@ mod walk_field_tests {
         // Over water the seam wraps north-south too.
         let s = walk_field(&types, w as u32, h as u32, 0, 0, true);
         assert_eq!(s[5 * w], 1);
+    }
+
+    #[test]
+    fn test_day_night_cycle_progression() {
+        // At T=0 (morning): sun is high, night is 0.0
+        let (sun_morning, night_morning) = Engine::day_night_state(0.0, 0.0);
+        assert!(sun_morning.y > 0.8, "Morning sun should be high in sky");
+        assert_eq!(night_morning, 0.0, "Daytime should have zero night darkness");
+
+        // After ~25s: sunset / twilight, sun descends towards horizon
+        let (sun_sunset, night_sunset) = Engine::day_night_state(25.0, 0.0);
+        assert!(sun_sunset.y < 0.2, "Sunset sun drops towards horizon");
+        assert!(night_sunset > 0.0 && night_sunset < 1.0, "Twilight transitions smoothly");
+
+        // After ~45s: night, sun is below horizon
+        let (sun_night, night_night) = Engine::day_night_state(45.0, 0.0);
+        assert!(sun_night.y < -0.15, "Sun is below horizon at night");
+        assert_eq!(night_night, 1.0, "Night reaches full darkness");
+
+        // Baseline era darkness is preserved if higher than diurnal darkness
+        let (_, night_with_era) = Engine::day_night_state(0.0, 0.85);
+        assert_eq!(night_with_era, 0.85, "Era darkness is respected during daytime");
     }
 }

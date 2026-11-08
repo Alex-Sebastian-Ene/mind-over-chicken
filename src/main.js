@@ -845,6 +845,20 @@ function render() {
   // they follow the camera and wrap with the map. In 3D, labels are projected instead.
   const offsets = windowed && !G.render3d ? cosmos.overlayOffsets() : [[0, 0]];
 
+  // Dynamic diurnal day/night cycle (#201)
+  let sunX = 1.0, sunY = 0.85, sunZ = 0.0, totalNight = dark;
+  if (engine && typeof engine.compute_day_night === 'function') {
+    const dn = engine.compute_day_night(G.runTime || 0, dark);
+    sunX = dn[0]; sunY = dn[1]; sunZ = dn[2]; totalNight = dn[3] * k;
+  } else {
+    const phase = 1.05 + (G.runTime || 0) * 0.0785;
+    sunX = Math.cos(phase);
+    sunY = Math.sin(phase);
+    sunZ = Math.cos(phase * 0.7) * 0.35;
+    const diurnal = Math.max(0, Math.min(1, (0.15 - sunY) / 0.30));
+    totalNight = Math.max(dark, diurnal * k);
+  }
+
   if (engine) {
     try {
       if (G.render3d && z < 1.0) {
@@ -867,12 +881,7 @@ function render() {
             engine.add_3d_light(l.x, 10.0, l.y, l.r, 1.2);
           }
         }
-        // Directional sun rotates with day/night
-        const sunAngle = (G.runTime || 0) * 0.15;
-        const sunX = Math.cos(sunAngle);
-        const sunY = 0.85;
-        const sunZ = Math.sin(sunAngle);
-        engine.render_3d(0.016, sunX, sunY, sunZ, dark, flash, fade, sx, sy, screen.width, screen.height);
+        engine.render_3d(0.016, sunX, sunY, sunZ, totalNight, flash, fade, sx, sy, screen.width, screen.height);
 
         // Continuous overlay blend between 3D planet view and 3D map view
         if (z > 0.001) {
@@ -886,7 +895,7 @@ function render() {
         engine.begin_frame();
         engine.upload_canvas(low);
         if (surface && scene.lights) addLights2d(scene, offsets);
-        engine.render_uploaded_canvas(dark, flash, fade, sx, sy, screen.width, screen.height);
+        engine.render_uploaded_canvas(surface ? totalNight : 0, flash, fade, sx, sy, screen.width, screen.height);
       }
     } catch (e) {
       console.error('WebGL render error:', e);
