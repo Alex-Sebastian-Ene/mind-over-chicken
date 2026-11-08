@@ -22,13 +22,14 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
   - `Shift`: Spike Stress (drops calm)
   - `B`: Deliberate Blink. On a surface it throws lightning (a tree strike starts a forest fire); in the galaxy/globe it selects/lands like a left click
   - `Space` / `Enter` / click during an era's opening camera move: skip it
+  - `3`: Hold to charge the charged fireball, release to throw (or fist → pull back → thrust + open palm with the camera). Its colour follows joy (red) / surprise (blue)
   - `T`: Toggle 3D Heightmap Terrain vs 2D Classic
   - `Z` / `X` (or scroll, or a trackpad pinch): one continuous zoom out to the globe and galaxy / back in to the surface. In 3D the zoom goes toward the cursor
   - `Left` / `Right` (or `A` / `D`) in the galaxy: choose a world; `Enter` or zoom in to land on it. `N`: visit the next world
   - `M`: Toggle Personalized Brain Model & Judge Panel
   - `G`: Toggle PPO AI God Autopilot
   - `E` / `C`: Toggle the EEG / Camera sidebars; `` ` ``: the Debug panel; `Shift+C`: re-centre the headset's head pose
-  - Hands: pinch + hand movement pans, pinch + head motion tilts the 3D view, two hands zoom. No hand gesture casts a spell (#261).
+  - Hands: pinch + hand movement pans, pinch + head motion tilts the 3D view, two hands zoom. The only hand cast is the charged fireball: fist, pull back, thrust and open the palm (#291); the old gesture spells are gone (#261).
 
 ---
 
@@ -71,7 +72,8 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 - **0:22**: Aim mouse/head at the fire pit. Press `B` (or physical blink). Lightning crashes, fire ignites, audio synth roars.
 - **0:30**: Aim at a giant chicken. Press `B`. A roast chicken appears, food count rises to 5+.
 - **0:36**: Fire heat drops under 50%; calm hold begins. Hold `Space` (or close eyes for EEG calm). Meter fills to 100%, advisor celebrates, tribe population grows.
-- **0:50**: Aim at a tree and press `B`: a forest fire starts and spreads. Hold `F` (Rain or Calm) for about 2 s: rain puts it out. With the camera on, pinch and move a hand to pan; two hands zoom.
+- **0:50**: Aim at a tree and press `B`: a forest fire starts and spreads. Hold `F` (Rain or Calm) for about 2 s: rain puts it out.
+- **0:50**: Show the camera hands: pinch over a villager to carry them, then pinch with both hands and spread them to zoom. Optional: hold `3` (or, on camera, make a fist, pull it back, then thrust and open the palm) to throw the charged fireball (#291).
 
 ---
 

@@ -26,4 +26,4 @@
 
 ## Meaningful action
 
-The first input that changes the game state on purpose: a blink aimed at something, holding calm or focus during a prompt, or a pinch that grabs or pans. Random key mashing doesn't count.
+The first input that changes the game state on purpose: a blink aimed at something, holding calm or focus during a prompt, a pinch that grabs or pans, or a charged fireball. Random key mashing doesn't count.

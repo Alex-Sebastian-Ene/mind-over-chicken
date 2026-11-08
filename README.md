@@ -14,13 +14,13 @@ This README is the canonical specification. If the code or an issue disagrees wi
 | **Seeds** | For the current dummy run, all four civilizations use **randomly generated seeds**. The player's civilization will later be seeded from biometric calibration. | Canonical for now |
 | **Progression** | **Twenty emergent ages** ([docs/ages.md](docs/ages.md), data in `data/ages.json`): a civilization enters an age when its own simulation meets that age's conditions and can fall back in a collapse. **No tech tree, no research screen, no player-chosen upgrades, no evolution system.** | Canonical (decided by Alex) |
 | **Stack** | Rust compiled to WebAssembly, rendered with WebGL2. The current JavaScript/Canvas build is the playable reference until the Rust port reaches parity (#17). | Canonical target |
-| **Camera** | Camera input is **required**. Face detection supplies expressions and concentration cues. Hand tracking is for movement only: pinch to grab or pan, two hands to zoom (#261). No hand gesture casts a spell; gesture-driven UI navigation is deferred. | Required |
+| **Camera** | Camera input is **required**. Face detection supplies expressions and concentration cues. Hand tracking is for movement: pinch to grab or pan, two hands to zoom (#261). The one hand cast is the charged fireball (#291); gesture-driven UI navigation is deferred. | Required |
 | **Head tracking** | Accelerometer **and gyroscope** supply head orientation and movement. | Required |
 | **Heart rate** | Not an input. Removed in #99; stress (EEG agitation, or face anger) drives everything pulse used to. | Removed |
 | **Calibration** | The 10-second window is a placeholder for the dummy run. The window must be configurable, and the dummy run uses a **random setup** instead of a real seed. | Canonical placeholder |
 | **Ambient modulation** | EEG/facial signals driving global temperament, chaos, and weather. | Deferred; not important for the current milestone |
 | **Gesture UI** | Hand gestures selecting menus and navigating the UI. | Deferred |
-| **God powers** | Deliberate blinks throw lightning; holding focus (Rain or Calm) summons rain; hands grab/move living things and pan, and two hands zoom. The old hand/keyboard spell casts were removed (#261). | In scope (updated) |
+| **God powers** | Deliberate blinks throw lightning; holding focus (Rain or Calm) summons rain; hands grab/move living things and pan, and two hands zoom. The old hand/keyboard spell casts were removed (#261); the one deliberate hand cast is the charged fireball (#291). | In scope (updated) |
 
 ---
 
@@ -35,7 +35,7 @@ Raw physical and biometric streams captured from the player:
 * **External camera**
   * **Face detection:** facial expressions (for example smiling) and concentration cues. The webcam stays off until the player clicks **Start Camera**; frames never leave the device.
   * **Manual mood:** a **Happy ↔ Mix ↔ Surprised** slider in the Camera panel replaces the face's mood once **No emotion** (ticked by default) is cleared. It works with no webcam or headset (#155).
-  * **Hand-gesture detection:** hand movement and position in real time, used for movement only: grab, pan, tilt and zoom (#261). Gesture-driven UI navigation is deferred.
+  * **Hand-gesture detection:** hand movement and position in real time, used for movement: grab, pan, tilt and zoom (#261), plus the charged fireball, the one deliberate hand cast (#291). Gesture-driven UI navigation is deferred.
 * **Fallback input**
   * **Mouse, keyboard, and touch:** local development, testing, and demo fallback only. They are not the product input model.
 
@@ -61,9 +61,9 @@ Continuously maps live EEG activity and facial expressions into global world var
 
 ### 3.3 Active command and UI control
 
-* Target design: hand gestures move things and the camera; they do not select or cast spells (#261).
+* Target design: hand gestures move things and the camera; they do not select spells (#261). The charged fireball is the one deliberate hand cast (#291).
 * Target design: head tracking (accelerometer plus gyroscope), facial focus, and hand gestures navigate the UI.
-* **Current milestone:** head tracking and facial/biometric signals are required; hand input is movement only (pinch + hand pans, pinch + head motion tilts the 3D view; two-hand zoom), and gesture-driven UI navigation is **deferred**.
+* **Current milestone:** head tracking and facial/biometric signals are required; hand input is for movement (pinch + hand pans, pinch + head motion tilts the 3D view; two-hand zoom) plus the charged fireball, and gesture-driven UI navigation is **deferred**.
 
 ---
 
@@ -94,12 +94,13 @@ The Rust/Wasm simulation loop and world rules.
 
 * **Blink lightning:** deliberate blinks strike at the head cursor. In the Stone Age, strike the fire pit to light it or the giant chicken for dinner (#232). In the galaxy/globe a blink is a world click: it selects a planet or lands, never a UI control.
 * **Calm / focus / stress:** EEG bands (and the keyboard fallback) drive the era mechanics.
-* **Pinch grab & two-hand zoom:** hand input moves living entities and the camera; it does not cast spells. In the crowded-planet sandbox a pinch picks up the nearest person and sets them down on land (#272). The Camera sidebar has a guided pinch movement calibration with the live camera and hand wireframe: left, right, up and down targets for each hand, auto-advancing and auto-closing when complete. Per-axis gains persist per browser; head tilt is not calibrated because it already works.
+* **Pinch grab & two-hand zoom:** hand input moves living entities and the camera. In the crowded-planet sandbox a pinch picks up the nearest person and sets them down on land (#272). The Camera sidebar has a guided pinch movement calibration with the live camera and hand wireframe: left, right, up and down targets for each hand, auto-advancing and auto-closing when complete. Per-axis gains persist per browser; head tilt is not calibrated because it already works.
+* **Charged fireball (#291):** hold a fist, pull it back, then thrust forward and open the palm; or hold `3` and release. Colour follows mood: joy red, surprise blue, neutral ember. This is the one deliberate hand cast.
 * **Rain or Calm:** the Insight/focus signal held for ~2 s summons rain, putting out forest fires and the Stone campfire.
 * **Forest fires:** lightning aimed at a tree starts a fire that spreads to nearby trees.
 * **Manual mood:** joy lifts morale (in the Stone Age the tribe dances); surprise sets off a sky flash and lightning once each time the slider crosses into the surprised side (#155).
 
-**Status:** the hand-gesture and keyboard spell casts (fireball, bounty, rain, bless, disaster, peace, point) were removed in #261.
+**Status:** the old hand-gesture and keyboard spell set (bounty, rain, bless, disaster, peace, point) was removed in #261. The single deliberate charged fireball is the exception (#291).
 
 ---
 
@@ -122,7 +123,7 @@ The Rust/Wasm simulation loop and world rules.
 ### Required next
 
 * [ ] **Circular world with four civilizations:** one circular map, four separate starting regions, four agents per civilization, and random seeds for the dummy run. Tracked in #52.
-* [ ] **Camera input:** face detection and expression/concentration cues. Hand tracking is movement only (#261); gesture-driven UI navigation remains deferred. Tracked in #33.
+* [ ] **Camera input:** face detection and expression/concentration cues. Hand tracking is for movement, plus the charged fireball (#261, #291); gesture-driven UI navigation remains deferred. Tracked in #33.
 * [ ] **Head tracking:** accelerometer plus gyroscope orientation, neutral-point calibration, and aim. Tracked in #53.
 * [ ] **Calibration seed:** configurable window, random dummy setup, and the final sensor-to-trait mapping for friendliness, aggressiveness, and violence. Tracked in #54.
 * [ ] **Inter-civilization interactions:** define contact, combat, and non-hostile interaction between the four civilizations.
@@ -143,10 +144,10 @@ Tracked in #55.
 
 ## 7. Current build status
 
-The Rust/Wasm engine and WebGL renderer are landing under #17; the JavaScript game shell remains playable while the port reaches parity. The current build has three entry points: the five-scene campaign, the galaxy sandbox (home world plus three brain-seeded worlds), and the crowded-planet sandbox (`src/civ/`). The crowded-planet sandbox implements the canonical world model; the campaign is still the default button. Camera face mood, the manual mood slider and hand grab/pan/zoom are active; gyroscope fusion and the configurable calibration seed are in. Treat the build as a reference implementation, not as the specification.
+The Rust/Wasm engine and WebGL renderer are landing under #17; the JavaScript game shell remains playable while the port reaches parity. The current build has three entry points: the five-scene campaign, the galaxy sandbox (home world plus three brain-seeded worlds), and the crowded-planet sandbox (`src/civ/`). The crowded-planet sandbox implements the canonical world model; the campaign is still the default button. Camera face mood, the manual mood slider, hand grab/pan/zoom and the charged fireball are active; gyroscope fusion and the configurable calibration seed are in. Treat the build as a reference implementation, not as the specification.
 
 * **Campaign:** Stone Age (light the fire, feed the tribe with a giant chicken, keep the flame with calm) → Farming · Kingdoms montage (the scholars ink your thoughts letter by letter, faster the harder you focus; no arithmetic, #223) → Industry (stress moves the goat market) → a short Information Age time skip → Space Age (hold focus through a ten-second countdown).
-* **Keys (emulated headset):** **Space** calm, **F** focus / Rain or Calm, **Shift** stress, **B** or click to blink, mouse or arrows to aim, drag to pan, **E** / **C** the EEG / Camera sidebars, **M** the model panel, **`** the Debug panel, **G** the AI God, **N** the next world. The demo's full hotkey card is in [docs/demo.md](docs/demo.md).
+* **Keys (emulated headset):** **Space** calm, **F** focus / Rain or Calm, **Shift** stress, **B** or click to blink, hold and release **3** for the charged fireball, mouse or arrows to aim, drag to pan, **E** / **C** the EEG / Camera sidebars, **M** the model panel, **`** the Debug panel, **G** the AI God, **N** the next world. The demo's full hotkey card is in [docs/demo.md](docs/demo.md).
 
 ---
 

@@ -79,7 +79,7 @@ Fights are **agent against agent** and come out of the simulation. They also hap
 - calm drifts them down toward a truce;
 - lightning breaks a charge, and the struck side loses morale.
 
-The peace, fireball and disaster casts went with the other hand-gesture spells in #261; hands now only grab, pan and zoom.
+The peace, fireball and disaster spells went with the other hand-gesture casts in #261. The charged fireball that came back in #291 is a burst at the cursor; it does not strike armies.
 
 ## Where the player's brain comes in
 Every age has a "brain moment" (the `brain` field in the data). Examples:
