@@ -626,15 +626,6 @@ body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
 .cam-msg { margin: 0; font-size: 12px; line-height: 1.35; color: var(--bone); }
 .cam-panel[data-state="error"] [data-cam-msg] { color: #ffb3c0; }
 .cam-body { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px; align-items: start; }
-.cam-calib {
-  display: block;
-  width: 100%;
-  height: auto;
-  margin: 6px 0 8px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #0b0c16;
-}
 .cam-view {
   position: relative;
   aspect-ratio: 4 / 3;

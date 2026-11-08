@@ -193,8 +193,8 @@ export function initMovementCalibration({
       drawArrow(ctx, w * 0.12, w * 0.35, h * 0.12, 'rgba(255,207,74,0.8)');
       drawArrow(ctx, w * 0.88, w * 0.65, h * 0.12, 'rgba(255,207,74,0.8)');
       ctx.fillStyle = 'rgba(244,240,228,0.75)';
-      ctx.font = '10px "Pixelify Sans", monospace'; ctx.textAlign = 'center';
-      ctx.fillText('TURN HEAD LEFT / RIGHT', w / 2, h - 8);
+      ctx.font = `${Math.max(12, Math.round(w / 60))}px "Pixelify Sans", monospace`; ctx.textAlign = 'center';
+      ctx.fillText('TURN HEAD LEFT / RIGHT', w / 2, h - 14);
     } else {
       const dir = active && step === 1 ? -1 : 1;
       const p = smooth(phase);
@@ -203,8 +203,8 @@ export function initMovementCalibration({
       drawHand(ctx, g, w, h, { pinching: true, side: dir < 0 ? 'right' : 'left' });
       drawArrow(ctx, w * 0.15, w * 0.85, h * 0.16, 'rgba(255,207,74,0.65)');
       ctx.fillStyle = 'rgba(244,240,228,0.75)';
-      ctx.font = '10px "Pixelify Sans", monospace'; ctx.textAlign = 'center';
-      ctx.fillText(dir < 0 ? 'RIGHT HAND · PINCH & SWEEP' : 'LEFT HAND · PINCH & SWEEP', w / 2, h - 8);
+      ctx.font = `${Math.max(12, Math.round(w / 60))}px "Pixelify Sans", monospace`; ctx.textAlign = 'center';
+      ctx.fillText(dir < 0 ? 'RIGHT HAND · PINCH & SWEEP' : 'LEFT HAND · PINCH & SWEEP', w / 2, h - 14);
     }
 
     const s = getState();

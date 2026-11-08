@@ -421,12 +421,23 @@ function newGame(source, startIndex = 0) {
     return { x: p.x / cosmos.worldW, y: p.y / cosmos.worldH };
   };
   brain.onBlink((aim) => {
+    // Blink is a left click for game mechanics only (#284). Never touch DOM/UI, and do nothing
+    // while an overlay or calibration is open.
+    const gameVisible = !!G && $('titleScreen').hidden && $('failScreen').hidden && $('endScreen').hidden
+      && !banner && !intro.active && !eegPanel?.wiz?.active
+      && document.getElementById('moveCalibModal')?.hidden !== false;
+    if (!gameVisible) return;
     hud.flashBlink();
+    if (cosmos.z > 0.5) {
+      // Galaxy/globe: the reticle IS the pointer here. Select/land exactly like a left click.
+      if (cosmos.clickAt?.(aim.x * W, aim.y * H, G)) audio.blip();
+      return;
+    }
     if (engine) engine.game_on_blink(aim.x * cosmos.worldW, aim.y * cosmos.worldH);
     cosmos.galaxy?.onBlink();   // storms on the blink world; a strike on the world you're zoomed into
     if (cosmos.galaxy?.attended) audio.thunder();
     const view = cosmos.viewScene(G); // planets (#68): another world's surface when you're on it
-    if (!banner && !intro.active && !eegPanel?.wiz?.active && view?.onBlink) view.onBlink(aim);   // not while calibrating (#176)
+    if (view?.onBlink) view.onBlink(aim);
   });
   // The galaxy exists from the start: home plus three worlds the first 10 s of play will shape.
   G.camera = cosmos;          // the eras ask it where the screen is (#129)
@@ -1418,7 +1429,8 @@ screen.addEventListener('contextmenu', (e) => e.preventDefault());
 // Shift is the Stress demo key: full agitation on the emulated headset (input.panic).
 const KEYS = { Space: 'calm', KeyF: 'focus', ShiftLeft: 'panic', ShiftRight: 'panic' };
 window.addEventListener('keydown', (e) => {
-  if (e.target.closest?.('input')) return;
+  if (e.target?.closest?.('input')) return;
+  if (document.getElementById('moveCalibModal')?.hidden === false) return;
   if (!$('failScreen').hidden) {
     if (e.code === 'Enter') { e.preventDefault(); retryEra(); return; }
     if (e.code === 'KeyA') { e.preventDefault(); toggleAssistMode(); return; }
@@ -1794,18 +1806,31 @@ window.__moc.camera = initCamera({
     if (!G) return;
     const move = pinchMove({ handDx: dx, handDy: dy, headDx, headDy });
     if (cosmos.active || (cosmos?.z || 0) > 0.05) {
-      if (active) {
-        // In normalized hand space (-1..1). Moving hand right rotates globe right.
-        const spin = -move.panX * 3.5;
-        cosmos.rot += spin;
-        cosmos.spinVel = spin / 0.033;
+      if (active && move.panX) {
+        // Same formula as a pointer drag, so a rotated globe follows the hand (#284).
+        cosmos.dragRotate?.(move.panX * W);
       }
       return;
     }
-    // On the surface, 2D or 3D, a one-hand pinch drags the map (#156).
+    // On the surface, 2D or 3D, a one-hand pinch drags the map (#156). The sign matches a
+    // pointer drag: hand left moves the world left. In 3D the ground under the centre is
+    // raycast so a rotated/tilted camera pans in screen space (#284).
     if (active && (move.panX || move.panY)) {
-      if (in3dSurface()) cam3dBase = null;
-      panMap(-move.panX * W * 1.5, -move.panY * H * 1.5);
+      if (in3dSurface() && cosmos.view && !cosmos.surfaceInView) {
+        const r = screen.getBoundingClientRect();
+        const w = r.width || screen.clientWidth || W;
+        const h = r.height || screen.clientHeight || H;
+        const a = engine?.screen_to_ground(w / 2, h / 2, w, h);
+        const b = engine?.screen_to_ground(w / 2 + move.panX * w, h / 2 + move.panY * h, w, h);
+        if (a && b && a[0] >= 0 && b[0] >= 0) {
+          cosmos.pan(-(b[0] - a[0]), -(b[1] - a[1]));
+          cam3dBase = null;
+        } else {
+          panMap(move.panX * W * 1.5, move.panY * H * 1.5);
+        }
+      } else {
+        panMap(move.panX * W * 1.5, move.panY * H * 1.5);
+      }
     }
     if (active && in3dSurface() && (move.tiltX || move.tiltY)) {
       engine.orbit_camera(move.tiltX * W * 0.008, move.tiltY * H * 0.008);

@@ -83,21 +83,10 @@ const TEMPLATE = `
         <div class="eeg-imu-mini">
           <span>Pinch / Zoom: <b data-cam-pinch>--</b></span>
         </div>
+        <div class="eeg-url-row">
+          <button type="button" class="btn btn-primary btn-small" data-calib-open>🎯 Pinch &amp; Head Calibration</button>
+        </div>
       </div>
-    </div>
-  </section>
-
-  <section class="eeg-sec" aria-label="Pinch movement calibration">
-    <div class="eeg-sec-head">
-      <h3>Pinch &amp; Head Calibration</h3>
-      <span class="eeg-qual" data-calib-status>idle</span>
-    </div>
-    <canvas class="cam-calib" width="300" height="160"></canvas>
-    <p class="eeg-msg" data-calib-msg>Pinch and follow the wireframe: left hand, right hand, then pinch + head tilt.</p>
-    <div class="eeg-url-row">
-      <button type="button" class="btn btn-primary btn-small" data-calib-start>Calibrate</button>
-      <button type="button" class="btn btn-small" data-calib-skip disabled>Skip</button>
-      <button type="button" class="btn btn-small" data-calib-reset>Reset</button>
     </div>
   </section>
 
@@ -153,6 +142,33 @@ export function initCamera({
   if (!btn || !panel) return null;
   panel.innerHTML = TEMPLATE;
   const $ = (sel) => panel.querySelector(sel);
+  const calibModal = document.createElement('div');
+  calibModal.className = 'calib-wiz';
+  calibModal.id = 'moveCalibModal';
+  calibModal.hidden = true;
+  calibModal.setAttribute('role', 'dialog');
+  calibModal.setAttribute('aria-modal', 'true');
+  calibModal.setAttribute('aria-label', 'Pinch and head calibration');
+  calibModal.innerHTML = `
+    <div class="calib-wiz-top">
+      <div>
+        <span class="calib-wiz-step" data-calib-status>idle</span>
+        <h2>Pinch &amp; Head Calibration</h2>
+        <p data-calib-msg>Pinch and follow the wireframe: left hand, right hand, then pinch + head tilt.</p>
+      </div>
+      <div class="calib-wiz-actions">
+        <button type="button" class="btn btn-small" data-calib-close>Close <kbd>Esc</kbd></button>
+      </div>
+    </div>
+    <div class="calib-wiz-stage"><canvas class="calib-wiz-canvas" width="960" height="500"></canvas></div>
+    <div class="calib-wiz-bottom">
+      <div class="eeg-url-row">
+        <button type="button" class="btn btn-primary btn-small" data-calib-start>Calibrate</button>
+        <button type="button" class="btn btn-small" data-calib-skip disabled>Skip</button>
+        <button type="button" class="btn btn-small" data-calib-reset>Reset</button>
+      </div>
+    </div>`;
+  if (document.body?.appendChild) document.body.appendChild(calibModal);
   const video = $('.cam-video');
   const hands = $('.cam-hands');
   const handsCtx = hands.getContext('2d');
@@ -190,16 +206,6 @@ export function initCamera({
   let lastGestureAt = 0;
   let status = 'off';
   let pinchCal = loadPinchCalibration();
-  const movementCal = initMovementCalibration({
-    canvas: $('.cam-calib'),
-    statusEl: $('[data-calib-status]'),
-    msgEl: $('[data-calib-msg]'),
-    startBtn: $('[data-calib-start]'),
-    skipBtn: $('[data-calib-skip]'),
-    resetBtn: $('[data-calib-reset]'),
-    getState: () => ({ live: !!stream && status === 'on', hands: multi, multi, grabbed, brain: getG()?.brain }),
-    onChange: (cal) => { pinchCal = cal; savePinchCalibration(cal); },
-  });          // off | starting | on | error
   let stream = null;
   let engine = null;
   let enginePending = null;
@@ -222,6 +228,30 @@ export function initCamera({
   const frames = new FrameMeter();
   let fpsBefore = 0;
   let guardAt = Infinity;
+
+  const movementCal = initMovementCalibration({
+    canvas: calibModal.querySelector('.calib-wiz-canvas'),
+    statusEl: calibModal.querySelector('[data-calib-status]'),
+    msgEl: calibModal.querySelector('[data-calib-msg]'),
+    startBtn: calibModal.querySelector('[data-calib-start]'),
+    skipBtn: calibModal.querySelector('[data-calib-skip]'),
+    resetBtn: calibModal.querySelector('[data-calib-reset]'),
+    getState: () => ({ live: !!stream && status === 'on', hands: multi, multi, grabbed, brain: getG()?.brain }),
+    onChange: (cal) => { pinchCal = cal; savePinchCalibration(cal); },
+  });
+  const openCalib = () => {
+    calibModal.hidden = false;
+    movementCal?.start?.();
+  };
+  const closeCalib = () => {
+    movementCal?.stop?.();
+    calibModal.hidden = true;
+  };
+  $('[data-calib-open]')?.addEventListener('click', openCalib);
+  calibModal.querySelector('[data-calib-close]')?.addEventListener('click', closeCalib);
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Escape' && !calibModal.hidden) { e.preventDefault(); closeCalib(); }
+  });
 
   const coach = initCoach({
     getContext,
@@ -351,6 +381,7 @@ export function initCamera({
     lastGestureAt = 0;
     pinchSmoother.reset();
     movementCal?.stop?.();
+    if (calibModal) calibModal.hidden = true;
     mood = neutralMood();
     strongPending = false;
     surprisePending = false;
@@ -780,7 +811,7 @@ export function initCamera({
       pinchStrength: finger?.pinching ? 1 : 0,
       statusText: nowText(now),
     });
-    movementCal?.update?.(now);
+    if (!calibModal.hidden) movementCal?.update?.(now);
     drawFx(now);
   }
   function guardFrames(now) {

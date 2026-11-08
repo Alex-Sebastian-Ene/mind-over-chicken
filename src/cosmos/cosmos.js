@@ -415,7 +415,7 @@ export class Cosmos extends ZoomState {
       const dx = x - this.drag.x;
       this.drag.moved += Math.abs(dx) + Math.abs(y - this.drag.y);
       this.drag.x = x; this.drag.y = y;
-      if (this.z > 0.5 && this.z < 1.5) { this.rot -= dx / BIG_R; this.spinVel = -dx / BIG_R / 0.033; }
+      this.dragRotate(dx);
     }
     if (this.galaxy && this.z > 1.5) this.hover = this.galaxy.hit(x, y);
   }
@@ -426,6 +426,11 @@ export class Cosmos extends ZoomState {
     const d = this.drag;
     this.drag = null;
     if (!d || d.moved > 4) return null;
+    return this.clickAt(x, y, G);
+  }
+
+  // A left click in the world (#284): select a planet in the galaxy or land on the globe.
+  clickAt(x, y, G) {
     if (this.galaxy && this.z > 1.5) {
       const p = this.galaxy.hit(x, y);
       if (p && p.forming) { this.say(p.mindSlot && !this.galaxy.mindReady ? 'Still reading your mind. Keep playing.' : 'Still forming. Give it a second.'); return null; }
@@ -437,6 +442,14 @@ export class Cosmos extends ZoomState {
       }
     }
     return null;
+  }
+
+  // Pointer drag and pinch drag share this so a rotated planet follows the hand the same way (#284).
+  dragRotate(dxPixels) {
+    if (!(this.z > 0.5 && this.z < 1.5)) return false;
+    this.rot -= dxPixels / BIG_R;
+    this.spinVel = -dxPixels / BIG_R / 0.033;
+    return true;
   }
 
   // The galaxy's picker (Alex): Left/Right select the next planet to that side on screen; the
