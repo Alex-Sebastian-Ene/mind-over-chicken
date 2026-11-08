@@ -174,7 +174,7 @@ export class MultiHandTracker {
     this.zoomDeadZone = zoomDeadZone;
     this.leftPinch = new PinchDetector({ ...pinch, lossMs });
     this.rightPinch = new PinchDetector({ ...pinch, lossMs });
-    this.distFilter = new OneEuroFilter({ minCutoff: 1.5, beta: 6 });
+    this.distFilter = new OneEuroFilter({ minCutoff: 1.5, beta: 10 });   // beta 6 → 10: zoom follows fast spreads with less lag
     this.reset();
   }
 
