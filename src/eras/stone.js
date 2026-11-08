@@ -876,6 +876,32 @@ export class StoneAge {
       life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color: pick(['#c9c2b0', '#8a7a5a', '#5f5545']),
     }));
     for (const p of this.living()) if (dist(x, y, p.x, p.y) < 22 + charge * 14) p.fear = clamp(p.fear + 0.2 + charge * 0.2);
+    // A massive explosion (Alex): everything in the blast takes it. Giant chickens are roasted,
+    // trees catch, people near the centre die, everyone further out panics.
+    const R = 18 + charge * 26;
+    this.flash = Math.max(this.flash, 0.6);
+    G.shake = Math.max(G.shake || 0, 2.2 + charge * 1.4);
+    for (const m of this.mammoths) {
+      if (m.alive && dist(x, y, m.x, m.y) < R) { m.alive = false; m.dead = true; this.meat.push({ x: m.x, y: m.y, amount: 5, cooked: true, claimed: 0 }); }
+    }
+    let burning = 0;
+    for (const t of [...(G.world.trees || [])]) {
+      if (burning >= 4 + Math.round(charge * 6)) break;
+      if (dist(x, y, t.x, t.y) < R && this.igniteForestFire(t)) burning++;
+    }
+    for (const p of this.living()) {
+      if (p.colony || p.state === 'aboard') continue;
+      const d = dist(x, y, p.x, p.y);
+      if (d < R * 0.45) this.kill(p);
+      else if (d < R * 1.4) { p.fear = clamp(p.fear + 0.5); if (['idle', 'warm', 'dance', 'huddle', 'hunt'].includes(p.state)) { p.state = 'flee'; p.target = null; } }
+    }
+    // And it strikes like lightning at the centre: it lights the pit.
+    this.lastBolt = -Infinity;
+    this.onBlink(G.world.aimOf(x, y));
+    if (this.living().length === 0 && !this.done) {
+      this.done = true;
+      G.fail?.('Your fireball wiped out the whole tribe.');
+    }
   }
 
   // aim is 0..1 like the brain's. The fist (fireball) normally arrives through onBlink.
