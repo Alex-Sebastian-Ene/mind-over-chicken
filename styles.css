@@ -559,6 +559,12 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
   padding: 12px 14px;
   box-shadow: 0 20px 60px -10px rgba(0, 0, 0, 0.9);
 }
+/* #90: reduced motion (Settings, or the system setting) stops CSS animations and transitions. */
+body[data-reduced-motion="1"] *, body[data-reduced-motion="1"] *::before, body[data-reduced-motion="1"] *::after {
+  animation-duration: 0.001ms !important; animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important; scroll-behavior: auto !important;
+}
+.set-keys { margin: 0 0 4px; font-size: 12px; line-height: 1.6; }
 /* ---------- settings panel (#186, #89): above every overlay, it can open from the title ---------- */
 .settings-panel {
   position: fixed; z-index: 56;
@@ -650,6 +656,33 @@ body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
 .cam-msg { margin: 0; font-size: 12px; line-height: 1.35; color: var(--bone); }
 .cam-panel[data-state="error"] [data-cam-msg] { color: #ffb3c0; }
 .cam-body { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px; align-items: start; }
+.cam-fireball {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 4px;
+}
+.cam-fb-orb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ff9a2e;
+  box-shadow: 0 0 10px #ff9a2e;
+  flex: none;
+}
+.cam-fb-meter {
+  flex: 1;
+  height: 6px;
+  border: 1px solid var(--line);
+  background: var(--ink);
+}
+.cam-fb-meter > i {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: #ff9a2e;
+  transition: width 0.1s linear;
+}
 .cam-view {
   position: relative;
   aspect-ratio: 4 / 3;
@@ -674,30 +707,6 @@ body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
 .cam-panel[data-mood="surprise"] [data-emotion="surprise"],
 .cam-panel[data-mood="sadness"] [data-emotion="sadness"] { color: var(--bone); font-weight: 700; }
 .cam-now { margin: 0; font: 12px/1.3 var(--pixel); min-height: 1.3em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cam-spells { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
-.cam-spell {
-  --cd: 0;
-  --hold: 0;
-  position: relative;
-  aspect-ratio: 1;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-}
-.cam-ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
-.cam-ring circle { fill: none; stroke-width: 3; }
-.cam-ring .cam-ring-track { fill: var(--panel-2); stroke: var(--line); }
-.cam-ring .cam-ring-hold { stroke: var(--calm); stroke-dasharray: 100; stroke-dashoffset: calc(100 - var(--hold) * 100); }
-.cam-ring .cam-ring-cd { stroke: var(--focus); stroke-dasharray: 100; stroke-dashoffset: calc(100 - var(--cd) * 100); }
-.cam-spell:hover .cam-ring-track { stroke: var(--muted); }
-.cam-spell.is-held .cam-ring-track { stroke: var(--calm); }
-.cam-glyph { position: relative; font-size: 15px; line-height: 1; }
-.cam-spell.is-cooling .cam-glyph { opacity: 0.45; filter: grayscale(1); }
-.cam-spell kbd { position: absolute; right: -3px; bottom: -3px; font-size: 9px; padding: 0 2px; }
 .cam-privacy { margin: 0; font-size: 11px; color: var(--muted); }
 .cam-fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 
@@ -706,8 +715,6 @@ body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
   .bar-tools:has(.cam-btn) { flex-wrap: wrap; row-gap: 6px; }
   .cam-panel { position: static; width: auto; margin-top: 8px; }
   .cam-body { grid-template-columns: minmax(0, 40%) minmax(0, 1fr); }
-  .cam-spells { max-width: 380px; }
-  .cam-glyph { font-size: 18px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

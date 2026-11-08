@@ -44,7 +44,8 @@ import { setRustAiPolicy } from './ai/policy.js';
 import { setRustAgentHelpers } from './sim/agents.js';
 import { initDebug } from './camera/debug.js'; // camera debug (#67)
 import { Calibration, readCalibrationConfig, saveCalibrationConfig, CALIBRATION_DEFAULTS, setRustCalibration } from './brain/calibration.js';
-import { initSettings, syncCameraIndicator } from './ui/settings.js'; // calibration (#54)
+import { initSettings, syncCameraIndicator } from './ui/settings.js';
+import { reducedMotion, flashAlpha, shakeAmount as shakeFor } from './ui/motion.js'; // calibration (#54)
 import { SIM } from './cosmos/planet-sim.js';
 import { CivSandbox, initPlanetSizePicker } from './civ/sandbox.js'; // civ (#50)
 import { worldMeta, renderWorldDetail } from './cosmos/panel.js'; // planets (#68)
@@ -539,7 +540,7 @@ function startTransition(scene, caption = {}) {
   document.body.dataset.intro = 'on';
   G.brain.setCue(null);
   introCam = null;
-  if (engine && engine.is_3d_mode()) {
+  if (engine && engine.is_3d_mode() && !reducedMotion()) {   // no camera sweep under reduced motion (#90)
     // Land on the player's own angle, or the default diorama pose if they were looking straight down.
     const d = engine.get_camera_distance(), pitch = engine.get_camera_pitch();
     const to = d >= CAM3D.blendFrom ? { dist: 300, pitch: 1.05 } : { dist: d, pitch };
@@ -869,12 +870,11 @@ function render() {
   scene.draw(ctx);
   scene.drawAfterLight?.(ctx);
   if (windowed && !G.render3d) {
-    const zoom = intro.active ? 1 + (INTRO_FROM.zoom2d - 1) * intro.away() : 1;
+    const zoom = intro.active && !reducedMotion() ? 1 + (INTRO_FROM.zoom2d - 1) * intro.away() : 1;   // #90
     if (zoom > 1.001) cosmos.blitViewScaled(worldCanvas, low, zoom);   // the intro's wider frame
     else cosmos.blitView(worldCanvas, low);
   }
   if (!G.render3d) scene.drawScreen?.(lowCtx);
-  if (!windowed && !G.render3d && scene?.phase !== 'voyage') cosmos.applyPan(low);
 
   let cosmic = false;
   if (!G.render3d || z >= 1.0) {
@@ -890,8 +890,10 @@ function render() {
   const surface = !cosmic || z < 1.0;
   const k = cosmic ? Math.max(0, 1 - z / 0.3) : 1;
   const dark = scene.phase === 'voyage' ? 0 : (scene.darkness || 0) * k;
-  const flash = (scene.flash || 0) * k;
-  const shakeAmount = G.shake ? (G.shake * 0.008) : 0;
+  // #90: flashes are capped for photosensitivity (softer still, and no shake, under reduced motion).
+  const rm = reducedMotion();
+  const flash = flashAlpha((scene.flash || 0) * k, rm);
+  const shakeAmount = shakeFor(G.shake, rm);
   const sx = shakeAmount ? (Math.random() - 0.5) * shakeAmount : 0;
   const sy = shakeAmount ? (Math.random() - 0.5) * shakeAmount : 0;
   // World-space lights and labels repeat at every copy of the world that reaches the screen, so
@@ -1244,7 +1246,7 @@ function zoomOutFromSurface() {
   if (!in3dSurface()) { cosmos.zoomOut(G); return; }
   const d = engine.get_camera_distance();
   if (d < CAM3D.topDown - 4) {
-    cam3dTween = { from: d, t0: performance.now(), dur: 300 };
+    cam3dTween = { from: d, t0: performance.now(), dur: reducedMotion() ? 1 : 300 };   // #90: a cut, not a sweep
   } else {
     cosmos.zoomOut(G);
   }
@@ -1497,6 +1499,11 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
+  if ((e.code === 'Digit3' || e.code === 'Numpad3') && !e.repeat) {
+    window.__moc?.camera?.fireballKeyDown?.();
+    e.preventDefault();
+    return;
+  }
   const s = sim(); if (!s) return;
   if (KEYS[e.code]) { s.input[KEYS[e.code]] = true; e.preventDefault(); }
   if (e.code === 'KeyB' && !e.repeat) s.blink();
@@ -1512,6 +1519,7 @@ window.addEventListener('keydown', (e) => {
   }
 });
 window.addEventListener('keyup', (e) => {
+  if (e.code === 'Digit3' || e.code === 'Numpad3') { window.__moc?.camera?.fireballKeyUp?.(); return; }
   const s = sim(); if (!s) return;
   if (KEYS[e.code]) s.input[KEYS[e.code]] = false;
 });

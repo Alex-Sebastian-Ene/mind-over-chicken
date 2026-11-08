@@ -4,7 +4,7 @@
 //   Hands: MediaPipe Gesture Recognizer (numHands=2, #118) → movement only:
 //          1. One-hand pinch grabs & relocates living entities under the cursor (#120)
 //          2. Two-hand pinch distance continuously zooms in/out & freezes on release (#119)
-//          3. No hand shape casts a spell (#261).
+//          3. One deliberate cast (#291): fist → pull back → thrust + open palm = charged fireball.
 //   Face:  MediaPipe Face Landmarker blendshapes → Joy (continuous) + Surprise (debounced event) (#117).
 //   Coach: Collapsible bottom panel with procedural 21-landmark ghost hands (#123).
 //
@@ -21,6 +21,7 @@ import { clamp } from '../sim/util.js';
 import { GESTURE_LABEL } from './gestures.js';
 import { PinchMoveSmoother } from './pinch-move.js';
 import { initMovementCalibration, loadPinchCalibration, savePinchCalibration } from './movement-calibration.js';
+import { FireballController } from './fireball.js';
 import { EMOTIONS, EmotionTracker, neutralMood, blendshapeMap } from './emotion.js';
 import { manualMood, surpriseRisingEdge } from './manual-mood.js';
 import { loadVision } from './vision.js';
@@ -71,6 +72,7 @@ const TEMPLATE = `
       </div>
       <div class="eeg-cursor-controls">
         <div class="eeg-imu-xyz" style="grid-template-columns:1fr">
+          <div><span>Camera Frames</span><b data-cam-rate-video>--</b></div>
           <div><span>Hands Inference</span><b data-cam-rate-hands>--</b></div>
           <div><span>Face Inference</span><b data-cam-rate-face>--</b></div>
         </div>
@@ -88,6 +90,19 @@ const TEMPLATE = `
         </div>
       </div>
     </div>
+  </section>
+
+  <section class="eeg-sec" aria-label="Charged fireball">
+    <div class="eeg-sec-head">
+      <h3>Charged Fireball</h3>
+      <span class="eeg-qual" data-cam-fb-state>idle</span>
+    </div>
+    <div class="cam-fireball">
+      <span class="cam-fb-orb" data-cam-fb-orb></span>
+      <span class="cam-fb-meter"><i data-cam-fb-meter></i></span>
+      <b data-cam-fb-pct>0%</b>
+    </div>
+    <p class="eeg-msg">Hold a fist, pull it back, then thrust forward and open your palm. Or hold <kbd>3</kbd> and release.</p>
   </section>
 
   <section class="eeg-sec" aria-label="Mood read from your face">
@@ -180,12 +195,17 @@ export function initCamera({
     startBtn: $('[data-cam-start]'),
     stopBtn: $('[data-cam-stop]'),
     fps: $('[data-cam-fps]'),
+    rateVideo: $('[data-cam-rate-video]'),
     rateHands: $('[data-cam-rate-hands]'),
     rateFace: $('[data-cam-rate-face]'),
     aim: $('[data-cam-aim]'),
     gesture: $('[data-cam-gesture]'),
     pinch: $('[data-cam-pinch]'),
     range: $('[data-cam-range]'),
+    fbState: $('[data-cam-fb-state]'),
+    fbOrb: $('[data-cam-fb-orb]'),
+    fbMeter: $('[data-cam-fb-meter]'),
+    fbPct: $('[data-cam-fb-pct]'),
     dominant: $('[data-cam-dominant]'),
     bars: Object.fromEntries(EMOTIONS.map((k) => [k, $(`[data-emotion="${k}"] .cam-bar > span`)])),
     vals: Object.fromEntries(EMOTIONS.map((k) => [k, $(`[data-emotion-val="${k}"]`)])),
@@ -203,6 +223,7 @@ export function initCamera({
   const fingers = new FingerController({ headCursorOnly: true });
   const multiHand = new MultiHandTracker();
   const pinchSmoother = new PinchMoveSmoother();
+  const fireball = new FireballController();
   let lastGestureAt = 0;
   let status = 'off';
   let pinchCal = loadPinchCalibration();
@@ -343,7 +364,7 @@ export function initCamera({
     }
     let s;
     try {
-      s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+      s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 } }, audio: false });   // 60 fps where the webcam can: hands track up to MAX_HZ
     } catch (err) {
       if (id === run) setStatus('error', cameraError(err));
       return;
@@ -388,6 +409,7 @@ export function initCamera({
     lastHeadAim = null;
     lastGestureAt = 0;
     pinchSmoother.reset();
+    fireball.reset();
     movementCal?.stop?.();
     if (calibModal) calibModal.hidden = true;
     mood = neutralMood();
@@ -513,6 +535,20 @@ export function initCamera({
   }
 
   // ---------- model results ----------
+  function castFireball(fb, G) {
+    const scene = G?.scene;
+    const aim = G?.brain?.aim;
+    if (!scene || !aim) return false;
+    if (typeof scene.onFireball !== 'function') return false;
+    try { scene.onFireball(aim, { color: fb.color, charge: fb.charge }); }
+    catch (err) { console.error('[camera] onFireball failed:', err); return false; }
+    G.stats.casts = (G.stats.casts || 0) + 1;
+    G.audio?.thunder?.();
+    coach?.flash(`🔥 Fireball ${Math.round(fb.charge * 100)}%`, 'ok', 1400);
+    G.hud?.showCause?.(`🔥 Charged fireball ${Math.round(fb.charge * 100)}% · ${fb.color}`, { tone: 'ok' });
+    return true;
+  }
+
   function onGesture(r) {
     if (!stream || status !== 'on') return;
     const now = performance.now();
@@ -562,6 +598,15 @@ export function initCamera({
 
     // Multi-hand tracker: 2-hand continuous zoom (#118, #119), 1-hand grab (#120)
     multi = multiHand.update({ hands: rawHands, now, aspect: handAspect });
+    const fb = fireball.update({
+      hand,
+      gesture,
+      mood,
+      now,
+      aspect: handAspect,
+      pinching: !!(finger?.pinching || multi?.grab?.active),
+    });
+    if (fb.cast) castFireball(fb, G);
     if (multi.grab.started) pinchSmoother.reset();
     const pinchMove = pinchSmoother.filter({
       handDx: multi.grab.dx,
@@ -675,6 +720,9 @@ export function initCamera({
 
   // ---------- UI ----------
   function nowText(now) {
+    if (fireball.state === 'charging' || fireball.state === 'primed') {
+      return `🔥 Fireball ${Math.round(fireball.charge * 100)}% · ${fireball.state === 'primed' ? 'open your palm!' : 'pull back, then thrust'}`;
+    }
     if (multi?.bothPinched) {
       return `👐 Two-hand zoom (${Math.round((multi.zoomFactor || 1) * 100)}%) · unpinch to freeze`;
     }
@@ -719,6 +767,7 @@ export function initCamera({
       }
     }
     if (ui.fps) ui.fps.textContent = `${Math.round(frames.fps(now))} fps`;
+    if (ui.rateVideo) ui.rateVideo.textContent = stream && snap?.video?.count ? `${Math.round(snap.video.hz)} fps` : '--';
     if (ui.rateHands) ui.rateHands.textContent = stream && snap ? fmtRate(snap.gesture) : '--';
     if (ui.rateFace) ui.rateFace.textContent = stream && snap ? fmtRate(snap.face) : '--';
 
@@ -757,12 +806,21 @@ export function initCamera({
     if (ui.range) {
       ui.range.textContent = grabbed ? `carrying ${grabbed.label}` : multi?.bothPinched ? 'two-hand zoom active' : 'ready';
     }
+    if (ui.fbState) {
+      ui.fbState.textContent = fireball.state;
+      ui.fbOrb.style.background = fireball.color;
+      ui.fbOrb.style.boxShadow = `0 0 10px ${fireball.color}`;
+      ui.fbMeter.style.width = `${Math.round(fireball.charge * 100)}%`;
+      ui.fbMeter.style.background = fireball.color;
+      ui.fbPct.textContent = `${Math.round(fireball.charge * 100)}%`;
+    }
   }
 
   function drawFx(now) {
     const G = getG();
     const carrying = !!grabbed && !!G?.brain;
-    if (!carrying) {
+    const charging = fireball.state === 'charging' || fireball.state === 'primed';
+    if (!carrying && !charging) {
       if (fxDirty) { fxCtx.clearRect(0, 0, fx.width, fx.height); fxDirty = false; }
       return;
     }
@@ -785,8 +843,15 @@ export function initCamera({
     };
     const r = reticleOnScreen(G);
     const x = r.x * cw, y = r.y * ch;
-    ring(x, y, 8 * u, 1, '#ff8a3d', 2 * u);
-    glyphAt('🤏', x, y - 11 * u, 8 * u);
+    if (charging) {
+      ring(x, y, 12 * u, 1, 'rgba(242,232,213,0.2)');
+      ring(x, y, 12 * u, fireball.charge, fireball.color, 2.5 * u);
+      glyphAt('🔥', x, y - 16 * u, 9 * u);
+    }
+    if (carrying) {
+      ring(x, y, 8 * u, 1, '#ff8a3d', 2 * u);
+      glyphAt('🤏', x, y - 11 * u, 8 * u);
+    }
     fxCtx.globalAlpha = 1;
   }
 
@@ -813,6 +878,10 @@ export function initCamera({
       }
       syncMood(G);
     }
+    if (fireball.keyboard) {
+      const fb = fireball.update({ mood, now, pinching: false });
+      if (fb.cast) castFireball(fb, getG());
+    }
     if (!panel.hidden && now - uiAt > 60) { uiAt = now; updatePanel(now); }
     coach?.update(now, {
       live: !!stream && status === 'on',
@@ -820,6 +889,7 @@ export function initCamera({
       rightVisible: !!multi?.right?.visible,
       bothPinched: !!multi?.bothPinched,
       grabActive: !!grabbed || !!multi?.grab?.active,
+      fireball: fireball.state,
       pinchStrength: finger?.pinching ? 1 : 0,
       statusText: nowText(now),
     });
@@ -859,6 +929,7 @@ export function initCamera({
       finger: finger && { mode: finger.mode, ratio: finger.ratio, reach: finger.reach, pinching: finger.pinching, progress: finger.progress, suppress: finger.suppress, tip: finger.tip },
       pinch: { enter: fingers.pinch.enter, exit: fingers.pinch.exit },
       range: fingers.range.snapshot(),
+      fireball: { state: fireball.state, charge: fireball.charge, color: fireball.color, keyboard: fireball.keyboard },
       mood: { ...mood },
     };
   }
@@ -871,6 +942,11 @@ export function initCamera({
     get vision() { return engine?.vision || null; },
     get grabbed() { return grabbed; },
     start, stop, togglePanel,
+    fireballKeyDown: () => fireball.keyboardDown(mood, performance.now()),
+    fireballKeyUp: () => {
+      const fb = fireball.keyboardUp(mood, performance.now());
+      if (fb.cast) castFireball(fb, getG());
+    },
     tracker, fingers, multiHand, coach, video,
     debugState,
     simulate: { gesture: onGesture, face: onFace },

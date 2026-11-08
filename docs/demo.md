@@ -19,6 +19,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
   - `F`: Hold Focus / Insight. Hold ~2 s (Rain or Calm) to summon rain and put out a forest fire
   - `Shift`: Spike Stress (drops calm)
   - `B`: Deliberate Blink. On a surface it throws lightning (a tree strike starts a forest fire); in the galaxy/globe it selects/lands like a left click
+  - `3`: Hold to charge the charged fireball, release to throw (or fist → pull back → thrust + open palm with the camera). Its colour follows joy (red) / surprise (blue)
   - `T`: Toggle 3D Heightmap Terrain vs 2D Classic
   - `Z` / `X`: Zoom Out (Galaxy) / Zoom In (Surface)
   - `M`: Toggle Personalized Brain Model & Judge Panel
@@ -61,13 +62,13 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 > *Watch the reticle. When I perform a deliberate double-blink—[BLINK]—lightning strikes the fire pit, igniting civilization's first flame.*  
 > *Now I strike a giant chicken across the river—[BLINK]—barbecuing dinner for the hunters.*  
 > *Notice the fire fading! The game demands serenity. As I take a deep breath and enter calm hold... [HOLD 5s]... my alpha-to-beta wave ratio spikes above 60%, the fire roars back, and a baby is born.*  
-> *And with our camera vision, when I hold up a closed fist—a fireball crashes down; an open palm blesses the harvest with divine food."*
+> *And with our camera vision, I pinch to pick up a villager and carry them to safety, and spread two pinched hands to zoom out over the world."*
 
 #### Operator Actions
 - **0:22**: Aim mouse/head at the fire pit. Press `B` (or physical blink). Lightning crashes, fire ignites, audio synth roars.
 - **0:30**: Aim at a giant chicken. Press `B`. A roast chicken appears, food count rises to 5+.
 - **0:36**: Fire heat drops under 50%; calm hold begins. Hold `Space` (or close eyes for EEG calm). Meter fills to 100%, advisor celebrates, tribe population grows.
-- **0:50**: Show camera gesture: raise a fist (or press `2`) to cast fireball. Raise open palm (or press `3`) to drop resources.
+- **0:50**: Show the camera hands: pinch over a villager to carry them, then pinch with both hands and spread them to zoom. (Hands only move things; no gesture casts a spell, #261.)
 
 ---
 

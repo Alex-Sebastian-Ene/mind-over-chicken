@@ -97,6 +97,28 @@ export const COACH_MOVES = [
       ];
     },
   },
+  {
+    id: 'charged_fireball',
+    title: 'Charged Fireball',
+    key: '3',
+    glyph: '🔥',
+    instruction: 'Hold a fist, pull it back, then thrust forward and open your hand. Or hold 3 and release.',
+    contexts: ['surface', 'civ'],
+    sample(phase) {
+      const at = { cx: 0.5, cy: 0.72, size: 0.28 };
+      if (phase < 0.3) return [{ hand: buildGhostHand('open', 'fist', phase / 0.3, at), state: {} }];
+      if (phase < 0.65) {
+        const k = (phase - 0.3) / 0.35;
+        return [{ hand: buildGhostHand('fist', 'fist', 1, { ...at, size: 0.28 - 0.06 * k }), state: { held: true } }];
+      }
+      if (phase < 0.8) {
+        const k = (phase - 0.65) / 0.15;
+        return [{ hand: buildGhostHand('fist', 'fist', 1, { ...at, size: 0.22 + 0.12 * k }), state: { held: true } }];
+      }
+      const k = (phase - 0.8) / 0.2;
+      return [{ hand: buildGhostHand('fist', 'open', k, at), state: {} }];
+    },
+  },
 ];
 
 export const COACH_MOVE_BY_ID = Object.fromEntries(COACH_MOVES.map((m) => [m.id, m]));
@@ -128,7 +150,7 @@ const TEMPLATE = `
   </div>
 `;
 
-export function initCoach({ getContext = () => 'surface', onCastMove = null } = {}) {
+export function initCoach({ getContext = () => 'surface' } = {}) {
   const panel = document.getElementById('coachPanel');
   if (!panel) return null;
   panel.innerHTML = TEMPLATE;
@@ -231,13 +253,16 @@ export function initCoach({ getContext = () => 'surface', onCastMove = null } = 
       ctx.fillText('←  PINCH & SPREAD  →', w / 2, 16);
     } else if (move.id === 'pinch_grab') {
       ctx.fillText('PINCH · HAND PANS · HEAD TILTS', w / 2, 16);
+    } else if (move.id === 'charged_fireball') {
+      ctx.fillText(phase < 0.65 ? 'FIST · PULL BACK' : phase < 0.8 ? 'THRUST' : 'OPEN PALM', w / 2, 16);
     }
   }
 
   function update(now = performance.now(), state = {}) {
     const context = getContext() || 'surface';
 
-    if (state.bothPinched) selectMove('two_hand_zoom');
+    if (state.fireball === 'charging' || state.fireball === 'primed') selectMove('charged_fireball');
+    else if (state.bothPinched) selectMove('two_hand_zoom');
     else if (state.grabActive) selectMove('pinch_grab');
 
     const handCount = (state.leftVisible ? 1 : 0) + (state.rightVisible ? 1 : 0);
