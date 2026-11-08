@@ -948,15 +948,21 @@ body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
 .calib-wiz-top h2 { margin: 2px 0 4px; font: 700 24px var(--pixel); color: var(--bone); }
 .calib-wiz-top p { margin: 0; font-size: 13px; color: var(--muted); }
 .calib-wiz-actions { display: flex; gap: 8px; align-items: center; }
+/* The canvas scales down to the stage on both axes (#221): it used to keep its 500 px height on
+   short screens and cover the stats line (Head Aim) and the log. Absolutely placed so the
+   percentages resolve against the stage, and the bitmap keeps its 960:500 ratio. */
 .calib-wiz-stage {
-  display: grid;
-  place-items: center;
+  position: relative;
   min-height: 0;
 }
 .calib-wiz-canvas {
-  width: min(960px, 100%);
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: auto;
+  height: auto;
+  max-width: min(960px, 100%);
   max-height: 100%;
-  aspect-ratio: 960 / 500;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 6px;

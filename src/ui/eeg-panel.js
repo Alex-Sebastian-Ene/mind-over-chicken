@@ -935,7 +935,15 @@ export class EegPanel {
         ctx.fill();
       }
 
-      this.wiz.statsEl.textContent = `Head Aim (screen): (${(aim?.x ?? 0.5).toFixed(2)}, ${(aim?.y ?? 0.5).toFixed(2)}) · Motion R²: ${Math.round((mm?.r2 ?? 0) * 100)}% (PitchEdge: ${(mm?.pitchEdgeDeg ?? 8).toFixed(1)}°) · Blink Acc: ${Math.round((bm?.accuracy ?? 0) * 100)}% (Thr ${Math.round(bm?.thresholdUv ?? 175)}µV)`;
+      // Brain drops non-finite head tilts (#221) and says why: show it instead of a silent canvas.
+      if (b?.aimFault) {
+        ctx.fillStyle = '#ffcf4a';
+        ctx.font = '13px "Atkinson Hyperlegible", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`Head aim: ${b.aimFault}`, w / 2, h - 18);
+      }
+
+      this.wiz.statsEl.textContent = `Head Aim (screen): (${(aim?.x ?? 0.5).toFixed(2)}, ${(aim?.y ?? 0.5).toFixed(2)})${b?.aimFault ? ` [${b.aimFault}]` : ''} · Motion R²: ${Math.round((mm?.r2 ?? 0) * 100)}% (PitchEdge: ${(mm?.pitchEdgeDeg ?? 8).toFixed(1)}°) · Blink Acc: ${Math.round((bm?.accuracy ?? 0) * 100)}% (Thr ${Math.round(bm?.thresholdUv ?? 175)}µV)`;
     }
   }
 
