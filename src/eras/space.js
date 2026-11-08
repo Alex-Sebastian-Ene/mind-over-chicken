@@ -376,7 +376,6 @@ export class SpaceAge {
     G.audio?.thunder?.();
     this.particles.burst(22 + Math.round(charge * 26), () => ({ x, y, vx: rand(-44, 44), vy: rand(-58, 4), g: 70, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color }));
     this.particles.burst(8 + Math.round(charge * 8), () => ({ x: x + rand(-4, 4), y: y + rand(-1, 2), vx: rand(-18, 18), vy: rand(-16, -2), g: 24, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color: pick(['#c9c2b0', '#8a7a5a', '#5f5545']) }));
-    floater(this.particles, x, y - 8, `SLAM! ${Math.round(charge * 100)}%`, color, 7);
     for (const c of this.citizens) if (c.state !== 'aboard' && dist(x, y, c.x, c.y) < 20 + charge * 12) c.courage = clamp(c.courage - 0.2);
   }
 
