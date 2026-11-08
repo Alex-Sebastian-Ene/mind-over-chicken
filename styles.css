@@ -385,6 +385,9 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
   min-width: 0;
 }
 .power.is-active { opacity: 1; }
+/* #178: a tile that does nothing in this era is disabled; one the campaign hasn't reached is hidden. */
+.power[hidden] { display: none; }
+.power:disabled { opacity: 0.25; cursor: not-allowed; }
 .power[data-power="blink"] { --tint: var(--focus); }
 .power[data-power="calm"] { --tint: var(--calm); }
 .power[data-power="focus"] { --tint: var(--focus); }
