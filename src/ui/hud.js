@@ -2,7 +2,30 @@
 // with its live meter), and the judge overlay that shows the personal model.
 
 import { FEATURE_NAMES } from '../brain/model.js';
-import { STRESSED } from '../brain/brain.js';
+import { STRESSED, QUALITY_USABLE } from '../brain/brain.js';
+
+// Signal truth (#85): how far to trust what the headset says, next to the source chip. Quality is
+// the brain's smoothed contact quality (the #175 gate), plus head tracking and the calibration
+// window that seeds your civilisation. Null for the emulator (nothing to doubt).
+export const QUALITY_GOOD = 0.7;
+export function signalSummary(G, nowMs = globalThis.performance?.now?.() ?? 0) {
+  const src = G?.source, b = G?.brain;
+  if (!src || src.kind !== 'bridge' || !b) return null;
+  const c = G.calibration;
+  const calib = !c ? '' : c.done ? 'calibrated' : `calibrating ${Math.ceil(c.remaining)} s`;
+  const streaming = src.connected && src.lastFrameAt > 0 && nowMs - src.lastFrameAt < 3000;
+  if (!streaming) {
+    return { level: 'poor', text: 'Signal: no data', title: 'The headset is not sending EEG: check that the Muse is on and paired with the bridge.' };
+  }
+  const q = Math.round((b.signalQuality ?? 1) * 100);
+  const level = b.signalUnusable || b.signalQuality < QUALITY_USABLE ? 'poor' : b.signalQuality < QUALITY_GOOD ? 'fair' : 'good';
+  const parts = [`Signal ${level} ${q}%`];
+  if (!b.headTracking) parts.push('no head aim');
+  if (calib) parts.push(calib);
+  const why = level === 'poor' ? 'Poor contact: settle the band on your forehead and behind your ears. The era waits while it is this low.'
+    : level === 'fair' ? 'Fair contact: calm and focus readings are noisier than usual.' : 'Good contact.';
+  return { level, text: parts.join(' · '), title: `${why}${b.headTracking ? '' : ' Head tracking is unavailable: the mouse and arrow keys aim.'}${calib ? ` Seed window: ${calib}.` : ''}` };
+}
 
 // 8×8 pixel icons for the power tiles.
 const ICONS = {
@@ -57,6 +80,7 @@ export class Hud {
       stress: doc.querySelector('[data-power="stress"]'),
     };
     this.source = doc.getElementById('sourceStatus');
+    this.signal = doc.getElementById('signalChip');   // #85
     this.cause = doc.getElementById('causeToast');   // #177: what your hands and face just did
     this.causeLeft = 0;
     this.modelPanel = doc.getElementById('modelPanel');
@@ -101,7 +125,21 @@ export class Hud {
     if (this.source.dataset.ok !== ok) this.source.dataset.ok = ok;
   }
 
+  // The signal chip (#85): hidden for the emulator, else quality, head tracking and calibration.
+  showSignal(G) {
+    if (!this.signal) return;
+    this.signalAt = (this.signalAt || 0) + 1;
+    if (this.signalAt % 10) return;   // a few times a second is plenty
+    const s = signalSummary(G);
+    this.signal.hidden = !s;
+    if (!s) return;
+    if (this.signal.textContent !== s.text) this.signal.textContent = s.text;
+    if (this.signal.dataset.level !== s.level) this.signal.dataset.level = s.level;
+    if (this.signal.title !== s.title) this.signal.title = s.title;
+  }
+
   update(dt, G) {
+    this.showSignal(G);
     if (this.causeLeft > 0) {
       this.causeLeft -= dt;
       if (this.causeLeft <= 0 && this.cause) this.cause.hidden = true;

@@ -1477,21 +1477,22 @@ export class RustBrain {
         return ret;
     }
     /**
+     * One headset frame: EEG bands, blink, head tilt, motion and contact quality. There is no
+     * heart-rate argument: the game does not read heart rate (#99, #153).
      * @param {number} delta
      * @param {number} theta
      * @param {number} alpha
      * @param {number} beta
      * @param {number} gamma
      * @param {boolean} blink
-     * @param {number} hr
      * @param {number} tilt_x
      * @param {number} tilt_y
      * @param {number} motion
      * @param {number} quality
      * @returns {boolean}
      */
-    ingest(delta, theta, alpha, beta, gamma, blink, hr, tilt_x, tilt_y, motion, quality) {
-        const ret = wasm.rustbrain_ingest(this.__wbg_ptr, delta, theta, alpha, beta, gamma, blink, hr, tilt_x, tilt_y, motion, quality);
+    ingest(delta, theta, alpha, beta, gamma, blink, tilt_x, tilt_y, motion, quality) {
+        const ret = wasm.rustbrain_ingest(this.__wbg_ptr, delta, theta, alpha, beta, gamma, blink, tilt_x, tilt_y, motion, quality);
         return ret !== 0;
     }
     constructor() {
@@ -1701,6 +1702,8 @@ export class RustEmotionTracker {
         wasm.rustemotiontracker_reset(this.__wbg_ptr);
     }
     /**
+     * Arguments follow `INPUTS` in src/camera/emotion.js. Returns
+     * `[dominant, joy, anger, surprise, sadness, neutral, intensity, face, event, surpriseTriggered, calibrating]`.
      * @param {boolean} has_face
      * @param {number} mouth_smile_left
      * @param {number} mouth_smile_right
@@ -1710,6 +1713,8 @@ export class RustEmotionTracker {
      * @param {number} mouth_press_right
      * @param {number} jaw_open
      * @param {number} brow_inner_up
+     * @param {number} brow_outer_up_left
+     * @param {number} brow_outer_up_right
      * @param {number} eye_wide_left
      * @param {number} eye_wide_right
      * @param {number} mouth_frown_left
@@ -1717,8 +1722,8 @@ export class RustEmotionTracker {
      * @param {number} dt
      * @returns {Array<any>}
      */
-    update_direct(has_face, mouth_smile_left, mouth_smile_right, brow_down_left, brow_down_right, mouth_press_left, mouth_press_right, jaw_open, brow_inner_up, eye_wide_left, eye_wide_right, mouth_frown_left, mouth_frown_right, dt) {
-        const ret = wasm.rustemotiontracker_update_direct(this.__wbg_ptr, has_face, mouth_smile_left, mouth_smile_right, brow_down_left, brow_down_right, mouth_press_left, mouth_press_right, jaw_open, brow_inner_up, eye_wide_left, eye_wide_right, mouth_frown_left, mouth_frown_right, dt);
+    update_direct(has_face, mouth_smile_left, mouth_smile_right, brow_down_left, brow_down_right, mouth_press_left, mouth_press_right, jaw_open, brow_inner_up, brow_outer_up_left, brow_outer_up_right, eye_wide_left, eye_wide_right, mouth_frown_left, mouth_frown_right, dt) {
+        const ret = wasm.rustemotiontracker_update_direct(this.__wbg_ptr, has_face, mouth_smile_left, mouth_smile_right, brow_down_left, brow_down_right, mouth_press_left, mouth_press_right, jaw_open, brow_inner_up, brow_outer_up_left, brow_outer_up_right, eye_wide_left, eye_wide_right, mouth_frown_left, mouth_frown_right, dt);
         return ret;
     }
 }
@@ -2234,6 +2239,9 @@ export class RustSimSource {
         wasm.rustsimsource_set_input(this.__wbg_ptr, calm, focus, panic);
     }
     /**
+     * The last frame emitted over `dt`, as `SIM_FRAME_LEN` numbers: delta, theta, alpha, beta,
+     * gamma, blink (0 or 1), tilt x, tilt y, motion, quality. All zeros when no frame was due
+     * (quality 0). No heart rate (#153).
      * @param {number} dt
      * @returns {Float32Array}
      */
@@ -2896,8 +2904,11 @@ function __wbg_get_imports() {
         __wbg_bufferData_2fb8740d60478bf0: function(arg0, arg1, arg2, arg3) {
             arg0.bufferData(arg1 >>> 0, arg2, arg3 >>> 0);
         },
-        __wbg_bufferData_aaab2a06f5c64e23: function(arg0, arg1, arg2, arg3, arg4) {
-            arg0.bufferData(arg1 >>> 0, getArrayU8FromWasm0(arg2, arg3), arg4 >>> 0);
+        __wbg_bufferData_9305dba3ba9cba4e: function(arg0, arg1, arg2, arg3) {
+            arg0.bufferData(arg1 >>> 0, arg2, arg3 >>> 0);
+        },
+        __wbg_bufferSubData_940e3860400f4182: function(arg0, arg1, arg2, arg3, arg4) {
+            arg0.bufferSubData(arg1 >>> 0, arg2, getArrayU8FromWasm0(arg3, arg4));
         },
         __wbg_children_5767547ca7e1c276: function(arg0) {
             const ret = arg0.children;
@@ -3373,22 +3384,22 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [F64], shim_idx: 18, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [F64], shim_idx: 56, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 14, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 52, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("PointerEvent")], shim_idx: 14, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("PointerEvent")], shim_idx: 52, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__283);
             return ret;
         },
         __wbindgen_generic_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 14, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 52, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__284);
             return ret;
         },

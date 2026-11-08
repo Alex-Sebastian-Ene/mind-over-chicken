@@ -60,6 +60,7 @@ import { frameLoop } from './ui/loop.js';
 import { dayNight } from './render/daynight.js';
 import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
 import { mirrorHud } from './ui/hud-mirror.js';
+import { footprint3d } from './ui/minimap.js';   // the minimap's 3D window (release QA)
 import { AIM_VIEW, aimViewKind, clampHomeAim, clampScreenAim } from './input/visible-aim.js';
 import { listSaves, getSave, latestSave, saveRun, deleteSave, clearSaves, newRunId, nextRunNumber } from './game/saves.js'; // local saves
 import { buildCheckpoint, galaxySummary, restoreBrain } from './game/checkpoint.js';
@@ -863,10 +864,29 @@ function drawMinimap(ctx, scene) {
   ctx.drawImage(miniCache.canvas, x0, y0);
   // The camera's window, cut at the seams like the view itself.
   const sx = MINI.w / (world.width || W), sy = MINI.h / (world.height || H);
-  const r = cosmos.view.blits();
   ctx.strokeStyle = '#ffe066';
   ctx.lineWidth = 0.6;
-  for (let i = 0; i < r.length; i += 6) ctx.strokeRect(x0 + r[i] * sx, y0 + r[i + 1] * sy, r[i + 2] * sx, r[i + 3] * sy);
+  // In 3D the window is the ground the zoomed, tilted camera sees, not the 2D 320×180 (release QA).
+  const fp = G.render3d && typeof engine?.screen_to_ground === 'function'
+    ? footprint3d((x, y) => engine.screen_to_ground(x, y, screen.width, screen.height), {
+      tx: engine.get_camera_target_x(), tz: engine.get_camera_target_z(),
+      ww: world.width || W, wh: world.height || H, sw: screen.width, sh: screen.height,
+    })
+    : null;
+  if (fp) {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x0, y0, MINI.w, MINI.h); ctx.clip();
+    for (const ox of [-MINI.w, 0, MINI.w]) for (const oy of [-MINI.h, 0, MINI.h]) {   // wrap copies
+      ctx.beginPath();
+      fp.forEach(([x, y], i) => (i ? ctx.lineTo(x0 + ox + x * sx, y0 + oy + y * sy) : ctx.moveTo(x0 + ox + x * sx, y0 + oy + y * sy)));
+      ctx.closePath();
+      ctx.stroke();
+    }
+    ctx.restore();
+  } else {
+    const r = cosmos.view.blits();
+    for (let i = 0; i < r.length; i += 6) ctx.strokeRect(x0 + r[i] * sx, y0 + r[i + 1] * sy, r[i + 2] * sx, r[i + 3] * sy);
+  }
   const v = world.sites?.village;
   if (v) { ctx.fillStyle = '#ff9a2e'; ctx.fillRect(x0 + v.x * sx - 0.75, y0 + v.y * sy - 0.75, 1.5, 1.5); }
   ctx.globalAlpha = 1;
@@ -1382,7 +1402,8 @@ function zoom3dBy(f) {
 function zoomOutFromSurface() {
   const scene = cosmos?.viewScene?.(G) || G?.scene;
   if (scene instanceof CivSandbox || scene?.civ) {
-    scene.onWheel?.(100);
+    // In 3D the civ relief is the unzoomed view: zoom the 3D camera, as the wheel does (release QA).
+    if (in3dSurface()) { cam3dTween = null; zoom3dBy(1.25); } else scene.onWheel?.(100);
     return;
   }
   if (!in3dSurface()) { cosmos.zoomOut(G); return; }
@@ -1396,7 +1417,7 @@ function zoomOutFromSurface() {
 function zoomInOnSurface() {
   const scene = cosmos?.viewScene?.(G) || G?.scene;
   if (scene instanceof CivSandbox || scene?.civ) {
-    scene.onWheel?.(-100);
+    if (in3dSurface()) { cam3dTween = null; zoom3dBy(0.8); } else scene.onWheel?.(-100);
     return;
   }
   if (in3dSurface() && (cosmos?.z || 0) <= 0.01) {

@@ -43,6 +43,8 @@ pub struct Engine {
     lights: Vec<Light>,
     lights_3d: Vec<Light3D>,
     billboards_3d: Vec<BillboardVertex>,
+    /// Ground contact shadows, drawn before the sprites without writing depth (#200).
+    shadows_3d: Vec<BillboardVertex>,
     current_era: u8,
     is_3d_mode: bool,
     time_3d: f32,
@@ -98,6 +100,7 @@ impl Engine {
             lights: Vec::new(),
             lights_3d: Vec::new(),
             billboards_3d: Vec::new(),
+            shadows_3d: Vec::new(),
             current_era: 0,
             is_3d_mode: true,
             time_3d: 0.0,
@@ -278,6 +281,7 @@ impl Engine {
 
     pub fn clear_3d_billboards(&mut self) {
         self.billboards_3d.clear();
+        self.shadows_3d.clear();
     }
 
     /// The colour around the map in 3D (the world's deep sea, 0..255), so the view's edges read
@@ -402,53 +406,22 @@ impl Engine {
         let center = [wx, ground_y + y, wz];
         let ground_center = [wx, ground_y, wz];
 
-        // Soft ground contact shadow beneath entities, trees, and structures (fades out as entity ascends)
-        let shadow_variant = if y < 15.0 {
-            match sprite_id {
-                sprites::SPRITE_VILLAGER | sprites::SPRITE_CHICKEN | sprites::SPRITE_GOAT => Some(0),
-                sprites::SPRITE_TREE => Some(3), // Dedicated small tree shadow (#200)
-                sprites::SPRITE_MAMMOTH
-                | sprites::SPRITE_HUT
-                | sprites::SPRITE_HOUSE
-                | sprites::SPRITE_TOWER
-                | sprites::SPRITE_ROCKET => Some(1),
-                sprites::SPRITE_FACTORY
-                | sprites::SPRITE_EXCHANGE
-                | sprites::SPRITE_HANGAR
-                | sprites::SPRITE_PAD => Some(2),
-                _ => None,
-            }
-        } else {
-            None
-        };
-
-        if let Some(sv) = shadow_variant {
+        // Soft ground contact shadow beneath entities, trees and structures (none once airborne).
+        // Shadows go in their own list: the renderer draws them first without writing depth,
+        // so overlapping shadows blend instead of Z-fighting and never cut into a sprite (#200).
+        if let Some(sv) = shadow_variant(sprite_id, y) {
             let s_entry = sprites::get_sprite_atlas_entry(sprites::SPRITE_SHADOW, 1, 0, sv);
             let shw = s_entry.world_w * 0.5;
             let shd = s_entry.world_h * 0.5;
-            // Jitter elevation slightly (0.015..0.025) across world coordinates to prevent Z-fighting between overlapping shadows (#200)
-            let shadow_bias = 0.015 + ((wx * 17.3 + wz * 31.7).sin().abs() * 0.01);
-            let s_tl = BillboardVertex {
+            let lift = 0.02;
+            let corner = |dx: f32, dz: f32, u: f32, v: f32| BillboardVertex {
                 center: ground_center,
-                offset: [-shw, shadow_bias, -shd],
-                uv: [s_entry.u0, s_entry.v0],
+                offset: [dx, lift, dz],
+                uv: [u, v],
             };
-            let s_bl = BillboardVertex {
-                center: ground_center,
-                offset: [-shw, shadow_bias, shd],
-                uv: [s_entry.u0, s_entry.v1],
-            };
-            let s_tr = BillboardVertex {
-                center: ground_center,
-                offset: [shw, shadow_bias, -shd],
-                uv: [s_entry.u1, s_entry.v0],
-            };
-            let s_br = BillboardVertex {
-                center: ground_center,
-                offset: [shw, shadow_bias, shd],
-                uv: [s_entry.u1, s_entry.v1],
-            };
-            self.billboards_3d
+            let (s_tl, s_bl) = (corner(-shw, -shd, s_entry.u0, s_entry.v0), corner(-shw, shd, s_entry.u0, s_entry.v1));
+            let (s_tr, s_br) = (corner(shw, -shd, s_entry.u1, s_entry.v0), corner(shw, shd, s_entry.u1, s_entry.v1));
+            self.shadows_3d
                 .extend_from_slice(&[s_tl, s_bl, s_tr, s_tr, s_bl, s_br]);
         }
 
@@ -551,6 +524,7 @@ impl Engine {
                 sun_dir,
                 night,
                 &self.lights_3d,
+                &self.shadows_3d,
                 &self.billboards_3d,
             );
 
@@ -572,6 +546,7 @@ impl Engine {
 
         self.lights_3d.clear();
         self.billboards_3d.clear();
+        self.shadows_3d.clear();
     }
 
     pub fn begin_frame(&mut self) {
@@ -583,6 +558,7 @@ impl Engine {
         self.lights.clear();
         self.lights_3d.clear();
         self.billboards_3d.clear();
+        self.shadows_3d.clear();
     }
 
     pub fn add_light(&mut self, x: f32, y: f32, radius: f32, intensity: f32) {
@@ -1262,6 +1238,29 @@ impl Engine {
     }
 }
 
+/// Which ground shadow a sprite casts (`SPRITE_SHADOW` variant), if any. Trees get the small
+/// one (#200): a forest is hundreds of trees, and the big mammoth-sized shadow piled up.
+/// Nothing casts one once it is 15 units up.
+pub(crate) fn shadow_variant(sprite_id: u32, y: f32) -> Option<u32> {
+    if y >= 15.0 {
+        return None;
+    }
+    match sprite_id {
+        sprites::SPRITE_VILLAGER | sprites::SPRITE_CHICKEN | sprites::SPRITE_GOAT => Some(0),
+        sprites::SPRITE_TREE => Some(3),
+        sprites::SPRITE_MAMMOTH
+        | sprites::SPRITE_HUT
+        | sprites::SPRITE_HOUSE
+        | sprites::SPRITE_TOWER
+        | sprites::SPRITE_ROCKET => Some(1),
+        sprites::SPRITE_FACTORY
+        | sprites::SPRITE_EXCHANGE
+        | sprites::SPRITE_HANGAR
+        | sprites::SPRITE_PAD => Some(2),
+        _ => None,
+    }
+}
+
 #[wasm_bindgen]
 pub fn rust_villager_look(era: &str, seed: u32) -> js_sys::Array {
     let mut rng = crate::terrain::Mulberry32::new(seed);
@@ -1706,6 +1705,9 @@ impl RustEmotionTracker {
         self.inner.reset();
     }
 
+    /// Arguments follow `INPUTS` in src/camera/emotion.js. Returns
+    /// `[dominant, joy, anger, surprise, sadness, neutral, intensity, face, event, surpriseTriggered, calibrating]`.
+    #[allow(clippy::too_many_arguments)]
     pub fn update_direct(
         &mut self,
         has_face: bool,
@@ -1717,6 +1719,8 @@ impl RustEmotionTracker {
         mouth_press_right: f64,
         jaw_open: f64,
         brow_inner_up: f64,
+        brow_outer_up_left: f64,
+        brow_outer_up_right: f64,
         eye_wide_left: f64,
         eye_wide_right: f64,
         mouth_frown_left: f64,
@@ -1725,18 +1729,24 @@ impl RustEmotionTracker {
     ) -> js_sys::Array {
         let mut map = std::collections::HashMap::new();
         if has_face {
-            map.insert("mouthSmileLeft".to_string(), mouth_smile_left);
-            map.insert("mouthSmileRight".to_string(), mouth_smile_right);
-            map.insert("browDownLeft".to_string(), brow_down_left);
-            map.insert("browDownRight".to_string(), brow_down_right);
-            map.insert("mouthPressLeft".to_string(), mouth_press_left);
-            map.insert("mouthPressRight".to_string(), mouth_press_right);
-            map.insert("jawOpen".to_string(), jaw_open);
-            map.insert("browInnerUp".to_string(), brow_inner_up);
-            map.insert("eyeWideLeft".to_string(), eye_wide_left);
-            map.insert("eyeWideRight".to_string(), eye_wide_right);
-            map.insert("mouthFrownLeft".to_string(), mouth_frown_left);
-            map.insert("mouthFrownRight".to_string(), mouth_frown_right);
+            for (k, v) in [
+                ("mouthSmileLeft", mouth_smile_left),
+                ("mouthSmileRight", mouth_smile_right),
+                ("browDownLeft", brow_down_left),
+                ("browDownRight", brow_down_right),
+                ("mouthPressLeft", mouth_press_left),
+                ("mouthPressRight", mouth_press_right),
+                ("jawOpen", jaw_open),
+                ("browInnerUp", brow_inner_up),
+                ("browOuterUpLeft", brow_outer_up_left),
+                ("browOuterUpRight", brow_outer_up_right),
+                ("eyeWideLeft", eye_wide_left),
+                ("eyeWideRight", eye_wide_right),
+                ("mouthFrownLeft", mouth_frown_left),
+                ("mouthFrownRight", mouth_frown_right),
+            ] {
+                map.insert(k.to_string(), v);
+            }
         }
 
         let (mood, ev) = self.inner.update(if has_face { Some(&map) } else { None }, dt);
@@ -1750,12 +1760,9 @@ impl RustEmotionTracker {
         arr.push(&JsValue::from_f64(mood.neutral));
         arr.push(&JsValue::from_f64(mood.intensity));
         arr.push(&JsValue::from_bool(mood.face));
-        let ev_str = match ev {
-            Some(camera::emotion::EmotionEvent::Change) => "change",
-            Some(camera::emotion::EmotionEvent::Strong) => "strong",
-            None => "",
-        };
-        arr.push(&JsValue::from_str(ev_str));
+        arr.push(&JsValue::from_str(ev.map_or("", |e| e.as_str())));
+        arr.push(&JsValue::from_bool(mood.surprise_triggered));
+        arr.push(&JsValue::from_bool(mood.calibrating));
         arr
     }
 }
@@ -1937,6 +1944,8 @@ impl RustBrain {
         self.inner.set_cue(cue);
     }
 
+    /// One headset frame: EEG bands, blink, head tilt, motion and contact quality. There is no
+    /// heart-rate argument: the game does not read heart rate (#99, #153).
     pub fn ingest(
         &mut self,
         delta: f32,
@@ -1945,7 +1954,6 @@ impl RustBrain {
         beta: f32,
         gamma: f32,
         blink: bool,
-        hr: f32,
         tilt_x: f32,
         tilt_y: f32,
         motion: f32,
@@ -1960,7 +1968,6 @@ impl RustBrain {
                 gamma,
             },
             blink,
-            hr: if hr > 0.0 { Some(hr) } else { None },
             tilt: Some((tilt_x, tilt_y)),
             motion,
             quality,
@@ -2022,8 +2029,20 @@ impl RustSimSource {
         self.inner.blink();
     }
 
+    /// The last frame emitted over `dt`, as `SIM_FRAME_LEN` numbers: delta, theta, alpha, beta,
+    /// gamma, blink (0 or 1), tilt x, tilt y, motion, quality. All zeros when no frame was due
+    /// (quality 0). No heart rate (#153).
     pub fn step(&mut self, dt: f32) -> js_sys::Float32Array {
-        let mut out = [0.0f32; 11];
+        js_sys::Float32Array::from(&self.step_values(dt)[..])
+    }
+}
+
+/// Numbers per `RustSimSource::step` frame (src/brain/sources.js reads this layout).
+pub const SIM_FRAME_LEN: usize = 10;
+
+impl RustSimSource {
+    fn step_values(&mut self, dt: f32) -> [f32; SIM_FRAME_LEN] {
+        let mut out = [0.0f32; SIM_FRAME_LEN];
         self.inner.update(dt, |f| {
             out = [
                 f.bands.delta,
@@ -2032,14 +2051,51 @@ impl RustSimSource {
                 f.bands.beta,
                 f.bands.gamma,
                 if f.blink { 1.0 } else { 0.0 },
-                f.hr.unwrap_or(0.0),
                 f.tilt.map(|t| t.0).unwrap_or(0.0),
                 f.tilt.map(|t| t.1).unwrap_or(0.0),
                 f.motion,
                 f.quality,
             ];
         });
-        js_sys::Float32Array::from(&out[..])
+        out
+    }
+}
+
+#[cfg(test)]
+mod brain_input_tests {
+    use super::*;
+
+    #[test]
+    fn sim_frames_carry_no_heart_rate() {
+        // #153: every number in an emulated frame is a band share, a 0/1 blink, a tilt in -1..1,
+        // a motion or a quality: a pulse in beats per minute has no slot left.
+        let mut sim = RustSimSource::new(153);
+        let mut frames = 0;
+        for _ in 0..40 {
+            let v = sim.step_values(0.1);
+            if v[SIM_FRAME_LEN - 1] <= 0.0 {
+                continue;
+            }
+            frames += 1;
+            let bands: f32 = v[..5].iter().sum();
+            assert!((bands - 1.0).abs() < 1e-4, "bands sum to 1: {v:?}");
+            assert!(v.iter().all(|x| x.abs() <= 1.0), "a value outside -1..1: {v:?}");
+            assert_eq!(v[SIM_FRAME_LEN - 1], 1.0, "quality: {v:?}");
+        }
+        assert!(frames >= 35, "frames = {frames}");
+    }
+
+    #[test]
+    fn brain_ingest_reads_tilt_where_heart_rate_used_to_be() {
+        // #153: RustBrain::ingest is bands, blink, tilt x/y, motion, quality (src/brain/brain.js
+        // passes exactly these). Its seventh argument is now the head tilt, not a heart rate.
+        let mut brain = RustBrain::new();
+        for _ in 0..30 {
+            brain.ingest(0.2, 0.2, 0.2, 0.2, 0.2, false, 1.0, -1.0, 0.0, 1.0);
+        }
+        let aim = brain.inner.aim;
+        assert!(aim.0 > 0.95 && aim.1 < 0.05, "aim = {aim:?}");
+        assert_eq!(brain.inner.stats.frames_seen, 30);
     }
 }
 
@@ -2101,5 +2157,21 @@ mod walk_field_tests {
         // Over water the seam wraps north-south too.
         let s = walk_field(&types, w as u32, h as u32, 0, 0, true);
         assert_eq!(s[5 * w], 1);
+    }
+}
+
+#[cfg(test)]
+mod shadow_tests {
+    use super::{shadow_variant, sprites};
+
+    #[test]
+    fn trees_cast_a_small_shadow_not_the_mammoth_one() {
+        let tree = sprites::get_sprite_atlas_entry(sprites::SPRITE_SHADOW, 1, 0, shadow_variant(sprites::SPRITE_TREE, 0.0).unwrap());
+        let big = sprites::get_sprite_atlas_entry(sprites::SPRITE_SHADOW, 1, 0, shadow_variant(sprites::SPRITE_MAMMOTH, 0.0).unwrap());
+        assert!(tree.world_w * tree.world_h * 4.0 < big.world_w * big.world_h, "tree {}x{} vs {}x{}", tree.world_w, tree.world_h, big.world_w, big.world_h);
+        assert!(tree.world_w <= 6.0);
+        // Airborne things cast none.
+        assert_eq!(shadow_variant(sprites::SPRITE_TREE, 20.0), None);
+        assert_eq!(shadow_variant(sprites::SPRITE_VILLAGER, 15.0), None);
     }
 }

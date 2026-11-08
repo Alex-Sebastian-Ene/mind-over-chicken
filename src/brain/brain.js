@@ -205,9 +205,10 @@ export class Brain {
     if (this.wasm && frame.bands) {
       const b = frame.bands;
       try {
+        // RustBrain.ingest: bands, blink, tilt x/y, motion, quality. No heart rate (#153).
         this.wasm.ingest(
           b.delta || 0, b.theta || 0, b.alpha || 0, b.beta || 0, b.gamma || 0,
-          !!frame.blink, frame.hr || 0,
+          !!frame.blink,
           Number.isFinite(frame.tilt?.x) ? frame.tilt.x : 0, Number.isFinite(frame.tilt?.y) ? frame.tilt.y : 0,
           frame.motion || 0, frame.quality ?? 1   // quality 0 is poor contact, not "unknown" (#175)
         );
