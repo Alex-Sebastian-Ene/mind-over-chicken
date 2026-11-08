@@ -30,6 +30,12 @@ class SiteSmokeTest(unittest.TestCase):
                 target = (mod.parent / spec).resolve()
                 self.assertTrue(target.is_file(), f"{mod.relative_to(ROOT)} imports missing {spec}")
 
+    def test_index_ids_are_unique(self):
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        ids = re.findall(r"""\bid=["']([^"']+)["']""", html)
+        dupes = sorted({i for i in ids if ids.count(i) > 1})
+        self.assertEqual(dupes, [], f"duplicate ids in index.html: {dupes}")
+
     def test_bridge_compiles(self):
         py_compile.compile(str(ROOT / "bridge" / "muse_bridge.py"), doraise=True)
         py_compile.compile(str(ROOT / "scripts" / "serve.py"), doraise=True)
