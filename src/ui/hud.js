@@ -2,7 +2,7 @@
 // with its live meter), and the judge overlay that shows the personal model.
 
 import { FEATURE_NAMES } from '../brain/model.js';
-import { STRESSED, RAIN_THRESHOLD, rainFromBands } from '../brain/brain.js';
+import { STRESSED } from '../brain/brain.js';
 
 // 8×8 pixel icons for the power tiles.
 const ICONS = {
@@ -157,8 +157,8 @@ export class Hud {
       if (thr != null) el.style.setProperty('--thr', `${Math.round(thr * 100)}%`);
       el.querySelector('.power-value').textContent = text;
     };
-    const rain = b.rain ?? rainFromBands(b.bands || {});
-    set(this.powers.focus, rain, scene?.powers.includes('focus') ? RAIN_THRESHOLD : null, `${Math.round(rain * 100)}%`);
+    const focus = b.source?.input?.focus ? 1 : b.focus;
+    set(this.powers.focus, focus, scene?.powers.includes('focus') ? b.threshold('focus', 0.5) : null, `${Math.round(focus * 100)}%`);
     // Stress: about 0.15 at rest, up with EEG agitation or an angry face (brain.js).
     const stress = b.stress ?? 0;
     set(this.powers.stress, stress, null, `${Math.round(stress * 100)}%`);

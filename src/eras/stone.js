@@ -6,7 +6,6 @@
 import { Particles, clamp, dist, rand, chance, floater, pick } from '../sim/util.js';
 import { walk, animate, villagerLook, sail } from '../sim/agents.js';
 import { drawPerson, drawMammoth, drawFire, makeBolt, drawBolt, drawReticle, drawChicken, drawBoat } from '../render/sprites.js';
-import { RAIN_THRESHOLD } from '../brain/brain.js';
 
 const POP_START = 10;
 const POP_TARGET = 15;
@@ -23,7 +22,7 @@ export class StoneAge {
     this.intro = {
       title: 'Stone Age',
       goal: `Grow the tribe to ${POP_TARGET} and keep the fire alive with ${CALM_TARGET} calm holds.`,
-      how: [['Blink', 'Throw lightning where you look. Strike the fire pit to light it, strike a giant chicken for dinner, or strike a tree to start a forest fire.'], ['Calm', 'When the flame fades, stay calm for 5 seconds.'], ['Rain', 'A forest fire needs rain: hold F (beta+theta) for two seconds to summon it.']],
+      how: [['Blink', 'Throw lightning where you look. Strike the fire pit to light it, strike a giant chicken for dinner, or strike a tree to start a forest fire.'], ['Calm', 'When the flame fades, stay calm for 5 seconds.'], ['Rain', 'A forest fire needs rain: hold F / Insight for two seconds to summon it.']],
     };
     this.powers = ['blink', 'focus'];
     this.darkness = 0.6;
@@ -187,7 +186,7 @@ export class StoneAge {
     this.G.audio?.thunder?.();
     if (!this.forest.warned) {
       this.forest.warned = true;
-      this.G.advisor.say('forest-fire', 'The forest is on fire! Hold F (beta+theta) for two seconds to summon rain and put it out!', { mood: 'panic', priority: 3, cooldown: 999 });
+      this.G.advisor.say('forest-fire', 'The forest is on fire! Hold F / Insight for two seconds to summon rain and put it out!', { mood: 'panic', priority: 3, cooldown: 999 });
     }
     return true;
   }
@@ -260,8 +259,11 @@ export class StoneAge {
       return;
     }
     if (r.cooldown > 0) { r.progress = 0; return; }
-    const level = this.G.brain.rain ?? 0;
-    r.progress = level >= RAIN_THRESHOLD ? r.progress + dt : Math.max(0, r.progress - dt * 1.5);
+    const brain = this.G.brain;
+    const held = this.G.source?.input?.focus ? 1 : 0;
+    const level = Math.max(brain.focus ?? 0, held);
+    const thr = brain.threshold ? brain.threshold('focus', 0.5) : 0.5;
+    r.progress = level >= thr ? r.progress + dt : Math.max(0, r.progress - dt * 1.5);
     if (r.progress >= 2) this.startRain();
   }
 
