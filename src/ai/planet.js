@@ -53,6 +53,7 @@ export class SimPlanet {
       finish: noop,
     };
     this.scene = new StoneAge();
+    this.scene.simulated = true;
     this.scene.label = 'Simulated planet · Stone Age';
     this.G.scene = this.scene;
     this.scene.enter(this.G);
@@ -63,6 +64,7 @@ export class SimPlanet {
     this.outcome = null;
     this.aiLastBolt = -Infinity;
     this.scene = new StoneAge();
+    this.scene.simulated = true;
     this.scene.label = 'Simulated planet · Stone Age';
     this.G.scene = this.scene;
     this.scene.enter(this.G);
