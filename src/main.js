@@ -35,6 +35,7 @@ import initEngine, {
   rust_animate_agent,
 } from '../pkg/mind_over_chicken_engine.js';
 import { Cosmos } from './cosmos/cosmos.js';
+import { ReturnHome } from './cosmos/return-home.js'; // death returns the camera home (#297)
 import { ERA_LABEL, ERA_NAMES, CHANNELS, fmtPop, planetDot, ownerLabel, setRustGalaxy } from './cosmos/galaxy.js';
 import { initCamera } from './camera/camera.js'; // camera (#33)
 import { pinchMove } from './camera/pinch-move.js'; // one-hand pinch movement (#270)
@@ -60,6 +61,7 @@ import { engineFailToShow } from './ui/fail.js';
 import { frameLoop } from './ui/loop.js';
 import { dayNight } from './render/daynight.js';
 import { surfaceMaxDistance } from './render/surface-zoom.js';
+import { drawAimReticle } from './render/reticle.js';
 import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
 import { mirrorHud } from './ui/hud-mirror.js';
 import { createRivals, playerState, applyRivalLine } from './civ/rivals.js'; // rivals on the home world (#212)
@@ -437,6 +439,7 @@ function newGame(source, startIndex = 0, { mode = 'story', resume = null, setupP
       pendingTimer = delay;
     },
     fail(reason) { showFail(reason); },
+    returnHome(opts) { returnHome(opts); },   // the civ sandbox reports its wipe-out here (#297)
     finish(extra) { G.finished = true; G.extra = extra; patchSave({ finished: true }); setTimeout(showEnd, 2200); },
     // The intro transition for the scene in play (#137), e.g. a new stage inside one scene.
     startTransition(caption) { startTransition(G.scene, caption); },
@@ -751,6 +754,29 @@ function dismissBanner() {
   if (G.scene.id === 'stone' || G.scene.id === 'industry') G.brain.setCue(G.scene.hold?.active || G.scene.ipo?.state === 'active' ? 'calm' : 'rest');
 }
 
+// ---------- death returns the camera home (#297, src/cosmos/return-home.js) ----------
+// Every death path calls returnHome({ reason, level }): a home era failing (behind the fail
+// screen), an AI world's capital tribe dying while you watch, the civ sandbox wiping you out.
+const homeward = new ReturnHome(cosmos, {
+  cause: (text) => hud.showCause(text, { ms: 2400, tone: 'bad' }),
+  say: (text) => cosmos.say(text),
+  advise: (text) => advisor.say('return-home', text, { mood: 'nervous', priority: 2, cooldown: 10 }),
+  reduced: () => reducedMotion(),
+});
+const homewardCtx = () => ({
+  screen: !$('titleScreen').hidden ? 'title' : !$('endScreen').hidden ? 'end' : null,
+  finished: !!G?.finished, intro: intro.active, navigating: !!cam3dTween, G,
+});
+function returnHome(ask) { return G ? homeward.request(ask, homewardCtx()) : null; }
+// Retry lands home: back down from the home globe onto the era's stage.
+function landHome() {
+  homeward.cancel();
+  const home = cosmos.homePlanet();
+  if (cosmos.focus && home) cosmos.focusPlanet(home, G);
+  cosmos.zoomTo(0, G);
+  if (reducedMotion()) { cosmos.z = cosmos.target; cosmos.vz = 0; }
+}
+
 let failTimer = null;
 function showFail(reason) {
   if (G) {
@@ -801,6 +827,7 @@ function showFail(reason) {
   audio.bad();
   clearTimeout(failTimer);
   failTimer = null; // No silent auto-retry (#86)
+  returnHome({ reason: 'home-fail' });   // the camera eases to the home globe behind the card (#297)
 }
 
 function updateAssistUI() {
@@ -848,6 +875,7 @@ function toggleInvincible() {
 function quitToTitle() {
   clearTimeout(failTimer);
   failTimer = null;
+  homeward.cancel();
   $('failScreen').hidden = true;
   $('banner').hidden = true;
   $('endScreen').hidden = true;
@@ -871,6 +899,7 @@ function retryEra() {
   if ($('failScreen').hidden) return;
   $('failScreen').hidden = true;
   restartScene();
+  landHome();
 }
 
 function showEnd() {
@@ -1014,6 +1043,7 @@ function render() {
   textCtx.setTransform(1, 0, 0, 1, 0, 0);
   textCtx.clearRect(0, 0, textLayer.width, textLayer.height);
   if (!scene) {
+    document.body.dataset.reticle = '0';
     if (engine) {
       engine.begin_frame();
       engine.end_frame(0, 0, 0, 0, 0, screen.width, screen.height);
@@ -1180,7 +1210,31 @@ function render() {
   textCtx.globalAlpha = visible;
   if (cosmic) cosmos.overlay(textCtx, G);
   textCtx.globalAlpha = 1;
+  // The aim cursor (#301), last of all: above lighting, night, weather, flashes and labels.
+  const aimAt = !intro.active && !G.finished ? aimScreenPoint(scene, z) : null;
+  document.body.dataset.reticle = aimAt ? '1' : '0';   // hides the native crosshair (styles.css)
+  if (aimAt) {
+    textCtx.setTransform(1, 0, 0, 1, 0, 0);
+    const b = document.body.dataset;
+    drawAimReticle(textCtx, aimAt.x * K, aimAt.y * K, { f: Math.max(1, Math.round(K / 2)), size: b.cursorSize || 'm', contrast: b.cursorContrast === '1', t: G.runTime || 0, reduced: rm });
+  }
   perfSample.n++; perfSample.ms += performance.now() - t0;
+}
+
+// Where the aim is on screen, in low-res pixels (#301). The globe and galaxy use the screen
+// pointer; the home world maps its world point to the 2D window or projects it in 3D; other
+// worlds' surfaces and the civ sandbox aim in their own 320×180 view.
+function aimScreenPoint(scene, z) {
+  const aim = G?.brain?.aim;
+  if (!aim || !Number.isFinite(aim.x) || !Number.isFinite(aim.y)) return null;
+  if (z > 0.5) return { x: aim.x * (W - 1), y: aim.y * (H - 1) };
+  const world = worldScene(scene) ? scene.G?.world : null;
+  const p = world?.aimPoint ? world.aimPoint(aim) : { x: aim.x * (W - 1), y: aim.y * (H - 1) };
+  if (G.render3d && engine && typeof engine.project_to_screen === 'function') {
+    const q = engine.project_to_screen(p.x, p.y, textLayer.width, textLayer.height);
+    return q[0] < -9000 ? null : { x: q[0] / K, y: q[1] / K };
+  }
+  return world ? cosmos.toScreen(p.x, p.y) : p;
 }
 
 // 3D: only the trees and buildings near the camera target are sent as billboards (the world is
@@ -1256,6 +1310,7 @@ function frame(ts) {
     } else fade = Math.max(0, fade - dt * 1.6);
     G.shake = Math.max(0, (G.shake || 0) - dt * 2);
     cosmos.update(dt, G);
+    homeward.update(dt, homewardCtx());   // #297
     updateAimTarget();   // #294: keep the cursor and every blink target inside the visible view
     advisor.update(dt);
     G.news?.update(dt);
@@ -1912,6 +1967,7 @@ $('endModelBtn').addEventListener('click', toggleModel);
 // ---------- zoom + galaxy UI ----------
 let revealed = 0;
 cosmos.onEvent = (p, text, kind) => {
+  if (kind === 'tribe-lost') { returnHome({ reason: 'ai-tribe', planet: p, world: p.name, cause: text }); return; }   // #297
   if (kind === 'born') patchSave({ galaxy: galaxySummary(cosmos.galaxy) });   // the save names the worlds born
   if (kind === 'born' && (p.mindSlot || (p.setup && CHANNELS[p.channel]))) {
     revealed++;

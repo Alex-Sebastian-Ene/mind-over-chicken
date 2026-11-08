@@ -11,9 +11,9 @@ test('settings round-trip and fall back to the defaults', () => {
   const s = memory();
   assert.deepEqual(loadSettings(s), { ...SETTINGS_DEFAULTS });
   saveSettings({ reducedMotion: true, cameraOnStart: true }, s);
-  assert.deepEqual(loadSettings(s), { reducedMotion: true, cameraOnStart: true });
+  assert.deepEqual(loadSettings(s), { ...SETTINGS_DEFAULTS, reducedMotion: true, cameraOnStart: true });
   s.setItem(SETTINGS_KEY, '{"reducedMotion": "yes", "cameraOnStart": 1}');
-  assert.deepEqual(loadSettings(s), { reducedMotion: null, cameraOnStart: false });
+  assert.deepEqual(loadSettings(s), { ...SETTINGS_DEFAULTS });
   s.setItem(SETTINGS_KEY, '{oops');
   assert.deepEqual(loadSettings(s), { ...SETTINGS_DEFAULTS });
   assert.deepEqual(loadSettings(null), { ...SETTINGS_DEFAULTS });
@@ -42,4 +42,13 @@ test('the top bar is EEG, 3D, AI God, Sound and Settings; Camera, Model and Debu
   for (const id of ['camBtn', 'modelBtn', 'dbgBtn']) assert.doesNotMatch(bar, new RegExp(`id="${id}"`), `${id} left the top bar`);
   const panel = html.slice(html.indexOf('id="settingsPanel"'), html.indexOf('</aside>', html.indexOf('id="settingsPanel"')));
   for (const id of ['camBtn', 'modelBtn', 'dbgBtn', 'setReducedMotion', 'setAimSens', 'setCalibSeconds', 'setCalibMode', 'setCameraOnStart', 'settingsReset']) assert.match(panel, new RegExp(`id="${id}"`), id);
+});
+
+test('the cursor size and high contrast are saved, and bad values fall back (#301)', () => {
+  const s = memory();
+  saveSettings({ ...SETTINGS_DEFAULTS, cursorSize: 'l', cursorContrast: true }, s);
+  assert.deepEqual(loadSettings(s), { ...SETTINGS_DEFAULTS, cursorSize: 'l', cursorContrast: true });
+  s.setItem(SETTINGS_KEY, '{"cursorSize": "xxl", "cursorContrast": "yes"}');
+  assert.equal(loadSettings(s).cursorSize, 'm');
+  assert.equal(loadSettings(s).cursorContrast, false);
 });

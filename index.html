@@ -21,13 +21,14 @@
       <span class="source" id="sourceStatus" data-ok="0">No headset</span>
       <!-- #85: how far to trust the headset right now (src/ui/hud.js signalSummary) -->
       <span class="signal" id="signalChip" data-level="good" role="status" hidden></span>
+      <!-- #152: joy buff and surprise while a mood is live (src/camera/mood-actions.js moodChip) -->
+      <span class="mood-chip" id="moodChip" data-tone="idle" hidden></span>
       <span class="clock" id="clock" aria-label="Run time">0:00</span>
       <button type="button" class="tool eeg-btn" id="eegBtn" aria-pressed="false" aria-controls="eegPanel" title="Connect or disconnect EEG headset and view live signals (E)">EEG <kbd>E</kbd></button>
       <!-- #89: Camera, Model and Debug live in Settings › Advanced; this shows while the webcam runs -->
       <button type="button" class="tool cam-live" id="camLive" hidden title="The camera is on: open the Camera panel (C)">● Camera on</button>
       <button type="button" class="tool" id="mode3dBtn" aria-pressed="false" title="Toggle 3D world (T)">3D</button>
       <button type="button" class="tool" id="aiGodBtn" aria-pressed="false" title="Toggle AI God autopilot (G)">AI God <kbd>G</kbd></button>
-      <button type="button" class="tool invincible" id="invincibleBtn" aria-pressed="false" title="Toggle people invincibility: hunger and deaths paused (I)" hidden>🛡️ People</button>
       <button type="button" class="tool" id="soundBtn" aria-pressed="true">Sound on</button>
       <button type="button" class="tool" id="settingsBtn" aria-pressed="false" aria-controls="settingsPanel" title="Settings: comfort, head aim, calibration, camera, advanced">⚙ Settings</button>
     </div>
@@ -106,7 +107,7 @@
     <button type="button" class="power" data-power="focus">
       <canvas class="power-icon" width="8" height="8" aria-hidden="true"></canvas>
       <span class="power-name">Rain</span>
-      <span class="power-sub">Open palm + Insight · hold <kbd>F</kbd></span>
+      <span class="power-sub">Open palm + Insight · camera</span>
       <span class="power-value">0%</span>
       <span class="meter"><span></span></span>
     </button>
@@ -281,6 +282,8 @@
   <section class="set-group" aria-labelledby="setComfortH">
     <h3 id="setComfortH">Comfort</h3>
     <label class="set-row"><input type="checkbox" id="setReducedMotion"> <span>Reduce motion <small>No screen shake, softer lightning flashes, no camera sweeps. Starts from your system setting.</small></span></label>
+    <label class="set-row"><span>Cursor size <small>The aim reticle on the map.</small></span> <select id="setCursorSize"><option value="s">Small</option><option value="m">Medium</option><option value="l">Large</option></select></label>
+    <label class="set-row"><input type="checkbox" id="setCursorContrast"> <span>High-contrast cursor <small>White on black instead of amber.</small></span></label>
   </section>
   <section class="set-group" aria-labelledby="setAimH">
     <h3 id="setAimH">Head aim (Muse)</h3>

@@ -12,6 +12,8 @@ import { walk, animate, villagerLook } from '../sim/agents.js';
 import { drawPerson, drawGoat, drawChicken } from '../render/sprites.js';
 import { FireballFX } from '../render/fireball.js';
 import { label } from './stone.js';
+import { joyBuff, surpriseFires, surpriseEffect, sparkleCount, JOY_COLORS } from '../camera/mood-actions.js'; // #152
+import { reducedMotion } from '../ui/motion.js';
 
 // What the scholars write down, one focus window each.
 export const INVENTIONS = [
@@ -85,6 +87,7 @@ export class FarmingToKingdoms {
     this.t += dt;
     for (const hit of this.fireballs.update(dt)) this.impactFireball(hit);
     this.particles.update(dt);
+    montageJoy(this, dt);   // #152
     const v = w.sites.village;
 
     for (const p of this.people) {
@@ -225,12 +228,7 @@ export class FarmingToKingdoms {
     floater(this.particles, p.x, p.y - 6, text, '#ffd166', 6);
   }
 
-  onMood(mood) {
-    const text = MONTAGE_MOODS[mood.dominant];
-    if (!text || mood.reason !== 'change' || !this.G) return;
-    const c = this.G.camera?.viewCenter?.() || this.G.world.sites.village;   // mid-screen
-    floater(this.particles, c.x, c.y - 38, text, '#9ec9ff', 6);
-  }
+  onMood(mood) { montageMood(this, mood); }
 }
 
 export class InfoAge {
@@ -260,6 +258,7 @@ export class InfoAge {
     this.t += dt;
     for (const hit of this.fireballs.update(dt)) this.impactFireball(hit);
     this.particles.update(dt);
+    montageJoy(this, dt);   // #152
     if (this.t > 6 && !this.left) { this.left = true; this.G.brain.setCue(null); this.G.complete(0.1); }
   }
 
@@ -302,7 +301,35 @@ export class InfoAge {
     if (text) this.G?.advisor.say(`cast-info-${spell}`, `Even in the montage: ${text}.`, { priority: 2, cooldown: 2 });
   }
 
-  onMood() {}
+  onMood(mood) { montageMood(this, mood); }
+}
+
+// #152: the montages are short, so joy and surprise only decorate them. Joy: sparkles drift over
+// the middle of the screen while you smile. Surprise (once per event): a capped flash, a short
+// shake (none under reduced motion), thunder and a caption. Any change of mood gets a caption.
+function montageJoy(scene, dt) {
+  scene.flash = Math.max(0, (scene.flash || 0) - dt);
+  const G = scene.G, joy = joyBuff(G?.mood);
+  if (!joy) return;
+  const c = G.camera?.viewCenter?.() || G.world?.sites?.village || { x: W / 2, y: H / 2 };
+  for (let n = sparkleCount(joy, dt, 10); n > 0; n--) {
+    scene.particles.add({ x: c.x + rand(-60, 60), y: c.y - rand(0, 40), vx: rand(-3, 3), vy: rand(-14, -8), life: 1, maxLife: 1, size: 1, color: pick(JOY_COLORS) });
+  }
+}
+
+function montageMood(scene, mood) {
+  const G = scene.G;
+  if (!G) return;
+  const c = G.camera?.viewCenter?.() || G.world?.sites?.village || { x: W / 2, y: H / 2 };   // mid-screen
+  if (surpriseFires(mood)) {
+    const fx = surpriseEffect(reducedMotion());
+    scene.flash = Math.max(scene.flash || 0, fx.flash);
+    G.shake = Math.max(G.shake || 0, fx.shake);
+    G.audio?.thunder?.();
+    floater(scene.particles, c.x, c.y - 52, 'SURPRISE!', '#ffe066', 10);
+  }
+  const text = MONTAGE_MOODS[mood.dominant];
+  if (text && mood.reason === 'change') floater(scene.particles, c.x, c.y - 38, text, '#9ec9ff', 6);
 }
 
 // camera (#33): what a cast or a mood looks like from ten thousand years away.

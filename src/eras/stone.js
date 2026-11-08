@@ -9,12 +9,13 @@ import { forestFire, forestFireStep } from './forest-fire.js';
 import { eraTuning } from '../game/options.js'; // difficulty (#220)
 import { drawPerson, drawMammoth, drawFire, makeBolt, drawBolt, drawReticle, drawChicken, drawBoat } from '../render/sprites.js';
 import { FireballFX } from '../render/fireball.js';
+import { joyBuff, surpriseFires, surpriseEffect, sparkleCount, JOY_COLORS } from '../camera/mood-actions.js'; // #152
+import { reducedMotion } from '../ui/motion.js';
 
-// Rain is a hand spell while the camera is on: an open palm plus Insight/Focus. Without the
-// camera, holding F is the fallback. `hand.at` is a performance.now() timestamp.
+// Rain is a camera spell: an open palm held to the camera plus Insight/Focus. There is no
+// keyboard fallback. `hand.at` is a performance.now() timestamp.
 export function rainHandReady(hand, now = performance.now()) {
-  if (!hand?.active) return true;
-  return !!hand.palm && now - (Number(hand.at) || 0) <= 350;
+  return !!hand?.active && !!hand.palm && now - (Number(hand.at) || 0) <= 350;
 }
 
 const POP_START = 10;
@@ -34,7 +35,7 @@ export class StoneAge {
     this.intro = {
       title: 'Stone Age',
       goal: `Grow the tribe to ${POP_TARGET} and keep the fire alive with ${FOCUS_TARGET} focus holds.`,
-      how: [['Blink', 'Throw lightning where you look. Strike the fire pit to light it, strike a giant chicken for dinner, or strike a tree to start a forest fire.'], ['Focus', 'When the flame fades, hold Insight for 5 seconds.'], ['Rain', 'A forest fire needs rain: open your palm and hold Insight for two seconds (or hold F without the camera).']],
+      how: [['Blink', 'Throw lightning where you look. Strike the fire pit to light it, strike a giant chicken for dinner, or strike a tree to start a forest fire.'], ['Focus', 'When the flame fades, hold Insight for 5 seconds.'], ['Rain', 'A forest fire needs rain: hold an open palm to the camera and hold Insight for two seconds.']],
     };
     this.powers = ['blink', 'focus'];
     this.darkness = 0.6;
@@ -208,7 +209,7 @@ export class StoneAge {
     this.G.audio?.thunder?.();
     if (!this.forest.warned) {
       this.forest.warned = true;
-      this.G.advisor.say('forest-fire', 'The forest is on fire! Hold F / Insight for two seconds to summon rain and put it out!', { mood: 'panic', priority: 3, cooldown: 999 });
+      this.G.advisor.say('forest-fire', 'The forest is on fire! Hold an open palm to the camera and Insight for two seconds to summon rain and put it out!', { mood: 'panic', priority: 3, cooldown: 999 });
     }
     return true;
   }
@@ -282,11 +283,11 @@ export class StoneAge {
     const held = this.G.source?.input?.focus ? 1 : 0;
     const level = Math.max(brain.focus ?? 0, held);
     const thr = brain.threshold ? brain.threshold('focus', 0.5) : 0.5;
-    // Camera on: rain needs a deliberate open palm + Insight. Camera off: F is the fallback.
+    // Rain is a camera spell: a held open palm is required every frame, plus Insight.
     if (!rainHandReady(this.G.handInput, performance.now())) {
-      if (level >= thr && r.progress > 0.15 && this.t - r.hintAt > 6) {
+      if (level >= thr && this.t - r.hintAt > 8) {
         r.hintAt = this.t;
-        this.G.advisor?.say('rain-palm', 'Rain is a hand spell now, my lord: open your palm and hold Insight together.', { priority: 2, cooldown: 8 });
+        this.G.advisor?.say('rain-palm', 'Rain is a camera spell, my lord: hold an open palm to the camera with Insight.', { priority: 2, cooldown: 8 });
       }
       r.progress = Math.max(0, r.progress - dt * 2);
       return;
@@ -302,6 +303,7 @@ export class StoneAge {
     this.particles.update(dt);
     this.bolts = this.bolts.filter((b) => (b.life -= dt) > 0);
     this.flash = Math.max(0, this.flash - dt);
+    this.joyStep(dt);   // #152: the joy buff, every frame while you smile
 
     // ---- Fire and the focus/insight challenge ----
     const f = this.fire;
@@ -426,7 +428,7 @@ export class StoneAge {
     }
 
     // ---- Births ----
-    this.birthTimer += dt;
+    this.birthTimer += dt * (1 + 0.6 * (this.joy || 0));   // #152: joy brings babies sooner
     if (this.birthTimer > 2.2) {
       this.birthTimer = 0;
       const alive = this.living();
@@ -751,11 +753,8 @@ export class StoneAge {
 
   drawAfterLight(ctx) {
     for (const b of this.bolts) drawBolt(ctx, b.pts, Math.min(1, b.life * 4));
-    const a = this.G.brain.aim;
-    // Painted into the map in 3D too: the map drapes over the terrain, so it lands exactly on the
-    // ground point under the cursor (the standing sprite version sat above it, or didn't show).
-    const w = this.G.world, p = w.aimPoint(a);
-    drawReticle(ctx, p.x, p.y, this.t, '#ffe066');
+    // The aim reticle is drawn once, on top of the lighting, by main.js (#301).
+    const w = this.G.world;
     if (this.flash > 0) { ctx.fillStyle = `rgba(220,230,255,${this.flash * 0.9})`; ctx.fillRect(0, 0, w.width, w.height); }
   }
 
@@ -964,32 +963,62 @@ export class StoneAge {
     this.particles.burst(60, () => ({ x: cx + rand(-60, 60), y: cy + rand(-100, 26), vx: -4, vy: rand(70, 100), life: rand(0.5, 1), maxLife: 1, size: 1, color: 'rgba(158,201,255,0.75)' }));
   }
 
-  // Face mood. Joy: the tribe dances and believes. Anger: it gets restless. Surprise: the sky
-  // flashes. Sadness: the night gets darker. Sent on every change of dominant mood (including
-  // back to neutral) and again every few seconds while a mood stays strong.
+  // The tribe at home (not settlers or sailors): who the face's mood reaches.
+  homeTribe() { return this.living().filter((p) => !p.colony && p.state !== 'embark' && p.state !== 'aboard'); }
+
+  // #152: joy is a continuous buff while the face smiles (or the slider says Happy): the tribe at
+  // home dances, gains faith, loses fear and has babies sooner, and sparkles rise from the dancers.
+  // It stops the moment the smile does (src/camera/mood-actions.js joyBuff).
+  joyStep(dt) {
+    const joy = this.done ? 0 : joyBuff(this.G.mood);
+    this.joy = joy;
+    const home = this.homeTribe();
+    const dancers = [];
+    for (const p of home) {
+      const free = joy > 0 && ['idle', 'warm', 'huddle', 'dance', 'cower'].includes(p.state);
+      if (free) { p.state2 = 'dance'; p.moodDance = true; dancers.push(p); }
+      else if (p.moodDance) { p.moodDance = false; p.state2 = null; }
+      if (joy > 0) { p.faith = clamp(p.faith + dt * 0.06 * joy); p.fear = clamp(p.fear - dt * 0.1 * joy); }
+    }
+    for (let n = sparkleCount(joy, dt, 14); n > 0 && dancers.length; n--) {
+      const p = pick(dancers);
+      this.particles.add({ x: p.x + rand(-2, 2), y: p.y - 8, vx: rand(-3, 3), vy: rand(-16, -9), life: 0.9, maxLife: 0.9, size: 1, color: pick(JOY_COLORS) });
+    }
+  }
+
+  // #152: a surprise is a one-shot: lightning cracks on screen, a capped flash and a short shake
+  // (none under reduced motion), thunder, and the tribe jumps.
+  surpriseStrike() {
+    const G = this.G, fx = surpriseEffect(reducedMotion());
+    this.flash = Math.max(this.flash, fx.flash);
+    G.shake = Math.max(G.shake || 0, fx.shake);
+    const c = G.camera?.viewCenter?.() || this.fire;   // somewhere on screen
+    for (let i = 0; i < fx.bolts; i++) this.bolts.push({ pts: makeBolt(c.x + rand(-140, 140), c.y + rand(-60, 70)), life: 0.3 + i * 0.12 });
+    G.audio?.thunder?.();
+    for (const p of this.homeTribe()) p.fear = clamp(p.fear + 0.15);
+    floater(this.particles, c.x, c.y - 40, 'SURPRISE!', '#ffe066', 10);
+  }
+
+  // Face mood. Joy is the continuous buff above (its onset gets a floater and a faith boost).
+  // Surprise fires once per event (mood.surpriseTriggered), not while a face just stays surprised.
+  // Anger: the tribe gets restless. Sadness: the night gets darker. Sent on every change of
+  // dominant mood (including back to neutral), on a surprise, and every few seconds while strong.
   onMood(mood) {
     const G = this.G;
     if (!G) return;
     this.baseDarkness ??= this.darkness;
     this.darkness = clamp(this.baseDarkness + (mood.dominant === 'sadness' ? 0.25 : 0), 0, 0.9);
-    const home = this.living().filter((p) => !p.colony && p.state !== 'embark' && p.state !== 'aboard');
-    if (mood.dominant !== 'joy') for (const p of home) if (p.moodDance) { p.moodDance = false; p.state2 = null; }
     if (this.done) return;
+    if (surpriseFires(mood)) this.surpriseStrike();
+    const home = this.homeTribe();
     if (mood.dominant === 'joy') {
-      for (const p of home) {
-        p.faith = clamp(p.faith + 0.12);
-        p.fear = clamp(p.fear - 0.15);
-        if (['idle', 'warm', 'huddle', 'dance', 'cower'].includes(p.state)) { p.state2 = 'dance'; p.moodDance = true; }
+      if (mood.reason === 'change' && joyBuff(mood) > 0) {
+        for (const p of home) p.faith = clamp(p.faith + 0.12);
+        floater(this.particles, this.fire.x, this.fire.y - 18, 'the tribe dances!', '#ffe066', 7);
       }
     } else if (mood.dominant === 'anger') {
       for (const p of home) { p.fear = clamp(p.fear + 0.1); p.faith = clamp(p.faith - 0.05); }
       if (mood.reason === 'change') floater(this.particles, this.fire.x, this.fire.y - 16, 'grumbling', '#ff8a9c', 6);
-    } else if (mood.dominant === 'surprise') {
-      this.flash = Math.max(this.flash, 0.3);
-      const c = G.camera?.viewCenter?.() || this.fire;   // somewhere on screen
-      this.bolts.push({ pts: makeBolt(c.x + rand(-140, 140), c.y + rand(-60, 70)), life: 0.3 });
-      G.audio.thunder();
-      for (const p of home) p.fear = clamp(p.fear + 0.05);
     }
   }
 }

@@ -49,7 +49,7 @@ export class SimPlanet {
       stats: { lightning: 0, smitten: 0, births: 0, deaths: 0, recessions: 0, restarts: 0 },
       eraTimes: [], eraStart: 0, finished: false,
       complete: () => { this.outcome ||= 'win'; },
-      fail: () => { this.outcome ||= 'lose'; },
+      fail: (reason) => { this.outcome ||= 'lose'; this.failReason ||= reason || null; },
       finish: noop,
     };
     this.scene = new StoneAge();
@@ -62,6 +62,7 @@ export class SimPlanet {
   // A fresh Stone Age (a new tribe) on the same world, e.g. after a win or a loss (#68).
   restart() {
     this.outcome = null;
+    this.failReason = null;
     this.aiLastBolt = -Infinity;
     this.scene = new StoneAge();
     this.scene.simulated = true;
