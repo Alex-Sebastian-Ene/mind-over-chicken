@@ -32,6 +32,12 @@ export class Engine {
     draw_text_badge(cx: number, y: number, text: string, text_r: number, text_g: number, text_b: number, bg_r: number, bg_g: number, bg_b: number, bg_a: number): void;
     draw_text_centered(cx: number, y: number, text: string, r: number, g: number, b: number, a: number): void;
     end_frame(night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
+    /**
+     * Mirror the JS scene on screen into the HUD (#191): its objectives (`flags` bit 1 done,
+     * 2 bad, 4 plain) and run time. The Rust era sim then stands still and raises nothing of its
+     * own; see GameFlow::mirrored. Called by src/main.js every frame, before game_tick.
+     */
+    game_mirror(run_time: number, labels: string[], values: string[], flags: Uint8Array | number[]): void;
     game_on_blink(aim_x: number, aim_y: number): void;
     game_on_cast(spell: string, aim_x: number, aim_y: number): void;
     game_restart_era(): void;
@@ -41,6 +47,10 @@ export class Engine {
      * (EEG agitation or face anger, 0..1, about 0.15 at rest).
      */
     game_tick(dt: number, calm: number, focus: number, stress: number, blinks: number): void;
+    /**
+     * Back to the Rust era sim driving the HUD (the all-Rust app never mirrors).
+     */
+    game_unmirror(): void;
     /**
      * Standalone helper to generate a civ planet RGBA texture (#109).
      */
@@ -106,6 +116,10 @@ export class Engine {
     pan_camera(dx: number, dz: number): void;
     project_to_screen(wx: number, wz: number, cw: number, ch: number): Float32Array;
     render_3d(dt: number, sun_x: number, sun_y: number, sun_z: number, night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
+    /**
+     * Blit an overlay canvas on top of the rendered 3D scene with alpha blending.
+     */
+    render_overlay_canvas(canvas: HTMLCanvasElement, alpha: number, canvas_w: number, canvas_h: number): void;
     render_uploaded_canvas(night: number, flash: number, fade: number, shake_x: number, shake_y: number, canvas_w: number, canvas_h: number): void;
     screen_to_ground(sx: number, sy: number, cw: number, ch: number): Float32Array;
     set_3d_mode(enabled: boolean): void;
@@ -114,7 +128,11 @@ export class Engine {
      * as open ocean. JS passes its palette's deep-water colour.
      */
     set_backdrop(r: number, g: number, b: number): void;
+    set_camera_distance(distance: number): void;
+    set_camera_pitch(pitch: number): void;
+    set_camera_pose(yaw: number, pitch: number, distance: number): void;
     set_camera_target(tx: number, tz: number): void;
+    set_camera_yaw(yaw: number): void;
     set_era(era: number): void;
     /**
      * Use the JS world's heights (row-major `width × height`, 0..1, sea level 0.33) for the 3D
@@ -245,7 +263,11 @@ export class RustBrain {
     blinks(): number;
     calm(): number;
     focus(): number;
-    ingest(delta: number, theta: number, alpha: number, beta: number, gamma: number, blink: boolean, hr: number, tilt_x: number, tilt_y: number, motion: number, quality: number): boolean;
+    /**
+     * One headset frame: EEG bands, blink, head tilt, motion and contact quality. There is no
+     * heart-rate argument: the game does not read heart rate (#99, #153).
+     */
+    ingest(delta: number, theta: number, alpha: number, beta: number, gamma: number, blink: boolean, tilt_x: number, tilt_y: number, motion: number, quality: number): boolean;
     constructor();
     retrain(): boolean;
     set_cue(cue_id: number): void;
@@ -265,7 +287,9 @@ export class RustCalibration {
 }
 
 /**
- * Standalone WebAssembly Cast Controller for camera god powers (#33, #108)
+ * Standalone WebAssembly Cast Controller for camera god powers (#33, #108). The browser's
+ * src/camera/casts.js runs this: the three core moves, with the fist-to-open fireball (#150, #159).
+ * `update` returns [held, progress, cast, aiming, armed].
  */
 export class RustCastController {
     free(): void;
@@ -288,7 +312,11 @@ export class RustEmotionTracker {
     [Symbol.dispose](): void;
     constructor(calibrate_seconds: number);
     reset(): void;
-    update_direct(has_face: boolean, mouth_smile_left: number, mouth_smile_right: number, brow_down_left: number, brow_down_right: number, mouth_press_left: number, mouth_press_right: number, jaw_open: number, brow_inner_up: number, eye_wide_left: number, eye_wide_right: number, mouth_frown_left: number, mouth_frown_right: number, dt: number): Array<any>;
+    /**
+     * Arguments follow `INPUTS` in src/camera/emotion.js. Returns
+     * `[dominant, joy, anger, surprise, sadness, neutral, intensity, face, event, surpriseTriggered, calibrating]`.
+     */
+    update_direct(has_face: boolean, mouth_smile_left: number, mouth_smile_right: number, brow_down_left: number, brow_down_right: number, mouth_press_left: number, mouth_press_right: number, jaw_open: number, brow_inner_up: number, brow_outer_up_left: number, brow_outer_up_right: number, eye_wide_left: number, eye_wide_right: number, mouth_frown_left: number, mouth_frown_right: number, dt: number): Array<any>;
 }
 
 /**
@@ -325,6 +353,10 @@ export class RustGalaxy {
     planet_pos_y(idx: number): number;
     planet_progress(idx: number): number;
     set_attended(planet_idx: number): void;
+    ship_count(): number;
+    ship_from(idx: number): number;
+    ship_t(idx: number): number;
+    ship_to(idx: number): number;
     step(dt: number, calm: number, focus: number, stress: number, blinks_last_10s: number, blinks_total: number): void;
     war_battles(): Float32Array;
     war_bodies(): Float32Array;
@@ -454,6 +486,11 @@ export class RustSimSource {
     blink(): void;
     constructor(seed: number);
     set_input(calm: boolean, focus: boolean, panic: boolean): void;
+    /**
+     * The last frame emitted over `dt`, as `SIM_FRAME_LEN` numbers: delta, theta, alpha, beta,
+     * gamma, blink (0 or 1), tilt x, tilt y, motion, quality. All zeros when no frame was due
+     * (quality 0). No heart rate (#153).
+     */
     step(dt: number): Float32Array;
 }
 
@@ -547,6 +584,12 @@ export class ViewCamera {
      * smaller than the view). Draw each with `drawImage(world, sx, sy, w, h, dx, dy, w, h)`.
      */
     blits(): Float32Array;
+    /**
+     * Like `blits`, for a window `scale` times the view's size around the same centre, with the
+     * destination rectangles shrunk back onto the view: `[sx, sy, w, h, dx, dy, dw, dh]` per
+     * rectangle. A zoomed-out frame, e.g. an era's intro easing in onto its stage.
+     */
+    blits_scaled(scale: number): Float32Array;
     center_x(): number;
     center_y(): number;
     /**
@@ -668,11 +711,13 @@ export interface InitOutput {
     readonly engine_draw_text_badge: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
     readonly engine_draw_text_centered: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly engine_end_frame: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+    readonly engine_game_mirror: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly engine_game_on_blink: (a: number, b: number, c: number) => void;
     readonly engine_game_on_cast: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly engine_game_restart_era: (a: number) => void;
     readonly engine_game_start_era: (a: number, b: number) => void;
     readonly engine_game_tick: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly engine_game_unmirror: (a: number) => void;
     readonly engine_generate_civ_terrain: (a: number, b: number, c: number) => [number, number];
     readonly engine_generate_terrain: (a: number, b: number, c: number, d: number) => [number, number];
     readonly engine_get_camera_distance: (a: number) => number;
@@ -729,11 +774,16 @@ export interface InitOutput {
     readonly engine_pan_camera: (a: number, b: number, c: number) => void;
     readonly engine_project_to_screen: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly engine_render_3d: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
+    readonly engine_render_overlay_canvas: (a: number, b: any, c: number, d: number, e: number) => [number, number];
     readonly engine_render_uploaded_canvas: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly engine_screen_to_ground: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly engine_set_3d_mode: (a: number, b: number) => void;
     readonly engine_set_backdrop: (a: number, b: number, c: number, d: number) => void;
+    readonly engine_set_camera_distance: (a: number, b: number) => void;
+    readonly engine_set_camera_pitch: (a: number, b: number) => void;
+    readonly engine_set_camera_pose: (a: number, b: number, c: number, d: number) => void;
     readonly engine_set_camera_target: (a: number, b: number, c: number) => void;
+    readonly engine_set_camera_yaw: (a: number, b: number) => void;
     readonly engine_set_era: (a: number, b: number) => void;
     readonly engine_set_heightmap: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly engine_set_terrain_biome: (a: number, b: number, c: number) => void;
@@ -790,7 +840,7 @@ export interface InitOutput {
     readonly rustbrain_blinks: (a: number) => number;
     readonly rustbrain_calm: (a: number) => number;
     readonly rustbrain_focus: (a: number) => number;
-    readonly rustbrain_ingest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => number;
+    readonly rustbrain_ingest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
     readonly rustbrain_new: () => number;
     readonly rustbrain_retrain: (a: number) => number;
     readonly rustbrain_set_cue: (a: number, b: number) => void;
@@ -808,7 +858,7 @@ export interface InitOutput {
     readonly rustcastcontroller_update: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly rustemotiontracker_new: (a: number) => number;
     readonly rustemotiontracker_reset: (a: number) => void;
-    readonly rustemotiontracker_update_direct: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => any;
+    readonly rustemotiontracker_update_direct: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number) => any;
     readonly rustfingercontroller_new: () => number;
     readonly rustfingercontroller_reset: (a: number) => void;
     readonly rustfingercontroller_update: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => any;
@@ -829,6 +879,10 @@ export interface InitOutput {
     readonly rustgalaxy_planet_pos_y: (a: number, b: number) => number;
     readonly rustgalaxy_planet_progress: (a: number, b: number) => number;
     readonly rustgalaxy_set_attended: (a: number, b: number) => void;
+    readonly rustgalaxy_ship_count: (a: number) => number;
+    readonly rustgalaxy_ship_from: (a: number, b: number) => number;
+    readonly rustgalaxy_ship_t: (a: number, b: number) => number;
+    readonly rustgalaxy_ship_to: (a: number, b: number) => number;
     readonly rustgalaxy_step: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly rustgalaxy_war_battles: (a: number) => [number, number];
     readonly rustgalaxy_war_bodies: (a: number) => [number, number];
@@ -913,6 +967,7 @@ export interface InitOutput {
     readonly rustworldgen_use_learned_relief: (a: number) => number;
     readonly rustworldgen_width: (a: number) => number;
     readonly viewcamera_blits: (a: number) => [number, number];
+    readonly viewcamera_blits_scaled: (a: number, b: number) => [number, number];
     readonly viewcamera_center_x: (a: number) => number;
     readonly viewcamera_center_y: (a: number) => number;
     readonly viewcamera_copies: (a: number, b: number) => [number, number];
@@ -949,11 +1004,10 @@ export interface InitOutput {
     readonly moc_brain_get_agitation: (a: number) => number;
     readonly moc_brain_get_calm: (a: number) => number;
     readonly moc_brain_get_focus: (a: number) => number;
-    readonly moc_brain_get_hr_delta: (a: number) => number;
     readonly moc_brain_get_model_accuracy: (a: number) => number;
     readonly moc_brain_get_model_trust: (a: number, b: number) => number;
     readonly moc_brain_get_stress: (a: number) => number;
-    readonly moc_brain_ingest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => number;
+    readonly moc_brain_ingest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
     readonly moc_brain_new: () => number;
     readonly moc_brain_set_cue: (a: number, b: number) => void;
     readonly moc_brain_update: (a: number, b: number) => number;
@@ -965,8 +1019,8 @@ export interface InitOutput {
     readonly moc_sim_set_input: (a: number, b: number, c: number, d: number) => void;
     readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_: (a: number, b: number, c: number) => void;
     readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__295: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__296: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__307: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__308: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
@@ -975,6 +1029,7 @@ export interface InitOutput {
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_destroy_closure: (a: number, b: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
+    readonly __externref_drop_slice: (a: number, b: number) => void;
     readonly __wbindgen_start: () => void;
 }
 

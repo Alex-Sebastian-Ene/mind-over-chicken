@@ -156,7 +156,26 @@ export class World {
       const px = this.wrapX(Math.round(x + Math.cos(a) * r)), py = this.wrapY(Math.round(y + Math.sin(a) * r));
       if (this.walkable(px, py) && (!pred || pred(px, py))) return { x: px, y: py };
     }
-    return this.nearestWalkable(x, y);
+    const near = this.nearestWalkable(x, y);
+    if (!pred || pred(near.x, near.y)) return near;
+    if (this.sites?.village && (!pred || pred(this.sites.village.x, this.sites.village.y))) {
+      return { ...this.sites.village };
+    }
+    return near;
+  }
+
+  // A walkable point in a loose cluster around (x, y): a free angle, a radius biased towards
+  // the centre, and a little space from the structures already placed. Co-ordinates wrap.
+  clusterSpot(x, y, spreadX, spreadY, pred, placed, rng = Math.random, innerX = 5, innerY = 3) {
+    for (let i = 0; i < 30; i++) {
+      const a = rng() * Math.PI * 2, r = Math.pow(rng(), 1.35);
+      const px = this.wrapX(Math.round(x + Math.cos(a) * (innerX + r * (spreadX - innerX))));
+      const py = this.wrapY(Math.round(y + Math.sin(a) * (innerY + r * (spreadY - innerY))));
+      if (!this.walkable(px, py) || (pred && !pred(px, py))) continue;
+      if (placed && placed.some((o) => Math.abs(this.dx(px, o.x)) < 3 && Math.abs(this.dy(py, o.y)) < 3)) continue;
+      return { x: px, y: py };
+    }
+    return null;
   }
 
   // Era-specific land use. Called once per era before painting.
@@ -186,15 +205,15 @@ export class World {
 
     if (era === 'stone') {
       for (let i = 0; i < 4; i++) {
-        const a = (i / 4) * Math.PI * 2 + 0.5;
-        this.structures.push({ kind: 'hut', x: Math.round(v.x + Math.cos(a) * 11), y: Math.round(v.y + Math.sin(a) * 7) });
+        const p = this.clusterSpot(v.x, v.y, 13, 8, null, this.structures, rng, 6, 4);
+        if (p) this.structures.push({ kind: 'hut', ...p });
       }
     }
     if (era === 'farming') {
       farms(14, 18, 60);
       for (let i = 0; i < 10; i++) {
-        const a = (i / 10) * Math.PI * 2;
-        this.structures.push({ kind: 'hut', x: Math.round(v.x + Math.cos(a) * (12 + (i % 2) * 6)), y: Math.round(v.y + Math.sin(a) * (8 + (i % 2) * 4)) });
+        const p = this.clusterSpot(v.x, v.y, 19, 12, null, this.structures, rng, 6, 4);
+        if (p) this.structures.push({ kind: 'hut', ...p });
       }
     }
     // Settlements spread to the other continents from the farming age on.
@@ -202,12 +221,11 @@ export class World {
       for (const c of this.continents.slice(1)) {
         const n = era === 'farming' ? 5 : 8;
         for (let i = 0; i < n; i++) {
-          const a = (i / n) * Math.PI * 2;
-          const x = this.wrapX(Math.round(c.village.x + Math.cos(a) * 7)), y = this.wrapY(Math.round(c.village.y + Math.sin(a) * 5));
-          if (!this.walkable(x, y)) continue;
-          if (era === 'farming') this.structures.push({ kind: 'hut', x, y });
-          else if (era === 'space' && i % 3 === 0) this.structures.push({ kind: 'tower', x, y, h: 7 + (i % 4) });
-          else this.structures.push({ kind: 'house', x, y, roof: era === 'space' ? '#5a6b8c' : '#8e3b2a' });
+          const p = this.clusterSpot(c.village.x, c.village.y, 9, 6, null, this.structures, rng, 3, 2);
+          if (!p) continue;
+          if (era === 'farming') this.structures.push({ kind: 'hut', ...p });
+          else if (era === 'space' && i % 3 === 0) this.structures.push({ kind: 'tower', ...p, h: 7 + (i % 4) });
+          else this.structures.push({ kind: 'house', ...p, roof: era === 'space' ? '#5a6b8c' : '#8e3b2a' });
         }
         if (era !== 'farming' && c.harbor) road(c.village, c.harbor.land, 1);
       }
@@ -219,17 +237,13 @@ export class World {
       road({ x: v.x, y: v.y - 22 }, { x: v.x, y: v.y + 22 });
       for (let y = -2; y <= 2; y++) for (let x = -3; x <= 3; x++) setT(v.x + x, v.y + y, T.PAVED);
       const roofs = era === 'industry' ? ['#a4402f', '#8e3b2a', '#b5543a', '#6f4a3a'] : ['#5a6b8c', '#7f8fa8', '#a4402f', '#4d5d7a'];
-      let placed = 0;
-      for (let ring = 0; ring < 3; ring++) {
-        const n = 10 + ring * 6;
-        for (let i = 0; i < n; i++) {
-          const a = (i / n) * Math.PI * 2 + ring * 0.3;
-          const x = Math.round(v.x + Math.cos(a) * (12 + ring * 9)), y = Math.round(v.y + Math.sin(a) * (8 + ring * 6));
-          if (!this.walkable(x, y) || dist(x, y, s.exchange.x, s.exchange.y) < 9 || dist(x, y, s.factory.x, s.factory.y) < 12) continue;
-          if (era === 'space' && ring === 0 && i % 2 === 0) this.structures.push({ kind: 'tower', x, y, h: 8 + Math.floor(rng() * 7) });
-          else this.structures.push({ kind: 'house', x, y, roof: roofs[(i + ring) % roofs.length] });
-          placed++;
-        }
+      for (let i = 0; i < 48; i++) {
+        const p = this.clusterSpot(v.x, v.y, 30, 20,
+          (x, y) => dist(x, y, s.exchange.x, s.exchange.y) >= 9 && dist(x, y, s.factory.x, s.factory.y) >= 12,
+          this.structures, rng, 9, 6);
+        if (!p) continue;
+        if (era === 'space' && i % 10 === 0) this.structures.push({ kind: 'tower', ...p, h: 8 + Math.floor(rng() * 7) });
+        else this.structures.push({ kind: 'house', ...p, roof: roofs[i % roofs.length] });
       }
       this.structures.push({ kind: 'factory', x: s.factory.x, y: s.factory.y, smoke: era === 'industry' });
       this.structures.push({ kind: 'exchange', x: s.exchange.x, y: s.exchange.y });
@@ -371,14 +385,20 @@ export class World {
   }
 
   // Animated water glints, drawn every frame on top of the baked layer.
+  // A few glints that fade in and out at fixed spots, each on its own slow phase. They used to be
+  // a fresh random scatter every half second, which read as arrays of white pixels popping up
+  // on the sea (Alex). Same density per pixel of sea on any world size (#129).
   drawWater(ctx, time) {
-    const rng = mulberry32((Math.floor(time * 2) * 7919) ^ this.seed);
-    ctx.fillStyle = 'rgba(170, 205, 240, 0.55)';
-    // As many glints per pixel of sea on a bigger world as on the 320×180 one (#129).
-    const n = Math.round((70 * this.width * this.height) / (W * H));
+    const rng = mulberry32(this.seed ^ 0x2545f491);
+    const n = Math.round((24 * this.width * this.height) / (W * H));
     for (let i = 0; i < n; i++) {
       const x = Math.floor(rng() * this.width), y = Math.floor(rng() * this.height);
-      if (this.typeAt(x, y) <= T.SHALLOW) ctx.fillRect(x, y, 2, 1);
+      const phase = rng() * Math.PI * 2, speed = 0.5 + rng() * 0.7;
+      if (this.typeAt(x, y) > T.SHALLOW) continue;
+      const a = Math.max(0, Math.sin(time * speed + phase)) * 0.3;
+      if (a < 0.03) continue;
+      ctx.fillStyle = `rgba(170, 205, 240, ${a.toFixed(3)})`;
+      ctx.fillRect(x, y, 2, 1);
     }
   }
 }

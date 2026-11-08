@@ -79,6 +79,8 @@ pub struct WebGl3DRenderer {
     pub u_water_light_pos: WebGlUniformLocation,
     pub u_water_light_rad: WebGlUniformLocation,
     pub u_water_light_int: WebGlUniformLocation,
+    pub u_water_world_h: Option<WebGlUniformLocation>,
+    pub u_water_wave_k: Option<WebGlUniformLocation>,
 
     // Billboard uniforms
     pub u_billboard_vp: WebGlUniformLocation,
@@ -199,6 +201,7 @@ attribute vec3 a_normal;
 
 uniform mat4 u_viewProjection;
 uniform mediump float u_time; // must match WATER_FS precision or the program fails to link
+uniform mediump vec4 u_waveK; // wave numbers (x1, z1, x2, z2), whole waves per world period
 uniform float u_offsetX;
 uniform float u_offsetZ;
 
@@ -206,13 +209,13 @@ varying vec2 v_texCoord;
 varying vec3 v_worldPos;
 
 void main() {
-    vec3 pos = a_position;
-    // Two-octave animated 3D wave ripples
-    float w1 = sin(pos.x * 0.14 + u_time * 2.4) * cos(pos.z * 0.14 + u_time * 1.9) * 0.36;
-    float w2 = sin(pos.x * 0.28 - u_time * 3.1) * cos(pos.z * 0.24 + u_time * 2.7) * 0.14;
-    pos.y += w1 + w2;
+    vec3 wpos = a_position + vec3(u_offsetX, 0.0, u_offsetZ);
+    // Two-octave animated 3D wave ripples. A whole number of waves fits each world period
+    // (u_waveK), so the copies meet at the seams and nothing jumps when the camera wraps (#198).
+    float w1 = sin(wpos.x * u_waveK.x + u_time * 2.4) * cos(wpos.z * u_waveK.y + u_time * 1.9) * 0.36;
+    float w2 = sin(wpos.x * u_waveK.z - u_time * 3.1) * cos(wpos.z * u_waveK.w + u_time * 2.7) * 0.14;
+    wpos.y += w1 + w2;
 
-    vec3 wpos = pos + vec3(u_offsetX, 0.0, u_offsetZ);
     v_worldPos = wpos;
     v_texCoord = a_texCoord;
     gl_Position = u_viewProjection * vec4(wpos, 1.0);
@@ -229,6 +232,8 @@ uniform vec3 u_sunDir;
 uniform vec3 u_camPos;
 uniform float u_night;
 uniform float u_time;
+uniform float u_worldH;
+uniform vec4 u_waveK;
 uniform int u_lightCount;
 uniform vec3 u_lightPos[16];
 uniform float u_lightRad[16];
@@ -240,16 +245,19 @@ void main() {
     vec3 dayWaterShallow = vec3(0.12, 0.42, 0.58);
     vec3 nightWater = vec3(0.02, 0.05, 0.14);
 
-    // Depth / latitude variation
-    float depthGrad = clamp(abs(v_worldPos.z - 90.0) / 90.0, 0.0, 1.0);
+    // Depth / latitude variation with seamless torus wrapping
+    float halfH = max(1.0, u_worldH * 0.5);
+    float wz = mod(mod(v_worldPos.z, u_worldH) + u_worldH, u_worldH);
+    float depthGrad = clamp(abs(wz - halfH) / halfH, 0.0, 1.0);
     vec3 baseWater = mix(dayWaterShallow, dayWaterDeep, depthGrad * 0.8 + 0.2);
     vec3 col = mix(baseWater, nightWater, u_night);
 
     // Analytical wave normal from wave derivatives
-    float dw_dx = 0.14 * cos(v_worldPos.x * 0.14 + u_time * 2.4) * cos(v_worldPos.z * 0.14 + u_time * 1.9) * 0.36
-                + 0.28 * cos(v_worldPos.x * 0.28 - u_time * 3.1) * cos(v_worldPos.z * 0.24 + u_time * 2.7) * 0.14;
-    float dw_dz = -0.14 * sin(v_worldPos.x * 0.14 + u_time * 2.4) * sin(v_worldPos.z * 0.14 + u_time * 1.9) * 0.36
-                - 0.24 * sin(v_worldPos.x * 0.28 - u_time * 3.1) * sin(v_worldPos.z * 0.24 + u_time * 2.7) * 0.14;
+    vec4 k = u_waveK;
+    float dw_dx = k.x * cos(v_worldPos.x * k.x + u_time * 2.4) * cos(v_worldPos.z * k.y + u_time * 1.9) * 0.36
+                + k.z * cos(v_worldPos.x * k.z - u_time * 3.1) * cos(v_worldPos.z * k.w + u_time * 2.7) * 0.14;
+    float dw_dz = -k.y * sin(v_worldPos.x * k.x + u_time * 2.4) * sin(v_worldPos.z * k.y + u_time * 1.9) * 0.36
+                - k.w * sin(v_worldPos.x * k.z - u_time * 3.1) * sin(v_worldPos.z * k.w + u_time * 2.7) * 0.14;
     vec3 norm = normalize(vec3(-dw_dx, 1.0, -dw_dz));
 
     // Specular sunlight and moonlight glint (Fresnel / Blinn-Phong)
@@ -263,12 +271,7 @@ void main() {
     vec3 glintColor = mix(vec3(1.0, 0.85, 0.55), vec3(0.5, 0.7, 1.0), u_night);
     col += glintColor * (glint * (sunVis + u_night * 0.3));
 
-    // Sparkling foam crests
-    vec2 cell = floor(v_worldPos.xz * 0.5);
-    float h = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
-    if (h > 0.975 && sin(u_time * 3.0 + h * 40.0) > 0.5) {
-        col += vec3(0.35, 0.50, 0.65) * (1.0 - u_night * 0.5);
-    }
+    // (No blinking foam cells: they read as random arrays of white pixels on the sea. Alex.)
 
     // Dynamic point lights reflection on water
     for (int i = 0; i < 16; i++) {
@@ -554,6 +557,8 @@ impl WebGl3DRenderer {
         let u_water_light_int = gl
             .get_uniform_location(&water_program, "u_lightInt")
             .ok_or("Missing u_lightInt in water shader")?;
+        let u_water_world_h = gl.get_uniform_location(&water_program, "u_worldH");
+        let u_water_wave_k = gl.get_uniform_location(&water_program, "u_waveK");
 
         // Billboard uniform locations
         let u_billboard_vp = gl
@@ -637,6 +642,8 @@ impl WebGl3DRenderer {
             u_water_light_pos,
             u_water_light_rad,
             u_water_light_int,
+            u_water_world_h,
+            u_water_wave_k,
             u_billboard_vp,
             u_billboard_cam_right,
             u_billboard_cam_up,
@@ -776,6 +783,7 @@ impl WebGl3DRenderer {
         sun_dir: Vec3,
         night: f32,
         lights: &[Light3D],
+        shadows: &[BillboardVertex],
         billboards: &[BillboardVertex],
     ) {
         let gl = &self.gl;
@@ -900,6 +908,13 @@ impl WebGl3DRenderer {
         gl.uniform3fv_with_f32_array(Some(&self.u_water_light_pos), &pos_arr);
         gl.uniform1fv_with_f32_array(Some(&self.u_water_light_rad), &rad_arr);
         gl.uniform1fv_with_f32_array(Some(&self.u_water_light_int), &int_arr);
+        if let Some(loc) = self.u_water_world_h.as_ref() {
+            gl.uniform1f(Some(loc), self.world_h);
+        }
+        if let Some(loc) = self.u_water_wave_k.as_ref() {
+            let [a, b, c, d] = wave_numbers(self.world_w, self.world_h);
+            gl.uniform4f(Some(loc), a, b, c, d);
+        }
 
         gl.enable(WebGlRenderingContext::BLEND);
         gl.blend_func(
@@ -933,8 +948,9 @@ impl WebGl3DRenderer {
         gl.depth_mask(true);
         unbind_attrs(gl, &water_attrs);
 
-        // 4. Render Billboard Sprites (camera-facing entities standing on the ground)
-        if !billboards.is_empty() {
+        // 4. Render ground shadows, then the billboard sprites (camera-facing entities standing
+        // on the ground). Both share one buffer: shadows first, sprites after.
+        if !billboards.is_empty() || !shadows.is_empty() {
             gl.use_program(Some(&self.billboard_program));
             gl.uniform_matrix4fv_with_f32_array(Some(&self.u_billboard_vp), false, &view_proj.m);
             gl.uniform3f(
@@ -976,17 +992,21 @@ impl WebGl3DRenderer {
             gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&self.atlas_texture));
 
             gl.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&self.billboard_vbo));
-            unsafe {
-                let bytes = std::slice::from_raw_parts(
-                    billboards.as_ptr() as *const u8,
-                    billboards.len() * std::mem::size_of::<BillboardVertex>(),
-                );
-                gl.buffer_data_with_u8_array(
-                    WebGlRenderingContext::ARRAY_BUFFER,
-                    bytes,
-                    WebGlRenderingContext::DYNAMIC_DRAW,
-                );
-            }
+            let vsize = std::mem::size_of::<BillboardVertex>();
+            let as_bytes = |v: &[BillboardVertex]| unsafe {
+                std::slice::from_raw_parts(v.as_ptr() as *const u8, v.len() * vsize)
+            };
+            gl.buffer_data_with_i32(
+                WebGlRenderingContext::ARRAY_BUFFER,
+                ((shadows.len() + billboards.len()) * vsize) as i32,
+                WebGlRenderingContext::DYNAMIC_DRAW,
+            );
+            gl.buffer_sub_data_with_i32_and_u8_array(WebGlRenderingContext::ARRAY_BUFFER, 0, as_bytes(shadows));
+            gl.buffer_sub_data_with_i32_and_u8_array(
+                WebGlRenderingContext::ARRAY_BUFFER,
+                (shadows.len() * vsize) as i32,
+                as_bytes(billboards),
+            );
 
             let b_stride = std::mem::size_of::<BillboardVertex>() as i32;
             let billboard_attrs = [
@@ -996,14 +1016,27 @@ impl WebGl3DRenderer {
             ];
 
             // Sprites stand up to ~40 units tall and spread a few units around their feet.
-            for &(ox, oz) in &offsets {
-                if !visible([0.0, 0.0, 0.0], [map_w, 48.0, map_h], 16.0, ox, oz) {
+            let seen: Vec<(f32, f32)> = offsets
+                .iter()
+                .copied()
+                .filter(|&(ox, oz)| visible([0.0, 0.0, 0.0], [map_w, 48.0, map_h], 16.0, ox, oz))
+                .collect();
+            // Shadows lie on the ground and overlap (a forest is hundreds of them): drawn without
+            // writing depth they just blend, rather than Z-fighting each other, and a sprite drawn
+            // after them is never clipped by one (#200).
+            let (n_shadow, n_sprite) = (shadows.len() as i32, billboards.len() as i32);
+            for (first, count, write_depth) in [(0, n_shadow, false), (n_shadow, n_sprite, true)] {
+                if count == 0 {
                     continue;
                 }
-                gl.uniform1f(Some(&self.u_billboard_offset_x), ox);
-                gl.uniform1f(Some(&self.u_billboard_offset_z), oz);
-                gl.draw_arrays(WebGlRenderingContext::TRIANGLES, 0, billboards.len() as i32);
+                gl.depth_mask(write_depth);
+                for &(ox, oz) in &seen {
+                    gl.uniform1f(Some(&self.u_billboard_offset_x), ox);
+                    gl.uniform1f(Some(&self.u_billboard_offset_z), oz);
+                    gl.draw_arrays(WebGlRenderingContext::TRIANGLES, first, count);
+                }
             }
+            gl.depth_mask(true);
             unbind_attrs(gl, &billboard_attrs);
         }
 
@@ -1011,6 +1044,20 @@ impl WebGl3DRenderer {
         gl.disable(WebGlRenderingContext::DEPTH_TEST);
         gl.bind_framebuffer(WebGlRenderingContext::FRAMEBUFFER, None);
     }
+}
+
+/// The water's wave numbers (x1, z1, x2, z2): the design's 0.14/0.14/0.28/0.24 rounded to a
+/// whole number of waves per world period, so every wrap copy of the sea lines up with its
+/// neighbours at the seams and the pattern doesn't jump when the camera wraps (#198).
+pub fn wave_numbers(world_w: f32, world_h: f32) -> [f32; 4] {
+    let tau = std::f32::consts::TAU;
+    let snap = |k: f32, period: f32| {
+        if period <= 0.0 {
+            return k;
+        }
+        (k * period / tau).round().max(1.0) * tau / period
+    };
+    [snap(0.14, world_w), snap(0.14, world_h), snap(0.28, world_w), snap(0.24, world_h)]
 }
 
 /// Point a vertex attribute at the bound ARRAY_BUFFER. Returns None, and touches nothing, when
@@ -1083,5 +1130,26 @@ fn link_program(
         Err(gl
             .get_program_info_log(&program)
             .unwrap_or_else(|| "Unknown link error".into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wave_numbers;
+
+    #[test]
+    fn waves_fit_the_world_period() {
+        for (w, h) in [(640.0f32, 360.0f32), (320.0, 180.0), (2560.0, 1280.0), (100.0, 37.0)] {
+            let k = wave_numbers(w, h);
+            for (kk, period) in [(k[0], w), (k[1], h), (k[2], w), (k[3], h)] {
+                let waves = kk * period / std::f32::consts::TAU;
+                assert!((waves - waves.round()).abs() < 1e-3, "{waves} waves over {period}");
+                assert!(waves >= 1.0);
+            }
+            // Close to the designed look on real world sizes.
+            if w >= 320.0 {
+                assert!((k[0] - 0.14).abs() < 0.02 && (k[3] - 0.24).abs() < 0.03, "{k:?}");
+            }
+        }
     }
 }

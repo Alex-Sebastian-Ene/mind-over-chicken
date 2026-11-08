@@ -61,7 +61,6 @@ pub unsafe extern "C" fn moc_brain_ingest(
     beta: f32,
     gamma: f32,
     blink: u32,
-    hr: f32,
     tilt_x: f32,
     tilt_y: f32,
     motion: f32,
@@ -77,7 +76,6 @@ pub unsafe extern "C" fn moc_brain_ingest(
                 gamma,
             },
             blink: blink != 0,
-            hr: if hr > 0.0 { Some(hr) } else { None },
             tilt: Some((tilt_x, tilt_y)),
             motion,
             quality,
@@ -100,11 +98,6 @@ pub unsafe extern "C" fn moc_brain_get_calm(ptr: *const Brain) -> f32 {
 #[no_mangle]
 pub unsafe extern "C" fn moc_brain_get_focus(ptr: *const Brain) -> f32 {
     ptr.as_ref().map(|b| b.focus).unwrap_or(0.0)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn moc_brain_get_hr_delta(ptr: *const Brain) -> f32 {
-    ptr.as_ref().map(|b| b.hr_delta()).unwrap_or(0.0)
 }
 
 #[no_mangle]

@@ -543,7 +543,17 @@ pub struct Effect {
 pub struct Fire {
     pub i: u32,
     pub ttl: f32,
+    /// How many tiles the fire has passed through to get here: each step spreads less (it burns
+    /// out on its own instead of sweeping whole forests).
+    pub gen: u8,
 }
+
+/// Fire spread attempts per burning tile per second, before the per-generation fall-off.
+pub const FIRE_SPREAD: f32 = 0.45;
+/// Each generation of a fire spreads this much less, so fires die out after a dozen steps or so.
+pub const FIRE_FALLOFF: f32 = 0.8;
+/// A woodcutter's harvest fells the tree this often (the forest near villages thins out).
+pub const FELL_CHANCE: f32 = 0.3;
 
 /// A war or raid target for one civilisation.
 #[derive(Clone, Copy, Debug)]
@@ -751,6 +761,9 @@ pub struct World {
     pub burning: Vec<u8>,
     pub fires: Vec<Fire>,
     pub scorched: Vec<(u32, f32)>,
+    /// Cleared forest (burnt or felled) waiting to grow back: (tile, when to try). A tile regrows
+    /// only with trees beside it, so forests heal from their edges and big clearings stay open.
+    pub regrow: Vec<(u32, f32)>,
     pub effects: Vec<Effect>,
     pub events: Vec<Event>,
     pub stats: Stats,
@@ -759,6 +772,8 @@ pub struct World {
     pub cam: Cam,
     pub view: Framebuffer,
     pub paths: Paths,
+    /// Sea routes toward ports and landing sites (#197): boats keep to the water.
+    pub sea: Paths,
     pub grid: Grid,
     pub marches: Vec<Vec<March>>,
     pub hostile: Vec<bool>,
@@ -896,6 +911,7 @@ impl World {
             burning: vec![0; n],
             fires: Vec::new(),
             scorched: Vec::new(),
+            regrow: Vec::new(),
             effects: Vec::new(),
             events: Vec::new(),
             stats: Stats::default(),
@@ -904,6 +920,7 @@ impl World {
             cam: Cam::centred_on(d, d.w as f32 / 2.0, d.h as f32 / 2.0),
             view: Framebuffer::default(),
             paths: Paths::new(),
+            sea: Paths::sea(),
             grid: Grid::new(d),
             marches: vec![Vec::new(); MAX_FACTIONS],
             hostile: vec![false; MAX_FACTIONS * MAX_FACTIONS],
@@ -1065,6 +1082,48 @@ impl World {
         }
         self.events.push(e);
         self.news_of(&e);
+    }
+
+    /// The living person nearest (x, y) within `r` tiles (#188: a pinch picks people up).
+    pub fn agent_near(&self, x: f32, y: f32, r: f32) -> Option<usize> {
+        let mut best = None;
+        let mut bd = r * r;
+        for (i, a) in self.agents.iter().enumerate() {
+            if !a.alive {
+                continue;
+            }
+            let (dx, dy) = (self.d.dx(x, a.x), self.d.dy(y, a.y));
+            let d = dx * dx + dy * dy;
+            if d < bd {
+                bd = d;
+                best = Some(i);
+            }
+        }
+        best
+    }
+
+    /// Set a living person down at (x, y) if it is walkable land; they drop what they were doing
+    /// and carry on from there (#188). Returns whether they moved.
+    pub fn move_agent(&mut self, i: usize, x: f32, y: f32) -> bool {
+        let (tx, ty) = (x.floor() as i32, y.floor() as i32);
+        if i >= self.agents.len() || !self.agents[i].alive || !self.terrain.walkable(tx, ty) {
+            return false;
+        }
+        let (wx, wy) = (self.d.wrap_xf(x), self.d.wrap_yf(y));
+        let (cx, cy) = (self.d.wrap_x(tx), self.d.wrap_y(ty));
+        let a = &mut self.agents[i];
+        a.x = wx;
+        a.y = wy;
+        a.nx = NO_TILE;
+        a.ny = NO_TILE;
+        a.px = cx;
+        a.py = cy;
+        a.gx = cx;
+        a.gy = cy;
+        a.stuck = 0;
+        a.state = State::Idle;
+        a.timer = 0.5;
+        true
     }
 
     pub fn alive_factions(&self) -> impl Iterator<Item = &Faction> {
@@ -1328,6 +1387,7 @@ impl World {
         self.night = 0.5 - 0.5 * (phase * std::f32::consts::TAU).cos();
         self.rain_t = (self.rain_t - dt).max(0.0);
         self.paths.refill(2);
+        self.sea.refill(1);
         self.update_fires(dt);
         self.update_effects(dt);
         #[cfg(not(target_arch = "wasm32"))]
@@ -1374,17 +1434,19 @@ impl World {
     }
 
     fn update_fires(&mut self, dt: f32) {
+        self.update_regrowth();
         if self.fires.is_empty() && self.scorched.is_empty() {
             return;
         }
         let rain = self.rain_t > 0.0;
-        let mut new: Vec<u32> = Vec::new();
+        let mut new: Vec<(u32, u8)> = Vec::new();
         for k in 0..self.fires.len() {
             self.fires[k].ttl -= dt * if rain { 5.0 } else { 1.0 };
             if rain || self.fires.len() + new.len() >= 700 {
                 continue;
             }
-            if self.rng.chance(dt * 1.1) {
+            let gen = self.fires[k].gen;
+            if self.rng.chance(dt * FIRE_SPREAD * FIRE_FALLOFF.powi(gen as i32)) {
                 let fi = self.fires[k].i as usize;
                 let (x, y) = ((fi % self.d.w) as i32, (fi / self.d.w) as i32);
                 let k = self.rng.below(8);
@@ -1393,14 +1455,14 @@ impl World {
                 if self.d.in_y(ny) {
                     let j = self.d.idx(x + ox, ny);
                     if self.burning[j] == 0 && terrain::flammable(self.terrain.kind[j]) && self.food.amt[j] > 0.05 {
-                        new.push(j as u32);
+                        new.push((j as u32, gen.saturating_add(1)));
                     }
                 }
             }
         }
-        for j in new {
+        for (j, gen) in new {
             if self.fires.len() < 700 && self.burning[j as usize] == 0 {
-                self.ignite_tile(j as usize);
+                self.ignite_tile_gen(j as usize, gen);
             }
         }
         let now = self.time;
@@ -1416,6 +1478,12 @@ impl World {
         for i in out {
             self.burning[i as usize] = 0;
             self.scorched.push((i, now + 25.0));
+            // A burnt forest is a clearing until trees beside it seed it again.
+            if self.terrain.kind[i as usize] == terrain::FOREST {
+                self.terrain.kind[i as usize] = terrain::GRASS;
+                let due = now + self.rng.range(30.0, 50.0);
+                self.regrow.push((i, due));
+            }
         }
         // Burnt land greens up again.
         if !self.scorched.is_empty() {
@@ -1439,15 +1507,71 @@ impl World {
     }
 
     pub fn ignite_tile(&mut self, i: usize) {
+        self.ignite_tile_gen(i, 0);
+    }
+
+    fn ignite_tile_gen(&mut self, i: usize, gen: u8) {
         if self.burning[i] != 0 || !terrain::flammable(self.terrain.kind[i]) {
             return;
         }
         self.burning[i] = 1;
-        let ttl = if self.terrain.kind[i] == terrain::FOREST { self.rng.range(3.0, 5.5) } else { self.rng.range(1.5, 3.0) };
-        self.fires.push(Fire { i: i as u32, ttl });
+        // Trees smoulder a while; grass flashes over.
+        let ttl = if self.terrain.kind[i] == terrain::FOREST { self.rng.range(4.0, 7.0) } else { self.rng.range(1.5, 3.0) };
+        self.fires.push(Fire { i: i as u32, ttl, gen });
         self.food.set(i, 0.0, self.time);
         let c = [44u8, 34, 30, 255];
         self.terrain.rgba[i * 4..i * 4 + 4].copy_from_slice(&c);
+    }
+
+    /// A woodcutter fells the tree on tile `i`: the forest becomes a clearing, which grows back
+    /// slowly from the trees around it (unless the village cuts it again first).
+    pub fn fell_tree(&mut self, i: usize) {
+        if self.terrain.kind[i] != terrain::FOREST || self.burning[i] != 0 {
+            return;
+        }
+        self.terrain.kind[i] = terrain::GRASS;
+        self.repaint(i);
+        let due = self.time + self.rng.range(60.0, 100.0);
+        self.regrow.push((i as u32, due));
+    }
+
+    fn repaint(&mut self, i: usize) {
+        let c = self.terrain.base_colour((i % self.d.w) as i32, (i / self.d.w) as i32);
+        self.terrain.rgba[i * 4..i * 4 + 4].copy_from_slice(&c);
+    }
+
+    /// Cleared forest grows back where trees stand beside it: two or more neighbouring trees and
+    /// it regrows; one, and it tries again later; none, and it stays open land.
+    fn update_regrowth(&mut self) {
+        if self.regrow.is_empty() {
+            return;
+        }
+        let now = self.time;
+        if !self.regrow.iter().any(|&(_, t)| now >= t) {
+            return;
+        }
+        let due: Vec<(u32, f32)> = self.regrow.iter().copied().filter(|&(_, t)| now >= t).collect();
+        self.regrow.retain(|&(_, t)| now < t);
+        for (i, _) in due {
+            let i = i as usize;
+            if self.burning[i] != 0 || self.terrain.kind[i] != terrain::GRASS {
+                continue;
+            }
+            let (x, y) = ((i % self.d.w) as i32, (i / self.d.w) as i32);
+            let mut trees = 0;
+            for (ox, oy) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] {
+                if self.terrain.kind_at(x + ox, y + oy) == terrain::FOREST {
+                    trees += 1;
+                }
+            }
+            if trees >= 2 {
+                self.terrain.kind[i] = terrain::FOREST;
+                self.repaint(i);
+            } else if trees == 1 {
+                let again = now + self.rng.range(30.0, 60.0);
+                self.regrow.push((i as u32, again));
+            }
+        }
     }
 
     /// Tally villages and civilisations from the agents.

@@ -2,6 +2,7 @@ use moc_brain::brain::Brain;
 use moc_brain::calibration::{random_seed_traits, traits_from_features, SensorFeatures};
 use moc_brain::model::{features_from_bands, Bands, Class, PersonalModel};
 use moc_brain::sim_source::{BrainFrame, SimFingerprint, SimSource};
+use moc_brain::wasm_api::{moc_brain_free, moc_brain_ingest, moc_brain_new};
 
 #[test]
 fn test_scripted_player_following_cues_achieves_target_accuracy() {
@@ -219,28 +220,62 @@ fn test_brain_blink_debounce() {
     assert_eq!(brain.stats.blinks, 2);
 }
 
+/// Words in a `Debug` dump that would mean a heart-rate field or value is still carried.
+fn heart_rate_words(dump: &str) -> Vec<String> {
+    dump.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .map(|w| w.to_ascii_lowercase())
+        .filter(|w| {
+            w == "hr"
+                || w.starts_with("hr_")
+                || w.ends_with("_hr")
+                || ["heart", "pulse", "ppg", "bpm"].iter().any(|k| w.contains(k))
+        })
+        .collect()
+}
+
 #[test]
-fn test_resting_hr_estimation() {
+fn test_no_frame_or_brain_state_carries_heart_rate() {
+    // #153: heart rate left the game in #99. The emulated headset's frames, its fingerprint and
+    // the brain's state and stats carry no heart rate, and the brain still reads the EEG.
+    let mut sim = SimSource::new(153);
     let mut brain = Brain::new();
-    let mut frame = BrainFrame::default();
-    frame.bands = Bands {
-        delta: 0.2,
-        theta: 0.2,
-        alpha: 0.2,
-        beta: 0.2,
-        gamma: 0.2,
-    };
-
-    // Feed 25 heart rate values from 60 to 84 bpm
-    for i in 0..25 {
-        brain.update(1.0);
-        frame.hr = Some(60.0 + i as f32);
-        brain.ingest(&frame);
+    let mut frames = 0;
+    sim.input.calm = true;
+    for _ in 0..80 {
+        sim.update(0.1, |frame| {
+            let dump = format!("{:?}", frame);
+            assert!(heart_rate_words(&dump).is_empty(), "frame carries heart rate: {dump}");
+            brain.ingest(&frame);
+            frames += 1;
+        });
+        brain.update(0.1);
     }
+    assert!(frames >= 75, "frames = {frames}");
+    assert!(brain.calm > 0.3, "the brain still reads calm from the EEG: {}", brain.calm);
 
-    assert!(brain.rest_hr.is_some());
-    let rest = brain.rest_hr.unwrap();
-    // 25th percentile of 60..84 is around 66 bpm
-    assert!(rest >= 64.0 && rest <= 68.0, "rest_hr = {}", rest);
-    assert!(brain.hr_delta() > 0.0);
+    for (what, dump) in [
+        ("SimSource", format!("{:?}", sim)),
+        ("SimFingerprint", format!("{:?}", SimFingerprint::default_preset())),
+        ("BrainStats", format!("{:?}", brain.stats)),
+        ("Brain", format!("{:?}", brain)),
+    ] {
+        let words = heart_rate_words(&dump);
+        assert!(words.is_empty(), "{what} carries heart rate: {words:?}");
+    }
+}
+
+#[test]
+fn test_c_ingest_takes_no_heart_rate_argument() {
+    // #153: moc_brain_ingest is bands, blink, tilt x/y, motion, quality. The seventh value used
+    // to be the heart rate; it is now the head tilt, so a full right/up tilt steers the aim.
+    let b = moc_brain_new();
+    unsafe {
+        for _ in 0..30 {
+            moc_brain_ingest(b, 0.2, 0.2, 0.2, 0.2, 0.2, 0, 1.0, -1.0, 0.0, 1.0);
+        }
+        let brain = &*b;
+        assert!(brain.aim.0 > 0.95 && brain.aim.1 < 0.05, "aim = {:?}", brain.aim);
+        assert_eq!(brain.stats.frames_seen, 30);
+        moc_brain_free(b);
+    }
 }

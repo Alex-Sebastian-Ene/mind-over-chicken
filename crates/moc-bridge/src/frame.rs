@@ -1,6 +1,7 @@
 //! Telemetry data structures and synthetic generator for the headset bridge.
 //!
 //! Matches the exact JSON wire protocol expected by `BridgeSource` in `src/brain/sources.js`.
+//! Frames carry no heart rate: the game does not read it (#99, #153).
 
 use serde::{Deserialize, Serialize};
 
@@ -25,8 +26,6 @@ pub struct BridgeFrame {
     pub t: f32,
     pub bands: BandPowers,
     pub blink: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hr: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accel: Option<[f32; 3]>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,7 +55,6 @@ impl StatusMessage {
 #[derive(Debug, Clone)]
 pub struct SyntheticGenerator {
     pub time: f32,
-    pub hr: f32,
     pub calib_phase: f32,
     pub blink_timer: f32,
 }
@@ -71,7 +69,6 @@ impl SyntheticGenerator {
     pub fn new(_seed: u32) -> Self {
         Self {
             time: 0.0,
-            hr: 72.0,
             calib_phase: 0.0,
             blink_timer: 0.0,
         }
@@ -111,9 +108,6 @@ impl SyntheticGenerator {
             gamma: gamma / total,
         };
 
-        // Simulated pulse around 68-74 bpm
-        self.hr = 70.0 + 3.0 * (self.time * 0.2).sin();
-
         // Simulated head tilt
         let pitch = 2.5 * (self.time * 0.4).sin();
         let roll = 1.5 * (self.time * 0.3).cos();
@@ -125,7 +119,6 @@ impl SyntheticGenerator {
             t: (self.time * 10.0).round() / 10.0,
             bands,
             blink,
-            hr: None,
             accel: Some([ax, ay, az]),
             gyro: Some([0.0, 0.0, 0.0]),
             orientation: Some(HeadOrientation {

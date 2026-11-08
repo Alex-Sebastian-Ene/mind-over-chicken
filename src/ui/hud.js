@@ -2,13 +2,36 @@
 // with its live meter), and the judge overlay that shows the personal model.
 
 import { FEATURE_NAMES } from '../brain/model.js';
-import { STRESSED } from '../brain/brain.js';
+import { STRESSED, QUALITY_USABLE } from '../brain/brain.js';
+
+// Signal truth (#85): how far to trust what the headset says, next to the source chip. Quality is
+// the brain's smoothed contact quality (the #175 gate), plus head tracking and the calibration
+// window that seeds your civilisation. Null for the emulator (nothing to doubt).
+export const QUALITY_GOOD = 0.7;
+export function signalSummary(G, nowMs = globalThis.performance?.now?.() ?? 0) {
+  const src = G?.source, b = G?.brain;
+  if (!src || src.kind !== 'bridge' || !b) return null;
+  const c = G.calibration;
+  const calib = !c ? '' : c.done ? 'calibrated' : `calibrating ${Math.ceil(c.remaining)} s`;
+  const streaming = src.connected && src.lastFrameAt > 0 && nowMs - src.lastFrameAt < 3000;
+  if (!streaming) {
+    return { level: 'poor', text: 'Signal: no data', title: 'The headset is not sending EEG: check that the Muse is on and paired with the bridge.' };
+  }
+  const q = Math.round((b.signalQuality ?? 1) * 100);
+  const level = b.signalUnusable || b.signalQuality < QUALITY_USABLE ? 'poor' : b.signalQuality < QUALITY_GOOD ? 'fair' : 'good';
+  const parts = [`Signal ${level} ${q}%`];
+  if (!b.headTracking) parts.push('no head aim');
+  if (calib) parts.push(calib);
+  const why = level === 'poor' ? 'Poor contact: settle the band on your forehead and behind your ears. The era waits while it is this low.'
+    : level === 'fair' ? 'Fair contact: calm and focus readings are noisier than usual.' : 'Good contact.';
+  return { level, text: parts.join(' · '), title: `${why}${b.headTracking ? '' : ' Head tracking is unavailable: the mouse and arrow keys aim.'}${calib ? ` Seed window: ${calib}.` : ''}` };
+}
 
 // 8×8 pixel icons for the power tiles.
 const ICONS = {
   blink: { c: '#ffcf4a', p: ['....##..', '...##...', '..##....', '.######.', '....##..', '...##...', '..##....', '.#......'] },
-  calm: { c: '#59d8c8', p: ['...#....', '...##...', '..###...', '..####..', '.##.###.', '.#...##.', '.##.###.', '..####..'] },
-  focus: { c: '#ffcf4a', p: ['........', '..####..', '.#....#.', '#..##..#', '#..##..#', '.#....#.', '..####..', '........'] },
+  // Rain or Calm (#276): a rain cloud.
+  focus: { c: '#9ec9ff', p: ['..####..', '.######.', '########', '..#..#..', '.#..#...', '..#..#..', '.#..#...', '........'] },
   // Stress: the cartoon "cross vein" of an agitated god.
   stress: { c: '#ff5a72', p: ['..#..#..', '.##..##.', '##....##', '........', '........', '##....##', '.##..##.', '..#..#..'] },
 };
@@ -21,7 +44,24 @@ function paintIcon(canvas, icon) {
   icon.p.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === '#') ctx.fillRect(x, y, 1, 1); }));
 }
 
-const POWER_UNLOCK = { blink: 'stone', calm: 'stone', focus: 'kingdoms', stress: 'industry' };
+const POWER_UNLOCK = { blink: 'stone', focus: 'stone', stress: 'industry' };
+const ERA_ORDER = ['stone', 'farming', 'kingdoms', 'industry', 'space'];
+
+// What each power tile is in a scene (#178): 'on' (in scene.powers: it changes this scene),
+// 'off' (unlocked but does nothing here: shown disabled, not focusable) or 'hidden' (the campaign
+// hasn't reached it yet, POWER_UNLOCK). Scenes outside the campaign order (the galaxy, the
+// sandboxes, other worlds) count as having everything unlocked.
+export function tileStates(scene) {
+  const powers = scene?.powers || [];
+  const at = ERA_ORDER.indexOf(scene?.era);
+  const out = {};
+  for (const [k, era] of Object.entries(POWER_UNLOCK)) {
+    if (powers.includes(k)) out[k] = 'on';
+    else if (at >= 0 && ERA_ORDER.indexOf(era) > at) out[k] = 'hidden';
+    else out[k] = 'off';
+  }
+  return out;
+}
 
 let rustEngine = null;
 
@@ -36,11 +76,13 @@ export class Hud {
     this.clock = doc.getElementById('clock');
     this.powers = {
       blink: doc.querySelector('[data-power="blink"]'),
-      calm: doc.querySelector('[data-power="calm"]'),
       focus: doc.querySelector('[data-power="focus"]'),
       stress: doc.querySelector('[data-power="stress"]'),
     };
     this.source = doc.getElementById('sourceStatus');
+    this.signal = doc.getElementById('signalChip');   // #85
+    this.cause = doc.getElementById('causeToast');   // #177: what your hands and face just did
+    this.causeLeft = 0;
     this.modelPanel = doc.getElementById('modelPanel');
     this.modelBody = doc.getElementById('modelBody');
     this.lastObj = '';
@@ -50,20 +92,67 @@ export class Hud {
 
   setScene(scene) {
     this.eraChip.textContent = scene.label;
+    const states = tileStates(scene);
     for (const [k, el] of Object.entries(this.powers)) {
-      el.classList.toggle('is-active', scene.powers.includes(k));
+      const s = states[k];
+      el.classList.toggle('is-active', s === 'on');
+      el.hidden = s === 'hidden';
+      el.disabled = s !== 'on';   // a tile that does nothing here can't be pressed or focused
+      el.title = s === 'off' ? 'Not used in this era' : '';
     }
+  }
+
+  // A short line over the map saying what a camera action did (grab, drop, palm, fireball, a
+  // smile or surprise), or when a cooling cast will be ready (#177). The camera called this
+  // optionally and it didn't exist, so every one of those calls did nothing.
+  showCause(text, { ms = 2600, tone = 'ok' } = {}) {
+    if (!this.cause || !text) return;
+    this.cause.textContent = text;
+    this.cause.dataset.tone = tone;
+    this.cause.hidden = false;
+    this.causeLeft = ms / 1000;
   }
 
   flashBlink() { this.blinkFlash = 0.3; this.powers.blink.classList.add('is-firing'); }
 
+  // The headset chip in the top bar. The Rust shell never writes it, so both builds do it here:
+  // under the Rust HUD update() used to return first, and a connected Muse still read "No headset".
+  showSource(src) {
+    if (!this.source || !src) return;
+    const text = String(src.status ?? '');
+    const ok = src.connected ? '1' : '0';
+    if (this.source.textContent !== text) this.source.textContent = text;
+    if (this.source.dataset.ok !== ok) this.source.dataset.ok = ok;
+  }
+
+  // The signal chip (#85): hidden for the emulator, else quality, head tracking and calibration.
+  showSignal(G) {
+    if (!this.signal) return;
+    this.signalAt = (this.signalAt || 0) + 1;
+    if (this.signalAt % 10) return;   // a few times a second is plenty
+    const s = signalSummary(G);
+    this.signal.hidden = !s;
+    if (!s) return;
+    if (this.signal.textContent !== s.text) this.signal.textContent = s.text;
+    if (this.signal.dataset.level !== s.level) this.signal.dataset.level = s.level;
+    if (this.signal.title !== s.title) this.signal.title = s.title;
+  }
+
   update(dt, G) {
+    this.showSignal(G);
+    if (this.causeLeft > 0) {
+      this.causeLeft -= dt;
+      if (this.causeLeft <= 0 && this.cause) this.cause.hidden = true;
+    }
+    this.showSource(G.source);
     if (rustEngine) {
       if (this.blinkFlash > 0) {
         this.blinkFlash -= dt;
         if (this.blinkFlash <= 0) this.powers.blink.classList.remove('is-firing');
       }
-      if (this.modelPanel && !this.modelPanel.hidden) this.updateModel(G.brain?.model);
+      // The Rust shell draws the meters, not the model panel (#173: this called a missing
+      // updateModel(), which threw every frame the panel was open and froze the render).
+      if (this.modelPanel && !this.modelPanel.hidden && G.brain) this.renderModel(G.brain, G);
       return;
     }
     const b = G.brain;
@@ -106,8 +195,8 @@ export class Hud {
       if (thr != null) el.style.setProperty('--thr', `${Math.round(thr * 100)}%`);
       el.querySelector('.power-value').textContent = text;
     };
-    set(this.powers.calm, b.calm, scene?.powers.includes('calm') ? b.threshold('calm', 0.55) : null, `${Math.round(b.calm * 100)}%`);
-    set(this.powers.focus, b.focus, scene?.powers.includes('focus') ? b.threshold('focus', 0.5) : null, `${Math.round(b.focus * 100)}%`);
+    const focus = b.source?.input?.focus ? 1 : b.focus;
+    set(this.powers.focus, focus, scene?.powers.includes('focus') ? b.threshold('focus', 0.5) : null, `${Math.round(focus * 100)}%`);
     // Stress: about 0.15 at rest, up with EEG agitation or an angry face (brain.js).
     const stress = b.stress ?? 0;
     set(this.powers.stress, stress, null, `${Math.round(stress * 100)}%`);
@@ -115,8 +204,6 @@ export class Hud {
     if (this.blinkFlash > 0) { this.blinkFlash -= dt; if (this.blinkFlash <= 0) this.powers.blink.classList.remove('is-firing'); }
     this.powers.blink.querySelector('.power-value').textContent = `${b.stats.blinks}`;
 
-    this.source.textContent = G.source.status;
-    this.source.dataset.ok = G.source.connected ? '1' : '0';
 
     if (!this.modelPanel.hidden) this.renderModel(b, G);
   }
@@ -129,7 +216,7 @@ export class Hud {
     const weights = m.weights();
     const wRows = weights.map(({ c, w }) => `<tr><th>${c}</th>${w.map((x) => `<td class="${x >= 0 ? 'pos' : 'neg'}">${x.toFixed(1)}</td>`).join('')}</tr>`).join('');
     this.modelBody.innerHTML = `
-      <p class="model-lede">Trained silently on the moments the game asked you to relax, look around and do sums. There was no calibration screen.</p>
+      <p class="model-lede">Trained silently on the moments the game asked you to relax, look around and concentrate. There was no calibration screen.</p>
       <dl class="model-stats">
         <div><dt>Rest windows</dt><dd>${m.count('rest')}</dd></div>
         <div><dt>Calm windows</dt><dd>${m.count('calm')}</dd></div>

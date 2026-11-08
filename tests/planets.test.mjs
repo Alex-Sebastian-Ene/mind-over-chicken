@@ -12,6 +12,9 @@ import { ZoomState } from '../src/cosmos/zoom.js';
 import { Galaxy, FORM_SECONDS } from '../src/cosmos/galaxy.js';
 import { World, initTerrainSync } from '../src/world/terrain.js';
 import { settlementPlan, VW, VH, TILE, wrapX } from '../src/cosmos/vast.js';
+import { PlanetSurface } from '../src/cosmos/surface.js';
+import { StoneAge, label } from '../src/eras/stone.js';
+import { Particles } from '../src/sim/util.js';
 
 // The worlds come from Rust (#109): load the engine wasm once.
 initTerrainSync(readFileSync(new URL('../pkg/mind_over_chicken_engine_bg.wasm', import.meta.url)));
@@ -504,4 +507,175 @@ test('new worlds form one by one, FORM_SECONDS each', async () => {
     assert.equal(g.formSlot, null);
     assert.equal(g.formQueue.length, 0);
   } finally { console.error = err; }
+});
+
+test('zoom in from planet globe to surface maintains continuous 3D camera zoom (#207)', () => {
+  const z = new ZoomState();
+  z.target = 1;
+  z.z = 1.0;
+  assert.equal(z.target, 1);
+  assert.equal(z.z, 1.0);
+
+  // Zoom in towards surface
+  z.zoomIn();
+  assert.equal(z.target, 0);
+
+  // Over spring interpolation down to 0, z smoothly descends without overshooting
+  for (let i = 0; i < 20; i++) {
+    z.update(0.05);
+  }
+  assert.ok(z.z < 0.2, `expected descent below 0.2, got ${z.z}`);
+  assert.ok(z.z >= 0, `expected non-negative zoom, got ${z.z}`);
+});
+
+test('wasm galaxy avoids double-simulation (#196)', () => {
+  const g = new Galaxy();
+  g.add({ name: 'Home', home: true, alive: true, pop: 20 });
+  g.add({ name: 'Lumen', home: false, alive: true, pop: 10 });
+  let jsSimulateCalled = 0;
+  let jsSampleMindCalled = 0;
+  g.simulate = () => { jsSimulateCalled++; };
+  g.sampleMind = () => { jsSampleMindCalled++; };
+
+  // Mock wasm galaxy
+  g.wasm = {
+    step: () => {},
+    set_attended: () => {},
+    planet_count: () => g.planets.length,
+    planet_is_forming: () => false,
+    planet_name: (i) => `WasmPlanet${i}`,
+    planet_channel: () => 'calm',
+    planet_biome: () => 'temperate',
+    planet_pop: () => 42,
+    planet_era: () => 1,
+    planet_progress: () => 0.5,
+    planet_market: () => 120,
+    ship_count: () => 1,
+    ship_from: () => 0,
+    ship_to: () => 1,
+    ship_t: () => 0.3,
+  };
+
+  const brain = { calm: 0.8, focus: 0.5, stress: 0.2, recentBlinks: [], stats: { blinks: 3 } };
+  g.update(0.1, 0.1, brain);
+
+  // JS simulate must not run when wasm is active; the mind sample still reveals and forms worlds
+  assert.equal(jsSimulateCalled, 0, 'JS simulate must not run when wasm is present');
+  assert.equal(jsSampleMindCalled, 1, 'the mind sample still runs: it forms the mind-worlds');
+
+  // Wasm state synchronized
+  assert.equal(g.planets[1].pop, 42);
+  assert.equal(g.ships.length, 1);
+  assert.equal(g.ships[0].t, 0.3);
+});
+
+test('PlanetSurface 3D overlay projects settlement labels and particles, skipping behind-camera (#202)', () => {
+  const world = World.planet(4242, 'jungle');
+  const p = newPlanetState({ pop: 50, eraIndex: 0 });
+  const surface = new PlanetSurface(p, world);
+  assert.ok(surface.plan.length > 0);
+
+  // Mock canvas context
+  const texts = [];
+  const ctx = {
+    font: '',
+    textAlign: '',
+    fillStyle: '',
+    fillText(text, x, y) { texts.push({ text, x, y }); },
+    save() {},
+    restore() {},
+    translate() {},
+  };
+
+  // 1. In 3D mode with __project3d:
+  // Project (wx, wz) where wx = s.x / 2, wz = s.y / 2
+  const projectedCalls = [];
+  ctx.__project3d = (wx, wz) => {
+    projectedCalls.push({ wx, wz });
+    // First settlement in front of camera, subsequent behind camera (returns null)
+    if (projectedCalls.length === 1) return [160, 90];
+    return null;
+  };
+
+  surface.drawOverlay(ctx);
+
+  // Verifies that project3d was called with 3D terrain coordinates (vast / 2)
+  assert.ok(projectedCalls.length > 0);
+  assert.equal(projectedCalls[0].wx, surface.plan[0].x / 2);
+  assert.equal(projectedCalls[0].wz, surface.plan[0].y / 2);
+
+  // Only the visible settlement in front of camera was rendered (at pr[0], pr[1] - 8 - s.size * 2)
+  // Behind-camera settlement (null) was skipped, never drawn at unprojected coordinates
+  assert.ok(texts.some((t) => t.text.includes('capital') && Math.abs(t.x - 160) < 1));
+
+  // 2. drawScreenOverlay renders HUD in screen coordinates
+  const screenTexts = [];
+  const screenCtx = {
+    font: '',
+    textAlign: '',
+    fillStyle: '',
+    fillText(text, x, y) { screenTexts.push({ text, x, y }); },
+  };
+  surface.drawScreenOverlay(screenCtx);
+  assert.ok(screenTexts.some((t) => t.text.includes(p.name) && t.x === 4));
+  assert.ok(screenTexts.some((t) => t.text.includes('explore') && t.x === 160));
+});
+
+test('StoneAge.drawOverlay suppresses campaign tutorial prompts on simulated AI worlds (#202)', () => {
+  const normalStone = new StoneAge();
+  const mockG = {
+    world: {
+      paint: () => ({ width: 1, height: 1 }),
+      sites: { fire: { x: 50, y: 50 }, cave: { x: 40, y: 40 }, village: { x: 50, y: 50 } },
+      randomLand: () => ({ x: 45, y: 45 }),
+      nearestWalkable: () => ({ x: 55, y: 55 }),
+    },
+    brain: { setCue() {} },
+    advisor: { say() {} },
+  };
+  normalStone.enter(mockG);
+
+  // Campaign mode: unlit fire prompts player with "blink here to light the fire"
+  const campaignTexts = [];
+  const ctx = {
+    font: '',
+    textAlign: '',
+    fillStyle: '',
+    fillText(text, x, y) { campaignTexts.push(text); },
+  };
+  normalStone.drawOverlay(ctx);
+  assert.ok(campaignTexts.includes('blink here to light the fire'), 'campaign stone age shows tutorial prompt');
+
+  // Simulated AI mode: tutorial prompt is suppressed
+  const simStone = new StoneAge();
+  const simG = { ...mockG, simulated: true };
+  simStone.enter(simG);
+
+  const simTexts = [];
+  simStone.drawOverlay({
+    font: '',
+    textAlign: '',
+    fillStyle: '',
+    fillText(text, x, y) { simTexts.push(text); },
+  });
+  assert.ok(!simTexts.includes('blink here to light the fire'), 'simulated stone age suppresses tutorial prompt');
+});
+
+test('label and Particles.drawText skip rendering when __project3d returns null (#202)', () => {
+  const texts = [];
+  const ctx = {
+    font: '',
+    textAlign: '',
+    fillStyle: '',
+    fillText(text, x, y) { texts.push({ text, x, y }); },
+    __project3d: () => null, // all world points behind camera
+  };
+
+  label(ctx, 100, 100, 'behind camera test', '#fff');
+  assert.equal(texts.length, 0, 'label behind camera should not be drawn');
+
+  const p = new Particles();
+  p.add({ x: 100, y: 100, life: 1, maxLife: 1, shape: 'text', text: 'behind camera particle', color: '#fff', size: 6 });
+  p.drawText(ctx);
+  assert.equal(texts.length, 0, 'particle behind camera should not be drawn');
 });

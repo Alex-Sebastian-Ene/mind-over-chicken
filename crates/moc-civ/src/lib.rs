@@ -41,6 +41,8 @@ pub mod conflict;
 pub mod council;
 pub mod ffi;
 pub mod gym;
+pub mod home_ffi;
+pub mod homeworld;
 pub mod jobs;
 pub mod life;
 pub mod news;

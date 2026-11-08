@@ -75,18 +75,19 @@ export class SimSource {
       this.acc += dt;
       while (this.acc >= FRAME_DT) {
         this.acc -= FRAME_DT;
+        // RustSimSource.step: delta, theta, alpha, beta, gamma, blink, tilt x, tilt y, motion,
+        // quality (0 when no frame was due). No heart rate (#153).
         const out = this.wasm.step(FRAME_DT);
-        if (out && out[10] > 0) {
+        if (out && out[9] > 0) {
           emit({
             bands: { delta: out[0], theta: out[1], alpha: out[2], beta: out[3], gamma: out[4] },
             blink: out[5] > 0.5,
-            hr: out[6] > 0 ? out[6] : null,
             // The emulated head points where the mouse aims (setAim), like makeFrame: the Rust
             // sim's own tilt array left brain.aim NaN, so clicks missed (#129).
             tilt: { x: this.aim.x * 2 - 1, y: this.aim.y * 2 - 1 },
             isSim: true,
-            motion: out[9],
-            quality: out[10],
+            motion: out[8],
+            quality: out[9],
           });
         } else {
           emit(this.makeFrame());
@@ -149,6 +150,14 @@ export class SimSource {
       gyro: [0, 0, 0],
     };
   }
+}
+
+// The headset to keep for the next run (#185): the first connected bridge among the candidates
+// (the run's source, the title screen's preview), or null to fall back to the emulator.
+// A bridge counts once it has delivered EEG frames: an open socket with no headset behind it
+// would drop the player into a run with calm and focus stuck at zero (#174).
+export function liveBridge(...sources) {
+  return sources.find((s) => s?.kind === 'bridge' && s.connected && s.lastFrameAt > 0) || null;
 }
 
 // Reads frames from the Python bridge (BrainFlow → band powers, blinks, accelerometer and
@@ -327,6 +336,7 @@ export class BridgeSource {
         if (!settled) { settled = true; clearTimeout(timer); reject(new Error(`No bridge answered at ${this.url}`)); }
       };
       ws.onclose = () => {
+        this._settleFrameWaiters(new Error('The bridge closed before the headset sent any EEG'));
         this.connected = false;
         this.streaming = false;
         this.status = this._manualDisconnect ? 'Bridge disconnected' : 'Bridge disconnected — reconnecting…';
@@ -351,12 +361,33 @@ export class BridgeSource {
           this.streaming = true;
           this.queue.push(this.normalise(msg));
           this.lastFrameAt = performance.now();
+          this._settleFrameWaiters(null);
         } catch { /* ignore malformed frames */ }
       };
     });
   }
 
+  // Resolves on the first EEG frame, rejects after timeoutMs or if the socket closes first (#174):
+  // connect() resolves when the socket opens, and an open socket is not a headset.
+  waitForFrame(timeoutMs = 10000) {
+    if (this.lastFrameAt > 0) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const waiter = (err) => {
+        clearTimeout(timer);
+        this._frameWaiters = (this._frameWaiters || []).filter((w) => w !== waiter);
+        if (err) reject(err); else resolve();
+      };
+      const timer = setTimeout(() => waiter(new Error(`No EEG from the headset in ${Math.round(timeoutMs / 1000)} s`)), timeoutMs);
+      (this._frameWaiters ||= []).push(waiter);
+    });
+  }
+
+  _settleFrameWaiters(err) {
+    for (const w of [...(this._frameWaiters || [])]) w(err);
+  }
+
   disconnect() {
+    this._settleFrameWaiters(new Error('Cancelled'));
     this._manualDisconnect = true;
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);

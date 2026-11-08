@@ -340,6 +340,28 @@ pub extern "C" fn civ_agent_count(p: *mut World) -> usize {
     w(p).map(|w| w.agents.len()).unwrap_or(0)
 }
 
+/// The living person nearest (x, y) within r tiles, or -1 (#188).
+#[no_mangle]
+pub extern "C" fn civ_agent_near(p: *mut World, x: f32, y: f32, r: f32) -> i32 {
+    w(p).and_then(|w| w.agent_near(x, y, r)).map(|i| i as i32).unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern "C" fn civ_agent_x(p: *mut World, i: u32) -> f32 {
+    w(p).and_then(|w| w.agents.get(i as usize).map(|a| a.x)).unwrap_or(-1.0)
+}
+
+#[no_mangle]
+pub extern "C" fn civ_agent_y(p: *mut World, i: u32) -> f32 {
+    w(p).and_then(|w| w.agents.get(i as usize).map(|a| a.y)).unwrap_or(-1.0)
+}
+
+/// Set a living person down at (x, y) if it is walkable; 1 if they moved (#188).
+#[no_mangle]
+pub extern "C" fn civ_move_agent(p: *mut World, i: u32, x: f32, y: f32) -> u32 {
+    w(p).map(|w| w.move_agent(i as usize, x, y) as u32).unwrap_or(0)
+}
+
 #[no_mangle]
 pub extern "C" fn civ_owner_at(p: *mut World, x: f32, y: f32) -> i32 {
     w(p).map(|w| w.owner_at(x, y)).map(|o| if o == NO_F { -1 } else { o as i32 }).unwrap_or(-1)

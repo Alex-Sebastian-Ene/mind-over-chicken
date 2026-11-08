@@ -14,6 +14,7 @@ import { label } from '../eras/stone.js';
 import { ZoomState } from './zoom.js';
 import { tierName } from './planet-sim.js';
 import { drawReticle } from '../render/sprites.js';
+import { sideNeighbour } from './select.js';
 
 const CENTER = { x: W / 2, y: H / 2 };
 const BIG_R = 74;
@@ -23,6 +24,10 @@ const ERA_INDEX = { stone: 0, farming: 1, kingdoms: 1, industry: 2, space: 3 };
 const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 const smoothstep = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+// Continuous zoom input (#143): levels per wheel delta unit, and per e-fold of pinch spread.
+const WHEEL_LEVELS = 0.004;   // a mouse notch is 0.4 of a level (Alex: easier zoom)
+const PINCH_LEVELS = 3;
 
 export class Cosmos extends ZoomState {
   constructor() {
@@ -97,6 +102,8 @@ export class Cosmos extends ZoomState {
     // Three more worlds take shape from the player's first ten seconds of brain data.
     this.galaxy.addMindWorlds();
     this.galaxy.onEvent = (p, text, kind, tone) => this.onEvent?.(p, text, kind, tone);
+    // The space war presses your world as hard as the difficulty says (#220: Easy 0.5, Hard 1.6).
+    this.galaxy.war?.setPlayerPressure(G.difficulty?.space?.pressure ?? 1);
     return this.galaxy;
   }
 
@@ -144,6 +151,15 @@ export class Cosmos extends ZoomState {
     const r = this.view.blits();
     for (let i = 0; i < r.length; i += 6) lctx.drawImage(worldCanvas, r[i], r[i + 1], r[i + 2], r[i + 3], r[i + 4], r[i + 5], r[i + 2], r[i + 3]);
   }
+  // The same, for a window `scale` times the view's size shrunk onto the view (a zoomed-out frame:
+  // the era intro eases in from one).
+  blitViewScaled(worldCanvas, low, scale) {
+    if (!this.view?.blits_scaled) { this.blitView(worldCanvas, low); return; }
+    const lctx = low.getContext('2d');
+    lctx.imageSmoothingEnabled = false;
+    const r = this.view.blits_scaled(scale);
+    for (let i = 0; i < r.length; i += 8) lctx.drawImage(worldCanvas, r[i], r[i + 1], r[i + 2], r[i + 3], r[i + 4], r[i + 5], r[i + 6], r[i + 7]);
+  }
   // [ox, oy] translations (world px → view px) at which to repeat world-space overlays and lights
   // so they wrap with the map: one per copy of the world reaching the screen (+margin).
   overlayOffsets(margin = 24) {
@@ -180,7 +196,7 @@ export class Cosmos extends ZoomState {
     if (!scene) return galaxyHud;
     let h = this.homeHuds.get(scene);
     if (!h || h.base !== scene.label) {
-      h = { base: scene.label, label: `${scene.label} · your world`, powers: scene.powers, objectives: () => scene.objectives() };
+      h = { base: scene.label, label: `${scene.label} · your world`, era: scene.era, powers: scene.powers, objectives: () => scene.objectives() };
       this.homeHuds.set(scene, h);
     }
     return h;
@@ -225,7 +241,7 @@ export class Cosmos extends ZoomState {
   }
 
   // Draw the cosmos into the low-res canvas, using what the scene just drew as the flat map.
-  render(low, ctx, G) {
+  render(low, ctx, G, { is3d = false } = {}) {
     if (this.z <= 0.001) return false;
     const fctx = this.flat.getContext('2d');
     fctx.clearRect(0, 0, W, H);
@@ -234,16 +250,15 @@ export class Cosmos extends ZoomState {
     const look = this.focusLook(G);
     const z = this.z;
     if (z <= 1) {
-      // #138: one continuous move. The flat map shrinks and curls onto a sphere (its rows bend
-      // in toward the poles), the real globe fades in at the same apparent size, and then the
-      // globe settles to its resting size. The globe used to grow from a small dot while the
-      // map shrank, so the two never lined up.
+      // #138: one continuous move. In 2D, the flat map shrinks and curls onto a sphere; in 3D,
+      // the true 3D surface mesh is rendered underneath and blends directly with the planetary globe.
       const bigR = lerp(BIG_R * 1.25, BIG_R, smoothstep(0.35, 1, z));
       const fa = 1 - smoothstep(0.42, 0.66, z);
-      if (fa > 0) this.drawCurledMap(ctx, smoothstep(0, 0.6, z), fa, bigR, look.atmosphere);
+      if (!is3d && fa > 0) this.drawCurledMap(ctx, smoothstep(0, 0.6, z), fa, bigR, look.atmosphere);
       const face = this.faceRot();
       const rot = face + wrapAngle(this.rot - face) * smoothstep(0.55, 1, z);
-      if (look.tex) this.globe.draw(ctx, look.tex, CENTER.x, CENTER.y, bigR, { rot, alpha: smoothstep(0.4, 0.62, z), light: SUN, atmosphere: look.atmosphere });
+      const globeAlpha = is3d ? smoothstep(0.12, 0.52, z) : smoothstep(0.4, 0.62, z);
+      if (look.tex) this.globe.draw(ctx, look.tex, CENTER.x, CENTER.y, bigR, { rot, alpha: globeAlpha, light: SUN, atmosphere: look.atmosphere });
       const lp = look.planet;
       if (lp && lp.flash > 0) drawPlanetBolt(ctx, CENTER.x, CENTER.y, bigR, lp.storms + 1, Math.min(1, lp.flash * 2) * smoothstep(0.5, 0.9, z));
       this.drawMoon(ctx, z);
@@ -251,7 +266,7 @@ export class Cosmos extends ZoomState {
       const t = z - 1, e = ease(t);
       const gal = this.galaxy;
       const fp = look.planet || gal.home;
-      gal.draw(ctx, this.globe, G.scene?.layer || G.world.layers.stone, G.world.structures, { alpha: smoothstep(0.15, 0.9, t), skip: fp, hover: this.hover });
+      gal.draw(ctx, this.globe, G.scene?.layer || G.world.layers.stone, G.world.structures, { alpha: smoothstep(0.15, 0.9, t), skip: fp, hover: this.hover || this.selectedPlanet() });
       const q = gal.pos(fp);
       const toStar = [160 - q.x, 92 - q.y, 26];
       const n = Math.hypot(...toStar);
@@ -365,9 +380,15 @@ export class Cosmos extends ZoomState {
       label(ctx, CENTER.x, H - 6, this.canLand() ? 'drag to spin · scroll or X to land · Z for the galaxy' : 'drag to spin · scroll or Z to see the galaxy', '#a3a6c4', 5);
       ctx.globalAlpha = 1;
     }
-    if (this.galaxy && z > 1.2) this.galaxy.drawOverlay(ctx, { alpha: smoothstep(1.3, 1.9, z), hover: this.hover });
+    if (this.galaxy && z > 1.2) this.galaxy.drawOverlay(ctx, { alpha: smoothstep(1.3, 1.9, z), hover: this.hover || this.selectedPlanet() });
+    if (this.galaxy && z > 1.6) {
+      const sp = this.selectedPlanet();
+      label(ctx, W / 2, H - 6, `◀ ▶ choose a world${sp ? ` (${sp.name})` : ''} · scroll in or Enter to land`, '#a3a6c4', 5);
+    }
     if (this.toast) { ctx.globalAlpha = Math.min(1, this.toast.t); label(ctx, CENTER.x, 30, this.toast.text, '#ffd166', 6); ctx.globalAlpha = 1; }
-    if (G?.brain?.aim) {
+    // The globe and galaxy use the screen pointer; below 0.5 the surface scene draws its own
+    // world-space reticle (#294).
+    if (G?.brain?.aim && this.z > 0.5) {
       drawReticle(ctx, G.brain.aim.x * (W - 1), G.brain.aim.y * (H - 1), this.time, '#ffe066');
     }
   }
@@ -389,15 +410,16 @@ export class Cosmos extends ZoomState {
     if (this.pinch && this.pointers.size === 2) {
       const [a, b] = [...this.pointers.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
-      if (d > this.pinch.d * 1.35) { this.zoomIn(G); this.pinch.d = d; }
-      else if (d < this.pinch.d / 1.35) { this.zoomOut(G); this.pinch.d = d; }
+      // Continuous (#143): spreading the fingers zooms in smoothly, about a level per 1.4x spread.
+      if (d > 0 && this.pinch.d > 0) this.nudgeZoom(-Math.log(d / this.pinch.d) * PINCH_LEVELS, G);
+      this.pinch.d = d;
       return;
     }
     if (this.drag) {
       const dx = x - this.drag.x;
       this.drag.moved += Math.abs(dx) + Math.abs(y - this.drag.y);
       this.drag.x = x; this.drag.y = y;
-      if (this.z > 0.5 && this.z < 1.5) { this.rot -= dx / BIG_R; this.spinVel = -dx / BIG_R / 0.033; }
+      this.dragRotate(dx);
     }
     if (this.galaxy && this.z > 1.5) this.hover = this.galaxy.hit(x, y);
   }
@@ -408,6 +430,11 @@ export class Cosmos extends ZoomState {
     const d = this.drag;
     this.drag = null;
     if (!d || d.moved > 4) return null;
+    return this.clickAt(x, y, G);
+  }
+
+  // A left click in the world (#284): select a planet in the galaxy or land on the globe.
+  clickAt(x, y, G) {
     if (this.galaxy && this.z > 1.5) {
       const p = this.galaxy.hit(x, y);
       if (p && p.forming) { this.say(p.mindSlot && !this.galaxy.mindReady ? 'Still reading your mind. Keep playing.' : 'Still forming. Give it a second.'); return null; }
@@ -421,19 +448,50 @@ export class Cosmos extends ZoomState {
     return null;
   }
 
+  // Pointer drag and pinch drag share this so a rotated planet follows the hand the same way (#284).
+  dragRotate(dxPixels) {
+    if (!(this.z > 0.5 && this.z < 1.5)) return false;
+    this.rot -= dxPixels / BIG_R;
+    this.spinVel = -dxPixels / BIG_R / 0.033;
+    return true;
+  }
+
+  // The galaxy's picker (Alex): Left/Right select the next planet to that side on screen; the
+  // selected one is highlighted and is the world a zoom-in (wheel, X, pinch, Enter) lands on.
+  selectSide(dir, G) {
+    const gal = this.galaxy;
+    if (!gal || !this.inGalaxy) return null;
+    const items = gal.planets.map((p) => ({ p, x: gal.pos(p).x }));
+    const p = sideNeighbour(items, this.selectedPlanet(), dir);
+    if (!p) return null;
+    this.selected = p;
+    this.focus = this.isCampaign(p) ? null : p;
+    return p;
+  }
+  // The planet the galaxy view is "hovering": the last one picked, else the one in focus, else home.
+  selectedPlanet() { return this.selected || this.focus || this.galaxy?.home || null; }
+
   focusPlanet(p, G) {
+    this.selected = p;
     const r = super.focusPlanet(p);
     if (r.refused) { this.say(r.refused); return; }
     this.rot = this.galaxy ? this.galaxy.time * p.spin + p.phase : this.rot;
     if (this.galaxy?.war && !this.isCampaign(p)) this.galaxy.war.target = p;   // #166: the orders' target
   }
 
+  // Continuous (#143): every wheel delta moves the zoom (a mouse notch of 100 is 0.4 of a level;
+  // a trackpad's small deltas glide), with no 320 ms gate. The two-hand pinch comes through here too.
   wheel(deltaY, G) {
-    const now = performance.now();
-    this.wheelAcc += deltaY;
-    if (now - this.wheelAt < 320) return;
-    if (this.wheelAcc > 40) { this.zoomOut(G); this.wheelAt = now; this.wheelAcc = 0; }
-    else if (this.wheelAcc < -40) { this.zoomIn(G); this.wheelAt = now; this.wheelAcc = 0; }
+    this.nudgeZoom(clamp(deltaY, -300, 300) * WHEEL_LEVELS, G);
+  }
+
+  nudgeZoom(dz, G) {
+    if (this.z + dz >= 1.5) this.ensureGalaxy(G);
+    const fromSurface = this.target === 0;
+    const r = this.nudge(dz);
+    if (!r) return;
+    if (r.refused) this.say(r.refused);
+    if (r.level === 1 && fromSurface) this.rot = this.faceRot();
   }
 
   levelLabel() { return this.label(); }

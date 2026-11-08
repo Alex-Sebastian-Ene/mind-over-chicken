@@ -18,7 +18,7 @@ export const EVENT = {
 };
 // News line tones (Rust `news::TONE_*`).
 export const TONE = { info: 0, good: 1, bad: 2, warn: 3 };
-export const CAST = { fireball: 1, spawn: 2, peace: 3, disaster: 4, bless: 5, rain: 6, palm: 3, fist: 1 };
+export const CAST = { fireball: 1, spawn: 2, peace: 3, disaster: 4, bless: 5, rain: 6, palm: 3 };
 export const SEED_SOURCE = ['the run seed', 'calibration', 'your mind', 'rebellion'];
 
 export function loadCivModule() {
@@ -41,6 +41,12 @@ export async function createCiv(seed, { width = 0, height = 0, staged = false, r
 export const SETUP = { off: 0, choose: 1, place: 2, seed: 3, done: 4 };
 
 const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
+// Shortest signed difference from a to b on a wrapping axis of length n, in (-n/2, n/2].
+export function wrapFrom(a, b, n) {
+  let d = (((b - a) % n) + n) % n;
+  if (d > n / 2) d -= n;
+  return d;
+}
 
 export class Civ {
   constructor(ex, seed, width, height, staged, rivals) {
@@ -114,6 +120,8 @@ export class Civ {
 
   // ---- founding the civilisations one at a time (#98; the flow lives in Rust, setup.rs) ----
   get setupPhase() { return this.ex.civ_setup_phase(this.w); }
+  // Seeding window progress, 0..1 (the 5 s mind read for the civilisation being founded, #88).
+  get setupProgress() { return this.ex.civ_setup_progress ? this.ex.civ_setup_progress(this.w) : 0; }
   setupHover(x, y) { return this.ex.civ_setup_hover(this.w, x, y) > 0; }
   setupClick(x, y) { return this.ex.civ_setup_click(this.w, x, y); }
   setupEnter() { return this.ex.civ_setup_enter(this.w); }
@@ -123,6 +131,10 @@ export class Civ {
   setupLines() { const len = this.ex.civ_setup_text_build(this.w); return this.str(this.ex.civ_text_buf_ptr(this.w), len).split('\n').filter(Boolean); }
   get time() { return this.ex.civ_time(this.w); }
   get agents() { return this.ex.civ_agent_count(this.w); }
+  // Pinch-grab a person (#188): the nearest living one, where they are, and setting them down.
+  agentNear(x, y, r) { return this.ex.civ_agent_near ? this.ex.civ_agent_near(this.w, x, y, r) : -1; }
+  agentPos(i) { return { x: this.ex.civ_agent_x(this.w, i), y: this.ex.civ_agent_y(this.w, i) }; }
+  moveAgent(i, x, y) { return !!this.ex.civ_move_agent?.(this.w, i, x, y); }
 
   // The camera's 320×180 view as ImageData (copied out of wasm memory).
   render() {
@@ -139,21 +151,17 @@ export class Civ {
     return this.mini;
   }
 
-  // ---- camera (planet pixels; the view's left edge wraps, its top is clamped) ----
+  // ---- camera (planet pixels; the view wraps both ways round the torus, #111) ----
   pan(dx, dy) { this.ex.civ_cam_pan(this.w, dx, dy); }
   centre(x, y) { this.ex.civ_cam_centre(this.w, x, y); }
   get camX() { return this.ex.civ_cam_x(this.w); }
   get camY() { return this.ex.civ_cam_y(this.w); }
-  // The planet wraps both ways (#111), as in Rust's `Cam`.
-  toScreen(x, y) {
-    let sx = (((x - this.camX) % this.pw) + this.pw) % this.pw;
-    if (sx > this.pw / 2) sx -= this.pw;
-    if (sx < -320) sx += this.pw;
-    let sy = (((y - this.camY) % this.ph) + this.ph) % this.ph;
-    if (sy > this.ph / 2) sy -= this.ph;
-    if (sy < -180) sy += this.ph;
-    return { x: sx, y: sy };
-  }
+  // The planet wraps both ways (#111), as in Rust's `Cam`: the short way round from the
+  // view's centre (#230), so everything in the 320×180 view lands on screen on any planet
+  // (from the corner, the bottom rows of a 320-high planet flipped to the top).
+  toScreen(x, y) { return { x: wrapFrom(this.camX + 160, x, this.pw) + 160, y: wrapFrom(this.camY + 90, y, this.ph) + 90 }; }
+  // Distance the short way round on the torus (picking across the seams).
+  distance(ax, ay, bx, by) { return Math.hypot(wrapFrom(ax, bx, this.pw), wrapFrom(ay, by, this.ph)); }
   toPlanet(sx, sy) {
     return { x: ((this.camX + sx) % this.pw + this.pw) % this.pw, y: ((this.camY + sy) % this.ph + this.ph) % this.ph };
   }

@@ -45,6 +45,26 @@ impl OrbitCamera {
         self.distance = (self.distance * factor).clamp(MIN_DISTANCE, MAX_DISTANCE);
     }
 
+    pub fn set_distance(&mut self, d: f32) {
+        self.distance = d.clamp(MIN_DISTANCE, MAX_DISTANCE);
+    }
+
+    pub fn set_pitch(&mut self, p: f32) {
+        let min_pitch = 0.15;
+        let max_pitch = 1.55;
+        self.pitch = p.clamp(min_pitch, max_pitch);
+    }
+
+    pub fn set_yaw(&mut self, y: f32) {
+        self.yaw = y;
+    }
+
+    pub fn set_pose(&mut self, yaw: f32, pitch: f32, distance: f32) {
+        self.set_yaw(yaw);
+        self.set_pitch(pitch);
+        self.set_distance(distance);
+    }
+
     pub fn pan(&mut self, dx: f32, dz: f32) {
         let cos_y = self.yaw.cos();
         let sin_y = self.yaw.sin();
@@ -233,6 +253,26 @@ mod tests {
         // The camera sits south (+z) looking north, so the ray meets the plateau south of
         // where it would meet the sea-level plane.
         assert!(hit[1] > plane[1], "plateau should be hit before the plane ({:?} vs {:?})", hit, plane);
+    }
+
+    #[test]
+    fn test_camera_set_pose_and_clamping() {
+        let mut cam = OrbitCamera::new(160.0, 90.0);
+        cam.set_pose(1.23, 1.0, 150.0);
+        assert!((cam.yaw - 1.23).abs() < 1e-4);
+        assert!((cam.pitch - 1.0).abs() < 1e-4);
+        assert!((cam.distance - 150.0).abs() < 1e-4);
+
+        // Clamp checks
+        cam.set_distance(9999.0);
+        assert_eq!(cam.distance, MAX_DISTANCE);
+        cam.set_distance(-10.0);
+        assert_eq!(cam.distance, MIN_DISTANCE);
+
+        cam.set_pitch(3.0);
+        assert_eq!(cam.pitch, 1.55);
+        cam.set_pitch(-1.0);
+        assert_eq!(cam.pitch, 0.15);
     }
 
     #[test]

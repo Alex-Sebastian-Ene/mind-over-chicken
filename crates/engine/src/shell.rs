@@ -140,13 +140,13 @@ impl AdvisorDriver {
             let total_len = c.text.len() as f32;
             if c.shown < total_len {
                 c.shown = (c.shown + dt * 48.0).min(total_len);
-                // `shown` counts bytes: back off to a char boundary, or a "×" or "·" in a
-                // line panics the slice (and with it every later game_tick).
-                let mut char_idx = (c.shown.floor() as usize).min(c.text.len());
-                while !c.text.is_char_boundary(char_idx) {
-                    char_idx -= 1;
+                // `shown` counts bytes: cut on a char boundary, or a line with '×', '·' or '—'
+                // panics here and leaves the whole Engine borrowed (every later call throws).
+                let mut cut = (c.shown.floor() as usize).min(c.text.len());
+                while cut > 0 && !c.text.is_char_boundary(cut) {
+                    cut -= 1;
                 }
-                update_dom_text = Some(c.text[..char_idx].to_string());
+                update_dom_text = Some(c.text[..cut].to_string());
             } else {
                 c.hold -= dt;
                 if c.hold <= 0.0 {
@@ -412,9 +412,10 @@ mod advisor_era_tests {
     }
 
     #[test]
-    fn typing_out_a_line_with_multibyte_characters_does_not_panic() {
+    fn typing_out_a_line_with_wide_characters_never_cuts_inside_one() {
+        // '×', '·' and '—' are 2-3 bytes: typing the line out byte by byte used to panic on them.
         let mut a = AdvisorDriver::new();
-        assert!(a.say("tier", "Your world enters the age of orbital industry: fleets ×1.20, shields ×1.20 · ✓", "happy", 2, 1.0));
+        assert!(a.say("howto", "Blink · Calm: a 640×360 world — or bigger", "happy", 3, 999.0));
         for _ in 0..200 {
             a.update(1.0 / 60.0);
         }

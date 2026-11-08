@@ -9,8 +9,10 @@
 import { W, H, Particles, clamp, dist, rand, chance, floater, pick, mulberry32 } from '../sim/util.js';
 import { walk, animate, villagerLook } from '../sim/agents.js';
 import { drawPerson, drawChicken, drawRocket, drawGantry, drawReticle } from '../render/sprites.js';
+import { FireballFX } from '../render/fireball.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
+import { eraTuning } from '../game/options.js'; // difficulty (#220)
 
 const ENGINEERS = 10;
 const CITIZENS = 28;
@@ -22,6 +24,7 @@ export class SpaceAge {
   constructor() {
     this.id = 'space';
     this.era = 'space';
+    this.rustEra = 2;   // the Rust era sim under this scene (crates/engine/src/eras, #194)
     this.label = 'Era III · Space Age';
     this.intro = {
       title: 'Space Age',
@@ -37,6 +40,7 @@ export class SpaceAge {
     const w = G.world;
     this.layer = w.paint('space');
     this.particles = new Particles();
+    this.fireballs = new FireballFX();
     this.t = 0;
     this.phase = 'build';
     this.progress = 0;
@@ -76,6 +80,7 @@ export class SpaceAge {
   update(dt) {
     const G = this.G, w = G.world, brain = G.brain;
     this.t += dt;
+    for (const hit of this.fireballs.update(dt)) this.impactFireball(hit);
     this.particles.update(dt);
     const pad = this.pad, hangar = w.sites.hangar;
 
@@ -95,7 +100,7 @@ export class SpaceAge {
               floater(this.particles, e.x, e.y - 8, 'dropped it', '#ff8a9c', 5);
               G.advisor.say('drop', pick(['Someone dropped the fuel valve. I will not say who. It was because of your stress.', 'Another wrench in the ocean. The engineers can feel your stress, my lord.']), { mood: 'panic', priority: 2, cooldown: 10 });
             } else if (this.progress < 1) {
-              this.progress = Math.min(1, this.progress + 0.03);
+              this.progress = Math.min(1, this.progress + 0.03 / eraTuning(G).launchNeeds);
               G.audio.tick();
             }
             e.carry = null; e.state = 'load'; e.timer = rand(0.2, 0.8);
@@ -156,7 +161,7 @@ export class SpaceAge {
         this.phase = 'launch';
         brain.setCue(null);
         G.audio.rumble(4);
-        G.advisor.say('liftoff', 'LIFTOFF! From a fire pit to the stars. I would like to thank the mammoths.', { mood: 'happy', priority: 5, cooldown: 0 });
+        G.advisor.say('liftoff', 'LIFTOFF! From a fire pit to the stars. I would like to thank the chickens.', { mood: 'happy', priority: 5, cooldown: 0 });
         for (const c of this.citizens) if (c.state !== 'aboard') c.state = 'cheer';
       }
     }
@@ -317,6 +322,7 @@ export class SpaceAge {
 
   drawOverlay(ctx) {
     const G = this.G, brain = G.brain;
+    this.fireballs.draw(ctx);
     this.particles.drawText(ctx);
     const pad = this.pad;
     if (this.phase === 'build') {
@@ -356,6 +362,23 @@ export class SpaceAge {
   // They never touch the countdown itself: that stays a focus-and-nerve challenge.
 
   // aim is 0..1 like the brain's.
+  onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
+    const G = this.G;
+    if (!G || this.done || this.phase === 'launch' || this.phase === 'voyage') return;
+    const { x, y } = G.world.aimPoint(aim);
+    this.fireballs.launch({ x, y }, { color, charge });
+    G.audio?.blip?.();
+  }
+
+  impactFireball({ x, y, color = '#ff9a2e', charge = 1 }) {
+    const G = this.G;
+    G.shake = Math.max(G.shake || 0, 1.3 + charge * 0.6);
+    G.audio?.thunder?.();
+    this.particles.burst(22 + Math.round(charge * 26), () => ({ x, y, vx: rand(-44, 44), vy: rand(-58, 4), g: 70, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color }));
+    this.particles.burst(8 + Math.round(charge * 8), () => ({ x: x + rand(-4, 4), y: y + rand(-1, 2), vx: rand(-18, 18), vy: rand(-16, -2), g: 24, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color: pick(['#c9c2b0', '#8a7a5a', '#5f5545']) }));
+    for (const c of this.citizens) if (c.state !== 'aboard' && dist(x, y, c.x, c.y) < 20 + charge * 12) c.courage = clamp(c.courage - 0.2);
+  }
+
   onCast(spell, aim) {
     const G = this.G;
     if (!G || this.done || this.phase === 'launch' || this.phase === 'voyage') return;
@@ -363,7 +386,6 @@ export class SpaceAge {
     const { x, y } = G.world.aimPoint(aim);   // aims are 0..1 of the world (#129)
     const watching = this.citizens.filter((c) => c.state !== 'aboard');
     switch (spell) {
-      case 'fist':
       case 'fireball': {
         G.stats.lightning++;
         G.audio.thunder();

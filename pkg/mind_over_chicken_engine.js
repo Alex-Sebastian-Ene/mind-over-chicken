@@ -315,6 +315,33 @@ export class Engine {
         wasm.engine_end_frame(this.__wbg_ptr, night, flash, fade, shake_x, shake_y, canvas_w, canvas_h);
     }
     /**
+     * Mirror the JS scene on screen into the HUD (#191): its objectives (`flags` bit 1 done,
+     * 2 bad, 4 plain) and run time. The Rust era sim then stands still and raises nothing of its
+     * own; see GameFlow::mirrored. Called by src/main.js every frame, before game_tick.
+     * @param {number} run_time
+     * @param {string[]} labels
+     * @param {string[]} values
+     * @param {Uint8Array | number[]} flags
+     */
+    game_mirror(run_time, labels, values, flags) {
+        const val4 = +run_time;
+        let ptr0, len0, ptr1, len1, ptr2, len2;
+        try {
+            ptr0 = passArrayJsValueToWasm0(labels, wasm.__wbindgen_malloc);
+            len0 = WASM_VECTOR_LEN;
+            ptr1 = passArrayJsValueToWasm0(values, wasm.__wbindgen_malloc);
+            len1 = WASM_VECTOR_LEN;
+            ptr2 = passArray8ToWasm0(flags, wasm.__wbindgen_malloc);
+            len2 = WASM_VECTOR_LEN;
+        } catch (e) {
+            if (ptr2) { wasm.__wbindgen_free(ptr2, len2 * 1, 1); }
+            if (ptr1) { wasm.__externref_drop_slice(ptr1, len1); wasm.__wbindgen_free(ptr1, len1 * 4, 4); }
+            if (ptr0) { wasm.__externref_drop_slice(ptr0, len0); wasm.__wbindgen_free(ptr0, len0 * 4, 4); }
+            throw e;
+        }
+        wasm.engine_game_mirror(this.__wbg_ptr, val4, ptr0, len0, ptr1, len1, ptr2, len2);
+    }
+    /**
      * @param {number} aim_x
      * @param {number} aim_y
      */
@@ -353,6 +380,12 @@ export class Engine {
      */
     game_tick(dt, calm, focus, stress, blinks) {
         wasm.engine_game_tick(this.__wbg_ptr, dt, calm, focus, stress, blinks);
+    }
+    /**
+     * Back to the Rust era sim driving the HUD (the all-Rust app never mirrors).
+     */
+    game_unmirror() {
+        wasm.engine_game_unmirror(this.__wbg_ptr);
     }
     /**
      * Standalone helper to generate a civ planet RGBA texture (#109).
@@ -822,6 +855,19 @@ export class Engine {
         wasm.engine_render_3d(this.__wbg_ptr, dt, sun_x, sun_y, sun_z, night, flash, fade, shake_x, shake_y, canvas_w, canvas_h);
     }
     /**
+     * Blit an overlay canvas on top of the rendered 3D scene with alpha blending.
+     * @param {HTMLCanvasElement} canvas
+     * @param {number} alpha
+     * @param {number} canvas_w
+     * @param {number} canvas_h
+     */
+    render_overlay_canvas(canvas, alpha, canvas_w, canvas_h) {
+        const ret = wasm.engine_render_overlay_canvas(this.__wbg_ptr, canvas, alpha, canvas_w, canvas_h);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @param {number} night
      * @param {number} flash
      * @param {number} fade
@@ -861,11 +907,37 @@ export class Engine {
         wasm.engine_set_backdrop(this.__wbg_ptr, r, g, b);
     }
     /**
+     * @param {number} distance
+     */
+    set_camera_distance(distance) {
+        wasm.engine_set_camera_distance(this.__wbg_ptr, distance);
+    }
+    /**
+     * @param {number} pitch
+     */
+    set_camera_pitch(pitch) {
+        wasm.engine_set_camera_pitch(this.__wbg_ptr, pitch);
+    }
+    /**
+     * @param {number} yaw
+     * @param {number} pitch
+     * @param {number} distance
+     */
+    set_camera_pose(yaw, pitch, distance) {
+        wasm.engine_set_camera_pose(this.__wbg_ptr, yaw, pitch, distance);
+    }
+    /**
      * @param {number} tx
      * @param {number} tz
      */
     set_camera_target(tx, tz) {
         wasm.engine_set_camera_target(this.__wbg_ptr, tx, tz);
+    }
+    /**
+     * @param {number} yaw
+     */
+    set_camera_yaw(yaw) {
+        wasm.engine_set_camera_yaw(this.__wbg_ptr, yaw);
     }
     /**
      * @param {number} era
@@ -1405,21 +1477,22 @@ export class RustBrain {
         return ret;
     }
     /**
+     * One headset frame: EEG bands, blink, head tilt, motion and contact quality. There is no
+     * heart-rate argument: the game does not read heart rate (#99, #153).
      * @param {number} delta
      * @param {number} theta
      * @param {number} alpha
      * @param {number} beta
      * @param {number} gamma
      * @param {boolean} blink
-     * @param {number} hr
      * @param {number} tilt_x
      * @param {number} tilt_y
      * @param {number} motion
      * @param {number} quality
      * @returns {boolean}
      */
-    ingest(delta, theta, alpha, beta, gamma, blink, hr, tilt_x, tilt_y, motion, quality) {
-        const ret = wasm.rustbrain_ingest(this.__wbg_ptr, delta, theta, alpha, beta, gamma, blink, hr, tilt_x, tilt_y, motion, quality);
+    ingest(delta, theta, alpha, beta, gamma, blink, tilt_x, tilt_y, motion, quality) {
+        const ret = wasm.rustbrain_ingest(this.__wbg_ptr, delta, theta, alpha, beta, gamma, blink, tilt_x, tilt_y, motion, quality);
         return ret !== 0;
     }
     constructor() {
@@ -1498,7 +1571,9 @@ export class RustCalibration {
 if (Symbol.dispose) RustCalibration.prototype[Symbol.dispose] = RustCalibration.prototype.free;
 
 /**
- * Standalone WebAssembly Cast Controller for camera god powers (#33, #108)
+ * Standalone WebAssembly Cast Controller for camera god powers (#33, #108). The browser's
+ * src/camera/casts.js runs this: the three core moves, with the fist-to-open fireball (#150, #159).
+ * `update` returns [held, progress, cast, aiming, armed].
  */
 export class RustCastController {
     __destroy_into_raw() {
@@ -1627,6 +1702,8 @@ export class RustEmotionTracker {
         wasm.rustemotiontracker_reset(this.__wbg_ptr);
     }
     /**
+     * Arguments follow `INPUTS` in src/camera/emotion.js. Returns
+     * `[dominant, joy, anger, surprise, sadness, neutral, intensity, face, event, surpriseTriggered, calibrating]`.
      * @param {boolean} has_face
      * @param {number} mouth_smile_left
      * @param {number} mouth_smile_right
@@ -1636,6 +1713,8 @@ export class RustEmotionTracker {
      * @param {number} mouth_press_right
      * @param {number} jaw_open
      * @param {number} brow_inner_up
+     * @param {number} brow_outer_up_left
+     * @param {number} brow_outer_up_right
      * @param {number} eye_wide_left
      * @param {number} eye_wide_right
      * @param {number} mouth_frown_left
@@ -1643,8 +1722,8 @@ export class RustEmotionTracker {
      * @param {number} dt
      * @returns {Array<any>}
      */
-    update_direct(has_face, mouth_smile_left, mouth_smile_right, brow_down_left, brow_down_right, mouth_press_left, mouth_press_right, jaw_open, brow_inner_up, eye_wide_left, eye_wide_right, mouth_frown_left, mouth_frown_right, dt) {
-        const ret = wasm.rustemotiontracker_update_direct(this.__wbg_ptr, has_face, mouth_smile_left, mouth_smile_right, brow_down_left, brow_down_right, mouth_press_left, mouth_press_right, jaw_open, brow_inner_up, eye_wide_left, eye_wide_right, mouth_frown_left, mouth_frown_right, dt);
+    update_direct(has_face, mouth_smile_left, mouth_smile_right, brow_down_left, brow_down_right, mouth_press_left, mouth_press_right, jaw_open, brow_inner_up, brow_outer_up_left, brow_outer_up_right, eye_wide_left, eye_wide_right, mouth_frown_left, mouth_frown_right, dt) {
+        const ret = wasm.rustemotiontracker_update_direct(this.__wbg_ptr, has_face, mouth_smile_left, mouth_smile_right, brow_down_left, brow_down_right, mouth_press_left, mouth_press_right, jaw_open, brow_inner_up, brow_outer_up_left, brow_outer_up_right, eye_wide_left, eye_wide_right, mouth_frown_left, mouth_frown_right, dt);
         return ret;
     }
 }
@@ -1866,6 +1945,37 @@ export class RustGalaxy {
      */
     set_attended(planet_idx) {
         wasm.rustgalaxy_set_attended(this.__wbg_ptr, planet_idx);
+    }
+    /**
+     * @returns {number}
+     */
+    ship_count() {
+        const ret = wasm.rustgalaxy_ship_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    ship_from(idx) {
+        const ret = wasm.rustgalaxy_ship_from(this.__wbg_ptr, idx);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    ship_t(idx) {
+        const ret = wasm.rustgalaxy_ship_t(this.__wbg_ptr, idx);
+        return ret;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    ship_to(idx) {
+        const ret = wasm.rustgalaxy_ship_to(this.__wbg_ptr, idx);
+        return ret >>> 0;
     }
     /**
      * @param {number} dt
@@ -2420,6 +2530,9 @@ export class RustSimSource {
         wasm.rustsimsource_set_input(this.__wbg_ptr, calm, focus, panic);
     }
     /**
+     * The last frame emitted over `dt`, as `SIM_FRAME_LEN` numbers: delta, theta, alpha, beta,
+     * gamma, blink (0 or 1), tilt x, tilt y, motion, quality. All zeros when no frame was due
+     * (quality 0). No heart rate (#153).
      * @param {number} dt
      * @returns {Float32Array}
      */
@@ -2749,6 +2862,19 @@ export class ViewCamera {
         return v1;
     }
     /**
+     * Like `blits`, for a window `scale` times the view's size around the same centre, with the
+     * destination rectangles shrunk back onto the view: `[sx, sy, w, h, dx, dy, dw, dh]` per
+     * rectangle. A zoomed-out frame, e.g. an era's intro easing in onto its stage.
+     * @param {number} scale
+     * @returns {Float32Array}
+     */
+    blits_scaled(scale) {
+        const ret = wasm.viewcamera_blits_scaled(this.__wbg_ptr, scale);
+        var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
      * @returns {number}
      */
     center_x() {
@@ -3021,6 +3147,14 @@ function __wbg_get_imports() {
             const ret = arg0 === undefined;
             return ret;
         },
+        __wbg___wbindgen_string_get_7ce8eee7fd327545: function(arg0, arg1) {
+            const obj = arg1;
+            const ret = typeof(obj) === 'string' ? obj : undefined;
+            var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            var len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32((arg0 >>> 0) + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32((arg0 >>> 0) + 4 * 0, ptr1, true);
+        },
         __wbg___wbindgen_throw_4c88d8bf264fd984: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
@@ -3061,8 +3195,11 @@ function __wbg_get_imports() {
         __wbg_bufferData_2fb8740d60478bf0: function(arg0, arg1, arg2, arg3) {
             arg0.bufferData(arg1 >>> 0, arg2, arg3 >>> 0);
         },
-        __wbg_bufferData_aaab2a06f5c64e23: function(arg0, arg1, arg2, arg3, arg4) {
-            arg0.bufferData(arg1 >>> 0, getArrayU8FromWasm0(arg2, arg3), arg4 >>> 0);
+        __wbg_bufferData_9305dba3ba9cba4e: function(arg0, arg1, arg2, arg3) {
+            arg0.bufferData(arg1 >>> 0, arg2, arg3 >>> 0);
+        },
+        __wbg_bufferSubData_940e3860400f4182: function(arg0, arg1, arg2, arg3, arg4) {
+            arg0.bufferSubData(arg1 >>> 0, arg2, getArrayU8FromWasm0(arg3, arg4));
         },
         __wbg_children_5767547ca7e1c276: function(arg0) {
             const ret = arg0.children;
@@ -3515,6 +3652,9 @@ function __wbg_get_imports() {
         __wbg_uniform3fv_431207a9407b7d29: function(arg0, arg1, arg2, arg3) {
             arg0.uniform3fv(arg1, getArrayF32FromWasm0(arg2, arg3));
         },
+        __wbg_uniform4f_14a3638afe93aa8f: function(arg0, arg1, arg2, arg3, arg4, arg5) {
+            arg0.uniform4f(arg1, arg2, arg3, arg4, arg5);
+        },
         __wbg_uniform4fv_a1415c11925ac651: function(arg0, arg1, arg2, arg3) {
             arg0.uniform4fv(arg1, getArrayF32FromWasm0(arg2, arg3));
         },
@@ -3535,23 +3675,23 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [F64], shim_idx: 38, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [F64], shim_idx: 58, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 34, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 54, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("PointerEvent")], shim_idx: 34, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__295);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("PointerEvent")], shim_idx: 54, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__307);
             return ret;
         },
         __wbindgen_generic_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 34, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__296);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 54, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__308);
             return ret;
         },
         __wbindgen_generic_0000000000000005: function(arg0) {
@@ -3594,12 +3734,12 @@ function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_
     wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true_(arg0, arg1, arg2);
 }
 
-function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__295(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__295(arg0, arg1, arg2);
+function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__307(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__307(arg0, arg1, arg2);
 }
 
-function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__296(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__296(arg0, arg1, arg2);
+function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__308(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___web_sys_c6c05ca8bbded697___features__gen_WheelEvent__WheelEvent______true__308(arg0, arg1, arg2);
 }
 
 function wasm_bindgen_c8844f3841f2c088___convert__closures_____invoke___f64______true_(arg0, arg1, arg2) {
@@ -3857,6 +3997,16 @@ function passArrayF64ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 8, 8) >>> 0;
     getFloat64ArrayMemory0().set(arg, ptr / 8);
     WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passArrayJsValueToWasm0(array, malloc) {
+    const ptr = malloc(array.length * 4, 4) >>> 0;
+    for (let i = 0; i < array.length; i++) {
+        const add = addToExternrefTable0(array[i]);
+        getDataViewMemory0().setUint32(ptr + 4 * i, add, true);
+    }
+    WASM_VECTOR_LEN = array.length;
     return ptr;
 }
 

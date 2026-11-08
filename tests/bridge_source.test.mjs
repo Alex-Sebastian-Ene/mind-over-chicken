@@ -107,3 +107,67 @@ test('recenter() takes a new neutral pose', () => {
   near(f.tilt.x, 0, 0.02);
   near(f.tilt.y, 0, 1e-9);
 });
+
+// #185: Play again and the sandboxes keep a connected headset instead of swapping in the emulator.
+test('liveBridge keeps a connected bridge and nothing else', async () => {
+  const { liveBridge, SimSource } = await import('../src/brain/sources.js');
+  const sim = { kind: 'sim', connected: true };
+  const run = new S('ws://run');
+  const preview = new S('ws://preview');
+  assert.equal(liveBridge(sim, null, undefined), null, 'no bridge: fall back to the emulator');
+  assert.equal(liveBridge(run, preview), null, 'a bridge that never connected is not kept');
+  preview.connected = true;
+  assert.equal(liveBridge(run, preview), null, 'an open socket with no EEG yet is not a headset (#174)');
+  preview.lastFrameAt = 1;
+  assert.equal(liveBridge(run, preview), preview, 'the title screen\'s streaming bridge');
+  run.connected = true; run.lastFrameAt = 1;
+  assert.equal(liveBridge(run, preview), run, 'the run\'s own bridge first');
+  run.connected = false;   // the socket closed mid-run
+  assert.equal(liveBridge(run), null);
+  assert.equal(typeof SimSource, 'function');
+});
+
+// #174: connect() resolves when the socket opens; the run waits for the first EEG frame.
+class FakeSocket {
+  static last = null;
+  constructor(url) { this.url = url; FakeSocket.last = this; setTimeout(() => this.onopen?.(), 0); }
+  frame(t = 0.1) { this.onmessage?.({ data: JSON.stringify({ t, bands, blink: false, quality: 1 }) }); }
+  close() { setTimeout(() => this.onclose?.(), 0); }
+}
+
+test('a bridge that connects but never streams does not count as a headset', async () => {
+  const prev = globalThis.WebSocket;
+  globalThis.WebSocket = FakeSocket;
+  try {
+    const src = new S('ws://silent');
+    await src.connect();
+    assert.equal(src.connected, true);
+    await assert.rejects(src.waitForFrame(60), /No EEG from the headset/);
+    const { liveBridge } = await import('../src/brain/sources.js');
+    assert.equal(liveBridge(src), null);
+    src.disconnect();
+
+    const live = new S('ws://live');
+    await live.connect();
+    const waiting = live.waitForFrame(1000);
+    FakeSocket.last.frame();
+    await waiting;
+    assert.ok(live.lastFrameAt > 0);
+    assert.equal(liveBridge(live), live);
+    // A socket that closes while waiting rejects at once; cancelling (disconnect) does too.
+    const closing = new S('ws://closing');
+    await closing.connect();
+    const w2 = closing.waitForFrame(5000);
+    FakeSocket.last.close();
+    await assert.rejects(w2, /closed/);
+    closing.disconnect();
+    const cancel = new S('ws://cancel');
+    await cancel.connect();
+    const w3 = cancel.waitForFrame(5000);
+    cancel.disconnect();
+    await assert.rejects(w3, /Cancelled/);
+    live.disconnect();
+  } finally {
+    globalThis.WebSocket = prev;
+  }
+});

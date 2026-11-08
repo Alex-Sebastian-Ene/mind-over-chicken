@@ -184,39 +184,16 @@ impl App {
 
     pub fn on_key_down(&mut self, key: &str, now: f64) {
         match key {
-            "1" => {
-                if self.casts.trigger(SpellId::Point, now) {
-                    self.engine.game_on_cast("pointing", self.aim[0], self.aim[1]);
-                }
-            }
+            // The three core moves (#122, #159). Key 1 (pinch grab) needs the JS shell's scene
+            // grab; this shell has no grab target, so it does nothing here.
             "2" => {
-                if self.casts.trigger(SpellId::Fireball, now) {
-                    self.engine.game_on_cast("fireball", self.aim[0], self.aim[1]);
+                if self.casts.trigger(SpellId::Palm, now) {
+                    self.engine.game_on_cast("palm", self.aim[0], self.aim[1]);
                 }
             }
             "3" => {
-                if self.casts.trigger(SpellId::Spawn, now) {
-                    self.engine.game_on_cast("bounty", self.aim[0], self.aim[1]);
-                }
-            }
-            "4" => {
-                if self.casts.trigger(SpellId::Rain, now) {
-                    self.engine.game_on_cast("rain", self.aim[0], self.aim[1]);
-                }
-            }
-            "5" => {
-                if self.casts.trigger(SpellId::Bless, now) {
-                    self.engine.game_on_cast("bless", self.aim[0], self.aim[1]);
-                }
-            }
-            "6" => {
-                if self.casts.trigger(SpellId::Disaster, now) {
-                    self.engine.game_on_cast("disaster", self.aim[0], self.aim[1]);
-                }
-            }
-            "7" => {
-                if self.casts.trigger(SpellId::Peace, now) {
-                    self.engine.game_on_cast("peace", self.aim[0], self.aim[1]);
+                if self.casts.trigger(SpellId::Fireball, now) {
+                    self.engine.game_on_cast("fireball", self.aim[0], self.aim[1]);
                 }
             }
             " " => {

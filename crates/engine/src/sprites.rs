@@ -212,26 +212,34 @@ pub fn draw_person(
     }
 }
 
+/// The Stone Age's prey (Alex: "change the mammoth to a chicken"): a giant chicken, the same pixels
+/// as `drawMammoth` in src/render/sprites.js. Dead, it's a roast chicken.
 pub fn draw_mammoth(buf: &mut [u8], x: i32, y: i32, facing: i32, frame: u32, dead: bool) {
-    let fur = if dead { (0x5a, 0x40, 0x30) } else { (0x7b, 0x55, 0x36) };
-    let dark = (0x5e, 0x3f, 0x27);
+    // Column `dx` right of x (width w) when facing right, mirrored when facing left.
+    let m = |dx: i32, w: i32| if facing > 0 { x + dx } else { x - dx - w + 1 };
     if dead {
-        fill_rect(buf, x - 3, y - 2, 7, 2, fur.0, fur.1, fur.2, 255);
-        fill_rect(buf, x - 3, y - 3, 7, 1, 0x8f, 0x6a, 0x48, 255);
+        fill_rect(buf, x - 3, y, 7, 1, 0, 0, 0, 64);
+        fill_rect(buf, x - 3, y - 2, 6, 2, 0xb8, 0x67, 0x2a, 255);
+        fill_rect(buf, x - 2, y - 3, 4, 1, 0xd9, 0x8a, 0x3d, 255);
+        put_pixel(buf, m(3, 1), y - 2, 0xf2, 0xe6, 0xc8, 255);
+        put_pixel(buf, m(-4, 1), y - 2, 0xf2, 0xe6, 0xc8, 255);
         return;
     }
-    fill_rect(buf, x - 3, y, 7, 1, 0, 0, 0, 64);
-    fill_rect(buf, x - 3, y - 5, 6, 3, fur.0, fur.1, fur.2, 255);
-    fill_rect(buf, x - 2, y - 6, 4, 1, fur.0, fur.1, fur.2, 255);
-    let hx = if facing > 0 { x + 2 } else { x - 4 };
-    fill_rect(buf, hx, y - 6, 2, 3, dark.0, dark.1, dark.2, 255);
-    let tx = if facing > 0 { x + 4 } else { x - 5 };
-    put_pixel(buf, tx, y - 4, 0xf4, 0xec, 0xd8, 255); // tusk
-    let trk = if facing > 0 { x + 3 } else { x - 4 };
-    put_pixel(buf, trk, y - 3, dark.0, dark.1, dark.2, 255); // trunk
-    let leg = (frame % 2) as i32;
-    fill_rect(buf, x - 3 + leg, y - 2, 1, 2, dark.0, dark.1, dark.2, 255);
-    fill_rect(buf, x + 1 - leg, y - 2, 1, 2, dark.0, dark.1, dark.2, 255);
+    let (w, sh, red, or) = ((0xfb, 0xf6, 0xea), (0xe2, 0xd6, 0xbd), (0xe5, 0x39, 0x35), (0xf6, 0xa6, 0x23));
+    let step = (frame % 2) as i32;
+    fill_rect(buf, x - 3, y, 7, 1, 0, 0, 0, 64); // shadow
+    fill_rect(buf, m(-4, 2), y - 7, 2, 3, sh.0, sh.1, sh.2, 255); // tail feathers
+    fill_rect(buf, m(-3, 6), y - 5, 6, 3, w.0, w.1, w.2, 255); // body
+    fill_rect(buf, m(-2, 4), y - 2, 4, 1, w.0, w.1, w.2, 255); // belly
+    fill_rect(buf, m(-2, 3), y - 4, 3, 1, sh.0, sh.1, sh.2, 255); // wing
+    fill_rect(buf, m(-1, 2), y - 3, 2, 1, sh.0, sh.1, sh.2, 255);
+    fill_rect(buf, m(2, 2), y - 8, 2, 3, w.0, w.1, w.2, 255); // neck and head
+    fill_rect(buf, m(2, 2), y - 9, 2, 1, red.0, red.1, red.2, 255); // comb
+    put_pixel(buf, m(3, 1), y - 7, 0x2a, 0x1a, 0x10, 255); // eye
+    put_pixel(buf, m(4, 1), y - 7, or.0, or.1, or.2, 255); // beak
+    put_pixel(buf, m(4, 1), y - 6, red.0, red.1, red.2, 255); // wattle
+    put_pixel(buf, m(-1 + step, 1), y - 1, or.0, or.1, or.2, 255); // legs
+    put_pixel(buf, m(1 - step, 1), y - 1, or.0, or.1, or.2, 255);
 }
 
 pub fn draw_goat(buf: &mut [u8], x: i32, y: i32, facing: i32) {
@@ -536,7 +544,9 @@ pub fn get_sprite_atlas_entry(sprite_id: u32, facing: i32, frame: u32, variant: 
         SPRITE_SHADOW => match variant {
             0 => (6, 3, 8.0, 5.0),
             1 => (7, 3, 16.0, 8.0),
-            _ => (4, 4, 24.0, 12.0),
+            2 => (4, 4, 24.0, 12.0),
+            3 => (5, 4, 5.0, 3.5),
+            _ => (6, 3, 8.0, 5.0),
         },
         _ => (0, 0, 8.0, 8.0),
     };
@@ -708,7 +718,7 @@ pub fn create_sprite_atlas() -> Vec<u8> {
     draw_tree_oak(&mut temp, cx, cy);
     copy_cell(&mut atlas, &temp, 5, 3, 32);
 
-    // Shadows in Row 3 (cols 6, 7) & Row 4 (col 4)
+    // Shadows in Row 3 (cols 6, 7) & Row 4 (cols 4, 5)
     temp.fill(0);
     draw_shadow(&mut temp, cx, cy, 6, 3);
     copy_cell(&mut atlas, &temp, 6, 3, 16);
@@ -720,6 +730,10 @@ pub fn create_sprite_atlas() -> Vec<u8> {
     temp.fill(0);
     draw_shadow(&mut temp, cx, cy, 14, 7);
     copy_cell(&mut atlas, &temp, 4, 4, 16);
+
+    temp.fill(0);
+    draw_shadow(&mut temp, cx, cy, 5, 3);
+    copy_cell(&mut atlas, &temp, 5, 4, 16);
 
     // Unlit Firewood pile in Row 4 (col 0)
     temp.fill(0);
@@ -751,6 +765,11 @@ mod tests {
         let shadow_entry = get_sprite_atlas_entry(SPRITE_SHADOW, 1, 0, 0);
         assert!(shadow_entry.u1 > shadow_entry.u0);
         assert!(shadow_entry.world_w > 0.0);
+
+        let tree_shadow_entry = get_sprite_atlas_entry(SPRITE_SHADOW, 1, 0, 3);
+        assert!(tree_shadow_entry.u1 > tree_shadow_entry.u0);
+        assert_eq!(tree_shadow_entry.world_w, 5.0);
+        assert_eq!(tree_shadow_entry.world_h, 3.5);
 
         // Test newly added sprites
         let mut buf = vec![0u8; W * H * 4];
