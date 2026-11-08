@@ -1252,11 +1252,29 @@ pub(crate) fn shadow_variant(sprite_id: u32, y: f32) -> Option<u32> {
         | sprites::SPRITE_HUT
         | sprites::SPRITE_HOUSE
         | sprites::SPRITE_TOWER
-        | sprites::SPRITE_ROCKET => Some(1),
+        | sprites::SPRITE_ROCKET
+        // #206: small building variants.
+        | sprites::SPRITE_LONGHOUSE
+        | sprites::SPRITE_PUEBLO
+        | sprites::SPRITE_STILT_HUT
+        | sprites::SPRITE_SNOW_CABIN
+        | sprites::SPRITE_HENGE
+        | sprites::SPRITE_LODGE
+        | sprites::SPRITE_WINDMILL
+        | sprites::SPRITE_CLOCK_TOWER
+        | sprites::SPRITE_COMMS_DISH => Some(1),
         sprites::SPRITE_FACTORY
         | sprites::SPRITE_EXCHANGE
         | sprites::SPRITE_HANGAR
-        | sprites::SPRITE_PAD => Some(2),
+        | sprites::SPRITE_PAD
+        // #206: wide building variants.
+        | sprites::SPRITE_WATERMILL
+        | sprites::SPRITE_TERRACED
+        | sprites::SPRITE_MARKET_HALL
+        | sprites::SPRITE_WAREHOUSE
+        | sprites::SPRITE_SOLAR_ARRAY
+        | sprites::SPRITE_DOME
+        | sprites::SPRITE_CARGO_DEPOT => Some(2),
         _ => None,
     }
 }

@@ -328,6 +328,29 @@ pub fn binfo(b: Building) -> BInfo {
     BInfo { fx: f, place, sprite }
 }
 
+/// Alternate 4×4 glyphs for a village's founding clan (#206). Visual only: effects, costs and
+/// unlock ages still come from `binfo`. Variant 0 is the canonical sheet; 1 and 2 are
+/// culture-flavoured redraws of a few common buildings.
+pub fn sprite_variant(b: Building, variant: u8) -> [&'static str; 4] {
+    use Building::*;
+    if variant == 0 {
+        return binfo(b).sprite;
+    }
+    match (b, variant) {
+        (Hut, 1) => ["....", ".rr.", "rwwr", "wdw."],
+        (Hut, 2) => ["....", "..r.", ".rrr", "wdww"],
+        (Longhouse, 1) => ["....", "rrrr", "rwwr", "wddw"],
+        (Longhouse, 2) => [".rr.", "rwwr", "wwww", "wdww"],
+        (Market, 1) => ["....", "RyRy", "n..n", "nyyn"],
+        (Market, 2) => ["....", "yRyR", "n..n", "nynn"],
+        (Temple, 1) => ["..y.", ".rrr", "hkh.", "hhh."],
+        (Temple, 2) => [".yy.", "rrrr", "hkhh", "hhhh"],
+        (Tower, 1) => [".R..", ".m..", ".m..", "mmm."],
+        (Tower, 2) => [".m..", ".R..", ".m..", "mmm."],
+        _ => binfo(b).sprite,
+    }
+}
+
 /// What it costs (in goods) to build.
 pub fn cost(b: Building) -> f32 {
     1.0 + 0.6 * b.unlock_age() as f32

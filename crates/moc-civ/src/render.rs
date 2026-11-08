@@ -5,7 +5,7 @@
 use moc_planet::color::Rgba;
 use moc_planet::{VH, VW};
 
-use crate::jobs::{binfo, info, Building, Role};
+use crate::jobs::{info, sprite_variant, Building, Role};
 use crate::planet::blit;
 use crate::world::*;
 
@@ -140,7 +140,7 @@ impl World {
             let big = capital || v.pop >= 6;
             let siege = v.siege > 0.0;
             let age = f.age;
-            let (built, plague, camp, side, fest, mourn) = (v.built, v.plague, v.camp, v.side, v.festival_t > 0.0, v.mourn_t > 0.0);
+            let (built, plague, camp, side, fest, mourn, clan) = (v.built, v.plague, v.camp, v.side, v.festival_t > 0.0, v.mourn_t > 0.0, v.clan);
             let px = |s: &mut Self, x: i32, y: i32, c: Rgba| s.view.px(sx + x, sy + y, c);
             if big {
                 px(self, 0, -3, roof);
@@ -173,8 +173,9 @@ impl World {
                     px(self, k, 2, [255, 60, 50, 230]);
                 }
             }
-            // The age's buildings round the village, newest last (grey while dormant).
-            self.draw_buildings(sx, sy, built, age, roof);
+            // The age's buildings round the village, newest last (grey while dormant). The
+            // founding clan picks one of three glyph sheets (#206, visual only).
+            self.draw_buildings(sx, sy, built, age, roof, clan % 3);
             // A rebel flag over a village that has risen against its own crown.
             if camp != 0 && side == 1 {
                 for y in -8..=-4 {
@@ -206,7 +207,7 @@ impl World {
     }
 
     /// Up to eight of a village's buildings, 4x4 sprites in a ring round it.
-    fn draw_buildings(&mut self, sx: i32, sy: i32, built: u64, age: u8, roof: Rgba) {
+    fn draw_buildings(&mut self, sx: i32, sy: i32, built: u64, age: u8, roof: Rgba, culture: u8) {
         const SLOTS: [(i32, i32); 8] = [(-8, -3), (4, -3), (-8, 2), (4, 2), (-2, 3), (-13, -1), (9, -1), (-2, -9)];
         if built == 0 {
             return;
@@ -225,7 +226,7 @@ impl World {
             let b = Building::ALL[list[n - 1 - s]];
             let dormant = b.unlock_age() > age;
             let (ox, oy) = SLOTS[s];
-            let spr = binfo(b).sprite;
+            let spr = sprite_variant(b, culture);
             for (ry, row) in spr.iter().enumerate() {
                 for (rx, ch) in row.bytes().enumerate() {
                     let c: Rgba = match ch {

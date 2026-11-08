@@ -12,6 +12,7 @@ import { W, H, Particles, clamp, dist, rand, chance, gauss, floater, pick } from
 import { walk, animate, villagerLook, sail } from '../sim/agents.js';
 import { drawPerson, drawHen, drawChicken, drawBoat, drawReticle, makeBolt, drawBolt } from '../render/sprites.js';
 import { FireballFX } from '../render/fireball.js';
+import { isResidential } from '../world/buildings.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
 import { eraTuning } from '../game/options.js'; // difficulty (#220)
@@ -68,7 +69,8 @@ export class Industry {
     this.flash = 0;
     this.lastBolt = -5;
     this.strikes = 0;
-    const houses = w.structures.filter((s) => s.kind === 'house');
+    // Variants count as homes too, so the neighbourhood stays populated (#206).
+    const houses = w.structures.filter((s) => isResidential(s.kind));
     this.agents = [];
     for (let i = 0; i < N; i++) {
       const home = houses.length ? houses[i % houses.length] : w.sites.village;
