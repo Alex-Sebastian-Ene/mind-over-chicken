@@ -233,6 +233,9 @@ export class Galaxy {
   }
 
   surfaceEvent(p, ev) {
+    // #297: a capital tribe just died. main.js decides whether that takes the camera home; the
+    // label and note come with the restart (tribeOutcome).
+    if (ev.kind === 'lost') { this.onEvent?.(p, ev.detail || ev.text, 'tribe-lost'); return; }
     const colour = ev.kind === 'good' || ev.kind === 'milestone' ? '#ffd166' : '#ff8a9c';
     this.pushLabel(p, { text: ev.text, t: 3, color: colour });
     if (ev.kind !== 'milestone') this.note(p, `${p.name}: ${ev.text}${ev.detail ? ` (${ev.detail})` : ''}.`);

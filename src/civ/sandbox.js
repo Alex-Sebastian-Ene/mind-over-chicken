@@ -217,6 +217,17 @@ export class CivSandbox {
   name(i) { return this.byId.get(i)?.name ?? 'someone'; }
   player() { return this.factions.find((f) => f.isPlayer && f.alive) || null; }
 
+  // #297: your civilisation wiped out (EVENT.WIPED on the player's faction) sends the camera home,
+  // once. It only counts after it was founded and alive: before that it isn't alive either.
+  checkPlayerWiped() {
+    if (this.playerLost) return;
+    const mine = this.factions.find((f) => f.isPlayer);
+    if (mine?.alive) { this.playerSeen = true; return; }
+    if (!mine || !this.playerSeen) return;
+    this.playerLost = true;
+    this.G.returnHome?.({ reason: 'civ-wiped' });   // the news line already names who did it
+  }
+
   // ---------- simulation ----------
   update(dt) {
     const civ = this.civ;
@@ -274,6 +285,7 @@ export class CivSandbox {
     if (events.length) { this.refresh(); this.readNews(); }
     this.infoTimer -= dt;
     if (this.infoTimer <= 0) { this.infoTimer = 0.25; this.refresh(); }
+    this.checkPlayerWiped();
     this.miniTimer -= dt;
     if (this.miniTimer <= 0 && this.miniCanvas) {
       this.miniTimer = 0.5;
