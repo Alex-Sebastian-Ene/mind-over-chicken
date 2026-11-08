@@ -5,7 +5,7 @@
 //          1. One-hand pinch grabs & relocates living entities under the cursor (#120)
 //          2. Two-hand pinch distance continuously zooms in/out & freezes on release (#119)
 //          3. One deliberate cast (#291): fist → pull back → thrust + open palm = charged fireball.
-//          4. Rain spell (#330): open palm + Insight/Focus held together for two seconds.
+//          4. Rain spell (#330, #340): open palm held in camera + Insight/Focus for two seconds.
 //   Face:  MediaPipe Face Landmarker blendshapes → Joy (continuous) + Surprise (debounced event) (#117).
 //   Coach: Collapsible bottom panel with procedural 21-landmark ghost hands (#123).
 //
@@ -107,7 +107,7 @@ const TEMPLATE = `
       <b data-cam-fb-pct>0%</b>
     </div>
     <p class="eeg-msg">Hold a fist, pull it back, then thrust forward and open your palm. Or hold <kbd>3</kbd> and release.</p>
-    <p class="eeg-msg">Rain spell: open your palm and hold Insight/Focus for two seconds. Without the camera, hold <kbd>F</kbd>.</p>
+    <p class="eeg-msg">Rain spell: hold an open palm to the camera and hold Insight/Focus for two seconds. No camera, no Rain.</p>
   </section>
 
   <section class="eeg-sec" aria-label="Mood read from your face">

@@ -18,7 +18,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 - [ ] **Pinch calibration** (optional): Camera sidebar → **🎯 Pinch Movement Calibration** opens a pop-up. Follow the live camera + wireframe to the LEFT, RIGHT, UP and DOWN targets with each hand. It auto-advances, saves per-axis gains and closes when complete. Gains persist in the browser. Esc closes it. Head tilt is not calibrated.
 - [ ] **Hotkeys Reference Card**:
   - `Space`: Hold Calm (high alpha)
-  - `F`: Hold Focus / Insight. Hold 5 s at the fading campfire to rekindle it. For the Rain spell, open your palm and hold Insight ~2 s (or hold `F` alone without the camera) to put out a forest fire
+  - `F`: Hold Focus / Insight. Hold 5 s at the fading campfire to rekindle it. The Rain spell is camera-only: hold an open palm to the camera and hold Insight ~2 s to put out a forest fire
   - `Shift`: Spike Stress (drops calm)
   - `B`: Deliberate Blink. On a surface it throws lightning (a tree strike starts a forest fire); in the galaxy/globe it selects/lands like a left click
   - `Space` / `Enter` / click during an era's opening camera move: skip it
@@ -73,7 +73,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 - **0:22**: Aim mouse/head at the fire pit. Press `B` (or physical blink). Lightning crashes, fire ignites, audio synth roars.
 - **0:30**: Aim at a giant chicken. Press `B`. A roast chicken appears, food count rises to 5+.
 - **0:36**: Fire heat drops under 50%; the Insight hold begins. Hold `F` (or focus for the headset). The ring fills to 100%, the advisor celebrates and the tribe grows.
-- **0:50**: Aim at a tree and press `B`: a forest fire starts and spreads. Open your palm and hold Insight for about 2 s (or hold `F` with the camera off): the Rain spell puts it out.
+- **0:50**: Aim at a tree and press `B`: a forest fire starts and spreads. Hold an open palm to the camera and hold Insight for about 2 s: the Rain spell puts it out.
 - **0:50**: Show the camera hands: pinch over a villager to carry them, then pinch with both hands and spread them to zoom. Optional: hold `3` (or, on camera, make a fist, pull it back, then thrust and open the palm) to throw the charged fireball (#291).
 
 ---
