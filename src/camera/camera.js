@@ -24,6 +24,7 @@ import { clamp } from '../sim/util.js';
 import { SPELLS, SPELL_BY_ID, GESTURE_LABEL, spellForKeyCode, CAMERA_CASTS_ENABLED } from './spells.js';
 import { CastController } from './casts.js';
 import { EMOTIONS, EmotionTracker, neutralMood, blendshapeMap } from './emotion.js';
+import { manualMood, surpriseRisingEdge } from './manual-mood.js';
 import { loadVision } from './vision.js';
 import { loadEngine, workerPreference } from './engine.js';
 import { FingerController, MultiHandTracker } from './fingers.js';
@@ -119,6 +120,11 @@ const TEMPLATE = `
           <span class="eeg-bar cam-bar"><span></span></span>
           <span class="eeg-band-val" data-emotion-val="${k}">0%</span>
         </div>`).join('')}
+    </div>
+    <div class="cam-manual-mood" aria-label="Manual mood (no camera needed, #155)">
+      <label class="cam-manual-row"><input type="checkbox" data-cam-mood-off checked> No emotion</label>
+      <label class="cam-manual-row">Happy <input type="range" min="0" max="100" value="0" step="1" data-cam-mood-slider aria-label="Manual mood: Happy to Mix to Surprised" disabled> Surprised</label>
+      <span class="eeg-qual">Manual mood: <b data-cam-mood-manual>off</b> (overrides the camera while on)</span>
     </div>
     <p class="cam-privacy">Frames never leave this device. Nothing is uploaded.</p>
   </section>`;
@@ -218,6 +224,8 @@ export function initCamera({
   let keyCharge = null;        // { id, code, at }: key 3 held to charge a fireball, released to throw (#150)
   let mood = neutralMood();
   let moodScene = null, moodSent = null, strongPending = false, surprisePending = false;
+  // Manual mood (#155): off by default ("No emotion"); while on it replaces the camera's mood.
+  let manualOn = false, manualValue = 0, manualPrev = null;
   let advisorAt = -Infinity;
   let lastCast = null;
   let miss = null;
@@ -494,12 +502,28 @@ export function initCamera({
   });
   window.addEventListener('blur', () => { keyCharge = null; });
   for (const s of SPELLS) ui.spells[s.id]?.addEventListener('click', () => cast(s.id, 'tap'));
+  // Manual mood controls (#155).
+  {
+    const off = panel.querySelector('[data-cam-mood-off]'), slider = panel.querySelector('[data-cam-mood-slider]');
+    const out = panel.querySelector('[data-cam-mood-manual]');
+    const show = () => {
+      if (slider) slider.disabled = !manualOn;
+      if (out) out.textContent = !manualOn ? 'off' : manualValue < 0.35 ? 'happy' : manualValue > 0.65 ? 'surprised' : 'mix';
+    };
+    off?.addEventListener('change', () => {
+      manualOn = !off.checked; manualPrev = null;
+      if (!manualOn) { mood = neutralMood(); surprisePending = false; }
+      show();
+    });
+    slider?.addEventListener('input', () => { manualValue = Number(slider.value) / 100; show(); });
+    show();
+  }
 
   // ---------- mood (#117: Joy continuous + Surprise debounced event) ----------
   function syncMood(G) {
     const scene = G?.scene;
     if (!scene?.onMood || !canCast()) return;
-    if (!stream && scene !== moodScene) {
+    if (!stream && !manualOn && scene !== moodScene) {
       moodScene = scene;
       moodSent = 'neutral';
       strongPending = false;
@@ -523,10 +547,10 @@ export function initCamera({
       console.error('[camera] mood failed:', err);
     }
     if (wasSurprise) {
-      G.hud?.showCause?.('😮 Your surprised expression startled the sky!');
+      G.hud?.showCause?.(manualOn ? '😮 Manual mood: surprise startled the sky!' : '😮 Your surprised expression startled the sky!');
       advisorReact(G, 'surprise');
     } else if (reason === 'change' && changed && mood.dominant === 'joy') {
-      G.hud?.showCause?.('😊 Your smile boosted morale (+joy)');
+      G.hud?.showCause?.(manualOn ? '😊 Manual mood: joy boosted morale' : '😊 Your smile boosted morale (+joy)');
       advisorReact(G, 'joy');
     }
   }
@@ -884,7 +908,12 @@ export function initCamera({
     }
     const G = getG();
     if (G) {
-      G.mood = { ...(stream ? mood : neutralMood()), active: !!stream };
+      if (manualOn) {
+        mood = manualMood(manualValue);
+        if (surpriseRisingEdge(manualPrev, manualValue)) surprisePending = true;   // once per crossing
+        manualPrev = manualValue;
+      }
+      G.mood = { ...(manualOn || stream ? mood : neutralMood()), active: manualOn || !!stream, source: manualOn ? 'manual' : stream ? 'camera' : 'none' };
       if (grabbed && G.brain) {
         G.scene?.onGrabMove?.({ x: G.brain.aim.x, y: G.brain.aim.y });
       }
