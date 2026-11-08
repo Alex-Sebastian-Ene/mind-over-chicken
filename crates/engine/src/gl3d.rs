@@ -186,7 +186,8 @@ void main() {
 
     // Atmospheric horizon haze
     float camDist = distance(v_worldPos, u_camPos);
-    float haze = clamp((camDist - 240.0) / 420.0, 0.0, 0.50);
+    float hazeFrom = 240.0 + max(0.0, u_camPos.y - 340.0);   // wide views of big worlds stay clear
+    float haze = clamp((camDist - hazeFrom) / 420.0, 0.0, 0.50);
     vec3 hazeCol = mix(vec3(0.09, 0.17, 0.36), vec3(0.03, 0.05, 0.12), u_night);
 
     vec3 finalColor = mix(albedo.rgb * lightAccum, hazeCol, haze);
@@ -286,7 +287,8 @@ void main() {
 
     // Atmospheric horizon haze for water
     float camDist = distance(v_worldPos, u_camPos);
-    float haze = clamp((camDist - 240.0) / 420.0, 0.0, 0.55);
+    float hazeFrom = 240.0 + max(0.0, u_camPos.y - 340.0);
+    float haze = clamp((camDist - hazeFrom) / 420.0, 0.0, 0.55);
     vec3 hazeCol = mix(vec3(0.09, 0.17, 0.36), vec3(0.03, 0.05, 0.12), u_night);
     col = mix(col, hazeCol, haze);
 

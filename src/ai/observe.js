@@ -28,7 +28,7 @@ export const OBS_NAMES = [
   'hunger',          //  4  mean hunger of the living (0 if none)
   'starving',        //  5  share of the living with hunger >= 0.9
   'fear',            //  6  mean fear of the living
-  'hold_active',     //  7  1 while the calm challenge runs
+  'hold_active',     //  7  1 while the fire focus challenge runs (simulated scenes accept calm)
   'hold_progress',   //  8  hold.progress / 5 clamped to 0..1
   'holds',           //  9  hold.successes / 2 clamped to 0..1
   'mammoth_dist',    // 10  wrapped distance fire -> nearest living mammoth / 100, clamped 0..1; 1 if none
@@ -37,7 +37,7 @@ export const OBS_NAMES = [
   'rafts',           // 13  rafts boarding or sailing / 2 clamped to 0..1
   'overseas',        // 14  share of the living settled on another continent
   'time',            // 15  scene time / 120 clamped to 0..1
-  'calm',            // 16  brain.calm clamped to 0..1 (what the calm challenge reads)
+  'calm',            // 16  brain.calm clamped to 0..1 (the AI's calm action; simulated focus fallback)
   'calm_margin',     // 17  brain.calm - brain.threshold('calm', 0.55), clamped to -1..1
   'bolt_ready',      // 18  1 if a bolt now would not be refused by the cooldown
   'meat',            // 19  sum of uncollected meat amounts / 10 clamped to 0..1

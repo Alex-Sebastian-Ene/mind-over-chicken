@@ -32,7 +32,7 @@ test('mirrorHud hands the visible Stone Age to the engine, with the JS clock', a
   assert.equal(mirrorHud(engine, 42.5, s), true);
   const [runTime, labels, values, flags] = calls[0];
   assert.equal(runTime, 42.5);
-  assert.deepEqual(labels.map((l, i) => `${l} ${values[i]}`), ['Fire lit', 'Tribe 8/15', 'Calm holds 0/2', 'Food hunt chicken', 'Continents 1/5']);
+  assert.deepEqual(labels.map((l, i) => `${l} ${values[i]}`), ['Fire lit', 'Tribe 8/15', 'Focus holds 0/2', 'Food hunt chicken', 'Continents 1/5']);
   assert.equal(flags[0] & 1, 1, 'fire lit is done');
   assert.equal(mirrorHud({}, 1, s), false, 'an engine without game_mirror (old pkg) is left alone');
   assert.equal(mirrorHud(null, 1, s), false);
