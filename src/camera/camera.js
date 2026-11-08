@@ -1,7 +1,7 @@
 // camera (#33, #67, #116–#123, #261): opt-in webcam input.
 //   Aim:   the webcam does NOT track the head (#189). G.brain.aim comes from the EEG headset's head
 //          pose while it streams, else the mouse (aim-source.js). Hands never overwrite it (#116, #120).
-//   Hands: MediaPipe Gesture Recognizer (numHands=2, #118) → movement only:
+//   Hands: MediaPipe Hand Landmarker (numHands=2, #118, #327) + landmark classifier → movement:
 //          1. One-hand pinch grabs & relocates living entities under the cursor (#120)
 //          2. Two-hand pinch distance continuously zooms in/out & freezes on release (#119)
 //          3. One deliberate cast (#291): fist → pull back → thrust + open palm = charged fireball.

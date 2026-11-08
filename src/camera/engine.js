@@ -8,11 +8,11 @@
 //                     worker answers, not on the next game frame, so the rate is set by the camera
 //                     and the model, up to MAX_HZ (faster tracking, Alex).
 //   main (fallback)   the #59 path: the models run in this thread under a budget (at most one model
-//                     per game frame, ~12–25 Hz hands, ≤8 Hz face). Used when workers, module workers,
+//                     per game frame, ~30–50 Hz hands, ≤8 Hz face). Used when workers, module workers,
 //                     OffscreenCanvas or WebGL in a worker are unavailable, or a worker dies.
 //
 // Both report the same results to the handlers set with on():
-//   gesture({ hand, name, score, aspect, at, latency, ms })   hand: 21 landmarks or null
+//   gesture({ hands, hand, name, score, aspect, at, latency, ms })   hand: 21 landmarks or null
 //   face({ blendshapes, box, at, latency, ms })               blendshapes: null when no face
 //   fail(err)    the worker path broke while running; the caller switches to the main thread
 //   warn(text)   a model keeps failing
@@ -22,13 +22,14 @@
 // ?camworker=2 (default) one worker per model.
 
 import { loadVision } from './vision.js';
+import { classifyHand } from './classify-hand.js';
 import { loading } from '../ui/loading.js'; // loading screen
 import { RateMeter, Ema } from './meter.js';
 
 export const FRAME_WIDTH = { gesture: 320, face: 256 };
 // Caps, not targets: a 30 fps webcam gives at most 30 new frames a second, and each worker has one
 // frame in flight. Hands can follow a 60 fps camera; the face (CPU, blendshapes) stops at 30.
-export const MAX_HZ = { gesture: 60, face: 30 };
+export const MAX_HZ = { gesture: 90, face: 20 };
 // With one worker per model, the hands get the GPU and the face runs on the CPU (WebAssembly,
 // XNNPACK). Every WebGL context of the page, the game's included, runs in the browser's one GPU
 // process, so GPU models queue behind each other and behind the game. Measured on an i5-10300H
@@ -44,7 +45,7 @@ export function workerDelegates(search = globalThis.location?.search || '') {
   return { ...SPLIT_DELEGATES };
 }
 // Main-thread budget (#59): each model waits a multiple of its own measured cost.
-const HAND_MS = { tracking: 40, searching: 80, costX: 2.5 };
+const HAND_MS = { tracking: 24, searching: 55, costX: 1.8 };
 const FACE_MS = { min: 125, costX: 5 };
 const INIT_TIMEOUT_MS = 60000;
 const STALL_MS = { first: 20000, later: 5000 };   // no answer to a frame for this long: the worker is stuck
@@ -330,24 +331,24 @@ class MainEngine extends Engine {
     const aspect = (video.videoWidth || 4) / (video.videoHeight || 3);
     if (hands && v.gesture && now >= this.nextAt.gesture && t !== this.seen.gesture && !this.rebuilding.gesture) {
       this.seen.gesture = t;
-      const { res, ms } = this.timed('gesture', () => v.gesture.recognizeForVideo(video, now));
+      const { res, ms } = this.timed('gesture', () => v.gesture.detectForVideo(video, now));
       this.nextAt.gesture = now + Math.max(tracking ? HAND_MS.tracking : HAND_MS.searching, this.cost.gesture * HAND_MS.costX);
       const at = performance.now();
       this.record('gesture', at, ms, at - now);
       const lms = res?.landmarks || [];
       const handsList = lms.map((lm, i) => {
-        const g = res?.gestures?.[i]?.[0];
+        const c = classifyHand(lm);
         const h = res?.handedness?.[i]?.[0];
         return {
           landmarks: lm,
-          name: g?.categoryName || 'None',
-          score: g?.score || 0,
+          name: c.name,
+          score: c.score,
           handedness: h?.categoryName || null,
           handednessScore: h?.score || 0,
         };
       });
-      const top = res?.gestures?.[0]?.[0];
-      this.handlers.gesture?.({ hands: handsList, hand: res?.landmarks?.[0] || null, name: top?.categoryName || 'None', score: top?.score || 0, aspect, at, latency: at - now, ms });
+      const top = handsList[0];
+      this.handlers.gesture?.({ hands: handsList, hand: top?.landmarks || null, name: top?.name || 'None', score: top?.score || 0, aspect, at, latency: at - now, ms });
     } else if (v.face && now >= this.nextAt.face && t !== this.seen.face && !this.rebuilding.face) {
       this.seen.face = t;
       const { res, ms } = this.timed('face', () => v.face.detectForVideo(video, now));

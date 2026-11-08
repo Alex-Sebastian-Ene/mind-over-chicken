@@ -1,7 +1,7 @@
 // camera debug (#67): MediaPipe inference in a module Web Worker, so it never blocks the game.
 //
 // The main thread (engine.js) sends small video frames as transferred ImageBitmaps; this worker
-// runs the Gesture Recognizer and/or the Face Landmarker on them and posts back only landmarks,
+// runs the Hand Landmarker (plus landmark classifier) and/or the Face Landmarker on them and posts back only landmarks,
 // the top gesture and the 52 blendshape scores. Nothing leaves the device: the only network
 // traffic is the one-time download of the pinned runtime and the two models, as on the main thread.
 //
@@ -14,6 +14,7 @@
 //   out  { type: 'warn' | 'info', message }
 
 import { VISION_URLS, OPTIONS, withDelegate, quietInfoLogs } from './vision.js';
+import { classifyHand } from './classify-hand.js';
 
 quietInfoLogs();
 
@@ -28,7 +29,7 @@ self.importScripts = (...urls) => {
   }
 };
 
-const TASKS = { gesture: 'GestureRecognizer', face: 'FaceLandmarker' };
+const TASKS = { gesture: 'HandLandmarker', face: 'FaceLandmarker' };
 let mp = null, fileset = null;
 const tasks = {}, delegates = {}, lastTs = {}, rebuilding = {}, errors = {};
 
@@ -74,7 +75,7 @@ function warmUp(name) {
   g.fillStyle = '#808080';
   g.fillRect(0, 0, 320, 240);
   try {
-    if (name === 'gesture') tasks.gesture.recognizeForVideo(canvas, 1);
+    if (name === 'gesture') tasks.gesture.detectForVideo(canvas, 1);
     else tasks.face.detectForVideo(canvas, 1);
     lastTs[name] = 1;
   } catch (err) {
@@ -104,15 +105,15 @@ function failed(name, err) {
 const round = (v) => Math.round(v * 10000) / 10000;
 
 function runGesture(bitmap, ts) {
-  const r = tasks.gesture.recognizeForVideo(bitmap, ts);
+  const r = tasks.gesture.detectForVideo(bitmap, ts);
   const lms = r?.landmarks || [];
   const hands = lms.map((lm, i) => {
-    const top = r?.gestures?.[i]?.[0];
+    const c = classifyHand(lm);
     const h = r?.handedness?.[i]?.[0];
     return {
       landmarks: lm.map((p) => ({ x: round(p.x), y: round(p.y), z: round(p.z) })),
-      name: top?.categoryName || 'None',
-      score: top?.score || 0,
+      name: c.name,
+      score: c.score,
       handedness: h?.categoryName || null,
       handednessScore: h?.score || 0,
     };
