@@ -1,4 +1,4 @@
-// Readable names for the MediaPipe Gesture Recognizer categories. Hand gestures only drive
+// Readable names for the hand categories produced by classify-hand.js. Hands only drive
 // movement now: one-hand pinch grabs/moves, two-hand pinch zooms. No gesture casts a spell.
 
 export const GESTURE_LABEL = {
