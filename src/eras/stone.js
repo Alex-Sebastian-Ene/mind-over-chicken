@@ -876,6 +876,10 @@ export class StoneAge {
       life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color: pick(['#c9c2b0', '#8a7a5a', '#5f5545']),
     }));
     for (const p of this.living()) if (dist(x, y, p.x, p.y) < 22 + charge * 14) p.fear = clamp(p.fear + 0.2 + charge * 0.2);
+    // The slam also strikes like lightning where it lands: it lights the pit, roasts a giant
+    // chicken, sets a tree alight (the fireball used to be visual only).
+    this.lastBolt = -Infinity;
+    this.onBlink(this.G.world.aimOf(x, y));
   }
 
   // aim is 0..1 like the brain's. The fist (fireball) normally arrives through onBlink.
