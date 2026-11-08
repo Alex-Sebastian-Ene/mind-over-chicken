@@ -406,12 +406,12 @@ impl Engine {
         let shadow_variant = if y < 15.0 {
             match sprite_id {
                 sprites::SPRITE_VILLAGER | sprites::SPRITE_CHICKEN | sprites::SPRITE_GOAT => Some(0),
+                sprites::SPRITE_TREE => Some(3), // Dedicated small tree shadow (#200)
                 sprites::SPRITE_MAMMOTH
                 | sprites::SPRITE_HUT
                 | sprites::SPRITE_HOUSE
                 | sprites::SPRITE_TOWER
-                | sprites::SPRITE_ROCKET
-                | sprites::SPRITE_TREE => Some(1),
+                | sprites::SPRITE_ROCKET => Some(1),
                 sprites::SPRITE_FACTORY
                 | sprites::SPRITE_EXCHANGE
                 | sprites::SPRITE_HANGAR
@@ -426,24 +426,26 @@ impl Engine {
             let s_entry = sprites::get_sprite_atlas_entry(sprites::SPRITE_SHADOW, 1, 0, sv);
             let shw = s_entry.world_w * 0.5;
             let shd = s_entry.world_h * 0.5;
+            // Jitter elevation slightly (0.015..0.025) across world coordinates to prevent Z-fighting between overlapping shadows (#200)
+            let shadow_bias = 0.015 + ((wx * 17.3 + wz * 31.7).sin().abs() * 0.01);
             let s_tl = BillboardVertex {
                 center: ground_center,
-                offset: [-shw, 0.02, -shd],
+                offset: [-shw, shadow_bias, -shd],
                 uv: [s_entry.u0, s_entry.v0],
             };
             let s_bl = BillboardVertex {
                 center: ground_center,
-                offset: [-shw, 0.02, shd],
+                offset: [-shw, shadow_bias, shd],
                 uv: [s_entry.u0, s_entry.v1],
             };
             let s_tr = BillboardVertex {
                 center: ground_center,
-                offset: [shw, 0.02, -shd],
+                offset: [shw, shadow_bias, -shd],
                 uv: [s_entry.u1, s_entry.v0],
             };
             let s_br = BillboardVertex {
                 center: ground_center,
-                offset: [shw, 0.02, shd],
+                offset: [shw, shadow_bias, shd],
                 uv: [s_entry.u1, s_entry.v1],
             };
             self.billboards_3d
