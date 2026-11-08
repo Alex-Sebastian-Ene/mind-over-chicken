@@ -771,6 +771,7 @@ impl WebGl3DRenderer {
         sun_dir: Vec3,
         night: f32,
         lights: &[Light3D],
+        shadows: &[BillboardVertex],
         billboards: &[BillboardVertex],
     ) {
         let gl = &self.gl;
@@ -928,8 +929,9 @@ impl WebGl3DRenderer {
         gl.depth_mask(true);
         unbind_attrs(gl, &water_attrs);
 
-        // 4. Render Billboard Sprites (camera-facing entities standing on the ground)
-        if !billboards.is_empty() {
+        // 4. Render ground shadows, then the billboard sprites (camera-facing entities standing
+        // on the ground). Both share one buffer: shadows first, sprites after.
+        if !billboards.is_empty() || !shadows.is_empty() {
             gl.use_program(Some(&self.billboard_program));
             gl.uniform_matrix4fv_with_f32_array(Some(&self.u_billboard_vp), false, &view_proj.m);
             gl.uniform3f(
@@ -971,17 +973,21 @@ impl WebGl3DRenderer {
             gl.bind_texture(WebGlRenderingContext::TEXTURE_2D, Some(&self.atlas_texture));
 
             gl.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&self.billboard_vbo));
-            unsafe {
-                let bytes = std::slice::from_raw_parts(
-                    billboards.as_ptr() as *const u8,
-                    billboards.len() * std::mem::size_of::<BillboardVertex>(),
-                );
-                gl.buffer_data_with_u8_array(
-                    WebGlRenderingContext::ARRAY_BUFFER,
-                    bytes,
-                    WebGlRenderingContext::DYNAMIC_DRAW,
-                );
-            }
+            let vsize = std::mem::size_of::<BillboardVertex>();
+            let as_bytes = |v: &[BillboardVertex]| unsafe {
+                std::slice::from_raw_parts(v.as_ptr() as *const u8, v.len() * vsize)
+            };
+            gl.buffer_data_with_i32(
+                WebGlRenderingContext::ARRAY_BUFFER,
+                ((shadows.len() + billboards.len()) * vsize) as i32,
+                WebGlRenderingContext::DYNAMIC_DRAW,
+            );
+            gl.buffer_sub_data_with_i32_and_u8_array(WebGlRenderingContext::ARRAY_BUFFER, 0, as_bytes(shadows));
+            gl.buffer_sub_data_with_i32_and_u8_array(
+                WebGlRenderingContext::ARRAY_BUFFER,
+                (shadows.len() * vsize) as i32,
+                as_bytes(billboards),
+            );
 
             let b_stride = std::mem::size_of::<BillboardVertex>() as i32;
             let billboard_attrs = [
@@ -991,14 +997,27 @@ impl WebGl3DRenderer {
             ];
 
             // Sprites stand up to ~40 units tall and spread a few units around their feet.
-            for &(ox, oz) in &offsets {
-                if !visible([0.0, 0.0, 0.0], [map_w, 48.0, map_h], 16.0, ox, oz) {
+            let seen: Vec<(f32, f32)> = offsets
+                .iter()
+                .copied()
+                .filter(|&(ox, oz)| visible([0.0, 0.0, 0.0], [map_w, 48.0, map_h], 16.0, ox, oz))
+                .collect();
+            // Shadows lie on the ground and overlap (a forest is hundreds of them): drawn without
+            // writing depth they just blend, rather than Z-fighting each other, and a sprite drawn
+            // after them is never clipped by one (#200).
+            let (n_shadow, n_sprite) = (shadows.len() as i32, billboards.len() as i32);
+            for (first, count, write_depth) in [(0, n_shadow, false), (n_shadow, n_sprite, true)] {
+                if count == 0 {
                     continue;
                 }
-                gl.uniform1f(Some(&self.u_billboard_offset_x), ox);
-                gl.uniform1f(Some(&self.u_billboard_offset_z), oz);
-                gl.draw_arrays(WebGlRenderingContext::TRIANGLES, 0, billboards.len() as i32);
+                gl.depth_mask(write_depth);
+                for &(ox, oz) in &seen {
+                    gl.uniform1f(Some(&self.u_billboard_offset_x), ox);
+                    gl.uniform1f(Some(&self.u_billboard_offset_z), oz);
+                    gl.draw_arrays(WebGlRenderingContext::TRIANGLES, first, count);
+                }
             }
+            gl.depth_mask(true);
             unbind_attrs(gl, &billboard_attrs);
         }
 

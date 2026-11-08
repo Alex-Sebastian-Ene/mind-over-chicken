@@ -43,6 +43,8 @@ pub struct Engine {
     lights: Vec<Light>,
     lights_3d: Vec<Light3D>,
     billboards_3d: Vec<BillboardVertex>,
+    /// Ground contact shadows, drawn before the sprites without writing depth (#200).
+    shadows_3d: Vec<BillboardVertex>,
     current_era: u8,
     is_3d_mode: bool,
     time_3d: f32,
@@ -98,6 +100,7 @@ impl Engine {
             lights: Vec::new(),
             lights_3d: Vec::new(),
             billboards_3d: Vec::new(),
+            shadows_3d: Vec::new(),
             current_era: 0,
             is_3d_mode: true,
             time_3d: 0.0,
@@ -278,6 +281,7 @@ impl Engine {
 
     pub fn clear_3d_billboards(&mut self) {
         self.billboards_3d.clear();
+        self.shadows_3d.clear();
     }
 
     /// The colour around the map in 3D (the world's deep sea, 0..255), so the view's edges read
@@ -402,53 +406,22 @@ impl Engine {
         let center = [wx, ground_y + y, wz];
         let ground_center = [wx, ground_y, wz];
 
-        // Soft ground contact shadow beneath entities, trees, and structures (fades out as entity ascends)
-        let shadow_variant = if y < 15.0 {
-            match sprite_id {
-                sprites::SPRITE_VILLAGER | sprites::SPRITE_CHICKEN | sprites::SPRITE_GOAT => Some(0),
-                sprites::SPRITE_TREE => Some(3), // Dedicated small tree shadow (#200)
-                sprites::SPRITE_MAMMOTH
-                | sprites::SPRITE_HUT
-                | sprites::SPRITE_HOUSE
-                | sprites::SPRITE_TOWER
-                | sprites::SPRITE_ROCKET => Some(1),
-                sprites::SPRITE_FACTORY
-                | sprites::SPRITE_EXCHANGE
-                | sprites::SPRITE_HANGAR
-                | sprites::SPRITE_PAD => Some(2),
-                _ => None,
-            }
-        } else {
-            None
-        };
-
-        if let Some(sv) = shadow_variant {
+        // Soft ground contact shadow beneath entities, trees and structures (none once airborne).
+        // Shadows go in their own list: the renderer draws them first without writing depth,
+        // so overlapping shadows blend instead of Z-fighting and never cut into a sprite (#200).
+        if let Some(sv) = shadow_variant(sprite_id, y) {
             let s_entry = sprites::get_sprite_atlas_entry(sprites::SPRITE_SHADOW, 1, 0, sv);
             let shw = s_entry.world_w * 0.5;
             let shd = s_entry.world_h * 0.5;
-            // Jitter elevation slightly (0.015..0.025) across world coordinates to prevent Z-fighting between overlapping shadows (#200)
-            let shadow_bias = 0.015 + ((wx * 17.3 + wz * 31.7).sin().abs() * 0.01);
-            let s_tl = BillboardVertex {
+            let lift = 0.02;
+            let corner = |dx: f32, dz: f32, u: f32, v: f32| BillboardVertex {
                 center: ground_center,
-                offset: [-shw, shadow_bias, -shd],
-                uv: [s_entry.u0, s_entry.v0],
+                offset: [dx, lift, dz],
+                uv: [u, v],
             };
-            let s_bl = BillboardVertex {
-                center: ground_center,
-                offset: [-shw, shadow_bias, shd],
-                uv: [s_entry.u0, s_entry.v1],
-            };
-            let s_tr = BillboardVertex {
-                center: ground_center,
-                offset: [shw, shadow_bias, -shd],
-                uv: [s_entry.u1, s_entry.v0],
-            };
-            let s_br = BillboardVertex {
-                center: ground_center,
-                offset: [shw, shadow_bias, shd],
-                uv: [s_entry.u1, s_entry.v1],
-            };
-            self.billboards_3d
+            let (s_tl, s_bl) = (corner(-shw, -shd, s_entry.u0, s_entry.v0), corner(-shw, shd, s_entry.u0, s_entry.v1));
+            let (s_tr, s_br) = (corner(shw, -shd, s_entry.u1, s_entry.v0), corner(shw, shd, s_entry.u1, s_entry.v1));
+            self.shadows_3d
                 .extend_from_slice(&[s_tl, s_bl, s_tr, s_tr, s_bl, s_br]);
         }
 
@@ -551,6 +524,7 @@ impl Engine {
                 sun_dir,
                 night,
                 &self.lights_3d,
+                &self.shadows_3d,
                 &self.billboards_3d,
             );
 
@@ -572,6 +546,7 @@ impl Engine {
 
         self.lights_3d.clear();
         self.billboards_3d.clear();
+        self.shadows_3d.clear();
     }
 
     pub fn begin_frame(&mut self) {
@@ -583,6 +558,7 @@ impl Engine {
         self.lights.clear();
         self.lights_3d.clear();
         self.billboards_3d.clear();
+        self.shadows_3d.clear();
     }
 
     pub fn add_light(&mut self, x: f32, y: f32, radius: f32, intensity: f32) {
@@ -1259,6 +1235,29 @@ impl Engine {
 
     pub fn is_game_era_failed(&self) -> Option<String> {
         self.game.era_failed()
+    }
+}
+
+/// Which ground shadow a sprite casts (`SPRITE_SHADOW` variant), if any. Trees get the small
+/// one (#200): a forest is hundreds of trees, and the big mammoth-sized shadow piled up.
+/// Nothing casts one once it is 15 units up.
+pub(crate) fn shadow_variant(sprite_id: u32, y: f32) -> Option<u32> {
+    if y >= 15.0 {
+        return None;
+    }
+    match sprite_id {
+        sprites::SPRITE_VILLAGER | sprites::SPRITE_CHICKEN | sprites::SPRITE_GOAT => Some(0),
+        sprites::SPRITE_TREE => Some(3),
+        sprites::SPRITE_MAMMOTH
+        | sprites::SPRITE_HUT
+        | sprites::SPRITE_HOUSE
+        | sprites::SPRITE_TOWER
+        | sprites::SPRITE_ROCKET => Some(1),
+        sprites::SPRITE_FACTORY
+        | sprites::SPRITE_EXCHANGE
+        | sprites::SPRITE_HANGAR
+        | sprites::SPRITE_PAD => Some(2),
+        _ => None,
     }
 }
 
@@ -2085,5 +2084,21 @@ mod walk_field_tests {
         // Over water the seam wraps north-south too.
         let s = walk_field(&types, w as u32, h as u32, 0, 0, true);
         assert_eq!(s[5 * w], 1);
+    }
+}
+
+#[cfg(test)]
+mod shadow_tests {
+    use super::{shadow_variant, sprites};
+
+    #[test]
+    fn trees_cast_a_small_shadow_not_the_mammoth_one() {
+        let tree = sprites::get_sprite_atlas_entry(sprites::SPRITE_SHADOW, 1, 0, shadow_variant(sprites::SPRITE_TREE, 0.0).unwrap());
+        let big = sprites::get_sprite_atlas_entry(sprites::SPRITE_SHADOW, 1, 0, shadow_variant(sprites::SPRITE_MAMMOTH, 0.0).unwrap());
+        assert!(tree.world_w * tree.world_h * 4.0 < big.world_w * big.world_h, "tree {}x{} vs {}x{}", tree.world_w, tree.world_h, big.world_w, big.world_h);
+        assert!(tree.world_w <= 6.0);
+        // Airborne things cast none.
+        assert_eq!(shadow_variant(sprites::SPRITE_TREE, 20.0), None);
+        assert_eq!(shadow_variant(sprites::SPRITE_VILLAGER, 15.0), None);
     }
 }
