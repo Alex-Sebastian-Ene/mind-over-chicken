@@ -47,6 +47,11 @@ export const CALIBRATION = {
   sadness: { rest: 0.06, full: 0.35 },
 };
 
+// mood.surprise now reaches 1 on a clear face, so this is the identity. The fireball tint (#291)
+// used it to stretch surprise while it plateaued near 0.2.
+export const SURPRISE_FULL = 1;
+export function surpriseNormalized(v) { return clamp((Number(v) || 0) / SURPRISE_FULL); }
+
 // The blendshapes the Rust tracker reads, in RustEmotionTracker.update_direct's argument order.
 export const INPUTS = [
   'mouthSmileLeft', 'mouthSmileRight', 'browDownLeft', 'browDownRight', 'mouthPressLeft', 'mouthPressRight',

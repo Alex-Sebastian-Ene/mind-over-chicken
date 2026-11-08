@@ -1500,6 +1500,11 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
+  if ((e.code === 'Digit3' || e.code === 'Numpad3') && !e.repeat) {
+    window.__moc?.camera?.fireballKeyDown?.();
+    e.preventDefault();
+    return;
+  }
   const s = sim(); if (!s) return;
   if (KEYS[e.code]) { s.input[KEYS[e.code]] = true; e.preventDefault(); }
   if (e.code === 'KeyB' && !e.repeat) s.blink();
@@ -1515,6 +1520,7 @@ window.addEventListener('keydown', (e) => {
   }
 });
 window.addEventListener('keyup', (e) => {
+  if (e.code === 'Digit3' || e.code === 'Numpad3') { window.__moc?.camera?.fireballKeyUp?.(); return; }
   const s = sim(); if (!s) return;
   if (KEYS[e.code]) s.input[KEYS[e.code]] = false;
 });

@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  EmotionTracker, emotionsFromBlendshapes, rawEmotions, setRustEmotionTracker, INPUTS, RECIPES,
+  EmotionTracker, emotionsFromBlendshapes, rawEmotions, setRustEmotionTracker, INPUTS, RECIPES, surpriseNormalized,
 } from '../src/camera/emotion.js';
 import * as engine from '../pkg/mind_over_chicken_engine.js';
 
@@ -55,6 +55,8 @@ test('each clear expression reaches its full range', () => {
   assert.ok(sur.surprise >= 0.99, JSON.stringify(sur));
   assert.ok(sur.joy === 0 && sur.anger === 0 && sur.sadness < 0.2, JSON.stringify(sur));
   assert.ok(emotionsFromBlendshapes(SURPRISED_MOUTH_SHUT).surprise >= 0.95, 'brows up and eyes wide is enough');
+  // Already full range: the fireball tint (#291) no longer stretches it.
+  assert.equal(surpriseNormalized(0.5), 0.5);
 });
 
 test('surprise gain: the same numbers as Rust', () => {
