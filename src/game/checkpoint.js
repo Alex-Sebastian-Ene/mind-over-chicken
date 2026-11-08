@@ -86,6 +86,7 @@ export function buildCheckpoint(G, run, extra = {}) {
     eraTimes: Array.isArray(G?.eraTimes) ? G.eraTimes.map((e) => ({ label: e.label, seconds: Math.round((e.seconds || 0) * 10) / 10 })) : [],
     calibration,
     galaxy: galaxySummary(G?.camera?.galaxy),
+    setupPlanets: Array.isArray(G?.setupPlanets) ? G.setupPlanets.map((p) => ({ ...p, traits: { ...p.traits } })) : null,
     brain: brainSnapshot(G?.brain?.model),
     ...extra,
   };

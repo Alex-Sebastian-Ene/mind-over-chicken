@@ -110,7 +110,7 @@ export class PlanetSurface {
     w.paint = () => blankLayer();
     w.drawWater = () => {};
     w.layers3d = null;
-    this.sim = new SimPlanet({ seed: w.seed, biome: w.biome, brain: 'proxy', world: w }).setGod(new AIGod());
+    this.sim = new SimPlanet({ seed: w.seed, biome: w.biome, brain: 'proxy', world: w }).setGod(new AIGod({ weights: this.p.ppoWeights || null }));
     this.sim.scene.layer = blankLayer();   // the surface draws the land; the tribe draws itself
     if (this.sim.scene.G?.world) {
       this.sim.scene.G.world.drawWater = () => {};

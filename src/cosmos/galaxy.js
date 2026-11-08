@@ -24,6 +24,7 @@ import { loading } from '../ui/loading.js';
 import { label } from '../eras/stone.js';
 import { SIM, TEMPERAMENT, ERAS, newPlanetState, brainEffects, stepPlanet, blinkPlanet, arriveShip, newMind, stepMind, logHistory, reachMilestone, trackCampaignPop } from './planet-sim.js';
 import { PlanetSurface } from './surface.js';
+import { clampTraits, traitWeights } from '../ai/personality.js';
 import { SpaceWarView } from './space-war.js';   // #166: the interplanetary war (Rust)
 
 export const ERA_NAMES = ['stone', 'farming', 'industry', 'space'];
@@ -115,9 +116,26 @@ export class Galaxy {
     let name = opts.name;
     if (!name) { const free = NAMES.filter((n) => !this.usedNames.has(n)); name = pick(free.length ? free : NAMES); }
     const inhabited = opts.inhabited ?? chance(0.6);
-    const p = this.add({ name, biome: 'forming', size: opts.size ?? Math.round(rand(7, 10)), pop: 0, eraIndex: 0, channel: opts.channel || 'mixed', forming: true, alive: false });
+    const traits = opts.traits ? clampTraits(opts.traits) : null;
+    const p = this.add({
+      name, biome: 'forming', size: opts.size ?? Math.round(rand(7, 10)), pop: 0, eraIndex: 0,
+      channel: opts.channel || 'mixed', forming: true, alive: false,
+      traits, ppoWeights: opts.ppoWeights || (traits ? traitWeights(traits) : null), setup: !!opts.setup,
+    });
     this.form(p, biome, { pop: inhabited ? (opts.pop ?? 10) : 0, eraIndex: opts.eraIndex ?? 0, born: inhabited ? 'new tribe' : 'barren' });
     return p;
+  }
+
+  // The worlds the player shaped on the setup screen. They join the galaxy before the first
+  // stone is struck and keep their temperament: their AI god's PPO policy is weighted by it.
+  addSetupPlanets(planets = []) {
+    const made = [];
+    for (const opts of planets) {
+      if (!opts) continue;
+      const p = this.makePlanet({ ...opts, inhabited: opts.inhabited ?? true, pop: opts.pop ?? 10, eraIndex: 0, setup: true });
+      if (p) made.push(p);
+    }
+    return made;
   }
 
   add(o) {

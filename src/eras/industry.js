@@ -605,7 +605,10 @@ export class Industry {
     G.audio?.thunder?.();
     this.particles.burst(22 + Math.round(charge * 26), () => ({ x, y, vx: rand(-44, 44), vy: rand(-58, 4), g: 70, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color }));
     this.particles.burst(8 + Math.round(charge * 8), () => ({ x: x + rand(-4, 4), y: y + rand(-1, 2), vx: rand(-18, 18), vy: rand(-16, -2), g: 24, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color: pick(['#c9c2b0', '#8a7a5a', '#5f5545']) }));
-    for (const a of this.agents) if (dist(x, y, a.x, a.y) < 18 + charge * 12) a.fear = clamp(a.fear + 0.25);
+    const R = 60 + charge * 80;
+    for (const a of this.agents) if (dist(x, y, a.x, a.y) < R) a.fear = clamp(a.fear + 0.6);
+    const rivals = G.rivals?.smite?.(x, y, R) || 0;
+    if (rivals) G.hud?.showCause?.(`🔥 ${rivals} rival ${rivals === 1 ? 'person' : 'people'} killed in the blast`);
     // The slam also strikes like a blink where it lands (factories, pickets, the exchange).
     this.lastBolt = -Infinity;
     if (G.world?.aimOf) this.onBlink(G.world.aimOf(x, y));

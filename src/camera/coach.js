@@ -231,7 +231,7 @@ export function initCoach({ getContext = () => 'surface' } = {}) {
   window.addEventListener('keydown', (e) => {
     if (e.code !== COACH_KEY || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
-    if (['titleScreen', 'failScreen', 'endScreen', 'banner'].some((id) => document.getElementById(id)?.hidden === false) || document.body.dataset.intro === 'on') return;   // not during the era intro either
+    if (['titleScreen', 'planetSetup', 'failScreen', 'endScreen', 'banner'].some((id) => document.getElementById(id)?.hidden === false) || document.body.dataset.intro === 'on') return;   // not during the era intro either
     e.preventDefault();
     setOpen(!open);
   });

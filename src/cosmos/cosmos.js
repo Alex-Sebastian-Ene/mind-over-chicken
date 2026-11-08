@@ -94,13 +94,22 @@ export class Cosmos extends ZoomState {
     return { x: this.view.to_screen_x(wx), y: this.view.to_screen_y(wy) };
   }
 
-  ensureGalaxy(G, { autonomousHome = false } = {}) {
+  ensureGalaxy(G, { autonomousHome = false, setupPlanets = null } = {}) {
     if (this.galaxy) return this.galaxy;
     this.galaxy = new Galaxy();
     // A sandbox home runs on its own, on a mirror of the same world (built off-thread), so the paused game's map is untouched.
     this.galaxy.addHome(G.world, { autonomous: autonomousHome });
-    // Three more worlds take shape from the player's first ten seconds of brain data.
-    this.galaxy.addMindWorlds();
+    if (setupPlanets?.length) {
+      // The four worlds the setup screen read from the player's mind replace the three that the
+      // first ten seconds of play would make (Alex: no second reading, no remade worlds). The Rust
+      // galaxy only has the home and three mind slots, so this galaxy runs on the JS sim alone.
+      this.galaxy.wasm = null;
+      this.galaxy.mind.done = true;
+      this.galaxy.addSetupPlanets(setupPlanets);
+    } else {
+      // Three more worlds take shape from the player's first ten seconds of brain data.
+      this.galaxy.addMindWorlds();
+    }
     this.galaxy.onEvent = (p, text, kind, tone) => this.onEvent?.(p, text, kind, tone);
     // The space war presses your world as hard as the difficulty says (#220: Easy 0.5, Hard 1.6).
     this.galaxy.war?.setPlayerPressure(G.difficulty?.space?.pressure ?? 1);
