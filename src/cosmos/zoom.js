@@ -26,6 +26,7 @@ export class ZoomState {
     this.z = 0;          // animated zoom, 0..2
     this.vz = 0;         // its velocity (levels per second)
     this.target = 0;     // requested level
+    this.hold = 0;       // seconds the spring waits after continuous input (#143)
     this.focus = null;   // planet in view (null = the hand-played home)
     this.sandbox = false;
     this.homeRef = null; // the galaxy's home planet (Cosmos overrides homePlanet())
@@ -76,6 +77,20 @@ export class ZoomState {
   zoomIn() { return this.zoomTo(this.target - 1); }
   zoomOut() { return this.zoomTo(this.target + 1); }
 
+  // Continuous input (#143): the wheel and pinch move the zoom itself, by `dz` levels, instead of
+  // stepping a level per notch. Whichever level the zoom is nearest becomes the target (so the
+  // level logic, landing and refusals all stay as they were), and once the input stops for
+  // `hold` seconds the spring settles there. Returns zoomTo's result when the target changed.
+  nudge(dz, hold = 0.14) {
+    if (!dz) return null;
+    const lo = this.minLevel();
+    this.z = clampLevel(this.z + dz, lo, 2);
+    this.vz = 0;
+    this.hold = hold;
+    const near = Math.round(this.z);
+    return near !== this.target ? this.zoomTo(near) : null;
+  }
+
   // Pick a world (from the galaxy or the panel): show its globe.
   focusPlanet(p) {
     if (!p) return { ok: false, refused: 'No such world.' };
@@ -100,8 +115,10 @@ export class ZoomState {
 
   update(dt) {
     const h = Math.min(Math.max(dt || 0, 0), 0.05);
+    // While the player is still scrolling or pinching, the zoom stays where they put it.
+    if (this.hold > 0) this.hold = Math.max(0, this.hold - h);
     const x = this.z - this.target;
-    if (x !== 0 || this.vz !== 0) {
+    if (this.hold <= 0 && (x !== 0 || this.vz !== 0)) {
       // Semi-implicit Euler on z'' = -w^2 (z - target) - 2 w z' (critically damped).
       this.vz += (-ZOOM_OMEGA * ZOOM_OMEGA * x - 2 * ZOOM_OMEGA * this.vz) * h;
       const next = this.z + this.vz * h;

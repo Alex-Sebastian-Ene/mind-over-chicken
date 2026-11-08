@@ -1309,12 +1309,14 @@ screen.addEventListener('wheel', (e) => {
   if (in3dSurface() && (cosmos?.z || 0) <= 0.01) {
     cam3dTween = null;
     const scene = cosmos?.viewScene?.(G) || G?.scene;
-    // Already looking straight down at the whole map: the next notch hands over to the globe.
+    // Already looking straight down at the whole map: scrolling on carries on into the globe,
+    // continuously (#143).
     if (e.deltaY > 0 && engine.get_camera_distance() >= CAM3D.topDown - 0.5 && !(scene instanceof CivSandbox) && !scene?.civ) {
-      cosmos.zoomOut(G);
+      cosmos.wheel(e.deltaY, G);
       return;
     }
-    zoom3dBy(e.deltaY > 0 ? 1.1 : 0.91);
+    // In proportion to the scroll (#143): a mouse notch (100) is about ×1.1, a trackpad glides.
+    zoom3dBy(Math.exp(clamp(e.deltaY, -240, 240) * 0.00095));
     return;
   }
   const scene = cosmos?.viewScene?.(G) || G?.scene;
