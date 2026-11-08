@@ -391,7 +391,7 @@ export class PlanetSurface {
     if (this.sim) {
       const sc = this.sim.scene;
       if (sc.fire?.lit) {
-        engine.add_3d_light(tx0 + sc.fire.x / 2, 10.0, ty0 + sc.fire.y / 2, 25.0 + sc.fire.heat * 30.0 + Math.sin(this.t * 13) * 1.5, 1.8);
+        engine.add_3d_light(tx0 + sc.fire.x / 2, 10.0, ty0 + sc.fire.y / 2, 20.0 + sc.fire.heat * 22.0 + Math.sin(this.t * 13) * 1.2, 0.9);
       }
       if (sc.bolts) {
         for (const b of sc.bolts) {
@@ -619,6 +619,19 @@ export class PlanetSurface {
     this.particles.burst(12, () => ({ x: w.x, y: w.y, vx: rand(-30, 30), vy: rand(-40, 5), g: 60, life: 0.6, maxLife: 0.6, size: 1, color: pick(['#fff4c2', '#ffd166', '#ffffff']) }));
     const hit = this.plan.find((s) => Math.hypot(wrapDx(s.x - w.x), s.y - w.y) < 12);
     if (hit) floater(this.particles, w.x, w.y - 8, `lightning on the ${TIERS[hit.size].name.toLowerCase()}!`, '#ffe066', 6);
+  }
+
+  // Charged fireball (#291): same impact as the old fireball cast, coloured by mood.
+  onFireball(aim, opts = {}) {
+    const w = this.screenToWorld(aim);
+    const t = this.toTile(w.x, w.y);
+    const r = castPlanet(this.p, 'fireball');
+    const color = opts.color || '#ff9a2e';
+    this.particles.burst(18 + Math.round((opts.charge || 1) * 16), () => ({ x: w.x + rand(-20, 20), y: w.y + rand(-12, 12), vx: rand(-3, 3), vy: rand(-14, -4), life: rand(0.4, 0.8), maxLife: 0.8, size: 1, color }));
+    if (r) floater(this.particles, w.x, w.y - 10, r.text, r.good ? '#9be38a' : '#ff8a9c', 7);
+    else floater(this.particles, w.x, w.y - 10, `fireball ${Math.round((opts.charge || 1) * 100)}%`, color, 7);
+    const scene = this.sim?.scene;
+    if (t && scene?.onFireball) scene.onFireball(t, opts);
   }
 
   // A camera cast at a screen aim: the whole world feels it; inside the capital the tribe does too.
