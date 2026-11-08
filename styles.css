@@ -7,8 +7,8 @@
   --line: #2d5d5a;
   --bone: #f7efdf;       /* text */
   --muted: #a8c5bd;
-  --ember: #ff8566;      /* accent: fire, primary actions */
-  --calm: #7fdcc6;
+  --ember: #6fe3b4;      /* accent: fire, primary actions */
+  --calm: #8fd6f0;
   --focus: #ffd47e;
   --alarm: #ff6470;
   --good: #9ee68f;
@@ -207,8 +207,8 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
 }
 .btn:hover { border-color: var(--muted); }
 .btn:active { transform: translateY(1px); border-bottom-width: 2px; }
-.btn-primary { background: var(--ember); color: var(--ink); border-color: #c9573d; }
-.btn-primary:hover { border-color: #9a3c28; }
+.btn-primary { background: var(--ember); color: var(--ink); border-color: #3fae84; }
+.btn-primary:hover { border-color: #2c8565; }
 .btn-primary kbd { background: rgba(0, 0, 0, 0.15); color: var(--ink); border-color: rgba(0, 0, 0, 0.3); }
 
 /* ---------- advisor ---------- */
@@ -419,8 +419,8 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; color: 
   z-index: 50;
   overflow-y: auto;
   background:
-    radial-gradient(1200px 500px at 50% 110%, rgba(255, 133, 102, 0.18), transparent 70%),
-    radial-gradient(900px 420px at 50% -10%, rgba(127, 220, 198, 0.12), transparent 70%),
+    radial-gradient(1200px 500px at 50% 110%, rgba(111, 227, 180, 0.16), transparent 70%),
+    radial-gradient(900px 420px at 50% -10%, rgba(143, 214, 240, 0.10), transparent 70%),
     var(--ink);
   padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
@@ -673,8 +673,8 @@ body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #ff9d6e;
-  box-shadow: 0 0 10px #ff9d6e;
+  background: #ffd54a;
+  box-shadow: 0 0 10px #ffd54a;
   flex: none;
 }
 .cam-fb-meter {
@@ -687,7 +687,7 @@ body:has(#endScreen:not([hidden])) .model-panel { z-index: 55; }
   display: block;
   width: 0;
   height: 100%;
-  background: #ff9d6e;
+  background: #ffd54a;
   transition: width 0.1s linear;
 }
 .cam-view {
@@ -1122,7 +1122,7 @@ body[data-era="title"] .coach-panel { display: none !important; }
 }
 .coach-card.is-live {
   border-color: var(--calm);
-  background: rgba(127, 220, 198, 0.08);
+  background: rgba(143, 214, 240, 0.08);
 }
 .coach-card-head {
   display: flex;
