@@ -19,6 +19,8 @@ export const RECIPES = {
 
 // Raw recipe value at which an emotion starts to count, and how much more makes it 1.
 export const RANGE = { joy: [0.1, 0.45], surprise: [0.1, 0.35] };
+export const SURPRISE_FULL = 0.2;   // real surprised faces plateau near 20% (#291)
+export function surpriseNormalized(v) { return clamp((Number(v) || 0) / SURPRISE_FULL); }
 
 const ZERO = { joy: 0, surprise: 0 };
 

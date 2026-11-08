@@ -133,7 +133,7 @@
     <div class="start">
       <div class="start-main">
         <button type="button" class="btn btn-primary" id="playSim">Play with the emulated headset</button>
-        <p class="hint">Placeholder for the Muse: it sends the same signals, driven by your keyboard.
+        <p class="hint"><b>No headset or camera needed.</b> Lightning flashes the screen: turn on <i>Reduce motion</i> in Settings to soften flashes and stop the shaking. Placeholder for the Muse: it sends the same signals, driven by your keyboard.
           <kbd>Space</kbd> calm · <kbd>F</kbd> focus · <kbd>Shift</kbd> stress · <kbd>B</kbd> or click to blink · drag to pan the planet · mouse is head tilt. <kbd>E</kbd> EEG and <kbd>C</kbd> Camera sidebars (<kbd>Shift</kbd>+<kbd>C</kbd> re-centres the headset). Scroll, pinch or <kbd>Z</kbd> / <kbd>X</kbd> to zoom out to the planet and the galaxy; zoom into any world to land on it, or press <kbd>N</kbd> to visit the next one <!-- planets (#68) -->. On a phone, hold the power tiles and tap the map.</p>
       </div>
       <div class="start-sandbox">
@@ -240,6 +240,10 @@
     <label class="set-row set-range"><span>Seconds of play that seed your civilisation</span> <input type="number" id="setCalibSeconds" min="1" max="120" step="1" value="10"></label>
     <label class="set-row set-range"><span>Seed from</span> <select id="setCalibMode"><option value="random">a random roll (demo)</option><option value="sensor">your signals</option></select></label>
     <p class="set-note">Applies from the next run.</p>
+  </section>
+  <section class="set-group" aria-labelledby="setKeysH">
+    <h3 id="setKeysH">No headset or camera? (#90)</h3>
+    <p class="set-keys">The whole game plays on the keyboard and mouse: <kbd>Space</kbd> calm · <kbd>F</kbd> focus · <kbd>Shift</kbd> stress · <kbd>B</kbd> or click to blink · the mouse or arrow keys aim · <kbd>Z</kbd>/<kbd>X</kbd> zoom. On a phone, hold the power tiles and tap the map. The camera is optional.</p>
   </section>
   <section class="set-group" aria-labelledby="setCamH">
     <h3 id="setCamH">Camera</h3>

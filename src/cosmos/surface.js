@@ -621,6 +621,19 @@ export class PlanetSurface {
     if (hit) floater(this.particles, w.x, w.y - 8, `lightning on the ${TIERS[hit.size].name.toLowerCase()}!`, '#ffe066', 6);
   }
 
+  // Charged fireball (#291): same impact as the old fireball cast, coloured by mood.
+  onFireball(aim, opts = {}) {
+    const w = this.screenToWorld(aim);
+    const t = this.toTile(w.x, w.y);
+    const r = castPlanet(this.p, 'fireball');
+    const color = opts.color || '#ff9a2e';
+    this.particles.burst(18 + Math.round((opts.charge || 1) * 16), () => ({ x: w.x + rand(-20, 20), y: w.y + rand(-12, 12), vx: rand(-3, 3), vy: rand(-14, -4), life: rand(0.4, 0.8), maxLife: 0.8, size: 1, color }));
+    if (r) floater(this.particles, w.x, w.y - 10, r.text, r.good ? '#9be38a' : '#ff8a9c', 7);
+    else floater(this.particles, w.x, w.y - 10, `fireball ${Math.round((opts.charge || 1) * 100)}%`, color, 7);
+    const scene = this.sim?.scene;
+    if (t && scene?.onFireball) scene.onFireball(t, opts);
+  }
+
   // A camera cast at a screen aim: the whole world feels it; inside the capital the tribe does too.
   onCast(spell, aim) {
     if (spell === 'point') return;
