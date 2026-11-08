@@ -54,6 +54,7 @@ import { observe, decodeAction, scriptedAction, BOLT_COOLDOWN } from './ai/obser
 import { loading } from './ui/loading.js'; // loading screen
 import { engineFailToShow } from './ui/fail.js';
 import { frameLoop } from './ui/loop.js';
+import { dayNight } from './render/daynight.js';
 import { rustEraOf, rustEraTicks } from './eras/rust-era.js';
 
 // calibration (#54): the seed window is configurable (?calib=, ?calib_mode=, ?seed=); the galaxy's
@@ -881,12 +882,11 @@ function render() {
             engine.add_3d_light(l.x, 10.0, l.y, l.r, 1.2);
           }
         }
-        // Directional sun rotates with day/night
-        const sunAngle = (G.runTime || 0) * 0.15;
-        const sunX = Math.cos(sunAngle);
-        const sunY = 0.85;
-        const sunZ = Math.sin(sunAngle);
-        engine.render_3d(0.016, sunX, sunY, sunZ, dark, flash, fade, sx, sy, screen.width, screen.height);
+        // Day and night (#201): the sun rises and sets; after dusk the moonlit night shading takes
+        // over. An era's own darkness (dark) still wins. Off the surface the night must not dim space.
+        const dn = dayNight(G.runTime || 0, dark);
+        const night3d = z > 0.001 || scene.phase === 'voyage' ? dark : dn.night;
+        engine.render_3d(0.016, dn.sun.x, dn.sun.y, dn.sun.z, night3d, flash, fade, sx, sy, screen.width, screen.height);
 
         // Continuous overlay blend between 3D planet view and 3D map view
         if (z > 0.001) {
