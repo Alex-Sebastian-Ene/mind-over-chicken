@@ -367,6 +367,18 @@ export class CivSandbox {
     if (cancelled && this.civ) this.civ.moveAgent(g.agent, g.p0.x, g.p0.y);
   }
 
+  // Charged fireball (#291): a bright hit at the cursor.
+  onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
+    const G = this.G;
+    if (!G) return;
+    const p = this.aimPlanet(aim);
+    this.flash = 0.4;
+    G.audio?.thunder?.();
+    G.shake = Math.max(G.shake || 0, 1.2);
+    if (this.particles) this.particles.burst(16 + Math.round(charge * 16), () => ({ x: p.x, y: p.y, vx: rand(-30, 30), vy: rand(-40, 5), g: 50, life: rand(0.4, 0.7), maxLife: 0.7, size: 1, color }));
+    this.G.advisor?.say('civ-fireball', `A fireball! ${Math.round(charge * 100)}% charged and very visible.`, { mood: 'panic', priority: 2, cooldown: 8 });
+  }
+
   // camera (#49): hand casts. aim is 0..1 like the brain's.
   onCast(spell, aim) {
     const civ = this.civ, G = this.G;

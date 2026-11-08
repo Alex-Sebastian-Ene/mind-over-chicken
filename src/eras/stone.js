@@ -806,6 +806,23 @@ export class StoneAge {
     floater(this.particles, safeLand.x, safeLand.y - 8, `placed ${entLabel}`, '#9be38a', 6);
   }
 
+  // Charged fireball (#291): independent of the removed spell dispatch.
+  onFireball(aim, { color = '#ff9a2e', charge = 1 } = {}) {
+    const G = this.G;
+    if (!G || this.done) return;
+    const { x, y } = G.world.aimPoint(aim);
+    const n = 12 + Math.round(charge * 18);
+    this.flash = Math.max(this.flash, 0.3);
+    G.shake = Math.max(G.shake || 0, 1.2);
+    G.audio?.thunder?.();
+    this.particles.burst(n, () => ({
+      x, y, vx: rand(-36, 36), vy: rand(-46, 6), g: 60,
+      life: rand(0.45, 0.8), maxLife: 0.8, size: 1, color,
+    }));
+    floater(this.particles, x, y - 10, `fireball ${Math.round(charge * 100)}%`, color, 7);
+    for (const p of this.living()) if (dist(x, y, p.x, p.y) < 22 + charge * 14) p.fear = clamp(p.fear + 0.2 + charge * 0.2);
+  }
+
   // aim is 0..1 like the brain's. The fist (fireball) normally arrives through onBlink.
   onCast(spell, aim) {
     const G = this.G;
