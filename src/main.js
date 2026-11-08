@@ -1695,14 +1695,10 @@ window.__moc.camera = initCamera({
       }
       return;
     }
-    if (in3dSurface() && (cosmos?.z || 0) <= 0.01) {
-      if (active && (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001)) {
-        engine.orbit_camera(-dx * 3.5, dy * 3.5);
-        cam3dBase = null;
-      }
-      return;
-    }
+    // On the surface, 2D or 3D, a one-hand pinch drags the map (#156): it used to orbit the 3D
+    // camera, which felt like the world tilting away. Orbiting stays on right-drag.
     if (active && (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001)) {
+      if (in3dSurface()) cam3dBase = null;
       panMap(-dx * W * 1.5, -dy * H * 1.5);
     }
   },
