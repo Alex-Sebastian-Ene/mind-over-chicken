@@ -26,6 +26,6 @@ test('no storage (private window, blocked site data) means hands off, without th
 test('the camera only runs the hand model and reads gestures when hand moves are on', async () => {
   const src = await readFile(new URL('../src/camera/camera.js', import.meta.url), 'utf8');
   assert.match(src, /engine\.pump\(video, now, \{ hands: handsOn,/);
-  assert.match(src, /function onGesture\(r\) \{\n\s+if \(!stream \|\| status !== 'on' \|\| !handsOn\) return;/);
+  assert.match(src, /function onGesture\(r\) \{\r?\n\s+if \(!stream \|\| status !== 'on' \|\| !handsOn\) return;/);
   assert.match(src, /data-cam-hands/);
 });
