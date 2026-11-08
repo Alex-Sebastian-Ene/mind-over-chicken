@@ -30,6 +30,9 @@ pub const SPAWN_EVERY: f32 = 2.0;
 pub const SETTLER_COST: f32 = 5.0;
 /// Agent food (0..1) eaten per second; a full belly lasts 50 s.
 pub const EAT_RATE: f32 = 1.0 / 50.0;
+/// Health (0..1) an agent with an empty belly loses per second: 40 s from empty to dead, so a
+/// full belly and no food last 90 s (#298; was 0.1, 10 s).
+pub const STARVE_HP_RATE: f32 = 1.0 / 40.0;
 pub const GATHER_TIME: f32 = 1.8;
 pub const CARRY_MAX: f32 = 0.6;
 /// Tile food regrowth per second, as a fraction of the tile's maximum.
@@ -253,6 +256,18 @@ pub struct Metrics {
 
 /// Seconds in a day (the sandbox's day–night cycle).
 pub const DAY_SECONDS: f32 = 80.0;
+
+/// How long people live (#298), in world seconds; ages are seconds too (`Agent::age`).
+pub mod lifespan {
+    use super::DAY_SECONDS;
+    /// Each newborn draws its lifespan from `MIN..MAX`: 3–5 days (was 75–115 s, about one).
+    pub const MIN: f32 = 3.0 * DAY_SECONDS;
+    pub const MAX: f32 = 5.0 * DAY_SECONDS;
+    /// Founders start as adults of `0..START_AGE_MAX` s (`setup`, `gym`).
+    pub const START_AGE_MAX: f32 = 20.0;
+    /// Past this share of its own lifespan an agent is old: plague hits it twice as hard.
+    pub const OLD_FRAC: f32 = 0.6;
+}
 /// Night above which agents (from the Hearth Clans on) sleep: about a quarter of each day.
 pub const SLEEP_NIGHT: f32 = 0.82;
 /// The longest single step `World::advance` takes when the speed control runs it faster.
@@ -822,6 +837,8 @@ pub struct World {
     /// Agent and village limits for this planet: the defaults, more on a bigger one (#101).
     pub cap_agents: usize,
     pub cap_villages: usize,
+    /// The space age (#166): fleets of the civilisations at age 19+ (`space`).
+    pub space: crate::space::Space,
     #[cfg(not(target_arch = "wasm32"))]
     pub prof: [f64; 8],
     /// The politics tick's parts (native profiling only).
@@ -949,6 +966,7 @@ impl World {
             setup: crate::setup::Setup::default(),
             cap_agents: MAX_AGENTS,
             cap_villages: MAX_VILLAGES,
+            space: crate::space::Space::default(),
             #[cfg(not(target_arch = "wasm32"))]
             prof: [0.0; 8],
             #[cfg(not(target_arch = "wasm32"))]
@@ -985,7 +1003,7 @@ impl World {
                 let job = if k % 2 == 0 { Job::Forage } else { Job::Hunt };
                 if let Some(a) = self.spawn_agent(f, v, job, x, y) {
                     // The founders are adults of mixed ages.
-                    let age = self.rng.range(0.0, 20.0);
+                    let age = self.rng.range(0.0, lifespan::START_AGE_MAX);
                     self.agents[a].age = age;
                     self.agents[a].clan = (k / 2) as u8;
                 }
@@ -1268,7 +1286,7 @@ impl World {
         if self.agents.len() >= self.cap_agents {
             return None;
         }
-        let life = self.rng.range(75.0, 115.0);
+        let life = self.rng.range(lifespan::MIN, lifespan::MAX);
         let timer = self.rng.range(0.0, 0.6);
         let x = self.d.wrap_x(x);
         let y = self.d.wrap_y(y);
@@ -1340,8 +1358,10 @@ impl World {
     /// Run `real_dt` seconds of real time at the world's speed (×1, ×4, ×16), in steps of at
     /// most `MAX_SUBSTEP`; refresh the buffers JS reads once at the end.
     pub fn advance(&mut self, real_dt: f32) {
-        // Seeding a civilisation from the mind runs on real time (#98).
+        // Seeding a civilisation from the mind runs on real time (#98), and so does space (#166),
+        // like the galaxy it flies in.
         self.setup_tick(real_dt.max(0.0));
+        crate::space::tick(self, real_dt.max(0.0));
         let total = (real_dt.max(0.0) * self.speed).min(MAX_SUBSTEP * MAX_STEPS_PER_ADVANCE as f32);
         if total <= 0.0 {
             self.refresh_info();
@@ -1363,6 +1383,7 @@ impl World {
     /// Advance the world by `dt` seconds (clamped to 0.1).
     pub fn step(&mut self, dt: f32) {
         self.step_core(dt);
+        crate::space::tick(self, dt);
         self.refresh_info();
     }
 

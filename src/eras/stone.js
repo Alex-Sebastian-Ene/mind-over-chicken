@@ -24,6 +24,10 @@ const FOCUS_TARGET = 2;
 // 3D firelight strength at the pit (was 1.8, which read as a white glare around the fire).
 const FIRE_GLOW = 0.9;
 const HOLD_SECONDS = 5;
+// The tribe's hunger clock (#298), before the difficulty's `hunger` and `starvationGrace`:
+// hunger per second (0 → 1 takes ~110 s; assist mode ~200 s), the opening grace in which nobody
+// starves, and how long someone at full hunger holds on before dying. Was 0.017 / 0.008, 75 s, 8 s.
+export const STONE_HUNGER = Object.freeze({ rate: 0.009, assistRate: 0.005, grace: 120, starve: 12 });
 const NAMES = ['Grug', 'Ugg-a', 'Thak', 'Mo', 'Brakka', 'Nub', 'Ila', 'Krog', 'Zuz', 'Hap', 'Wenna', 'Dorf', 'Yip', 'Ooma'];
 
 export class StoneAge {
@@ -262,7 +266,7 @@ export class StoneAge {
     G.audio?.good?.();
     G.advisor.say('rain-summoned', hadForest
       ? 'Rain spell! The forest fire is out. The tribe is damp, alive and quietly impressed.'
-      : 'Rain falls over the tribe. No fire to put out, but the goats seem pleased.', { mood: 'happy', priority: 3, cooldown: 10 });
+      : 'Rain falls over the tribe. No fire to put out, but the chickens seem pleased.', { mood: 'happy', priority: 3, cooldown: 10 });
   }
 
   updateRain(dt) {
@@ -403,13 +407,13 @@ export class StoneAge {
         p.hunger = 0;
         p.starve = 0;
       } else {
-        const hungerRate = (this.G.assistMode ? 0.008 : 0.017) * eraTuning(this.G).hunger;
+        const hungerRate = (this.G.assistMode ? STONE_HUNGER.assistRate : STONE_HUNGER.rate) * eraTuning(this.G).hunger;
         p.hunger = clamp(p.hunger + dt * (p.colony ? -0.01 : hungerRate));
-        // 75-second initial starvation grace period so new players have time to learn (× difficulty)
-        const inGrace = this.t < 75 * eraTuning(this.G).starvationGrace;
+        // An opening starvation grace so new players have time to learn (× difficulty)
+        const inGrace = this.t < STONE_HUNGER.grace * eraTuning(this.G).starvationGrace;
         if (p.hunger >= 1 && !inGrace) {
           p.starve += dt;
-          if (p.starve > 8) {
+          if (p.starve > STONE_HUNGER.starve) {
             this.kill(p);
             floater(this.particles, p.x, p.y - 7, `${p.name} starved`, '#c9c2b0', 6);
             G.advisor.say('starve', `${p.name} has starved. The tribe asks if you could be slightly more of a god.`, { mood: 'nervous', priority: 2, cooldown: 12 });
@@ -697,14 +701,13 @@ export class StoneAge {
       engine.add_billboard(1, m.x, m.y, m.facing || 1, m.frame, m.dead ? 1 : 0);
     }
 
-    // People (tribe stays inside the dark cave until the fire is lit)
-    if (f.lit) {
-      for (const p of this.people) {
-        if (!p.alive && (p.deadT || 0) > 12) continue;
-        if (p.state === 'aboard') continue;
-        const pose = !p.alive ? 3 : p.state === 'dance' || p.state2 === 'dance' ? 1 : p.state === 'cower' ? 2 : p.halo && p.state === 'warm' ? 1 : 0;
-        engine.add_billboard(0, p.x, p.y, p.facing || 1, p.frame, pose);
-      }
+    // People. They stay on the map when the fire is out: an unlit pit must not make the tribe
+    // vanish (the fire going out is a setback, not a reason to hide everyone).
+    for (const p of this.people) {
+      if (!p.alive && (p.deadT || 0) > 12) continue;
+      if (p.state === 'aboard') continue;
+      const pose = !p.alive ? 3 : p.state === 'dance' || p.state2 === 'dance' ? 1 : p.state === 'cower' ? 2 : p.halo && p.state === 'warm' ? 1 : 0;
+      engine.add_billboard(0, p.x, p.y, p.facing || 1, p.frame, pose);
     }
 
     // Chicken
@@ -736,13 +739,11 @@ export class StoneAge {
     for (const m of this.mammoths) actors.push({ y: m.y, d: () => drawMammoth(ctx, m.x, m.y, m) });
     for (const b of this.boats) actors.push({ y: b.y, d: () => drawBoat(ctx, b.x, b.y, b) });
     for (const c of Object.values(this.colonies)) actors.push({ y: c.y, d: () => drawFire(ctx, c.x, c.y, 0.7, this.t + 3) });
-    if (this.fire.lit) {
-      for (const p of this.people) {
-        if (!p.alive && (p.deadT = (p.deadT || 0) + 1 / 60) > 12) continue;
-        if (p.state === 'aboard') continue;
-        const pose = !p.alive ? 'dead' : p.state === 'dance' || p.state2 === 'dance' ? 'dance' : p.state === 'cower' ? 'panic' : p.halo && p.state === 'warm' ? 'pray' : 'walk';
-        actors.push({ y: p.y, d: () => drawPerson(ctx, p.x, p.y, { ...p, pose, hat: p.halo ? '#ffe066' : null }) });
-      }
+    for (const p of this.people) {
+      if (!p.alive && (p.deadT = (p.deadT || 0) + 1 / 60) > 12) continue;
+      if (p.state === 'aboard') continue;
+      const pose = !p.alive ? 'dead' : p.state === 'dance' || p.state2 === 'dance' ? 'dance' : p.state === 'cower' ? 'panic' : p.halo && p.state === 'warm' ? 'pray' : 'walk';
+      actors.push({ y: p.y, d: () => drawPerson(ctx, p.x, p.y, { ...p, pose, hat: p.halo ? '#ffe066' : null }) });
     }
     actors.push({ y: this.chicken.y, d: () => drawChicken(ctx, this.chicken.x, this.chicken.y, this.chicken) });
     actors.push({ y: this.fire.y, d: () => drawFire(ctx, this.fire.x, this.fire.y, this.fire.lit ? this.fire.heat : 0, this.t) });
@@ -875,6 +876,32 @@ export class StoneAge {
       life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color: pick(['#c9c2b0', '#8a7a5a', '#5f5545']),
     }));
     for (const p of this.living()) if (dist(x, y, p.x, p.y) < 22 + charge * 14) p.fear = clamp(p.fear + 0.2 + charge * 0.2);
+    // A massive explosion (Alex): everything in the blast takes it. Giant chickens are roasted,
+    // trees catch, people near the centre die, everyone further out panics.
+    const R = 18 + charge * 26;
+    this.flash = Math.max(this.flash, 0.6);
+    G.shake = Math.max(G.shake || 0, 2.2 + charge * 1.4);
+    for (const m of this.mammoths) {
+      if (m.alive && dist(x, y, m.x, m.y) < R) { m.alive = false; m.dead = true; this.meat.push({ x: m.x, y: m.y, amount: 5, cooked: true, claimed: 0 }); }
+    }
+    let burning = 0;
+    for (const t of [...(G.world.trees || [])]) {
+      if (burning >= 4 + Math.round(charge * 6)) break;
+      if (dist(x, y, t.x, t.y) < R && this.igniteForestFire(t)) burning++;
+    }
+    for (const p of this.living()) {
+      if (p.colony || p.state === 'aboard') continue;
+      const d = dist(x, y, p.x, p.y);
+      if (d < R * 0.45) this.kill(p);
+      else if (d < R * 1.4) { p.fear = clamp(p.fear + 0.5); if (['idle', 'warm', 'dance', 'huddle', 'hunt'].includes(p.state)) { p.state = 'flee'; p.target = null; } }
+    }
+    // And it strikes like lightning at the centre: it lights the pit.
+    this.lastBolt = -Infinity;
+    this.onBlink(G.world.aimOf(x, y));
+    if (this.living().length === 0 && !this.done) {
+      this.done = true;
+      G.fail?.('Your fireball wiped out the whole tribe.');
+    }
   }
 
   // aim is 0..1 like the brain's. The fist (fireball) normally arrives through onBlink.

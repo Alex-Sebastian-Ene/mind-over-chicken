@@ -114,7 +114,7 @@ export class FireballFX {
     }
     const k2 = clamp((after - o.hold) / (o.impact - o.hold));
     // Stepped pixel shockwave on the ground, with a hot inner ring.
-    const R = 3 + k2 * (18 + s.charge * 16);
+    const R = 4 + k2 * (26 + s.charge * 30);   // a big blast (Alex: a massive explosion)
     const ring = shockwavePixels(R, k2).map((q) => ({ ...q, c: 'tint' }));
     drawPixels(ctx, tx, ty, ring, { tint: s.color }, { alpha: 1 - k2 });
     if (k2 < 0.6) drawPixels(ctx, tx, ty, shockwavePixels(R * 0.62, k2 + 0.3).map((q) => ({ ...q, c: 'hot' })), { hot: FB_HOT }, { alpha: 0.9 * (1 - k2 / 0.6) });

@@ -21,6 +21,7 @@ import { reducedMotion } from '../ui/motion.js';
 import { villagerLook, animate } from '../sim/agents.js';
 import { VW, VH, wrapX, wrapDx, wrapY, wrapDy, typeAt, walkableAt, settlementPlan } from './vast.js';
 import { TIERS, CONFLICT, castPlanet, tribeOutcome, easeSplit, tierName } from './planet-sim.js';
+import { pickBuilding, roofFor } from '../world/building-mix.js';
 
 const ERA_KEYS = ['stone', 'farming', 'industry', 'space'];
 const RESTART_AFTER = 3;                  // seconds the tribe dances (or lies still) before a new one gathers
@@ -29,7 +30,6 @@ const RESTART_AFTER = 3;                  // seconds the tribe dances (or lies s
 // they stay (they turned the return down by moving the camera).
 const RESTART_IN_VIEW = 8;
 const DARKNESS = [0.42, 0.36, 0.3, 0.26];  // night shading by era (lights carry the settlements)
-const ROOFS = { farming: ['#8e3b2a', '#a4402f'], industry: ['#a4402f', '#8e3b2a', '#b5543a', '#6f4a3a'], space: ['#5a6b8c', '#7f8fa8', '#a4402f', '#4d5d7a'] };
 const BUILDINGS = [3, 7, 14, 24];         // buildings per settlement size (camp … city)
 const FARMS = [0, 3, 6, 9];               // farm plots per settlement size from Farming on
 const WALKERS = [2, 4, 7, 10];            // villagers drawn per settlement size
@@ -234,8 +234,13 @@ export class PlanetSurface {
           && !placed.some((b) => Math.abs(wrapDx(x - b.x)) < 4 && Math.abs(y - b.y) < 3);
       }
       if (!clear) continue;
-      const kind = era === 'stone' ? 'hut' : era === 'farming' ? (size >= 2 && i % 3 === 0 ? 'house' : 'hut') : era === 'space' && size >= 2 && i % 3 === 0 ? 'tower' : 'house';
-      placed.push({ kind, x, y, h: 7 + Math.floor(rng() * 7), roof: pick(ROOFS[era] || ROOFS.farming) });
+      // Later eras keep a share of the older building types (building-mix.js): growth, not a
+      // replacement. Farming towns of size 2+ already mix a few houses in with the huts.
+      let kind, from = era;
+      if (era === 'farming') kind = size >= 2 && i % 3 === 0 ? 'house' : 'hut';
+      else ({ kind, from } = pickBuilding(era, rng()));
+      if (kind === 'tower' && size < 2) kind = 'house';   // small villages have no towers
+      placed.push({ kind, x, y, h: 7 + Math.floor(rng() * 7), roof: kind === 'house' ? roofFor(from, rng()) : undefined });
     }
     if (size >= 2 && (era === 'industry' || era === 'space') && walkableAt(v, s.x - 14, s.y + 10)) placed.push({ kind: 'factory', x: wrapX(s.x - 14), y: s.y + 10 });
     if (s.capital && era === 'space' && size >= 2 && walkableAt(v, s.x + 18, s.y + 8)) placed.push({ kind: 'pad', x: wrapX(s.x + 18), y: s.y + 8 });
@@ -615,7 +620,7 @@ export class PlanetSurface {
       { label: 'People', value: fmtNum(p.pop), plain: true },
       { label: 'Food', value: fmtNum(p.food), bad: p.hunger > 0.2, plain: p.hunger <= 0.2 },
       { label: 'Wood · stone', value: `${fmtNum(p.wood)} · ${fmtNum(p.stone)}`, plain: true },
-      { label: 'Goats', value: fmtNum(p.goats), plain: true },
+      { label: 'Chickens', value: fmtNum(p.goats), plain: true },
       { label: 'Stability', value: `${Math.round(p.stability * 100)}%`, bad: p.stability < 0.3, done: p.stability >= 0.6 },
     ];
     if (p.conflict) out.push({ label: 'Strife', value: CONFLICT[p.conflict].name, bad: true });

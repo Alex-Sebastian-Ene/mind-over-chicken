@@ -84,7 +84,7 @@ impl Era for IndustryEra {
                 plain: false,
             },
             Objective {
-                label: "Goat IPO".to_string(),
+                label: "Chicken IPO".to_string(),
                 value: if self.ipo_done {
                     "priced".to_string()
                 } else if gdp_done {
@@ -97,7 +97,7 @@ impl Era for IndustryEra {
                 plain: false,
             },
             Objective {
-                label: "Goat index".to_string(),
+                label: "Chicken index".to_string(),
                 value: format!("{:.1}", self.price),
                 done: false,
                 bad: self.price < 50.0,
@@ -120,13 +120,13 @@ impl Era for IndustryEra {
         }
         if self.price < 12.0 {
             self.done = true;
-            self.failed = Some("The Great Goat Depression. A goat is now worth less than its hat.".to_string());
+            self.failed = Some("The Great Chicken Depression. A chicken is now worth less than its egg.".to_string());
             events.push(EraEvent::PlaySound(SoundKind::Crash));
             return events;
         }
         if self.general_strike > 8.0 {
             self.done = true;
-            self.failed = Some("General strike. The economy has stopped. The goats have unionised.".to_string());
+            self.failed = Some("General strike. The economy has stopped. The chickens have unionised.".to_string());
             events.push(EraEvent::PlaySound(SoundKind::Bad));
             return events;
         }
@@ -151,10 +151,10 @@ impl Era for IndustryEra {
         self.momentum = (self.momentum * 0.85 + return_rate * 0.15).clamp(-0.5, 0.5);
         self.price = (self.price * (1.0 + return_rate * dt)).clamp(5.0, 500.0);
 
-        // Failure condition 1: The Great Goat Depression (price drops below 12.0)
+        // Failure condition 1: The Great Chicken Depression (price drops below 12.0)
         if self.price < 12.0 {
             self.done = true;
-            self.failed = Some("The Great Goat Depression. A goat is now worth less than its hat.".to_string());
+            self.failed = Some("The Great Chicken Depression. A chicken is now worth less than its egg.".to_string());
             events.push(EraEvent::PlaySound(SoundKind::Crash));
             return events;
         }
@@ -176,7 +176,7 @@ impl Era for IndustryEra {
         // Failure condition 2: General strike lasts too long (> 8 seconds)
         if self.general_strike > 8.0 {
             self.done = true;
-            self.failed = Some("General strike. The economy has stopped. The goats have unionised.".to_string());
+            self.failed = Some("General strike. The economy has stopped. The chickens have unionised.".to_string());
             events.push(EraEvent::PlaySound(SoundKind::Bad));
             return events;
         }
@@ -195,7 +195,7 @@ impl Era for IndustryEra {
             events.push(EraEvent::StatAddRecession);
             events.push(EraEvent::AdvisorSay {
                 key: "market-crash".to_string(),
-                text: "MARKET CRASH! The goats are stampeding! Calm down, my lord!".to_string(),
+                text: "MARKET CRASH! Chicken futures are running around with their heads cut off! Calm down, my lord!".to_string(),
                 mood: "panic".to_string(),
                 priority: 3,
                 cooldown: 8.0,
@@ -220,7 +220,7 @@ impl Era for IndustryEra {
                     events.push(EraEvent::PlaySound(SoundKind::Fanfare));
                     events.push(EraEvent::AdvisorSay {
                         key: "ipo-success".to_string(),
-                        text: "THE GOAT IPO HAS LANDED! Wealth for all! Onward to the Space Age!"
+                        text: "THE CHICKEN IPO HAS LANDED! Wealth for all! Onward to the Space Age!"
                             .to_string(),
                         mood: "happy".to_string(),
                         priority: 4,
@@ -273,14 +273,14 @@ impl Era for IndustryEra {
             });
         }
 
-        // 3. Strike Goat Exchange / Trading Floor: market volatility spike
+        // 3. Strike Chicken Exchange / Trading Floor: market volatility spike
         let de = ((aim_x - 130.0).powi(2) + (aim_y - 95.0).powi(2)).sqrt();
         if de < 24.0 {
             self.momentum += 0.15;
             events.push(EraEvent::PlaySound(SoundKind::Coin));
             events.push(EraEvent::AdvisorSay {
                 key: "exchange-shock".to_string(),
-                text: "Lightning struck the Goat Exchange! Traders are scrambling in volatile excitement."
+                text: "Lightning struck the Chicken Exchange! Traders are scrambling, feathers everywhere."
                     .to_string(),
                 mood: "panic".to_string(),
                 priority: 2,
@@ -314,7 +314,7 @@ impl Era for IndustryEra {
     fn billboards_3d(&self) -> Vec<EraBillboard> {
         let mut list = Vec::new();
 
-        // 1. Goats: sprite 2 (grazing around exchange pastures)
+        // 1. Hens: sprite 2 (pecking round the exchange yard; the herd was goats once)
         let goat_coords = [
             (145.0, 84.0),
             (152.0, 92.0),
@@ -453,7 +453,7 @@ mod tests {
         assert!(ind.is_failed().is_some());
         assert_eq!(
             ind.is_failed().unwrap(),
-            "The Great Goat Depression. A goat is now worth less than its hat."
+            "The Great Chicken Depression. A chicken is now worth less than its egg."
         );
         assert!(!ind.is_complete());
         assert!(events.contains(&EraEvent::PlaySound(SoundKind::Crash)));
@@ -472,7 +472,7 @@ mod tests {
         assert!(ind.is_failed().is_some());
         assert_eq!(
             ind.is_failed().unwrap(),
-            "General strike. The economy has stopped. The goats have unionised."
+            "General strike. The economy has stopped. The chickens have unionised."
         );
         assert!(!ind.is_complete());
         assert!(events.contains(&EraEvent::PlaySound(SoundKind::Bad)));

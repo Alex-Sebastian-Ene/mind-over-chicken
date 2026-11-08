@@ -52,6 +52,7 @@ import { reducedMotion, flashAlpha, shakeAmount as shakeFor } from './ui/motion.
 import { SIM } from './cosmos/planet-sim.js';
 import { CivSandbox, initPlanetSizePicker } from './civ/sandbox.js'; // civ (#50)
 import { worldMeta, renderWorldDetail } from './cosmos/panel.js'; // planets (#68)
+import { renderWarOrders } from './cosmos/space-war.js'; // space war (#166)
 import { SimPlanet } from './ai/planet.js';
 import { AIGod } from './ai/autopilot.js';
 import { observe, decodeAction, scriptedAction, BOLT_COOLDOWN } from './ai/observe.js';
@@ -800,7 +801,7 @@ function showFail(reason) {
       if (lower.includes('strike') || lower.includes('union')) {
         nextStep = 'Maintain calm when workers strike to settle tensions and resume production.';
       } else if (lower.includes('depression') || lower.includes('price')) {
-        nextStep = 'Steady your breathing and focus to stimulate goat market confidence.';
+        nextStep = 'Steady your breathing and focus to stimulate chicken market confidence.';
       } else if (lower.includes('fire')) {
         nextStep = 'Hold Insight/Focus when the flame begins to fade to rekindle warmth.';
       } else if (lower.includes('starv') || lower.includes('food')) {
@@ -912,7 +913,7 @@ function showEnd() {
     ['Era restarts', s.restarts],
     ['Lightning bolts', s.lightning],
     ['Villagers who found religion', s.smitten],
-    ['Goat recessions caused', s.recessions],
+    ['Chicken recessions caused', s.recessions],
     ['Passengers to the new world', `${x.passengers ?? 0} and one chicken`],
     ['Countdown scrubs', x.scrubs ?? 0],
     ['Seconds of calm', Math.round(b.stats.calmSeconds)],
@@ -1966,7 +1967,7 @@ $('endModelBtn').addEventListener('click', toggleModel);
 
 // ---------- zoom + galaxy UI ----------
 let revealed = 0;
-cosmos.onEvent = (p, text, kind) => {
+cosmos.onEvent = (p, text, kind, tone) => {
   if (kind === 'tribe-lost') { returnHome({ reason: 'ai-tribe', planet: p, world: p.name, cause: text }); return; }   // #297
   if (kind === 'born') patchSave({ galaxy: galaxySummary(cosmos.galaxy) });   // the save names the worlds born
   if (kind === 'born' && (p.mindSlot || (p.setup && CHANNELS[p.channel]))) {
@@ -1976,6 +1977,9 @@ cosmos.onEvent = (p, text, kind) => {
     if (revealed === 3) advisor.say('mindworlds3', 'Three worlds now, each listening to a different part of your mind. Steer them from here.', { mood: 'nervous', priority: 1, cooldown: 999 });
   } else if (kind === 'event' && cosmos.inGalaxy) {
     advisor.say(`gal-${text}`, `${p.name}: ${text}. That was you, my lord.`, { mood: /crash|famine|dark|poor/.test(text) ? 'panic' : 'happy', priority: 1, cooldown: 12 });
+  } else if (kind === 'war') {   // space war (#166): news about your world (tone 1 good, 2 bad, 3 warning)
+    G?.news?.push(text, { tone, source: 'space' });   // on the one news ticker too (#220)
+    advisor.say('space-war', text, { mood: tone === 2 || tone === 3 ? 'panic' : tone === 1 ? 'happy' : 'nervous', priority: tone === 2 || tone === 3 ? 2 : 1, cooldown: 5 });
   }
 };
 
@@ -1997,13 +2001,14 @@ function updateCosmosUi(dt) {
     const mirrored = p.home && !p.autonomous;
     const era = p.pop > 0 ? ERA_LABEL[ERA_NAMES[p.eraIndex]] : 'Barren';
     const owner = gal.attended === p ? `${ownerLabel(p)} · you're here` : ownerLabel(p);
-    const tier = worldMeta(p); // planets (#68): settlement tier and strife
+    const tier = [worldMeta(p), gal.war?.planetMeta(p)].filter(Boolean).join(' · '); // planets (#68): tier and strife; #166: fleet or ruler
     // Your world's card counts the rival peoples sharing it (#212).
     const rivals = p.home && G.rivals ? G.rivals.alive() : 0;
     const shared = rivals ? ` · ${rivals} rival ${rivals === 1 ? 'people' : 'peoples'}` : '';
     return { p, era: p.forming ? 'Forming' : tier ? `${era} · ${tier}` : era, pop: `${mirrored ? `${p.pop} people` : fmtPop(p.pop)} · ${owner}${shared}`, prog: mirrored ? (p.eraIndex + 1) / 4 : p.pop > 0 ? p.progress : 0 };
   });
   renderWorldDetail($('worldDetail'), cosmos.detailPlanet()); // planets (#68): milestones and history
+  renderWarOrders($('warOrders'), gal); // space war (#166): target a world, then raid, bombard or invade
   const key = rows.map((r) => `${r.p.name}|${r.era}|${r.pop}|${Math.round(r.prog * 20)}|${gal.attended === r.p}|${cosmos.target}|${r.p.effect}|${r.p.channel}`).join(';');
   if (key !== lastListKey) {
     lastListKey = key;
@@ -2043,6 +2048,17 @@ $('makePlanet').addEventListener('click', () => {
   audio.good();
   lastListKey = '';
   advisor.say('newplanet', `A new planet! I have named it ${p.name}. ${p.pop > 0 ? 'Someone already lives there. They seem nice.' : 'Nobody lives there yet. Send a ship.'}`, { mood: 'happy', priority: 2, cooldown: 6 });
+});
+$('warOrders')?.addEventListener('click', (e) => {   // space war (#166)
+  const b = e.target.closest('.war-order');
+  const war = cosmos.galaxy?.war;
+  if (!b || !G || !war?.target) return;
+  audio.unlock();
+  const why = war.order(war.target, Number(b.dataset.order));
+  if (why) { cosmos.say(why); return; }
+  audio.blip();
+  uiTimer = 0;
+  cosmos.zoomTo(2, G);   // watch the fleet fly
 });
 $('planetList').addEventListener('click', (e) => {
   const b = e.target.closest('.planet-row');

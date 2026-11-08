@@ -1777,9 +1777,11 @@ pub struct RustGalaxy {
 impl RustGalaxy {
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Self {
-        Self {
-            inner: moc_cosmos::galaxy::Galaxy::new(seed),
-        }
+        let mut inner = moc_cosmos::galaxy::Galaxy::new(seed);
+        // The browser's galaxy (src/cosmos/galaxy.js) has more planets than this one and syncs
+        // every one of them into the war itself (#166).
+        inner.war_auto = false;
+        Self { inner }
     }
 
     pub fn step(
@@ -1861,6 +1863,164 @@ impl RustGalaxy {
 
     pub fn is_mind_done(&self) -> bool {
         self.inner.mind.done
+    }
+
+    // ---- the interplanetary war (#166): moc_cosmos::war, strides in moc_cosmos::host ----
+
+    /// Every planet of the browser's galaxy, `war_body_stride()` floats each.
+    pub fn war_sync(&mut self, data: &[f32]) {
+        self.inner.war.sync_packed(data);
+    }
+
+    pub fn war_name(&mut self, idx: usize, name: &str) {
+        self.inner.war.sync_name(idx, name);
+    }
+
+    /// The campaign's home (−1: none, as in the sandboxes).
+    pub fn war_set_player_home(&mut self, idx: i32) {
+        self.inner.war.set_player_home(if idx >= 0 { Some(idx as usize) } else { None });
+    }
+
+    /// A planet several civilisations share (the civ sandbox's).
+    pub fn war_set_shared(&mut self, idx: usize, shared: bool) {
+        self.inner.war.set_shared(idx, shared);
+    }
+
+    /// Difficulty seam: how hard the AI powers press the player, ×how often they launch at the
+    /// player's world and ×how hard those fleets hit (1 default; Easy about 0.5, Hard about 1.6;
+    /// clamped to 0.1..=3).
+    pub fn war_set_player_pressure(&mut self, x: f32) {
+        self.inner.war.set_player_pressure(x);
+    }
+
+    pub fn war_player_pressure(&self) -> f32 {
+        self.inner.war.player_pressure
+    }
+
+    pub fn war_step(&mut self, dt: f32, calm: f32, focus: f32, stress: f32) {
+        self.inner.war.step(dt, moc_cosmos::war::Mind { calm, focus, stress });
+    }
+
+    /// The player orders an attack (0 raid, 1 bombard, 2 invade): "" if it is away, else why not.
+    pub fn war_order(&mut self, target: usize, order: u8) -> String {
+        let Some(p) = self.inner.war.player() else { return "You have no world in space yet.".to_string() };
+        match self.inner.war.order_index(p, target, order) {
+            Ok(_) => String::new(),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    /// The player's power (−1 none).
+    pub fn war_player(&self) -> i32 {
+        self.inner.war.player().map(|p| p as i32).unwrap_or(-1)
+    }
+
+    pub fn war_body_stride() -> usize {
+        moc_cosmos::host::BODY_IN
+    }
+
+    pub fn war_fleets(&self) -> Vec<f32> {
+        let mut v = Vec::new();
+        self.inner.war.pack_fleets(&mut v);
+        v
+    }
+
+    pub fn war_battles(&self) -> Vec<f32> {
+        let mut v = Vec::new();
+        self.inner.war.pack_battles(&mut v);
+        v
+    }
+
+    pub fn war_bodies(&self) -> Vec<f32> {
+        let mut v = Vec::new();
+        self.inner.war.pack_bodies(&mut v);
+        v
+    }
+
+    pub fn war_powers(&self) -> Vec<f32> {
+        let mut v = Vec::new();
+        self.inner.war.pack_powers(&mut v);
+        v
+    }
+
+    pub fn war_power_name(&self, p: usize) -> String {
+        self.inner.war.powers.get(p).map(|x| x.name.clone()).unwrap_or_default()
+    }
+
+    /// What the war did to every planet since the last call (`moc_cosmos::host::FX_OUT` each).
+    /// The planets this galaxy also simulates take it here too, so their next sync agrees.
+    pub fn war_take_fx(&mut self) -> Vec<f32> {
+        let mut v = Vec::new();
+        self.inner.war.take_fx_packed(&mut v);
+        for (i, c) in v.chunks_exact(moc_cosmos::host::FX_OUT).enumerate() {
+            let fx = moc_cosmos::war::BodyFx { pop_mul: c[0], progress_loss: c[1], stock_mul: c[2], captured_by: c[3] as i32, settled: c[4] > 0.5 };
+            self.inner.apply_war_fx(i, &fx);
+        }
+        v
+    }
+
+    /// News from line `from` on: [seq, tone, about the player, about a civ sandbox
+    /// civilisation, text, …].
+    pub fn war_news(&self, from: u32) -> js_sys::Array {
+        let arr = js_sys::Array::new();
+        for n in self.inner.war.news_since(from) {
+            arr.push(&JsValue::from_f64(n.seq as f64));
+            arr.push(&JsValue::from_f64(n.tone as f64));
+            arr.push(&JsValue::from_bool(n.player));
+            arr.push(&JsValue::from_bool(n.civ));
+            arr.push(&JsValue::from_str(&n.text));
+        }
+        arr
+    }
+
+    pub fn war_planet_meta(&self, idx: usize) -> String {
+        self.inner.war.planet_meta(idx)
+    }
+
+    pub fn war_target_line(&self, idx: usize) -> String {
+        match self.inner.war.player() {
+            Some(p) => self.inner.war.target_line(p, idx),
+            None => String::new(),
+        }
+    }
+
+    /// HUD rows for the player's power (or the galaxy's): "label\tvalue\tbad" lines.
+    pub fn war_hud(&self) -> String {
+        self.inner.war.hud_rows()
+    }
+
+    // ---- civ sandbox civilisations in space (#166 stage 4; moc-civ's space.rs) ----
+
+    /// Register or update a civilisation in space living on planet `home` (by the host's key).
+    /// Returns its power id (−1 if the galaxy has no room, or it was retired).
+    #[allow(clippy::too_many_arguments)]
+    pub fn war_upsert_civ(&mut self, key: u32, name: &str, r: u8, g: u8, b: u8, home: usize, production: f32, knowledge: f32, resources: f32, fleet: f32, shields: f32, defences: f32, garrison: f32, tier: u8, temper: f32, alive: bool) -> i32 {
+        let econ = moc_cosmos::war::Economy { production, knowledge, resources };
+        let defence = moc_cosmos::war::Defence { shields, defences, garrison };
+        match self.inner.war.upsert_external(key, name, [r, g, b], home, econ, fleet, defence, tier, temper, alive) {
+            Some(p) if alive => p as i32,
+            _ => -1,
+        }
+    }
+
+    /// The planets power `power` may strike (`moc_cosmos::host::TARGET_OUT` each).
+    pub fn war_targets_for(&self, power: u16) -> Vec<f32> {
+        let mut v = Vec::new();
+        self.inner.war.targets_for(power, &mut v);
+        v
+    }
+
+    /// A civilisation's fleet, already taken from its dock, flies at planet `target`. Returns
+    /// the fleet's id (−1: refused).
+    pub fn war_launch_external(&mut self, power: u16, target: usize, order: u8, strength: f32, motive: u8) -> i32 {
+        let Some(o) = moc_cosmos::war::Order::from_u8(order) else { return -1 };
+        let m = moc_cosmos::war::Motive::from_u8(motive);
+        self.inner.war.launch_external(power, target, o, strength, m).map(|id| id as i32).unwrap_or(-1)
+    }
+
+    /// What happened to a civilisation's power since the last call (`moc_cosmos::host::RESULT_OUT`).
+    pub fn war_take_results(&mut self, power: u16) -> Vec<f32> {
+        self.inner.war.take_results_packed(power).to_vec()
     }
 
     pub fn ship_count(&self) -> usize {
