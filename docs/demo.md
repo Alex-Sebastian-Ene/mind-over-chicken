@@ -12,7 +12,7 @@ A structured, rehearsed 3-minute (180-second) live presentation and judging play
 - [ ] **Headset**:
   - **Option A (Muse 2 hardware)**: Bluetooth paired. `python bridge/muse_bridge.py --board muse2` running in terminal, showing green stream.
   - **Option B (Emulated Headset fallback)**: Title screen selected as **"Emulated headset (keyboard)"**.
-- [ ] **Webcam**: Camera positioned at eye level with even lighting. Click **"Camera"** button on top bar (status turns green).
+- [ ] **Webcam**: Camera positioned at eye level with even lighting. Click **"Camera"** on the top bar to open the sidebar, then **"Start Camera"** and allow the permission prompt (status turns green).
 - [ ] **Hotkeys Reference Card**:
   - `Space`: Hold Calm (high alpha)
   - `F`: Hold Focus (beta / mental effort)

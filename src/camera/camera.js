@@ -7,7 +7,8 @@
 //   Face:  MediaPipe Face Landmarker blendshapes → Joy (continuous) + Surprise (debounced event) (#117).
 //   Coach: Collapsible bottom panel with procedural 21-landmark ghost hands (#123).
 //
-// PRIVACY: the camera starts only when the player clicks "Camera". Frames go from the <video>
+// PRIVACY: the camera starts only when the player clicks "Start Camera" in the sidebar (#183):
+// the toolbar Camera button and the ` key only open the sidebar. Frames go from the <video>
 // element to MediaPipe inside this tab (or its own workers). Nothing is recorded, stored or
 // uploaded: no frame, landmark or score leaves the device. Turning the camera off stops every
 // track. The only network traffic is the one-time download of the runtime and the two models.
@@ -55,6 +56,7 @@ const TEMPLATE = `
       <button type="button" class="btn btn-primary btn-small" data-cam-start>Start Camera</button>
       <button type="button" class="btn btn-small" data-cam-stop disabled>Stop &amp; Clear</button>
     </div>
+    <p class="cam-privacy" data-cam-optin>The webcam stays off until you click <b>Start Camera</b>; only then does the browser ask for permission. Frames never leave this device.</p>
   </section>
 
   <section class="eeg-sec">
@@ -119,11 +121,11 @@ function cameraError(err, castsEnabled) {
   const fallback = castsEnabled ? ' Keys 1–3 still trigger every move.' : '';
   const name = err?.name || '';
   if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError')
-    return `Camera permission was denied. Allow it in the address bar and click Camera again.${fallback}`;
+    return `Camera permission was denied. Allow it in the address bar and click Start Camera again.${fallback}`;
   if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError')
     return `No camera found.${fallback}`;
   if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError')
-    return `The camera is busy in another app. Close it and click Camera again.${fallback}`;
+    return `The camera is busy in another app. Close it and click Start Camera again.${fallback}`;
   return `Camera unavailable (${name || err?.message || 'unknown error'}).${fallback}`;
 }
 
@@ -357,14 +359,9 @@ export function initCamera({
     setStatus('off', 'Camera stopped and cleared. Keys 1–3 still trigger every move.');
   }
 
-  btn.addEventListener('click', () => {
-    if (panel.hidden) {
-      togglePanel(true);
-      if (status === 'off') start();
-    } else {
-      togglePanel(false);
-    }
-  });
+  // The toolbar button only opens and closes the sidebar (#183). getUserMedia runs from the
+  // Start Camera button alone, so reading about the moves never triggers a permission prompt.
+  btn.addEventListener('click', () => togglePanel());
   ui.startBtn?.addEventListener('click', () => start());
   ui.stopBtn?.addEventListener('click', () => stop());
   $('[data-cam-close]').addEventListener('click', () => togglePanel(false));
