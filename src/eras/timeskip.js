@@ -216,7 +216,6 @@ export class FarmingToKingdoms {
 
   impactFireball({ x, y, color = '#ff9a2e', charge = 1 }) {
     this.particles.burst(18 + Math.round(charge * 20), () => ({ x, y, vx: rand(-38, 38), vy: rand(-46, 4), g: 60, life: rand(0.45, 0.85), maxLife: 0.85, size: 1, color }));
-    floater(this.particles, x, y - 6, `SLAM! ${Math.round(charge * 100)}%`, color, 6);
   }
 
   onCast(spell, aim) {
@@ -296,7 +295,6 @@ export class InfoAge {
 
   impactFireball({ x, y, color = '#ff9a2e', charge = 1 }) {
     this.particles.burst(18 + Math.round(charge * 20), () => ({ x, y, vx: rand(-38, 38), vy: rand(-46, 4), g: 60, life: rand(0.45, 0.85), maxLife: 0.85, size: 1, color }));
-    floater(this.particles, x, y - 6, `SLAM! ${Math.round(charge * 100)}%`, color, 6);
   }
 
   onCast(spell) {

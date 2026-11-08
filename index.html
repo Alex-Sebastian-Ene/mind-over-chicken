@@ -127,12 +127,33 @@
 
     <nav class="title-view" data-title-view="main" aria-label="Main menu">
       <button type="button" class="btn btn-primary title-item" data-title-menu="continue" hidden>Continue<span class="title-sub" data-title-continue-sub></span></button>
-      <button type="button" class="btn title-item" id="playSim" data-title-menu="new">New Game</button>
+      <button type="button" class="btn title-item" id="playSim" data-title-menu="new" data-title-open="new">New Game</button>
       <button type="button" class="btn title-item" data-title-menu="load" data-title-open="load" hidden>Load</button>
       <button type="button" class="btn title-item" data-title-menu="sections" data-title-open="sections">Sections</button>
       <button type="button" class="btn title-item" data-title-menu="calibrate" data-title-open="calibrate">Calibrate</button>
       <button type="button" class="btn title-item" id="titleSettings" data-title-menu="options">Options</button>
     </nav>
+
+    <!-- One game (#220): the home world's size (and its rival peoples, #212) and the difficulty. -->
+    <div class="title-view" data-title-view="new" role="group" aria-labelledby="titleNewHeading" hidden>
+      <h2 class="title-view-head" id="titleNewHeading">New Game</h2>
+      <div class="size-pick" id="worldSizePick" role="radiogroup" aria-label="World size">
+        <span class="size-pick-label">World</span>
+        <button type="button" role="radio" data-option="worldSize" data-value="small" title="480×270, 3 rival peoples">Small</button>
+        <button type="button" role="radio" data-option="worldSize" data-value="medium" title="640×360, 5 rival peoples">Medium</button>
+        <button type="button" role="radio" data-option="worldSize" data-value="large" title="960×540, 8 rival peoples">Large</button>
+        <button type="button" role="radio" data-option="worldSize" data-value="huge" title="1280×720, 12 rival peoples">Huge</button>
+        <button type="button" role="radio" data-option="worldSize" data-value="random">Random</button>
+      </div>
+      <div class="size-pick" id="difficultyPick" role="radiogroup" aria-label="Difficulty">
+        <span class="size-pick-label">Difficulty</span>
+        <button type="button" role="radio" data-option="difficulty" data-value="easy" title="A slower fire, kinder rivals, one fewer people">Easy</button>
+        <button type="button" role="radio" data-option="difficulty" data-value="normal" title="The game as designed">Normal</button>
+        <button type="button" role="radio" data-option="difficulty" data-value="hard" title="Hungrier tribe, fiercer rivals, two more peoples">Hard</button>
+      </div>
+      <button type="button" class="btn btn-primary title-item" id="newGameStart">Start</button>
+      <button type="button" class="btn title-back" data-title-back>Back <kbd>Esc</kbd></button>
+    </div>
 
     <div class="title-view" data-title-view="load" role="group" aria-labelledby="titleLoadHeading" hidden>
       <h2 class="title-view-head" id="titleLoadHeading">Load</h2>

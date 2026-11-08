@@ -12,6 +12,7 @@ import { drawPerson, drawChicken, drawRocket, drawGantry, drawReticle } from '..
 import { FireballFX } from '../render/fireball.js';
 import { label } from './stone.js';
 import { STRESSED } from '../brain/brain.js';
+import { eraTuning } from '../game/options.js'; // difficulty (#220)
 
 const ENGINEERS = 10;
 const CITIZENS = 28;
@@ -99,7 +100,7 @@ export class SpaceAge {
               floater(this.particles, e.x, e.y - 8, 'dropped it', '#ff8a9c', 5);
               G.advisor.say('drop', pick(['Someone dropped the fuel valve. I will not say who. It was because of your stress.', 'Another wrench in the ocean. The engineers can feel your stress, my lord.']), { mood: 'panic', priority: 2, cooldown: 10 });
             } else if (this.progress < 1) {
-              this.progress = Math.min(1, this.progress + 0.03);
+              this.progress = Math.min(1, this.progress + 0.03 / eraTuning(G).launchNeeds);
               G.audio.tick();
             }
             e.carry = null; e.state = 'load'; e.timer = rand(0.2, 0.8);
@@ -375,7 +376,6 @@ export class SpaceAge {
     G.audio?.thunder?.();
     this.particles.burst(22 + Math.round(charge * 26), () => ({ x, y, vx: rand(-44, 44), vy: rand(-58, 4), g: 70, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color }));
     this.particles.burst(8 + Math.round(charge * 8), () => ({ x: x + rand(-4, 4), y: y + rand(-1, 2), vx: rand(-18, 18), vy: rand(-16, -2), g: 24, life: rand(0.5, 0.9), maxLife: 0.9, size: 1, color: pick(['#c9c2b0', '#8a7a5a', '#5f5545']) }));
-    floater(this.particles, x, y - 8, `SLAM! ${Math.round(charge * 100)}%`, color, 7);
     for (const c of this.citizens) if (c.state !== 'aboard' && dist(x, y, c.x, c.y) < 20 + charge * 12) c.courage = clamp(c.courage - 0.2);
   }
 

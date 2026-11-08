@@ -6,10 +6,23 @@
 // as a slam instead of a decal painted on the terrain.
 
 import { clamp, lerp } from '../sim/util.js';
+import { reducedMotion } from '../ui/motion.js';
+import {
+  drawFireballSprite, drawPixels, shockwavePixels, scorchPixels, shade,
+  FB_HOT, FB_SMOKE, FB_SCORCH, FB_DEBRIS,
+} from './fireball-sprite.js';
+
+// Pixel art (#319): the orb is the fireball sprite (spinning flame tongues, hot core, the emotion
+// colour), the trail is embers and smoke, and the slam is staged: a short hold on the impact frame,
+// then a stepped pixel shockwave on the ground, a fire burst, debris, dust and a scorch mark. Under
+// reduced motion the slam is a static burst and scorch that fade. No smooth circles.
 
 export const FIREBALL_FX = {
   travel: 0.58,
-  impact: 0.5,
+  impact: 0.8,
+  hold: 0.08,         // s the impact frame holds before the burst spreads
+  windup: 0.16,       // share of the flight spent pulling back before the drop
+  windupLift: 6,      // px the orb rises while pulling back
   lift: 96,
   chargeLift: 64,
   screenLift: 42,
@@ -53,7 +66,7 @@ export class FireballFX {
   get active() { return this.list.length; }
 
   // Draw in the scene's overlay pass. `ctx.__project3d` is set for the 3D view by main.js.
-  draw(ctx, { project = null } = {}) {
+  draw(ctx, { project = null, reduced = reducedMotion() } = {}) {
     if (!this.list.length) return;
     const proj = project || ctx.__project3d || null;
     for (const s of this.list) {
@@ -62,88 +75,87 @@ export class FireballFX {
       const target = proj ? proj(s.x1, s.y1) : [s.x1, s.y1];
       if (!target) continue;
       const [tx, ty] = target;
-
-      if (s.t < s.dur) {
-        for (let i = 5; i >= 1; i--) {
-          const q = clamp(p - i * 0.06);
-          const pos = this.position(s, q, proj, tx, ty);
-          this.spark(ctx, pos.x, pos.y, s.color, 0.42 * (1 - i / 6));
-        }
-        const pos = this.position(s, p, proj, tx, ty);
-        this.orb(ctx, pos.x, pos.y, s.color, s.charge, 1);
-        continue;
-      }
-
-      if (after <= this.opts.impact) {
-        const k = clamp(after / this.opts.impact);
-        const r = 2 + k * (24 + s.charge * 22);
-        ctx.save();
-        // Ground flash: a short, bright pool at the impact point.
-        ctx.globalAlpha = (1 - k) * 0.32;
-        ctx.fillStyle = s.color;
-        ctx.fillRect(Math.round(tx - r * 0.42), Math.round(ty - 2), Math.round(r * 0.84), 4);
-        // Two expanding rings: the slam's shockwave, then a hot inner ring.
-        ctx.globalAlpha = (1 - k) * 0.95;
-        ctx.strokeStyle = s.color;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(Math.round(tx), Math.round(ty), Math.round(r), 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.globalAlpha = (1 - k) * 0.65;
-        ctx.strokeStyle = '#fff4c2';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(Math.round(tx), Math.round(ty), Math.round(r * 0.62), 0, Math.PI * 2);
-        ctx.stroke();
-        // A few embers thrown up from the crater.
-        for (let i = 0; i < 5; i++) {
-          const a = -Math.PI / 2 + (i - 2) * 0.5;
-          const d = r * (0.35 + k * 0.55);
-          this.spark(ctx, tx + Math.cos(a) * d, ty - Math.abs(Math.sin(a)) * d, i % 2 ? '#fff4c2' : s.color, (1 - k) * 0.9);
-        }
-        ctx.restore();
-      }
+      const r = 2 + Math.round(s.charge * 2);
+      if (s.t < s.dur) this.drawFlight(ctx, s, p, proj, tx, ty, r);
+      else if (after <= this.opts.impact) this.drawImpact(ctx, s, after, tx, ty, r, reduced);
     }
+  }
+
+  drawFlight(ctx, s, p, proj, tx, ty, r) {
+    const frame = Math.floor(s.t * 16) % 4;
+    // Trail: embers in the charge colour and pale yellow, with a little grey smoke above them.
+    for (let i = 6; i >= 1; i--) {
+      const q = clamp(p - i * 0.045);
+      const pos = this.position(s, q, proj, tx, ty);
+      const fade = 1 - i / 7;
+      drawPixels(ctx, pos.x, pos.y, [{ x: 0, y: 0, c: i % 2 ? 'tint' : 'hot' }], { tint: s.color, hot: FB_HOT }, { alpha: 0.85 * fade });
+      if (i % 2 === 0) drawPixels(ctx, pos.x + (i % 4 ? 1 : -1), pos.y - 2 - i * 0.5, [{ x: 0, y: 0, c: 's' }], { s: FB_SMOKE }, { alpha: 0.4 * fade });
+    }
+    const pos = this.position(s, p, proj, tx, ty);
+    drawFireballSprite(ctx, pos.x, pos.y, { r, frame, color: s.color });
+  }
+
+  drawImpact(ctx, s, after, tx, ty, r, reduced) {
+    const o = this.opts;
+    const k = clamp(after / o.impact);
+    const frame = Math.floor(after * 14) % 4;
+    const big = r + 2 + Math.round(s.charge * 2);
+    // The scorch stays under everything and fades last.
+    drawPixels(ctx, tx, ty + 1, scorchPixels(3 + Math.round(s.charge * 3)).map((q) => ({ ...q, c: 's' })), { s: FB_SCORCH }, { alpha: 0.55 * clamp((1 - k) * 2) });
+    if (reduced) {
+      // Static and readable: one burst that fades, no expanding ring or flying debris.
+      drawFireballSprite(ctx, tx, ty - 2, { r: big - 1, frame: 0, color: s.color, alpha: 1 - k, tongues: false });
+      return;
+    }
+    if (after < o.hold) {
+      // Hold on the impact frame: the orb squashed into the ground, white-hot.
+      drawFireballSprite(ctx, tx, ty - 1, { r: big, frame, color: s.color, tongues: false });
+      return;
+    }
+    const k2 = clamp((after - o.hold) / (o.impact - o.hold));
+    // Stepped pixel shockwave on the ground, with a hot inner ring.
+    const R = 3 + k2 * (18 + s.charge * 16);
+    const ring = shockwavePixels(R, k2).map((q) => ({ ...q, c: 'tint' }));
+    drawPixels(ctx, tx, ty, ring, { tint: s.color }, { alpha: 1 - k2 });
+    if (k2 < 0.6) drawPixels(ctx, tx, ty, shockwavePixels(R * 0.62, k2 + 0.3).map((q) => ({ ...q, c: 'hot' })), { hot: FB_HOT }, { alpha: 0.9 * (1 - k2 / 0.6) });
+    // Fire burst rising and shrinking out of the crater.
+    const burst = Math.max(1, Math.round(big * (1 - k2)));
+    if (k2 < 0.85) drawFireballSprite(ctx, tx, ty - 2 - k2 * 7, { r: burst, frame, color: s.color, alpha: 1 - k2 * 0.6 });
+    // Debris thrown up under gravity, and dust rolling out along the ground.
+    const t = after - o.hold;
+    const debris = [];
+    for (let i = 0; i < 8; i++) {
+      const vx = (i - 3.5) * (7 + s.charge * 4) + Math.sin(i * 7.3 + s.drift) * 3;
+      const vy = 34 + (i % 3) * 10 + s.charge * 12;
+      const y = -(vy * t - 70 * t * t);
+      if (y > 1) continue;
+      debris.push({ x: Math.round(vx * t), y: Math.round(Math.min(0, y)), c: `d${i % 3}` });
+    }
+    drawPixels(ctx, tx, ty - 1, debris, { d0: FB_DEBRIS[0], d1: FB_DEBRIS[1], d2: shade(s.color, 0.3) }, { alpha: 1 - k2 * 0.5 });
+    const dust = [];
+    for (let i = 0; i < 6; i++) {
+      const side = i % 2 ? 1 : -1;
+      dust.push({ x: Math.round(side * (3 + k2 * (10 + i * 3))), y: -Math.round(k2 * (i % 3)), c: 's' });
+    }
+    drawPixels(ctx, tx, ty, dust, { s: FB_DEBRIS[2] }, { alpha: 0.6 * (1 - k2) });
   }
 
   position(s, p, proj, tx, ty) {
+    const o = this.opts;
+    // A short wind-up (the pull back) before the drop, then an accelerating slam.
+    const w = clamp(p / o.windup);
+    const lift = o.windupLift * Math.sin(w * Math.PI / 2);
+    const q = clamp((p - o.windup) / (1 - o.windup));
     if (proj) {
       // Screen-space slam: a small drift, then a vertical drop onto the projected ground point.
       return {
-        x: tx + s.drift * (1 - p),
-        y: ty - (1 - p) ** 2 * (this.opts.screenLift + this.opts.screenChargeLift * s.charge),
+        x: tx + s.drift * (1 - q),
+        y: ty - (1 - q) ** 2 * (o.screenLift + o.screenChargeLift * s.charge) - lift * (1 - q),
       };
     }
     return {
-      x: lerp(s.x0, s.x1, p),
-      y: lerp(s.y0, s.y1, p * p),
+      x: lerp(s.x0, s.x1, q),
+      y: lerp(s.y0 - lift, s.y1, q * q),
     };
-  }
-
-  orb(ctx, x, y, color, charge, alpha = 1) {
-    const r = Math.max(2, Math.round(2 + charge * 2.5));
-    const px = Math.round(x), py = Math.round(y);
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    // Soft outer glow, dark outline, hot core, white centre. Pixel squares keep the art style.
-    ctx.fillStyle = color;
-    ctx.globalAlpha = alpha * 0.22;
-    ctx.fillRect(px - r - 2, py - r - 2, r * 2 + 4, r * 2 + 4);
-    ctx.globalAlpha = alpha * 0.9;
-    ctx.fillStyle = 'rgba(8,10,24,0.7)';
-    ctx.fillRect(px - r - 1, py - r - 1, r * 2 + 2, r * 2 + 2);
-    ctx.fillStyle = color;
-    ctx.fillRect(px - r, py - r, r * 2, r * 2);
-    ctx.fillStyle = '#fff4c2';
-    ctx.fillRect(px - Math.max(1, r - 1), py - Math.max(1, r - 1), Math.max(2, r), Math.max(2, r));
-    ctx.restore();
-  }
-
-  spark(ctx, x, y, color, alpha = 1) {
-    ctx.save();
-    ctx.globalAlpha = clamp(alpha);
-    ctx.fillStyle = color;
-    ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
-    ctx.restore();
   }
 }

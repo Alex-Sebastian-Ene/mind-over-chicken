@@ -20,8 +20,8 @@ test('the main menu is exactly Continue, New Game, Load, Sections, Calibrate, Op
   assert.deepEqual(buttons(view('main')), MAIN_MENU);
   // Continue and Load start hidden: they appear once a run is saved.
   for (const k of ['continue', 'load']) assert.match(view('main'), new RegExp(`data-title-menu="${k}"[^>]*\\bhidden\\b`), k);
-  // New Game keeps the old Play handler; Options opens the Settings panel.
-  assert.match(view('main'), /id="playSim"[^>]*data-title-menu="new"/);
+  // New Game opens its step (world size, difficulty, #220); Options opens the Settings panel.
+  assert.match(view('main'), /id="playSim"[^>]*data-title-menu="new"[^>]*data-title-open="new"/);
   assert.match(view('main'), /id="titleSettings"[^>]*data-title-menu="options"/);
 });
 
