@@ -181,6 +181,23 @@ const TEMPLATE = `
   </section>
 `;
 
+// The calibration wizard's clock (#176): real time minus the time the headset wasn't streaming,
+// so a phase can't run out, record or finish on a dead stream. tick(live) once per frame.
+export class PausableClock {
+  constructor(realNow = () => performance.now()) {
+    this.realNow = realNow;
+    this.pausedMs = 0;
+    this.last = realNow();
+  }
+  tick(live) {
+    const r = this.realNow();
+    if (!live) this.pausedMs += r - this.last;
+    this.last = r;
+    return r - this.pausedMs;
+  }
+  now() { return this.realNow() - this.pausedMs; }
+}
+
 export class EegPanel {
   constructor(doc, { getSource, getBrain, onConnectBridge, onDisconnectBridge }) {
     this.doc = doc;
@@ -430,7 +447,7 @@ export class EegPanel {
   advanceToNextDot() {
     if (!this.wiz) return;
     this.wiz.dotIdx += 1;
-    this.wiz.dotEnteredAt = performance.now();
+    this.wiz.dotEnteredAt = this.wiz.clock ? this.wiz.clock.now() : performance.now();
     this.wiz.dotHoldSec = 0;
     this.wiz.dotSamplesTaken = 0;
     if (this.wiz.dotIdx >= this.wiz.dots.length) {
@@ -443,6 +460,8 @@ export class EegPanel {
     const src = this.getSource();
     const b = this.getBrain();
     this.wiz.active = true;
+    this.wiz.clock = new PausableClock();
+    this.wiz.lost = false;
     this.wiz.mode = mode;
     this.wiz.modal.hidden = false;
     this.wiz.lastBlinkCount = b?.stats?.blinks ?? 0;
@@ -460,7 +479,7 @@ export class EegPanel {
   enterWizardPhase(phase) {
     if (!this.wiz) return;
     const src = this.getSource();
-    const now = performance.now();
+    const now = this.wiz.clock ? this.wiz.clock.now() : performance.now();
     this.wiz.phase = phase;
     this.wiz.t0 = now;
     this.wiz.lastFrameNow = now;
@@ -511,6 +530,7 @@ export class EegPanel {
 
   advanceWizardPhase() {
     if (!this.wiz || !this.wiz.active) return;
+    if (this.wiz.lost && this.wiz.phase !== 'sandbox') return;   // never finish a step on a dead stream (#176)
     const src = this.getSource();
     if (this.wiz.phase === 'motion') {
       if (src?.finishMotionCalibration) {
@@ -552,7 +572,29 @@ export class EegPanel {
     const src = this.getSource();
     const b = this.getBrain();
     const aim = screenAimOf(b);
-    const now = performance.now();
+    // #176: no live frames, no calibration. The wizard clock stands still, nothing is recorded,
+    // no step can finish, and the wizard says so; it carries on where it was once frames return.
+    const now = this.wiz.clock ? this.wiz.clock.tick(hasRealStream) : performance.now();
+    const lost = !hasRealStream && this.wiz.phase !== 'sandbox';
+    if (lost !== this.wiz.lost) {
+      this.wiz.lost = lost;
+      if (this.wiz.skipBtn) this.wiz.skipBtn.disabled = lost;
+      this.addLog(lost ? 'Headset lost: calibration paused until the stream is back.' : 'Headset back: calibration resumes.');
+    }
+    if (lost) {
+      const ctx = this.wiz.ctx, w = this.wiz.canvas.width, h = this.wiz.canvas.height;
+      this.wiz.lastFrameNow = now;
+      ctx.fillStyle = 'rgba(8, 10, 24, 0.82)';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#ff9a2e';
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 20px "Pixelify Sans", monospace';
+      ctx.fillText('Headset lost: calibration paused', w / 2, h / 2 - 8);
+      ctx.fillStyle = '#f2e8d5';
+      ctx.font = '14px "Atkinson Hyperlegible", sans-serif';
+      ctx.fillText('It resumes when the Muse streams again. Close (Esc) to stop.', w / 2, h / 2 + 18);
+      return;
+    }
     const frameDt = Math.max(0.008, Math.min(0.25, (now - (this.wiz.lastFrameNow || now)) / 1000));
     this.wiz.lastFrameNow = now;
     const elapsed = (now - this.wiz.t0) / 1000;
